@@ -1,0 +1,51 @@
+{{- if eq .chezmoi.os "darwin" -}}
+#!/bin/sh
+set -eu
+
+setup_brew() {
+  if command -v brew >/dev/null 2>&1; then
+    return
+  fi
+
+  if [ -x /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+    return
+  fi
+
+  if [ -x /usr/local/bin/brew ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+    return
+  fi
+
+  echo "Homebrew is required to install shell integrations." >&2
+  exit 1
+}
+
+ensure_git() {
+  if command -v git >/dev/null 2>&1; then
+    return
+  fi
+
+  brew install git
+}
+
+setup_brew
+ensure_git
+
+if [ ! -d "$HOME/.oh-my-zsh" ]; then
+  echo "Installing Oh My Zsh..."
+  sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended --keep-zshrc
+fi
+
+if [ ! -d "$HOME/.local/share/zinit/zinit.git" ]; then
+  echo "Installing zinit..."
+  mkdir -p "$HOME/.local/share/zinit"
+  git clone https://github.com/zdharma-continuum/zinit "$HOME/.local/share/zinit/zinit.git"
+fi
+
+if [ ! -d "$HOME/.scm_breeze" ]; then
+  echo "Installing SCM Breeze..."
+  git clone https://github.com/scmbreeze/scm_breeze.git "$HOME/.scm_breeze"
+  "$HOME/.scm_breeze/install.sh"
+fi
+{{- end }}

@@ -1,0 +1,51 @@
+{{- if eq .chezmoi.os "darwin" -}}
+#!/bin/sh
+set -eu
+
+setup_brew() {
+  if command -v brew >/dev/null 2>&1; then
+    return
+  fi
+
+  if [ -x /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+    return
+  fi
+
+  if [ -x /usr/local/bin/brew ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+    return
+  fi
+
+  echo "Homebrew is required to install AI tools." >&2
+  exit 1
+}
+
+install_formula() {
+  formula="$1"
+
+  if brew list --formula "$formula" >/dev/null 2>&1; then
+    echo "$formula is already installed."
+    return
+  fi
+
+  brew install "$formula"
+}
+
+setup_brew
+install_formula mise
+
+mise use --global --yes node@24
+
+if ! command -v claude >/dev/null 2>&1; then
+  curl -fsSL https://claude.ai/install.sh | bash
+fi
+
+if ! command -v codex >/dev/null 2>&1; then
+  mise exec --yes node@24 -- npm install -g @openai/codex
+fi
+
+if ! command -v gemini >/dev/null 2>&1; then
+  install_formula gemini-cli
+fi
+{{- end }}

@@ -18,6 +18,16 @@ chezmoi diff
 chezmoi apply
 ```
 
+On macOS, `chezmoi apply` also runs setup scripts under `.chezmoiscripts` for
+the initial terminal environment:
+
+- Homebrew bootstrap
+- Ghostty and cmux
+- Ghostty font dependencies
+- CLI tools such as ripgrep, neovim, zellij, lazygit, starship, and mise
+- Oh My Zsh, zinit, and SCM Breeze
+- Node.js 24 via mise, plus Claude Code, Codex CLI, and Gemini CLI
+
 To edit an existing checkout, move to the chezmoi source directory.
 
 ```sh

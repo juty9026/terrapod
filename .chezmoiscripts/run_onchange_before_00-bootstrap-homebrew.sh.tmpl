@@ -1,0 +1,54 @@
+{{- if eq .chezmoi.os "darwin" -}}
+#!/bin/sh
+set -eu
+
+find_brew() {
+  if command -v brew >/dev/null 2>&1; then
+    command -v brew
+    return
+  fi
+
+  if [ -x /opt/homebrew/bin/brew ]; then
+    printf '%s\n' /opt/homebrew/bin/brew
+    return
+  fi
+
+  if [ -x /usr/local/bin/brew ]; then
+    printf '%s\n' /usr/local/bin/brew
+    return
+  fi
+
+  return 1
+}
+
+ensure_brew_shellenv() {
+  brew_bin="$1"
+  zprofile="$HOME/.zprofile"
+  shellenv_line="eval \"\$(${brew_bin} shellenv)\""
+
+  if [ ! -e "$zprofile" ]; then
+    : >"$zprofile"
+  fi
+
+  if ! grep -F "$brew_bin shellenv" "$zprofile" >/dev/null 2>&1; then
+    printf '\n%s\n' "$shellenv_line" >>"$zprofile"
+  fi
+}
+
+brew_bin="$(find_brew || true)"
+
+if [ -z "$brew_bin" ]; then
+  echo "Installing Homebrew..."
+  NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  brew_bin="$(find_brew || true)"
+fi
+
+if [ -z "$brew_bin" ]; then
+  echo "Homebrew install finished, but brew was not found." >&2
+  exit 1
+fi
+
+ensure_brew_shellenv "$brew_bin"
+eval "$("$brew_bin" shellenv)"
+brew analytics off >/dev/null 2>&1 || true
+{{- end }}

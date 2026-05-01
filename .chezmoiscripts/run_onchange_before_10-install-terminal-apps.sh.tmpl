@@ -17,7 +17,7 @@ setup_brew() {
     return
   fi
 
-  echo "Homebrew is required to install Ghostty font dependencies." >&2
+  echo "Homebrew is required to install terminal apps." >&2
   exit 1
 }
 
@@ -34,6 +34,7 @@ install_cask() {
 
 setup_brew
 
-install_cask font-jetbrains-mono-nerd-font
-install_cask font-d2coding
+for cask in ghostty cmux; do
+  install_cask "$cask"
+done
 {{- end }}
