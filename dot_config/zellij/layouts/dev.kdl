@@ -1,0 +1,31 @@
+layout {
+    tab name="CODE" focus=true {
+        pane split_direction="vertical" {
+            pane size="64%" name="EDITOR" command="nvim"
+            pane size="36%" stacked=true {
+                pane name="CLAUDE" focus=true command="claude" {
+                    args "--dangerously-skip-permissions"
+                }
+                pane name="CODEX" command="codex" start_suspended=true
+                pane name="GEMINI" command="gemini" start_suspended=true
+            }
+        }
+    }
+
+    tab name="TERMINAL" {
+        pane split_direction="vertical" {
+            pane name="SHELL"
+            pane name="LOG"
+        }
+    }
+
+    default_tab_template {
+        pane size=1 borderless=true {
+            plugin location="zellij:compact-bar"
+        }
+        children
+        pane size=1 borderless=true {
+            plugin location="zellij:status-bar"
+        }
+    }
+}
