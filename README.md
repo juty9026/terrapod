@@ -34,6 +34,25 @@ To edit an existing checkout, move to the chezmoi source directory.
 chezmoi cd
 ```
 
+## Local overrides
+
+`~/.ssh/allowed_signers` is rendered from
+`private_dot_ssh/allowed_signers.tmpl`. To trust additional SSH signing
+identities on a workstation, add machine-local data with `chezmoi edit-config`.
+
+```toml
+[data]
+gitAllowedSigners = [
+  "name@company.com ssh-ed25519 AAAA_COMPANY_PUBLIC_KEY company",
+]
+```
+
+Then apply the dotfiles.
+
+```sh
+chezmoi apply
+```
+
 ## Conventions
 
 - `dot_`: dotfiles in the home directory
