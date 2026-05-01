@@ -1,0 +1,57 @@
+# ~/.config/ghostty/config
+
+# Theme
+# theme = "light:Catppuccin Latte,dark:Catppuccin Mocha"
+theme = "Catppuccin Mocha"
+
+# Font
+font-family = "JetBrainsMono Nerd Font"
+font-family = "D2Coding"
+# font-size = 12
+
+# Window
+window-padding-x = 12
+window-padding-y = 10
+window-decoration = true
+macos-titlebar-style = tabs
+
+# Background
+background-opacity = 0.8
+background-blur-radius = 20
+
+# Autosuggestion color
+palette = 8=#7f849c
+
+# Cursor
+cursor-style = block
+cursor-style-blink = false
+
+# Mouse
+mouse-hide-while-typing = true
+
+# Clipboard
+copy-on-select = true
+clipboard-paste-protection = false
+
+# Scrollback
+scrollback-limit = 10000
+
+# macOS
+macos-option-as-alt = true
+
+# Shell Integration
+shell-integration = zsh
+shell-integration-features = cursor,sudo,title
+
+# Keybindings
+keybind = cmd+d=new_split:right
+keybind = cmd+shift+d=new_split:down
+keybind = cmd+w=close_surface
+keybind = cmd+alt+left=goto_split:left
+keybind = cmd+alt+right=goto_split:right
+keybind = cmd+alt+up=goto_split:top
+keybind = cmd+alt+down=goto_split:bottom
+keybind = global:ctrl+grave_accent=toggle_quick_terminal
+
+# Tabs
+window-save-state = always
