@@ -2,8 +2,8 @@
 # Mac Terminal Configuration
 # ============================================
 
-# Fastfetch (인터랙티브 셸에서만)
-if [[ $- == *i* ]] && command -v fastfetch &>/dev/null; then
+# Fastfetch
+if command -v fastfetch &>/dev/null; then
   fastfetch
 fi
 
@@ -21,18 +21,18 @@ fi
 # ============================================
 # Zinit 플러그인 매니저
 # ============================================
-if [[ ! -f "$HOME/.local/share/zinit/zinit.git/zinit.zsh" ]]; then
-  command mkdir -p "$HOME/.local/share/zinit"
-  command git clone https://github.com/zdharma-continuum/zinit "$HOME/.local/share/zinit/zinit.git"
+zinit_script="$HOME/.local/share/zinit/zinit.git/zinit.zsh"
+
+if [[ -r "$zinit_script" ]]; then
+  source "$zinit_script"
+  autoload -Uz _zinit
+  (( ${+_comps} )) && _comps[zinit]=_zinit
+
+  zinit light zdharma-continuum/fast-syntax-highlighting
+  zinit light zsh-users/zsh-autosuggestions
+  zinit light zsh-users/zsh-completions
 fi
-
-source "$HOME/.local/share/zinit/zinit.git/zinit.zsh"
-autoload -Uz _zinit
-(( ${+_comps} )) && _comps[zinit]=_zinit
-
-zinit light zdharma-continuum/fast-syntax-highlighting
-zinit light zsh-users/zsh-autosuggestions
-zinit light zsh-users/zsh-completions
+unset zinit_script
 
 # ============================================
 # SCM Breeze
@@ -72,7 +72,6 @@ fi
 if command -v zoxide &>/dev/null; then
   eval "$(zoxide init zsh)"
 fi
-alias zi="zoxide query -i"
 
 if command -v navi &>/dev/null; then
   eval "$(navi widget zsh)"
@@ -104,11 +103,5 @@ function tools() {
 function zr() {
   local dir
   dir=$(zoxide query -l | sort -k2 -rn | fzf)
-  [ -n "$dir" ] && z "$dir"
-}
-
-function zg() {
-  local dir
-  dir=$(zoxide query -l | xargs -I {} sh -c 'test -d {}/.git && echo {}' | fzf)
   [ -n "$dir" ] && z "$dir"
 }

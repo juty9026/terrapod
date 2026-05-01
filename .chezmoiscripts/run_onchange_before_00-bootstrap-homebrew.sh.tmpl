@@ -21,20 +21,6 @@ find_brew() {
   return 1
 }
 
-ensure_brew_shellenv() {
-  brew_bin="$1"
-  zprofile="$HOME/.zprofile"
-  shellenv_line="eval \"\$(${brew_bin} shellenv)\""
-
-  if [ ! -e "$zprofile" ]; then
-    : >"$zprofile"
-  fi
-
-  if ! grep -F "$brew_bin shellenv" "$zprofile" >/dev/null 2>&1; then
-    printf '\n%s\n' "$shellenv_line" >>"$zprofile"
-  fi
-}
-
 brew_bin="$(find_brew || true)"
 
 if [ -z "$brew_bin" ]; then
@@ -48,7 +34,6 @@ if [ -z "$brew_bin" ]; then
   exit 1
 fi
 
-ensure_brew_shellenv "$brew_bin"
 eval "$("$brew_bin" shellenv)"
 brew analytics off >/dev/null 2>&1 || true
 {{- end }}
