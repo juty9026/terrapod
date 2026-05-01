@@ -22,7 +22,7 @@ On macOS, `chezmoi apply` also runs setup scripts under `.chezmoiscripts` for
 the initial terminal environment:
 
 - Homebrew bootstrap
-- Ghostty and cmux
+- Ghostty, cmux, and Hammerspoon
 - Ghostty font dependencies
 - CLI tools such as ripgrep, neovim, zellij, lazygit, starship, and mise
 - Oh My Zsh, zinit, and SCM Breeze
