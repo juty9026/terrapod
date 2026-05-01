@@ -1,0 +1,23 @@
+{{- if eq .chezmoi.os "darwin" -}}
+#!/bin/sh
+set -eu
+
+if ! command -v brew >/dev/null 2>&1; then
+  echo "Homebrew is required to install Ghostty font dependencies." >&2
+  exit 1
+fi
+
+install_cask() {
+  cask="$1"
+
+  if brew list --cask "$cask" >/dev/null 2>&1; then
+    echo "$cask is already installed."
+    return
+  fi
+
+  brew install --cask "$cask"
+}
+
+install_cask font-jetbrains-mono-nerd-font
+install_cask font-d2coding
+{{- end }}
