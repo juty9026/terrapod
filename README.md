@@ -21,12 +21,13 @@ chezmoi apply
 On macOS, `chezmoi apply` also runs setup scripts under `.chezmoiscripts` for
 the initial terminal environment:
 
-- Homebrew bootstrap
-- Ghostty, cmux, and Hammerspoon
-- Ghostty font dependencies
-- CLI tools such as ripgrep, neovim, zellij, lazygit, starship, and mise
+- Homebrew bootstrap and the common `Brewfile` bundle
+- Ghostty, cmux, Hammerspoon, and font casks
+- CLI tools such as ripgrep, neovim, zellij, lazygit, starship, mise, and Gemini CLI
 - Oh My Zsh, zinit, and SCM Breeze
-- Node.js 24 via mise, plus Claude Code, Codex CLI, and Gemini CLI
+- Node.js 24 via mise, plus Claude Code and Codex CLI
+
+Machine-specific Homebrew packages should live outside the tracked `Brewfile`.
 
 To edit an existing checkout, move to the chezmoi source directory.
 

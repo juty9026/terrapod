@@ -21,19 +21,12 @@ setup_brew() {
   exit 1
 }
 
-install_formula() {
-  formula="$1"
-
-  if brew list --formula "$formula" >/dev/null 2>&1; then
-    echo "$formula is already installed."
-    return
-  fi
-
-  brew install "$formula"
-}
-
 setup_brew
-install_formula mise
+
+if ! command -v mise >/dev/null 2>&1; then
+  echo "mise is required. Run the Homebrew Brewfile bundle first." >&2
+  exit 1
+fi
 
 mise use --global --yes node@24
 
@@ -43,9 +36,5 @@ fi
 
 if ! command -v codex >/dev/null 2>&1; then
   mise exec --yes node@24 -- npm install -g @openai/codex
-fi
-
-if ! command -v gemini >/dev/null 2>&1; then
-  install_formula gemini-cli
 fi
 {{- end }}
