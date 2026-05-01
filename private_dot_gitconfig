@@ -1,0 +1,31 @@
+[user]
+	name = minu
+	email = juty9026@gmail.com
+	signingkey = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINz8oDp6v7P4IXYUzIsNuH3TvCogpPexpMYNB4JTxysJ
+[gpg]
+	format = ssh
+[gpg "ssh"]
+	program = /Applications/1Password.app/Contents/MacOS/op-ssh-sign
+	allowedSignersFile = ~/.ssh/allowed_signers
+[commit]
+	gpgsign = true
+[merge]
+	ff = false
+	conflictStyle = zdiff3
+[pull]
+	rebase = false
+	ff = only
+[rebase]
+	autoStash = true
+[diff]
+	tool = vimdiff
+[fetch]
+	prune = true
+[core]
+	pager = delta
+[interactive]
+	diffFilter = delta --color-only
+[delta]
+	navigate = true
+  dark = true
+  line-numbers = true
