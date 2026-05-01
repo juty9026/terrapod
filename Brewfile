@@ -22,6 +22,8 @@ brew "gemini-cli"
 
 cask "ghostty"
 cask "cmux"
+cask "claude-code"
+cask "codex"
 cask "hammerspoon"
 cask "karabiner-elements"
 cask "raycast"

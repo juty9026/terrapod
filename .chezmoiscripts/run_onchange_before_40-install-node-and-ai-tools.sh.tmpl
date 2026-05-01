@@ -21,6 +21,33 @@ setup_brew() {
   exit 1
 }
 
+remove_legacy_claude_install() {
+  legacy_claude_bin="$HOME/.local/bin/claude"
+  legacy_claude_dir="$HOME/.local/share/claude"
+
+  if [ -L "$legacy_claude_bin" ]; then
+    legacy_claude_target="$(readlink "$legacy_claude_bin")"
+
+    case "$legacy_claude_target" in
+      "$legacy_claude_dir"/*)
+        rm -f "$legacy_claude_bin"
+        ;;
+    esac
+  fi
+
+  if [ -d "$legacy_claude_dir" ]; then
+    rm -rf "$legacy_claude_dir"
+  fi
+}
+
+remove_legacy_npm_ai_tools() {
+  if command -v npm >/dev/null 2>&1; then
+    npm uninstall -g @anthropic-ai/claude-code @openai/codex >/dev/null 2>&1 || true
+  fi
+
+  mise exec --yes node@24 -- npm uninstall -g @anthropic-ai/claude-code @openai/codex >/dev/null 2>&1 || true
+}
+
 setup_brew
 
 if ! command -v mise >/dev/null 2>&1; then
@@ -30,11 +57,6 @@ fi
 
 mise use --global --yes node@24
 
-if ! command -v claude >/dev/null 2>&1; then
-  curl -fsSL https://claude.ai/install.sh | bash
-fi
-
-if ! command -v codex >/dev/null 2>&1; then
-  mise exec --yes node@24 -- npm install -g @openai/codex
-fi
+remove_legacy_claude_install
+remove_legacy_npm_ai_tools
 {{- end }}
