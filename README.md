@@ -35,6 +35,25 @@ To edit an existing checkout, move to the chezmoi source directory.
 chezmoi cd
 ```
 
+## Manual restore
+
+### Raycast
+
+Raycast Store extensions and app state are restored manually from a
+`.rayconfig` backup stored in 1Password, rather than tracked directly in this
+repo.
+
+1. Install Raycast from the `Brewfile`.
+2. Open the 1Password item for the Raycast settings export.
+3. Download the latest `.rayconfig` file.
+4. Run `Import Settings & Data` in Raycast.
+5. Enter the Raycast export passphrase from the same 1Password item.
+6. Select the categories to import, usually Store extensions, settings,
+   aliases, hotkeys, quicklinks, and snippets.
+
+When Raycast changes need to be shared across workstations, export a fresh
+`.rayconfig` from the primary workstation and update the 1Password item.
+
 ## Local overrides
 
 `~/.ssh/allowed_signers` is rendered from
