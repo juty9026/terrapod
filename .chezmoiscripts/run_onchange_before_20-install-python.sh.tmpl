@@ -1,0 +1,48 @@
+{{- if eq .chezmoi.os "darwin" -}}
+#!/bin/sh
+set -eu
+
+python_version="3.13"
+
+setup_brew() {
+  if command -v brew >/dev/null 2>&1; then
+    return
+  fi
+
+  if [ -x /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+    return
+  fi
+
+  if [ -x /usr/local/bin/brew ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+    return
+  fi
+
+  echo "Homebrew is required to install Python tooling." >&2
+  exit 1
+}
+
+setup_brew
+
+if ! command -v mise >/dev/null 2>&1; then
+  echo "mise is required. Run the Homebrew Brewfile bundle first." >&2
+  exit 1
+fi
+
+if ! command -v uv >/dev/null 2>&1; then
+  echo "uv is required. Run the Homebrew Brewfile bundle first." >&2
+  exit 1
+fi
+
+if ! command -v uvx >/dev/null 2>&1; then
+  echo "uvx is required. Run the Homebrew Brewfile bundle first." >&2
+  exit 1
+fi
+
+mise use --global --yes "python@$python_version"
+mise exec --yes "python@$python_version" -- python --version
+
+uv --version
+uvx --version
+{{- end }}
