@@ -56,12 +56,21 @@ When Raycast changes need to be shared across workstations, export a fresh
 
 ## Local overrides
 
-`~/.ssh/allowed_signers` is rendered from
-`private_dot_ssh/allowed_signers.tmpl`. To trust additional SSH signing
-identities on a workstation, add machine-local data with `chezmoi edit-config`.
+Machine-local options are configured outside this repo with
+`chezmoi edit-config`. Keep only the option names, defaults, and examples here;
+do not commit workstation-specific values.
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `enableHermesAgentPath` | `false` | Adds `~/.local/bin` to `PATH` for Hermes Agent on machines that need it. |
+| `gitAllowedSigners` | `[]` | Adds workstation-specific SSH signing identities to `~/.ssh/allowed_signers`. |
+
+Example:
 
 ```toml
 [data]
+enableHermesAgentPath = true
+
 gitAllowedSigners = [
   "name@company.com ssh-ed25519 AAAA_COMPANY_PUBLIC_KEY company",
 ]
