@@ -18,7 +18,6 @@ brew "lazygit"
 brew "navi"
 brew "starship"
 brew "mise"
-brew "uv"
 brew "gemini-cli"
 
 cask "ghostty"

@@ -25,7 +25,8 @@ the initial terminal environment:
 - Ghostty, cmux, Hammerspoon, and font casks
 - CLI tools such as ripgrep, neovim, zellij, lazygit, starship, mise, and Gemini CLI
 - Oh My Zsh, zinit, and SCM Breeze
-- Node.js 24 via mise, plus Claude Code and Codex CLI
+- Python 3.13 and uv/uvx via mise
+- Node.js 24 and pnpm 10 via mise, plus Claude Code and Codex CLI
 
 Machine-specific Homebrew packages should live outside the tracked `Brewfile`.
 

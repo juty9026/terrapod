@@ -2,23 +2,27 @@
 #!/bin/sh
 set -eu
 
-setup_brew() {
-  if command -v brew >/dev/null 2>&1; then
+setup_mise() {
+  if command -v mise >/dev/null 2>&1; then
     return
   fi
 
   if [ -x /opt/homebrew/bin/brew ]; then
     eval "$(/opt/homebrew/bin/brew shellenv)"
+  fi
+
+  if command -v mise >/dev/null 2>&1; then
     return
   fi
 
   if [ -x /usr/local/bin/brew ]; then
     eval "$(/usr/local/bin/brew shellenv)"
-    return
   fi
 
-  echo "Homebrew is required to install AI tools." >&2
-  exit 1
+  if ! command -v mise >/dev/null 2>&1; then
+    echo "mise is required. Run the Homebrew Brewfile bundle first." >&2
+    exit 1
+  fi
 }
 
 remove_legacy_claude_install() {
@@ -48,14 +52,10 @@ remove_legacy_npm_ai_tools() {
   mise exec --yes node@24 -- npm uninstall -g @anthropic-ai/claude-code @openai/codex >/dev/null 2>&1 || true
 }
 
-setup_brew
-
-if ! command -v mise >/dev/null 2>&1; then
-  echo "mise is required. Run the Homebrew Brewfile bundle first." >&2
-  exit 1
-fi
+setup_mise
 
 mise use --global --yes node@24
+mise exec --yes node@24 -- mise use --global --yes --fuzzy npm:pnpm@10
 
 remove_legacy_claude_install
 remove_legacy_npm_ai_tools
