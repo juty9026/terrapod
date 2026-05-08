@@ -7,7 +7,6 @@ theme = "Catppuccin Mocha"
 # Font
 font-family = "JetBrainsMono Nerd Font"
 font-family = "D2Coding"
-# font-size = 12
 
 # Window
 window-padding-x = 12
@@ -34,7 +33,7 @@ copy-on-select = true
 clipboard-paste-protection = false
 
 # Scrollback
-scrollback-limit = 10000
+scrollback-limit = 1000000
 
 # macOS
 macos-option-as-alt = true
