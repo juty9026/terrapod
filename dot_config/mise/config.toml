@@ -1,0 +1,6 @@
+[tools]
+bun = "latest"
+node = "24"
+"npm:pnpm" = "10"
+python = "3.13"
+uv = "latest"

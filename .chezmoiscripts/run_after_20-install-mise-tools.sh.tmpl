@@ -2,9 +2,6 @@
 #!/bin/sh
 set -eu
 
-python_version="3.13"
-uv_version="latest"
-
 setup_mise() {
   if command -v mise >/dev/null 2>&1; then
     return
@@ -29,11 +26,5 @@ setup_mise() {
 }
 
 setup_mise
-
-mise use --global --yes "python@$python_version"
-mise use --global --yes "uv@$uv_version"
-
-mise exec --yes "python@$python_version" -- python --version
-mise exec --yes "uv@$uv_version" -- uv --version
-mise exec --yes "uv@$uv_version" -- uvx --version
+mise install --yes -C "$HOME"
 {{- end }}

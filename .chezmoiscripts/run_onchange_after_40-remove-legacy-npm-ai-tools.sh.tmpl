@@ -49,14 +49,10 @@ remove_legacy_npm_ai_tools() {
     npm uninstall -g @anthropic-ai/claude-code @openai/codex >/dev/null 2>&1 || true
   fi
 
-  mise exec --yes node@24 -- npm uninstall -g @anthropic-ai/claude-code @openai/codex >/dev/null 2>&1 || true
+  mise exec --yes -C "$HOME" -- npm uninstall -g @anthropic-ai/claude-code @openai/codex >/dev/null 2>&1 || true
 }
 
 setup_mise
-
-mise use --global --yes node@24
-mise exec --yes node@24 -- mise use --global --yes --fuzzy npm:pnpm@10
-
 remove_legacy_claude_install
 remove_legacy_npm_ai_tools
 {{- end }}
