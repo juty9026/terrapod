@@ -27,6 +27,7 @@ the initial terminal environment:
 - Ghostty, cmux, Hammerspoon, and font casks
 - mise
 - CLI tools such as ripgrep, neovim, zellij, lazygit, and starship via mise
+- btop via Homebrew, because its mise-managed release assets do not support macOS arm64
 - Oh My Zsh, zinit, and SCM Breeze
 - Bun, Python, uv/uvx, and Node.js via `~/.config/mise/config.toml`
 - pnpm through Node.js Corepack

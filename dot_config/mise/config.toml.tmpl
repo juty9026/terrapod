@@ -4,12 +4,13 @@ node = "24"
 python = "3.13"
 uv = "latest"
 "aqua:ajeetdsouza/zoxide" = "latest"
+{{ if eq .chezmoi.os "linux" -}}
 "aqua:aristocratos/btop" = "latest"
+{{ end -}}
 "aqua:bootandy/dust" = "latest"
 "aqua:BurntSushi/ripgrep" = "latest"
 "aqua:cli/cli" = "latest"
 "aqua:dandavison/delta" = "latest"
-"aqua:denisidoro/navi" = "latest"
 "aqua:fastfetch-cli/fastfetch" = "latest"
 "aqua:jesseduffield/lazygit" = "latest"
 "aqua:junegunn/fzf" = "latest"
@@ -20,6 +21,9 @@ uv = "latest"
 "aqua:sharkdp/fd" = "latest"
 "aqua:starship/starship" = "latest"
 "aqua:zellij-org/zellij" = "latest"
+
+[settings.github]
+credential_command = "gh auth token 2>/dev/null || true"
 
 [settings.node]
 corepack = true

@@ -10,6 +10,6 @@ The macOS Terminal Profile and VPS Shell Profile should share one Core Shell Sta
 
 ## Consequences
 
-- Homebrew remains responsible for macOS bootstrap, GUI apps, casks, and fonts.
+- Homebrew remains responsible for macOS bootstrap, GUI apps, casks, fonts, and macOS fallbacks for tools whose mise-managed release assets do not support macOS.
 - APT remains responsible for Ubuntu bootstrap packages and installing mise itself.
 - CLI upgrades move from `brew upgrade` to `mise upgrade`.
