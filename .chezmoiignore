@@ -5,3 +5,19 @@ CONTEXT.md
 docs/**
 .github/**
 tests/**
+
+{{ if ne .chezmoi.os "darwin" }}
+# macOS Terminal Profile entries are not part of the VPS Shell Profile.
+.chezmoiscripts/00-bootstrap-homebrew.sh
+.chezmoiscripts/40-remove-legacy-npm-ai-tools.sh
+.chezmoiscripts/50-open-karabiner-if-needed.sh
+.config/cmux
+.config/cmux/**
+.config/ghostty
+.config/ghostty/**
+.config/karabiner
+.config/karabiner/**
+.hammerspoon
+.hammerspoon/**
+.zprofile
+{{ end }}
