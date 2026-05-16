@@ -58,6 +58,7 @@ chezmoi apply
 On Ubuntu, `chezmoi apply` runs setup scripts for the VPS shell profile:
 
 - APT bootstrap packages: zsh, git, curl, ca-certificates, gpg, unzip, and build-essential
+- Python build dependencies required by the mise-managed Python runtime
 - mise from the official mise APT repository
 - Oh My Zsh, zinit, and SCM Breeze
 - CLI tools such as ripgrep, neovim, zellij, lazygit, and starship via mise
