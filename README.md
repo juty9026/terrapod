@@ -42,8 +42,9 @@ chezmoi cd
 
 ### Ubuntu 24.04 VPS
 
-Ubuntu support targets 24.04 LTS only. Install chezmoi, initialize this repo,
-review the diff, then apply it.
+Ubuntu support targets 24.04 LTS only. The VPS profile is read-only by
+default, so no GitHub authentication is required for the initial setup. Install
+chezmoi, initialize this public repo over HTTPS, review the diff, then apply it.
 
 ```sh
 sudo apt update
@@ -51,7 +52,7 @@ sudo apt install -y ca-certificates curl git
 sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin"
 export PATH="$HOME/.local/bin:$PATH"
 
-chezmoi init git@github.com:juty9026/dotfiles.git
+chezmoi init https://github.com/juty9026/dotfiles.git
 chezmoi diff
 chezmoi apply
 ```
@@ -65,12 +66,14 @@ On Ubuntu, `chezmoi apply` runs setup scripts for the VPS shell profile:
 - CLI tools such as ripgrep, neovim, zellij, lazygit, and starship via mise
 - Bun, Python, uv/uvx, and Node.js via mise
 - pnpm through Node.js Corepack
+- Login shell switch to zsh
 
+Only configure GitHub authentication on a VPS if write access is needed later.
 If the first mise install hits GitHub API rate limits while resolving aqua
 tools, export a temporary `GITHUB_TOKEN` and rerun `chezmoi apply`.
 
-If zsh is not already the login shell, switch it after the first apply and
-reconnect.
+If the login shell could not be changed automatically, switch it after the
+first apply and reconnect.
 
 ```sh
 chsh -s "$(command -v zsh)"
