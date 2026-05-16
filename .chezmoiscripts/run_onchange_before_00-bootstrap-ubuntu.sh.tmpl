@@ -49,4 +49,15 @@ printf '%s\n' "deb [signed-by=/etc/apt/keyrings/mise-archive-keyring.asc] https:
 
 $sudo_cmd apt-get update -y
 $sudo_cmd apt-get install -y mise
+
+target_user="$(id -un)"
+zsh_path="/usr/bin/zsh"
+current_shell="$(getent passwd "$target_user" | cut -d: -f7)"
+
+if [ "$current_shell" != "$zsh_path" ]; then
+  echo "Setting login shell for $target_user to $zsh_path"
+  if ! $sudo_cmd chsh -s "$zsh_path" "$target_user"; then
+    echo "Could not change the login shell automatically. Run this manually after setup: chsh -s \"$zsh_path\"" >&2
+  fi
+fi
 {{- end }}
