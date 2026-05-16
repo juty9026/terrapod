@@ -1,0 +1,52 @@
+{{- if eq .chezmoi.os "linux" -}}
+#!/bin/sh
+set -eu
+
+os_id="{{ get .chezmoi.osRelease "id" }}"
+version_id="{{ get .chezmoi.osRelease "versionID" }}"
+
+if [ "$os_id" != "ubuntu" ] || [ "$version_id" != "24.04" ]; then
+  echo "Unsupported Linux release: ${os_id:-unknown} ${version_id:-unknown}. This dotfiles repo supports Ubuntu 24.04 LTS for the VPS Shell Profile." >&2
+  exit 1
+fi
+
+if [ "$(id -u)" -eq 0 ]; then
+  sudo_cmd=""
+elif command -v sudo >/dev/null 2>&1; then
+  sudo_cmd="sudo"
+else
+  echo "sudo is required to install Ubuntu bootstrap packages." >&2
+  exit 1
+fi
+
+export DEBIAN_FRONTEND=noninteractive
+
+$sudo_cmd apt-get update -y
+$sudo_cmd apt-get install -y \
+  build-essential \
+  ca-certificates \
+  curl \
+  git \
+  gpg \
+  libbz2-dev \
+  libffi-dev \
+  liblzma-dev \
+  libncursesw5-dev \
+  libreadline-dev \
+  libsqlite3-dev \
+  libssl-dev \
+  libxml2-dev \
+  libxmlsec1-dev \
+  tk-dev \
+  unzip \
+  xz-utils \
+  zlib1g-dev \
+  zsh
+
+$sudo_cmd install -dm 755 /etc/apt/keyrings
+curl -fSs https://mise.en.dev/gpg-key.pub | $sudo_cmd tee /etc/apt/keyrings/mise-archive-keyring.asc >/dev/null
+printf '%s\n' "deb [signed-by=/etc/apt/keyrings/mise-archive-keyring.asc] https://mise.en.dev/deb stable main" | $sudo_cmd tee /etc/apt/sources.list.d/mise.list >/dev/null
+
+$sudo_cmd apt-get update -y
+$sudo_cmd apt-get install -y mise
+{{- end }}

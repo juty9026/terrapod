@@ -1,8 +1,8 @@
-{{- if eq .chezmoi.os "darwin" -}}
+{{- if or (eq .chezmoi.os "darwin") (eq .chezmoi.os "linux") -}}
 #!/bin/sh
 set -eu
 
-setup_brew() {
+setup_macos_brew() {
   if command -v brew >/dev/null 2>&1; then
     return
   fi
@@ -26,10 +26,17 @@ ensure_git() {
     return
   fi
 
+{{ if eq .chezmoi.os "darwin" }}
   brew install git
+{{ else }}
+  echo "git is required to install shell integrations." >&2
+  exit 1
+{{ end }}
 }
 
-setup_brew
+{{ if eq .chezmoi.os "darwin" }}
+setup_macos_brew
+{{ end }}
 ensure_git
 
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
