@@ -1,6 +1,7 @@
 # Homebrew bootstrap and macOS-only dependencies.
 
 brew "mise"
+brew "btop"
 
 cask "ghostty"
 cask "cmux"
