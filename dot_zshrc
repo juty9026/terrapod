@@ -77,9 +77,9 @@ if command -v fzf &>/dev/null; then
 fi
 
 if command -v zoxide &>/dev/null; then
+  unalias zi 2>/dev/null
   eval "$(zoxide init zsh)"
 fi
-alias zi="zoxide query -i"
 
 # ============================================
 # Tool launcher
