@@ -51,7 +51,7 @@ $sudo_cmd apt-get update -y
 $sudo_cmd apt-get install -y mise
 
 target_user="$(id -un)"
-zsh_path="$(command -v zsh)"
+zsh_path="/usr/bin/zsh"
 current_shell="$(getent passwd "$target_user" | cut -d: -f7)"
 
 if [ "$current_shell" != "$zsh_path" ]; then

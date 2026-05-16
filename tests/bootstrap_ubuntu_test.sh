@@ -70,7 +70,8 @@ write_stub "$tmp_dir/bin/getent" \
   'exit 2'
 
 write_stub "$tmp_dir/bin/zsh" \
-  'exit 0'
+  'printf "%s\n" "PATH zsh should not be used for login shell changes" >&2' \
+  'exit 1'
 
 write_stub "$tmp_dir/bin/chsh" \
   'printf "%s\n" "$*" >"$CHSH_TEST_LOG"'
@@ -81,7 +82,7 @@ export CHSH_TEST_LOG="$tmp_dir/chsh.log"
 
 sh "$rendered" >"$tmp_dir/bootstrap.out" 2>"$tmp_dir/bootstrap.err"
 
-expected="-s $tmp_dir/bin/zsh testuser"
+expected="-s /usr/bin/zsh testuser"
 actual="$(cat "$CHSH_TEST_LOG" 2>/dev/null || true)"
 
 if [ "$actual" != "$expected" ]; then

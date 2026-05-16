@@ -4,3 +4,4 @@ AGENTS.md
 CONTEXT.md
 docs/**
 .github/**
+tests/**
