@@ -57,6 +57,10 @@ chezmoi diff
 chezmoi apply
 ```
 
+The `export PATH=...` line is only for the current bootstrap shell. After the
+first `chezmoi apply`, managed zsh sessions keep `~/.local/bin` on `PATH` so
+user-local binaries such as `chezmoi` remain available after reconnecting.
+
 On Ubuntu, `chezmoi apply` runs setup scripts for the VPS shell profile:
 
 - APT bootstrap packages: zsh, git, curl, ca-certificates, gpg, unzip, and build-essential
@@ -136,7 +140,6 @@ do not commit workstation-specific values.
 | Key | Default | Purpose |
 | --- | --- | --- |
 | `enableAiCliTools` | `false` | Installs Gemini CLI, Claude Code, and Codex with npm through the mise-managed Node.js runtime. |
-| `enableHermesAgentPath` | `false` | Adds `~/.local/bin` to `PATH` for Hermes Agent on machines that need it. |
 | `gitAllowedSigners` | `[]` | Adds workstation-specific SSH signing identities to `~/.ssh/allowed_signers`. |
 
 Example:
@@ -144,7 +147,6 @@ Example:
 ```toml
 [data]
 enableAiCliTools = true
-enableHermesAgentPath = true
 
 gitAllowedSigners = [
   "name@company.com ssh-ed25519 AAAA_COMPANY_PUBLIC_KEY company",

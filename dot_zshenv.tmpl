@@ -1,10 +1,8 @@
 export XDG_CONFIG_HOME="$HOME/.config"
 
-{{- if (default false (get . "enableHermesAgentPath")) }}
-# Local opt-in: add Hermes Agent user binaries.
+# User-local binaries.
 if [[ -d "$HOME/.local/bin" ]]; then
   typeset -U path PATH
   path=("$HOME/.local/bin" $path)
   export PATH
 fi
-{{- end }}
