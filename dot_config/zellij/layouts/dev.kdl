@@ -3,13 +3,15 @@ layout {
         pane split_direction="vertical" {
             pane size="64%" name="EDITOR" command="nvim"
             pane size="36%" stacked=true {
-                pane name="CLAUDE" focus=true command="claude" {
+                pane name="CLAUDE" focus=true command="claude" start_suspended=true {
                     args "--dangerously-skip-permissions"
                 }
                 pane name="CODEX" command="codex" start_suspended=true {
                     args "--yolo"
                 }
-                pane name="GEMINI" command="gemini" start_suspended=true
+                pane name="GEMINI" command="gemini" start_suspended=true {
+                    args "--yolo"
+                }
             }
         }
     }
