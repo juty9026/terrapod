@@ -6,6 +6,12 @@ docs/**
 .github/**
 tests/**
 
+{{ if not (or (default false (get . "enableEditorStack")) (default false (get . "enableDevelopmentWorkspace"))) }}
+# Optional Editor Stack entries are opt-in for every machine profile.
+.config/nvim
+.config/nvim/**
+{{ end }}
+
 {{ if ne .chezmoi.os "darwin" }}
 # macOS Terminal Profile entries are not part of the VPS Shell Profile.
 .chezmoiscripts/00-bootstrap-homebrew.sh
