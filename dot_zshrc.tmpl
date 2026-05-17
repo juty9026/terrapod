@@ -67,7 +67,9 @@ alias c="clear"
 alias ..="cd .."
 alias ...="cd ../.."
 alias zj="zellij"
+{{ if (default false (get . "enableDevelopmentWorkspace")) -}}
 alias zd="zellij --layout dev"
+{{ end -}}
 
 # ============================================
 # fzf + zoxide

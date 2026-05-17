@@ -19,6 +19,18 @@ pass() {
   print -- "ok - $1"
 }
 
+render_zshrc() {
+  local data="$1"
+
+  "$chezmoi_bin" \
+    --config "$tmp_dir/chezmoi.toml" \
+    --destination "$tmp_dir/home" \
+    --source "$repo_root" \
+    --override-data "$data" \
+    cat "$tmp_dir/home/.zshrc" \
+    >"$tmp_dir/home/.zshrc"
+}
+
 assert_pwd() {
   local expected_dir="$1"
   local message="$2"
@@ -106,16 +118,33 @@ STUB
 
 chmod +x "$tmp_dir/bin/fzf" "$tmp_dir/bin/zoxide"
 
+chezmoi_bin="$(command -v chezmoi)" || fail "chezmoi is required to render templates"
+
 export HOME="$tmp_dir/home"
 export PATH="$tmp_dir/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export CLAUDECODE=1
 export ZOXIDE_TEST_SELECTION="$tmp_dir/selected"
 
+: >"$tmp_dir/chezmoi.toml"
+render_zshrc '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableAiCliTools":true}'
+
 cd "$tmp_dir/start" || fail "could not enter test start directory"
-source "$repo_root/dot_zshrc"
+source "$tmp_dir/home/.zshrc"
+
+if ! alias zj >/dev/null 2>&1; then
+  fail "zj should remain the general Zellij launcher"
+fi
+
+pass "zj remains the general Zellij launcher"
+
+if alias zd >/dev/null 2>&1; then
+  fail "enableAiCliTools alone should not expose the Optional Development Workspace launcher"
+fi
+
+pass "enableAiCliTools alone does not expose the Optional Development Workspace launcher"
 
 if alias zi >/dev/null 2>&1; then
-  fail "dot_zshrc should not define a zi alias over zoxide's function"
+  fail ".zshrc should not define a zi alias over zoxide's function"
 fi
 
 zi_kind="$(whence -w zi)"
@@ -161,3 +190,12 @@ export ZOXIDE_TEST_LIST="$tmp_dir/git-project"$'\n'"$tmp_dir/plain"
 zg
 assert_pwd "$tmp_dir/git-project" "zg should still jump to the selected git directory"
 pass "zg continues to change directory"
+
+render_zshrc '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableDevelopmentWorkspace":true}'
+source "$tmp_dir/home/.zshrc"
+
+if ! alias zd >/dev/null 2>&1; then
+  fail "enableDevelopmentWorkspace should expose the Optional Development Workspace launcher"
+fi
+
+pass "enableDevelopmentWorkspace exposes the Optional Development Workspace launcher"
