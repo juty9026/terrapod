@@ -193,3 +193,11 @@ for pane in CLAUDE CODEX GEMINI; do
 done
 
 pass "enableDevelopmentWorkspace starts assistant panes suspended"
+
+if ! printf '%s\n' "$development_workspace_zellij_layout" |
+  grep -A2 'pane name="GEMINI" command="gemini"' |
+  grep -F 'args "--yolo"' >/dev/null; then
+  fail "enableDevelopmentWorkspace passes yolo mode to the Gemini pane"
+fi
+
+pass "enableDevelopmentWorkspace passes yolo mode to the Gemini pane"

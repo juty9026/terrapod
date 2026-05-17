@@ -9,7 +9,9 @@ layout {
                 pane name="CODEX" command="codex" start_suspended=true {
                     args "--yolo"
                 }
-                pane name="GEMINI" command="gemini" start_suspended=true
+                pane name="GEMINI" command="gemini" start_suspended=true {
+                    args "--yolo"
+                }
             }
         }
     }
