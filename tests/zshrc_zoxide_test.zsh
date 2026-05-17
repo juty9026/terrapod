@@ -126,6 +126,23 @@ export CLAUDECODE=1
 export ZOXIDE_TEST_SELECTION="$tmp_dir/selected"
 
 : >"$tmp_dir/chezmoi.toml"
+render_zshrc '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}}}'
+
+cd "$tmp_dir/start" || fail "could not enter test start directory"
+source "$tmp_dir/home/.zshrc"
+
+if ! alias zj >/dev/null 2>&1; then
+  fail "default shell should expose the general Zellij launcher"
+fi
+
+pass "default shell exposes the general Zellij launcher"
+
+if alias zd >/dev/null 2>&1; then
+  fail "default shell should not expose the Optional Development Workspace launcher"
+fi
+
+pass "default shell does not expose the Optional Development Workspace launcher"
+
 render_zshrc '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableAiCliTools":true}'
 
 cd "$tmp_dir/start" || fail "could not enter test start directory"

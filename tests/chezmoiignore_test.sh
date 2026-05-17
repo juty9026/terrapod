@@ -2,6 +2,12 @@
 set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+tmp_dir="$(mktemp -d)"
+
+cleanup() {
+  rm -rf "$tmp_dir"
+}
+trap cleanup EXIT INT TERM
 
 fail() {
   printf '%s\n' "not ok - $1" >&2
@@ -28,6 +34,17 @@ render_template() {
   chezmoi execute-template \
     --override-data "$data" \
     --file "$repo_root/$file"
+}
+
+render_managed_file() {
+  data="$1"
+  destination="$2"
+
+  chezmoi \
+    --source "$repo_root" \
+    --destination "$tmp_dir/home" \
+    --override-data "$data" \
+    cat "$tmp_dir/home/$destination"
 }
 
 assert_managed_paths_exclude_prefix() {
@@ -104,6 +121,11 @@ assert_managed_paths_exclude_prefix \
   "Ubuntu VPS ignores Optional Editor Stack entries by default"
 
 assert_managed_paths_exclude_prefix \
+  "$ubuntu_managed" \
+  "dot_config/zellij/layouts/dev.kdl" \
+  "Ubuntu VPS ignores Optional Development Workspace layout by default"
+
+assert_managed_paths_exclude_prefix \
   "$macos_managed" \
   "dot_config/nvim" \
   "macOS ignores Optional Editor Stack entries by default"
@@ -160,3 +182,14 @@ done
 
 pass "enableAiCliTools renders Optional AI Tool Stack installer"
 pass "enableDevelopmentWorkspace renders Optional AI Tool Stack installer"
+
+development_workspace_zellij_layout="$(render_managed_file "$development_workspace_data" ".config/zellij/layouts/dev.kdl")"
+
+for pane in CLAUDE CODEX GEMINI; do
+  if ! printf '%s\n' "$development_workspace_zellij_layout" |
+    grep -E "pane name=\"${pane}\" .*start_suspended=true" >/dev/null; then
+    fail "enableDevelopmentWorkspace starts assistant panes suspended"
+  fi
+done
+
+pass "enableDevelopmentWorkspace starts assistant panes suspended"
