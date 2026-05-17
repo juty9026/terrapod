@@ -97,7 +97,6 @@ development_workspace_data='{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu",
 development_workspace_managed="$(managed_source_paths "$development_workspace_data")"
 
 macos_only_entries="
-.chezmoiscripts/run_onchange_after_40-remove-legacy-npm-ai-tools.sh.tmpl
 .chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl
 .chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl
 dot_config/cmux
@@ -114,6 +113,11 @@ for entry in $macos_only_entries; do
 done
 
 pass "Ubuntu VPS ignores macOS-only entries"
+
+assert_managed_paths_exclude_prefix \
+  "$macos_managed" \
+  ".chezmoiscripts/run_onchange_after_40-remove-legacy-npm-ai-tools.sh.tmpl" \
+  "macOS default ignores legacy AI tool uninstall script"
 
 assert_managed_paths_exclude_prefix \
   "$ubuntu_managed" \
