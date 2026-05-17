@@ -137,17 +137,54 @@ Machine-local options are configured outside this repo with
 `chezmoi edit-config`. Keep only the option names, defaults, and examples here;
 do not commit workstation-specific values.
 
+All three optional stack profiles are disabled by default.
+
 | Key | Default | Purpose |
 | --- | --- | --- |
+| `enableEditorStack` | `false` | Enables the Optional Editor Stack, which manages the rich Neovim configuration. Plain Neovim remains in the Core Shell Stack either way. |
 | `enableAiCliTools` | `false` | Installs Gemini CLI, Claude Code, and Codex with npm through the mise-managed Node.js runtime. |
+| `enableDevelopmentWorkspace` | `false` | Enables the Optional Development Workspace preset, including the Optional Editor Stack, Optional AI Tool Stack, and development-specific Zellij workspace surfaces. |
 | `gitAllowedSigners` | `[]` | Adds workstation-specific SSH signing identities to `~/.ssh/allowed_signers`. |
 
-Example:
+When `enableDevelopmentWorkspace` is `true`, it enables both the Optional Editor Stack and Optional AI Tool Stack even if `enableEditorStack` or `enableAiCliTools` are false or omitted.
+
+Opting out of an optional stack excludes its files from chezmoi management; it does not remove files already present on a machine.
+
+### Optional stack profile examples
+
+Minimal VPS:
+
+```toml
+[data]
+```
+
+Editor-only machine:
+
+```toml
+[data]
+enableEditorStack = true
+```
+
+AI-only machine:
 
 ```toml
 [data]
 enableAiCliTools = true
+```
 
+Full development workspace machine:
+
+```toml
+[data]
+enableEditorStack = false
+enableAiCliTools = false
+enableDevelopmentWorkspace = true
+```
+
+Git signing identities can be configured alongside any profile.
+
+```toml
+[data]
 gitAllowedSigners = [
   "name@company.com ssh-ed25519 AAAA_COMPANY_PUBLIC_KEY company",
 ]
