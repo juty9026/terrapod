@@ -1,4 +1,4 @@
-{{- if and (or (eq .chezmoi.os "darwin") (eq .chezmoi.os "linux")) (default false (get . "enableAiCliTools")) -}}
+{{- if and (or (eq .chezmoi.os "darwin") (eq .chezmoi.os "linux")) (or (default false (get . "enableAiCliTools")) (default false (get . "enableDevelopmentWorkspace"))) -}}
 #!/bin/sh
 set -eu
 

@@ -12,6 +12,12 @@ tests/**
 .config/nvim/**
 {{ end }}
 
+{{ if not (default false (get . "enableDevelopmentWorkspace")) }}
+# Optional Development Workspace entries are opt-in for every machine profile.
+.config/zellij/layouts
+.config/zellij/layouts/**
+{{ end }}
+
 {{ if ne .chezmoi.os "darwin" }}
 # macOS Terminal Profile entries are not part of the VPS Shell Profile.
 .chezmoiscripts/00-bootstrap-homebrew.sh
