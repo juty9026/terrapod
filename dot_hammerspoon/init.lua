@@ -19,6 +19,7 @@ local helpToastStyle = {
 local appBindings = {
   { key = "t", label = "cmux", bundleID = "com.cmuxterm.app" },
   { key = "s", label = "Slack", bundleID = "com.tinyspeck.slackmacgap" },
+  { key = "d", label = "Discord", bundleID = "com.hnc.Discord" },
   { key = "n", label = "Notion", bundleID = "notion.id" },
   { key = "a", label = "ChatGPT Atlas", bundleID = "com.openai.atlas" },
   { key = "b", label = "Google Chrome", bundleID = "com.google.Chrome" },
