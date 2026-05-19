@@ -85,13 +85,13 @@ fi
 
 pass "development tests are ignored by chezmoi"
 
-ubuntu_data='{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}}}'
+ubuntu_data='{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableEditorStack":false,"enableAiCliTools":false,"enableDevelopmentWorkspace":false}'
 ubuntu_managed="$(managed_source_paths "$ubuntu_data")"
-macos_data='{"chezmoi":{"os":"darwin"}}'
+macos_data='{"chezmoi":{"os":"darwin"},"enableEditorStack":false,"enableAiCliTools":false,"enableDevelopmentWorkspace":false}'
 macos_managed="$(managed_source_paths "$macos_data")"
-editor_stack_data='{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableEditorStack":true}'
+editor_stack_data='{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableEditorStack":true,"enableAiCliTools":false,"enableDevelopmentWorkspace":false}'
 editor_stack_managed="$(managed_source_paths "$editor_stack_data")"
-ai_cli_tools_data='{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableAiCliTools":true}'
+ai_cli_tools_data='{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableEditorStack":false,"enableAiCliTools":true,"enableDevelopmentWorkspace":false}'
 ai_cli_tools_managed="$(managed_source_paths "$ai_cli_tools_data")"
 development_workspace_data='{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableEditorStack":false,"enableAiCliTools":false,"enableDevelopmentWorkspace":true}'
 development_workspace_managed="$(managed_source_paths "$development_workspace_data")"
@@ -130,6 +130,11 @@ assert_managed_paths_exclude_prefix \
   "Ubuntu VPS ignores Optional Development Workspace layout by default"
 
 assert_managed_paths_exclude_prefix \
+  "$ubuntu_managed" \
+  ".chezmoiscripts/run_onchange_after_60-install-ai-cli-tools.sh.tmpl" \
+  "Ubuntu VPS ignores Optional AI Tool Stack installer by default"
+
+assert_managed_paths_exclude_prefix \
   "$macos_managed" \
   "dot_config/nvim" \
   "macOS ignores Optional Editor Stack entries by default"
@@ -159,6 +164,16 @@ assert_managed_paths_include_prefix \
   "dot_config/zellij/layouts/dev.kdl" \
   "enableDevelopmentWorkspace includes Optional Development Workspace layout"
 
+assert_managed_paths_include_prefix \
+  "$ai_cli_tools_managed" \
+  ".chezmoiscripts/run_onchange_after_60-install-ai-cli-tools.sh.tmpl" \
+  "enableAiCliTools includes Optional AI Tool Stack installer"
+
+assert_managed_paths_include_prefix \
+  "$development_workspace_managed" \
+  ".chezmoiscripts/run_onchange_after_60-install-ai-cli-tools.sh.tmpl" \
+  "enableDevelopmentWorkspace includes Optional AI Tool Stack installer"
+
 ubuntu_mise_config="$(render_template "$ubuntu_data" "dot_config/mise/config.toml.tmpl")"
 
 if ! printf '%s\n' "$ubuntu_mise_config" | grep -F '"aqua:neovim/neovim" = "latest"' >/dev/null; then
@@ -167,8 +182,17 @@ fi
 
 pass "Ubuntu VPS keeps plain Neovim in the Core Shell Stack"
 
-ai_cli_tools_installer="$(render_template "$ai_cli_tools_data" ".chezmoiscripts/run_after_60-install-ai-cli-tools.sh.tmpl")"
-development_workspace_ai_installer="$(render_template "$development_workspace_data" ".chezmoiscripts/run_after_60-install-ai-cli-tools.sh.tmpl")"
+mise_tools_installer="$(render_template "$ubuntu_data" ".chezmoiscripts/run_onchange_after_20-install-mise-tools.sh.tmpl")"
+
+if ! printf '%s\n' "$mise_tools_installer" |
+  grep -E '^# mise-config-sha256=[0-9a-f]{64}$' >/dev/null; then
+  fail "mise tool installer tracks rendered mise config changes"
+fi
+
+pass "mise tool installer tracks rendered mise config changes"
+
+ai_cli_tools_installer="$(render_template "$ai_cli_tools_data" ".chezmoiscripts/run_onchange_after_60-install-ai-cli-tools.sh.tmpl")"
+development_workspace_ai_installer="$(render_template "$development_workspace_data" ".chezmoiscripts/run_onchange_after_60-install-ai-cli-tools.sh.tmpl")"
 
 for package in \
   "@anthropic-ai/claude-code" \

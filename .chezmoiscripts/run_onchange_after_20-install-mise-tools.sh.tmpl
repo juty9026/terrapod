@@ -1,5 +1,6 @@
 {{- if or (eq .chezmoi.os "darwin") (eq .chezmoi.os "linux") -}}
 #!/bin/sh
+# mise-config-sha256={{ includeTemplate "dot_config/mise/config.toml.tmpl" . | sha256sum }}
 set -eu
 
 setup_mise() {
