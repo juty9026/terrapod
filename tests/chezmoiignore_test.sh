@@ -89,6 +89,10 @@ ubuntu_data='{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24
 ubuntu_managed="$(managed_source_paths "$ubuntu_data")"
 macos_data='{"chezmoi":{"os":"darwin"},"enableEditorStack":false,"enableAiCliTools":false,"enableDevelopmentWorkspace":false}'
 macos_managed="$(managed_source_paths "$macos_data")"
+macos_ai_cli_tools_data='{"chezmoi":{"os":"darwin"},"enableEditorStack":false,"enableAiCliTools":true,"enableDevelopmentWorkspace":false}'
+macos_ai_cli_tools_managed="$(managed_source_paths "$macos_ai_cli_tools_data")"
+macos_development_workspace_data='{"chezmoi":{"os":"darwin"},"enableEditorStack":false,"enableAiCliTools":false,"enableDevelopmentWorkspace":true}'
+macos_development_workspace_managed="$(managed_source_paths "$macos_development_workspace_data")"
 editor_stack_data='{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableEditorStack":true,"enableAiCliTools":false,"enableDevelopmentWorkspace":false}'
 editor_stack_managed="$(managed_source_paths "$editor_stack_data")"
 ai_cli_tools_data='{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableEditorStack":false,"enableAiCliTools":true,"enableDevelopmentWorkspace":false}'
@@ -138,6 +142,26 @@ assert_managed_paths_exclude_prefix \
   "$macos_managed" \
   "dot_config/nvim" \
   "macOS ignores Optional Editor Stack entries by default"
+
+assert_managed_paths_exclude_prefix \
+  "$macos_managed" \
+  "dot_config/zsh/path.d/antigravity.zsh.tmpl" \
+  "macOS default ignores Antigravity PATH snippet"
+
+assert_managed_paths_exclude_prefix \
+  "$ai_cli_tools_managed" \
+  "dot_config/zsh/path.d/antigravity.zsh.tmpl" \
+  "Linux enableAiCliTools ignores Antigravity PATH snippet"
+
+assert_managed_paths_include_prefix \
+  "$macos_ai_cli_tools_managed" \
+  "dot_config/zsh/path.d/antigravity.zsh.tmpl" \
+  "macOS enableAiCliTools includes Antigravity PATH snippet"
+
+assert_managed_paths_include_prefix \
+  "$macos_development_workspace_managed" \
+  "dot_config/zsh/path.d/antigravity.zsh.tmpl" \
+  "macOS enableDevelopmentWorkspace includes Antigravity PATH snippet"
 
 assert_managed_paths_include_prefix \
   "$editor_stack_managed" \

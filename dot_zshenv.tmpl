@@ -1,8 +1,18 @@
 export XDG_CONFIG_HOME="$HOME/.config"
 
+typeset -U path PATH
+
 # User-local binaries.
 if [[ -d "$HOME/.local/bin" ]]; then
-  typeset -U path PATH
   path=("$HOME/.local/bin" $path)
-  export PATH
 fi
+
+# Managed PATH snippets.
+if [[ -d "$HOME/.config/zsh/path.d" ]]; then
+  for path_snippet in "$HOME"/.config/zsh/path.d/*.zsh(N); do
+    source "$path_snippet"
+  done
+  unset path_snippet
+fi
+
+export PATH

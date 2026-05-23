@@ -1,0 +1,12 @@
+# Antigravity paths.
+typeset -U path PATH
+
+if [[ -d "$HOME/.antigravity/antigravity/bin" ]]; then
+  path=("$HOME/.antigravity/antigravity/bin" $path)
+fi
+
+if [[ -d "$HOME/.antigravity-ide/antigravity-ide/bin" ]]; then
+  path=("$HOME/.antigravity-ide/antigravity-ide/bin" $path)
+fi
+
+export PATH

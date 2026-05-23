@@ -31,11 +31,13 @@ render_zshenv() {
     >"$tmp_dir/home/.zshenv"
 }
 
-lookup_chezmoi() {
+lookup_command() {
+  command_name="$1"
+
   env -i \
     HOME="$tmp_dir/home" \
     PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
-    zsh -c 'command -v chezmoi' \
+    zsh -c 'command -v "$1"' zsh "$command_name" \
     >"$tmp_dir/lookup.out" \
     2>"$tmp_dir/lookup.err"
 }
@@ -46,11 +48,43 @@ assert_lookup_success() {
 
   render_zshenv "$data"
 
-  if ! lookup_chezmoi; then
+  if ! lookup_command chezmoi; then
     fail "$message; expected ~/.local/bin/chezmoi in PATH"
   fi
 
   expected="$tmp_dir/home/.local/bin/chezmoi"
+  actual="$(cat "$tmp_dir/lookup.out")"
+
+  if [ "$actual" != "$expected" ]; then
+    fail "$message; expected '$expected', got '$actual'"
+  fi
+
+  pass "$message"
+}
+
+assert_path_snippet_lookup_success() {
+  data="$1"
+  message="$2"
+
+  render_zshenv "$data"
+
+  mkdir -p "$tmp_dir/home/.config/zsh/path.d"
+  mkdir -p "$tmp_dir/home/.snippet/bin"
+
+  cat >"$tmp_dir/home/.config/zsh/path.d/custom.zsh" <<'STUB'
+typeset -U path PATH
+path=("$HOME/.snippet/bin" $path)
+export PATH
+STUB
+
+  : >"$tmp_dir/home/.snippet/bin/snippet-tool"
+  chmod +x "$tmp_dir/home/.snippet/bin/snippet-tool"
+
+  if ! lookup_command snippet-tool; then
+    fail "$message; expected path.d snippet directory in PATH"
+  fi
+
+  expected="$tmp_dir/home/.snippet/bin/snippet-tool"
   actual="$(cat "$tmp_dir/lookup.out")"
 
   if [ "$actual" != "$expected" ]; then
@@ -78,3 +112,7 @@ assert_lookup_success \
 assert_lookup_success \
   '{"chezmoi":{"os":"darwin"}}' \
   "macOS zshenv exposes user-local binaries by default"
+
+assert_path_snippet_lookup_success \
+  '{"chezmoi":{"os":"darwin"}}' \
+  "macOS zshenv loads user PATH snippets"
