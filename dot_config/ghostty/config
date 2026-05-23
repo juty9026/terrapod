@@ -40,7 +40,7 @@ macos-option-as-alt = true
 
 # Shell Integration
 shell-integration = zsh
-shell-integration-features = cursor,sudo,title
+shell-integration-features = cursor,sudo,title,ssh-env,ssh-terminfo
 
 # Keybindings
 keybind = cmd+d=new_split:right
