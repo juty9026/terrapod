@@ -9,6 +9,13 @@ cleanup() {
   fi
 }
 
+signal_exit() {
+  status="$1"
+  trap - EXIT HUP INT TERM
+  cleanup
+  exit "$status"
+}
+
 fail() {
   printf '%s\n' "merge-pr: $1" >&2
   exit 1
@@ -22,7 +29,7 @@ strategy="${2:-}"
 
 case "$strategy" in
   merge)
-    exec gh pr merge "$branch" --merge --delete-branch
+    exec gh pr merge "$branch" --merge
     ;;
   squash)
     ;;
@@ -31,7 +38,10 @@ case "$strategy" in
     ;;
 esac
 
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'signal_exit 129' HUP
+trap 'signal_exit 130' INT
+trap 'signal_exit 143' TERM
 
 temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/merge-pr.XXXXXX")"
 message_file="$temp_dir/message"
@@ -49,7 +59,13 @@ pr_body="$(printf '%s\n' "$pr_message" | sed '1d')"
   printf '%s\n' "$pr_body"
 } >"$message_file"
 
-"${EDITOR:-vi}" "$message_file"
+if ! (
+  set -f
+  editor_command=${EDITOR:-vi}
+  sh -c '"$@"' sh $editor_command "$message_file"
+); then
+  fail "editor exited unsuccessfully"
+fi
 
 title="$(
   awk '
@@ -92,7 +108,7 @@ awk '
 ' "$message_file" >"$body_file"
 
 status=0
-gh pr merge "$branch" --squash --delete-branch --subject "$title" --body-file "$body_file" || status=$?
+gh pr merge "$branch" --squash --subject "$title" --body-file "$body_file" || status=$?
 cleanup
 trap - EXIT HUP INT TERM
 exit "$status"

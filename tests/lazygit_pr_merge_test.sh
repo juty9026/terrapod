@@ -40,7 +40,90 @@ assert_contains() {
   pass "$message"
 }
 
-mkdir -p "$tmp_dir/bin" "$tmp_dir/home" "$tmp_dir/editors" "$tmp_dir/tmp"
+assert_no_arg() {
+  call_file="$1"
+  unexpected="$2"
+  message="$3"
+
+  while IFS= read -r arg; do
+    if [ "$arg" = "$unexpected" ]; then
+      fail "$message"
+    fi
+  done <"$call_file"
+
+  pass "$message"
+}
+
+assert_arg_at() {
+  call_file="$1"
+  position="$2"
+  expected="$3"
+  message="$4"
+  actual="$(sed -n "${position}p" "$call_file")"
+
+  if [ "$actual" != "$expected" ]; then
+    fail "$message: expected arg $position to be '$expected', got '$actual'"
+  fi
+
+  pass "$message"
+}
+
+assert_call_args() {
+  call_file="$1"
+  message="$2"
+  shift 2
+  expected_file="$tmp_dir/expected.args"
+  : >"$expected_file"
+
+  for arg do
+    printf '%s\n' "$arg" >>"$expected_file"
+  done
+
+  if ! cmp -s "$expected_file" "$call_file"; then
+    printf '%s\n' "expected args:" >&2
+    sed 's/^/  /' "$expected_file" >&2
+    printf '%s\n' "actual args:" >&2
+    sed 's/^/  /' "$call_file" >&2
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
+assert_call_count() {
+  expected="$1"
+  message="$2"
+  actual=0
+
+  if [ -f "$GH_CALL_COUNT" ]; then
+    actual="$(cat "$GH_CALL_COUNT")"
+  fi
+
+  if [ "$actual" != "$expected" ]; then
+    fail "$message: expected $expected gh calls, got $actual"
+  fi
+
+  pass "$message"
+}
+
+assert_tmp_empty() {
+  message="$1"
+
+  if find "$TMPDIR" -mindepth 1 | grep . >/dev/null; then
+    find "$TMPDIR" -mindepth 1 >&2
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
+reset_gh_calls() {
+  rm -rf "$GH_CALL_DIR"
+  mkdir -p "$GH_CALL_DIR"
+  rm -f "$GH_CALL_COUNT" "$GH_BODY_CAPTURE" "$GH_BODY_FILE_PATH"
+}
+
+mkdir -p "$tmp_dir/bin" "$tmp_dir/home" "$tmp_dir/editors" "$tmp_dir/tmp" "$tmp_dir/calls"
 
 rendered_config="$(
   chezmoi \
@@ -67,17 +150,25 @@ assert_contains "$rendered_config" "loadingText: Merging PR..." "lazygit command
 helper="$repo_root/dot_config/lazygit/scripts/executable_merge-pr"
 
 write_stub "$tmp_dir/bin/gh" \
-  'printf "%s\n" "$*" >>"$GH_CALL_LOG"' \
+  'count=0' \
+  '[ -f "$GH_CALL_COUNT" ] && count="$(cat "$GH_CALL_COUNT")"' \
+  'count=$((count + 1))' \
+  'printf "%s\n" "$count" >"$GH_CALL_COUNT"' \
+  'call_file="$GH_CALL_DIR/call-$count.args"' \
+  ': >"$call_file"' \
+  'for arg do' \
+  '  printf "%s\n" "$arg" >>"$call_file"' \
+  'done' \
   'if [ "$1" = "pr" ] && [ "$2" = "view" ]; then' \
-  '  printf "%s\n" "Implement lazygit PR merge"' \
-  '  printf "%s\n" "This PR adds a merge menu."' \
+  '  printf "%s\n" "$GH_PR_TITLE"' \
+  '  printf "%s\n" "$GH_PR_BODY"' \
   '  exit 0' \
   'fi' \
   'if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then' \
   '  body_file=""' \
   '  while [ "$#" -gt 0 ]; do' \
   '    if [ "$1" = "--body-file" ]; then' \
-  '      body_file="$2"' \
+  '      body_file="${2:-}"' \
   '      break' \
   '    fi' \
   '    shift' \
@@ -93,35 +184,61 @@ write_stub "$tmp_dir/bin/gh" \
 write_stub "$tmp_dir/editors/append-editor" \
   'printf "%s\n" "Edited body line." >>"$1"'
 
+write_stub "$tmp_dir/editors/require-flag-editor" \
+  'if [ "${1:-}" != "--wait" ]; then' \
+  '  printf "%s\n" "missing --wait flag" >&2' \
+  '  exit 65' \
+  'fi' \
+  'printf "%s\n" "Edited body line." >>"$2"'
+
+write_stub "$tmp_dir/editors/remove-title-editor" \
+  'sed "/^Title:/d" "$1" >"$1.tmp"' \
+  'mv "$1.tmp" "$1"'
+
+write_stub "$tmp_dir/editors/failing-editor" \
+  'printf "%s\n" "editor failed intentionally" >&2' \
+  'exit 42'
+
 export PATH="$tmp_dir/bin:/usr/bin:/bin"
-export GH_CALL_LOG="$tmp_dir/gh-calls.log"
+export GH_CALL_DIR="$tmp_dir/calls"
+export GH_CALL_COUNT="$tmp_dir/gh-call-count"
 export GH_BODY_CAPTURE="$tmp_dir/body.txt"
 export GH_BODY_FILE_PATH="$tmp_dir/body-file-path.txt"
-export EDITOR="$tmp_dir/editors/append-editor"
+export GH_PR_TITLE='Implement lazygit PR merge; keep $HOME safe'
+export GH_PR_BODY="This PR adds a merge menu."
 export TMPDIR="$tmp_dir/tmp"
 
+reset_gh_calls
 sh "$helper" feature/pr-menu merge
 
-if ! grep -F "pr merge feature/pr-menu --merge --delete-branch" "$GH_CALL_LOG" >/dev/null; then
-  fail "merge strategy should call gh pr merge with --merge"
-fi
+assert_call_count 1 "merge strategy should call gh once"
+assert_call_args "$GH_CALL_DIR/call-1.args" \
+  "merge strategy should call gh pr merge with --merge and keep the branch" \
+  pr merge feature/pr-menu --merge
 
-pass "merge strategy calls gh pr merge with --merge"
-
-: >"$GH_CALL_LOG"
+reset_gh_calls
+export EDITOR="$tmp_dir/editors/require-flag-editor --wait"
 sh "$helper" feature/pr-menu squash
 
-if ! grep -F "pr view feature/pr-menu --json title,body --jq .title, .body" "$GH_CALL_LOG" >/dev/null; then
-  fail "squash strategy should read PR title and body"
+assert_call_count 2 "squash strategy should view then merge"
+assert_call_args "$GH_CALL_DIR/call-1.args" \
+  "squash strategy should read PR title and body" \
+  pr view feature/pr-menu --json title,body --jq ".title, .body"
+
+squash_merge_call="$GH_CALL_DIR/call-2.args"
+assert_arg_at "$squash_merge_call" 1 pr "squash merge call starts with gh pr"
+assert_arg_at "$squash_merge_call" 2 merge "squash merge call targets gh merge"
+assert_arg_at "$squash_merge_call" 3 feature/pr-menu "squash merge call targets the selected branch"
+assert_arg_at "$squash_merge_call" 4 --squash "squash merge call uses squash strategy"
+assert_arg_at "$squash_merge_call" 5 --subject "squash merge call passes a subject flag"
+assert_arg_at "$squash_merge_call" 6 "$GH_PR_TITLE" "squash strategy passes the metacharacter title as one subject argument"
+assert_arg_at "$squash_merge_call" 7 --body-file "squash merge call passes a body file"
+line_count="$(wc -l <"$squash_merge_call" | tr -d ' ')"
+if [ "$line_count" != 8 ]; then
+  fail "squash merge call should only pass expected arguments"
 fi
-
-pass "squash strategy reads PR title and body"
-
-if ! grep -F "pr merge feature/pr-menu --squash --delete-branch --subject Implement lazygit PR merge --body-file" "$GH_CALL_LOG" >/dev/null; then
-  fail "squash strategy should pass edited title as subject"
-fi
-
-pass "squash strategy passes edited title as subject"
+pass "squash merge call only passes expected arguments"
+assert_no_arg "$squash_merge_call" --delete-branch "squash strategy should not delete the branch"
 
 if ! grep -F "This PR adds a merge menu." "$GH_BODY_CAPTURE" >/dev/null; then
   fail "squash strategy should pass PR description as body"
@@ -138,16 +255,9 @@ if [ -e "$body_file_path" ]; then
   fail "squash strategy should remove its temporary body file after a successful merge"
 fi
 
-if find "$TMPDIR" -type f | grep . >/dev/null; then
-  fail "squash strategy should not leave temporary files after a successful merge"
-fi
+assert_tmp_empty "squash strategy should not leave temporary files or directories after success"
 
-pass "squash strategy removes temporary files after success"
-
-write_stub "$tmp_dir/editors/remove-title-editor" \
-  'sed "/^Title:/d" "$1" >"$1.tmp"' \
-  'mv "$1.tmp" "$1"'
-
+reset_gh_calls
 export EDITOR="$tmp_dir/editors/remove-title-editor"
 
 if sh "$helper" feature/pr-menu squash >"$tmp_dir/missing-title.out" 2>"$tmp_dir/missing-title.err"; then
@@ -158,8 +268,21 @@ if ! grep -F "missing a Title" "$tmp_dir/missing-title.err" >/dev/null; then
   fail "squash strategy should explain missing title errors"
 fi
 
-if find "$TMPDIR" -type f | grep . >/dev/null; then
-  fail "squash strategy should not leave temporary files after a missing-title abort"
+assert_call_count 1 "missing-title abort should not call gh merge"
+assert_tmp_empty "squash strategy should not leave temporary files or directories after a missing-title abort"
+pass "squash strategy rejects missing title"
+
+reset_gh_calls
+export EDITOR="$tmp_dir/editors/failing-editor"
+
+if sh "$helper" feature/pr-menu squash >"$tmp_dir/editor-failure.out" 2>"$tmp_dir/editor-failure.err"; then
+  fail "squash strategy should fail when the editor exits non-zero"
 fi
 
-pass "squash strategy rejects missing title"
+if ! grep -F "editor exited unsuccessfully" "$tmp_dir/editor-failure.err" >/dev/null; then
+  fail "squash strategy should explain editor failures"
+fi
+
+assert_call_count 1 "editor failure should not call gh merge"
+assert_tmp_empty "squash strategy should not leave temporary files or directories after editor failure"
+pass "squash strategy rejects editor failure"
