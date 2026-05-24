@@ -147,6 +147,20 @@ assert_contains "$rendered_config" "merge-pr {{.SelectedLocalBranch.Name | quote
 assert_contains "$rendered_config" "output: terminal" "lazygit command runs in a terminal"
 assert_contains "$rendered_config" "loadingText: Merging PR..." "lazygit command shows merge progress"
 
+helper_target="$(
+  chezmoi \
+    --source "$repo_root" \
+    --destination "$tmp_dir/home" \
+    target-path dot_config/lazygit/scripts/executable_merge-pr
+)"
+expected_helper_target="$tmp_dir/home/.config/lazygit/scripts/merge-pr"
+
+if [ "$helper_target" != "$expected_helper_target" ]; then
+  fail "chezmoi should install executable_merge-pr as merge-pr; expected '$expected_helper_target', got '$helper_target'"
+fi
+
+pass "chezmoi installs executable_merge-pr as the helper path lazygit calls"
+
 helper="$repo_root/dot_config/lazygit/scripts/executable_merge-pr"
 
 write_stub "$tmp_dir/bin/gh" \
