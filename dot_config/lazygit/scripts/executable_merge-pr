@@ -1,0 +1,98 @@
+#!/bin/sh
+set -eu
+
+temp_dir=""
+
+cleanup() {
+  if [ -n "$temp_dir" ] && [ -d "$temp_dir" ]; then
+    rm -rf "$temp_dir"
+  fi
+}
+
+fail() {
+  printf '%s\n' "merge-pr: $1" >&2
+  exit 1
+}
+
+branch="${1:-}"
+strategy="${2:-}"
+
+[ -n "$branch" ] || fail "branch is required"
+[ -n "$strategy" ] || fail "merge strategy is required"
+
+case "$strategy" in
+  merge)
+    exec gh pr merge "$branch" --merge --delete-branch
+    ;;
+  squash)
+    ;;
+  *)
+    fail "unsupported merge strategy: $strategy"
+    ;;
+esac
+
+trap cleanup EXIT HUP INT TERM
+
+temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/merge-pr.XXXXXX")"
+message_file="$temp_dir/message"
+body_file="$temp_dir/body"
+
+pr_message="$(gh pr view "$branch" --json title,body --jq '.title, .body')"
+pr_title="$(printf '%s\n' "$pr_message" | sed -n '1p')"
+pr_body="$(printf '%s\n' "$pr_message" | sed '1d')"
+
+{
+  printf '%s\n' '---'
+  printf 'Title: %s\n' "$pr_title"
+  printf '%s\n' '---'
+  printf '%s\n' ''
+  printf '%s\n' "$pr_body"
+} >"$message_file"
+
+"${EDITOR:-vi}" "$message_file"
+
+title="$(
+  awk '
+    NR == 1 && $0 == "---" {
+      in_header = 1
+      next
+    }
+    in_header && $0 == "---" {
+      exit
+    }
+    in_header && index($0, "Title:") == 1 {
+      value = substr($0, 7)
+      sub(/^[[:space:]]*/, "", value)
+      sub(/[[:space:]]*$/, "", value)
+      print value
+      exit
+    }
+  ' "$message_file"
+)"
+
+[ -n "$title" ] || fail "edited message is missing a Title"
+
+awk '
+  $0 == "---" && delimiter_count < 2 {
+    delimiter_count++
+    if (delimiter_count == 2) {
+      in_body = 1
+    }
+    next
+  }
+  in_body {
+    if (!checked_leading_blank) {
+      checked_leading_blank = 1
+      if ($0 == "") {
+        next
+      }
+    }
+    print
+  }
+' "$message_file" >"$body_file"
+
+status=0
+gh pr merge "$branch" --squash --delete-branch --subject "$title" --body-file "$body_file" || status=$?
+cleanup
+trap - EXIT HUP INT TERM
+exit "$status"

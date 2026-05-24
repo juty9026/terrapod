@@ -2,3 +2,25 @@ git:
   pagers:
     - pager: delta --dark --paging=never
     - pager: delta --dark --paging=never --side-by-side
+
+customCommands:
+  - key: X
+    context: localBranches
+    description: Merge GitHub PR
+    prompts:
+      - type: menu
+        title: Merge pull request
+        key: MergeStrategy
+        options:
+          - name: Merge commit
+            description: Create a merge commit
+            value: merge
+          - name: Squash
+            description: Squash commits into one commit
+            value: squash
+      - type: confirm
+        title: Merge PR?
+        body: Merge the GitHub PR for the selected branch?
+    command: ~/.config/lazygit/scripts/merge-pr {{.SelectedLocalBranch.Name | quote}} {{.Form.MergeStrategy | quote}}
+    output: terminal
+    loadingText: Merging PR...
