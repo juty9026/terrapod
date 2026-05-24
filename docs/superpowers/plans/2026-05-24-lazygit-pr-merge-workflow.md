@@ -73,7 +73,7 @@ rendered_config="$(
     cat "$tmp_dir/home/.config/lazygit/config.yml"
 )"
 
-assert_contains "$rendered_config" "description: Merge GitHub PR" "lazygit config exposes the PR merge command"
+assert_contains "$rendered_config" "description: Merge GitHub PR..." "lazygit config exposes the PR merge command as a follow-up flow"
 assert_contains "$rendered_config" "title: Merge pull request" "lazygit config prompts for merge strategy"
 assert_contains "$rendered_config" "Merge commit" "lazygit config offers merge commit strategy"
 assert_contains "$rendered_config" "Squash" "lazygit config offers squash strategy"
@@ -177,7 +177,7 @@ Update `dot_config/lazygit/config.yml` so it keeps the existing pager settings a
 customCommands:
   - key: "X"
     context: "localBranches"
-    description: "Merge GitHub PR"
+    description: "Merge GitHub PR..."
     prompts:
       - type: "menu"
         title: "Merge pull request"

@@ -134,7 +134,7 @@ rendered_config="$(
 
 assert_contains "$rendered_config" "key: X" "lazygit config binds the PR merge command to X"
 assert_contains "$rendered_config" "context: localBranches" "lazygit config exposes the command in local branches"
-assert_contains "$rendered_config" "description: Merge GitHub PR" "lazygit config exposes the PR merge command"
+assert_contains "$rendered_config" "description: Merge GitHub PR..." "lazygit config exposes the PR merge command as a follow-up flow"
 assert_contains "$rendered_config" "title: Merge pull request" "lazygit config prompts for merge strategy"
 assert_contains "$rendered_config" "key: MergeStrategy" "lazygit config stores the selected merge strategy"
 assert_contains "$rendered_config" "name: Merge commit" "lazygit config offers merge commit strategy"

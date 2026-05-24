@@ -6,7 +6,7 @@ git:
 customCommands:
   - key: X
     context: localBranches
-    description: Merge GitHub PR
+    description: Merge GitHub PR...
     prompts:
       - type: menu
         title: Merge pull request
