@@ -165,6 +165,9 @@ write_stub "$tmp_dir/bin/gh" \
   '  exit 0' \
   'fi' \
   'if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then' \
+  '  if [ "${GH_MERGE_EXIT:-0}" != "0" ]; then' \
+  '    exit "$GH_MERGE_EXIT"' \
+  '  fi' \
   '  body_file=""' \
   '  while [ "$#" -gt 0 ]; do' \
   '    if [ "$1" = "--body-file" ]; then' \
@@ -206,6 +209,7 @@ export GH_BODY_CAPTURE="$tmp_dir/body.txt"
 export GH_BODY_FILE_PATH="$tmp_dir/body-file-path.txt"
 export GH_PR_TITLE='Implement lazygit PR merge; keep $HOME safe'
 export GH_PR_BODY="This PR adds a merge menu."
+export GH_MERGE_EXIT=0
 export TMPDIR="$tmp_dir/tmp"
 
 reset_gh_calls
@@ -273,6 +277,25 @@ assert_tmp_empty "squash strategy should not leave temporary files or directorie
 pass "squash strategy rejects missing title"
 
 reset_gh_calls
+export EDITOR="$tmp_dir/editors/append-editor"
+export GH_MERGE_EXIT=45
+
+if sh "$helper" feature/pr-menu squash >"$tmp_dir/merge-failure.out" 2>"$tmp_dir/merge-failure.err"; then
+  fail "squash strategy should fail when gh merge exits non-zero"
+else
+  merge_failure_status="$?"
+fi
+
+if [ "$merge_failure_status" != "45" ]; then
+  fail "squash strategy should preserve gh merge failure status"
+fi
+
+assert_call_count 2 "merge failure should happen after view and merge calls"
+assert_tmp_empty "squash strategy should not leave temporary files or directories after gh merge failure"
+pass "squash strategy preserves gh merge failures"
+
+reset_gh_calls
+export GH_MERGE_EXIT=0
 export EDITOR="$tmp_dir/editors/failing-editor"
 
 if sh "$helper" feature/pr-menu squash >"$tmp_dir/editor-failure.out" 2>"$tmp_dir/editor-failure.err"; then
