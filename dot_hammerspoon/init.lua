@@ -17,7 +17,7 @@ local helpToastStyle = {
 }
 
 local appBindings = {
-  { key = "t", label = "cmux", bundleID = "com.cmuxterm.app" },
+  { key = "t", label = ghosttyAppName, bundleID = ghosttyBundleID },
   { key = "s", label = "Slack", bundleID = "com.tinyspeck.slackmacgap" },
   { key = "d", label = "Discord", bundleID = "com.hnc.Discord" },
   { key = "n", label = "Notion", bundleID = "notion.id" },
