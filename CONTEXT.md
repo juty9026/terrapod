@@ -50,7 +50,7 @@ _Avoid_: Homebrew replacement, standalone aqua
 - The **VPS Shell Profile** targets exactly one **Supported Ubuntu Release**.
 - The **VPS Shell Profile** includes the **Core Shell Stack**.
 - The **VPS Shell Profile** includes the **Development Runtime Stack**.
-- The **Core Shell Stack** includes Oh My Zsh and modern CLI tools such as fd, ripgrep, zoxide, lazygit, and plain Neovim.
+- The **Core Shell Stack** includes Oh My Zsh and modern CLI tools such as fd, ripgrep, zoxide, lazygit, GitHub CLI (`gh`), and plain Neovim.
 - The **Development Runtime Stack** includes mise-managed Bun, Node.js, Python, and uv.
 - pnpm belongs to the **Development Runtime Stack** through Node.js Corepack, not as a mise-managed tool.
 - Rich Neovim configuration belongs to the **Optional Editor Stack**, not the **Core Shell Stack**, and is opt-in for every machine profile.

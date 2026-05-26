@@ -206,6 +206,12 @@ fi
 
 pass "Ubuntu VPS keeps plain Neovim in the Core Shell Stack"
 
+if ! printf '%s\n' "$ubuntu_mise_config" | grep -F '"aqua:cli/cli" = "latest"' >/dev/null; then
+  fail "Ubuntu VPS installs GitHub CLI gh in the Core Shell Stack"
+fi
+
+pass "Ubuntu VPS installs GitHub CLI gh in the Core Shell Stack"
+
 mise_tools_installer="$(render_template "$ubuntu_data" ".chezmoiscripts/run_onchange_after_20-install-mise-tools.sh.tmpl")"
 
 if ! printf '%s\n' "$mise_tools_installer" |

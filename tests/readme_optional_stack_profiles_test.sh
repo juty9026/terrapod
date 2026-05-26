@@ -24,6 +24,21 @@ assert_contains() {
   pass "$message"
 }
 
+assert_ubuntu_setup_contains() {
+  needle="$1"
+  message="$2"
+
+  if ! awk '
+    /^### Ubuntu 24.04 VPS$/ { in_ubuntu = 1; next }
+    /^## Updates$/ { in_ubuntu = 0 }
+    in_ubuntu { print }
+  ' "$readme" | grep -F "$needle" >/dev/null; then
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
 assert_contains '| `enableEditorStack` | `false` |' \
   "README documents enableEditorStack default"
 assert_contains '| `enableAiCliTools` | `false` |' \
@@ -33,6 +48,8 @@ assert_contains '| `enableDevelopmentWorkspace` | `false` |' \
 
 assert_contains 'All three optional stack profiles are disabled by default.' \
   "README states optional stack profiles are disabled by default"
+assert_ubuntu_setup_contains 'GitHub CLI (`gh`)' \
+  "README documents gh as part of the Ubuntu Core Shell Stack"
 assert_contains 'When `enableDevelopmentWorkspace` is `true`, it enables both the Optional Editor Stack and Optional AI Tool Stack even if `enableEditorStack` or `enableAiCliTools` are false or omitted.' \
   "README documents full workspace preset precedence"
 assert_contains 'Opting out of an optional stack excludes its files from chezmoi management; it does not remove files already present on a machine.' \

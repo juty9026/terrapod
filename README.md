@@ -26,7 +26,7 @@ the initial terminal environment:
 - Homebrew bootstrap and the macOS `Brewfile` bundle
 - Ghostty, cmux, Hammerspoon, and font casks
 - mise
-- CLI tools such as ripgrep, neovim, zellij, lazygit, and starship via mise
+- CLI tools such as ripgrep, neovim, zellij, lazygit, GitHub CLI (`gh`), and starship via mise
 - btop via Homebrew, because its mise-managed release assets do not support macOS arm64
 - Oh My Zsh, zinit, and SCM Breeze
 - Bun, Python, uv/uvx, and Node.js via `~/.config/mise/config.toml`
@@ -67,7 +67,7 @@ On Ubuntu, `chezmoi apply` runs setup scripts for the VPS shell profile:
 - Python build dependencies required by the mise-managed Python runtime
 - mise from the official mise APT repository
 - Oh My Zsh, zinit, and SCM Breeze
-- CLI tools such as ripgrep, neovim, zellij, lazygit, and starship via mise
+- CLI tools such as ripgrep, neovim, zellij, lazygit, GitHub CLI (`gh`), and starship via mise
 - Bun, Python, uv/uvx, and Node.js via mise
 - pnpm through Node.js Corepack
 - Login shell switch to zsh
