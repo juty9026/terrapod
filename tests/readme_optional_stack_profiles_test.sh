@@ -33,6 +33,8 @@ assert_contains '| `enableDevelopmentWorkspace` | `false` |' \
 
 assert_contains 'All three optional stack profiles are disabled by default.' \
   "README states optional stack profiles are disabled by default"
+assert_contains 'GitHub CLI (`gh`)' \
+  "README documents gh as part of the Ubuntu Core Shell Stack"
 assert_contains 'When `enableDevelopmentWorkspace` is `true`, it enables both the Optional Editor Stack and Optional AI Tool Stack even if `enableEditorStack` or `enableAiCliTools` are false or omitted.' \
   "README documents full workspace preset precedence"
 assert_contains 'Opting out of an optional stack excludes its files from chezmoi management; it does not remove files already present on a machine.' \
