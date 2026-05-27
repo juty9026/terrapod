@@ -1,0 +1,31 @@
+#!/bin/sh
+set -eu
+
+show_help() {
+  cat <<'EOF'
+Terrapod - Dotfiles Management Tool
+
+Usage:
+  terrapod [help|--help|-h]
+
+Commands:
+  help  Show this help.
+EOF
+}
+
+fail_usage() {
+  printf '%s\n' "terrapod: $1" >&2
+  printf '%s\n' "Run 'terrapod help' for usage." >&2
+  exit 64
+}
+
+command_name="${1:-help}"
+
+case "$command_name" in
+  help|-h|--help)
+    show_help
+    ;;
+  *)
+    fail_usage "unknown command: $command_name"
+    ;;
+esac
