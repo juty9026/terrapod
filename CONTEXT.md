@@ -44,6 +44,10 @@ _Avoid_: primary CLI provider, runtime manager
 The shared tool provider for modern command-line tools across supported machine profiles.
 _Avoid_: Homebrew replacement, standalone aqua
 
+**macOS Desktop App Stack**:
+The opt-in macOS cask set for GUI apps, system-style desktop apps, fonts, and cask-delivered desktop support tools.
+_Avoid_: Homebrew bootstrap, shared CLI formula, Core Shell Stack
+
 ## Relationships
 
 - The **macOS Terminal Profile** and **VPS Shell Profile** are separate machine profiles in one dotfiles repository.
@@ -63,6 +67,9 @@ _Avoid_: Homebrew replacement, standalone aqua
 - Disabling an optional stack excludes its files from management but does not remove files already present on a machine.
 - Homebrew and APT are **Bootstrap Package Managers**, not the **Modern CLI Provider**.
 - mise with its aqua backend is the **Modern CLI Provider**.
+- The **macOS Desktop App Stack** is opt-in because Homebrew casks can install shared applications and desktop support assets outside a single user's home directory.
+- The **macOS Desktop App Stack** excludes Homebrew itself and shared CLI formulae such as mise and btop.
+- Enabling the **Optional Development Workspace** does not enable the **macOS Desktop App Stack**.
 
 ## Example Dialogue
 
