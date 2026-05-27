@@ -18,6 +18,16 @@ pass() {
   printf '%s\n' "ok - $1"
 }
 
+write_stub() {
+  path="$1"
+  shift
+  {
+    printf '%s\n' '#!/bin/sh'
+    printf '%s\n' "$@"
+  } >"$path"
+  chmod +x "$path"
+}
+
 assert_contains() {
   haystack="$1"
   needle="$2"
@@ -42,7 +52,30 @@ assert_line() {
   pass "$message"
 }
 
-mkdir -p "$tmp_dir/home"
+assert_call_args() {
+  call_file="$1"
+  message="$2"
+  shift 2
+
+  expected_file="$tmp_dir/expected.args"
+  : >"$expected_file"
+
+  for arg do
+    printf '%s\n' "$arg" >>"$expected_file"
+  done
+
+  if ! cmp -s "$expected_file" "$call_file"; then
+    printf '%s\n' "expected args:" >&2
+    sed 's/^/  /' "$expected_file" >&2
+    printf '%s\n' "actual args:" >&2
+    sed 's/^/  /' "$call_file" >&2
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
+mkdir -p "$tmp_dir/bin" "$tmp_dir/home"
 
 terrapod="$repo_root/dot_local/bin/executable_terrapod"
 
@@ -104,6 +137,16 @@ assert_contains \
   "Commands:" \
   "Terrapod help shows command list"
 
+assert_contains \
+  "$help_output" \
+  "terrapod chezmoi -- <args...>" \
+  "Terrapod help documents the raw chezmoi escape hatch"
+
+assert_contains \
+  "$help_output" \
+  "Run raw chezmoi for advanced maintenance." \
+  "Terrapod help describes raw chezmoi as advanced maintenance"
+
 default_output="$(sh "$terrapod")"
 
 assert_contains \
@@ -133,3 +176,43 @@ assert_contains \
   "$unknown_error" \
   "Run 'terrapod help' for usage." \
   "unknown Terrapod subcommands point to help"
+
+export CHEZMOI_CALL_FILE="$tmp_dir/chezmoi.args"
+
+write_stub "$tmp_dir/bin/chezmoi" \
+  ': >"$CHEZMOI_CALL_FILE"' \
+  'for arg do' \
+  '  printf "%s\n" "$arg" >>"$CHEZMOI_CALL_FILE"' \
+  'done' \
+  'exit 0'
+
+export PATH="$tmp_dir/bin:/usr/bin:/bin"
+
+sh "$terrapod" chezmoi -- status --include files
+
+assert_call_args \
+  "$CHEZMOI_CALL_FILE" \
+  "Terrapod passes raw arguments to chezmoi after --" \
+  status --include files
+
+if sh "$terrapod" chezmoi status >"$tmp_dir/missing-separator.out" 2>"$tmp_dir/missing-separator.err"; then
+  fail "raw chezmoi escape hatch requires -- separator"
+fi
+
+missing_separator_error="$(cat "$tmp_dir/missing-separator.err")"
+
+assert_contains \
+  "$missing_separator_error" \
+  "terrapod: raw chezmoi commands must be separated with '--'" \
+  "Terrapod explains missing raw chezmoi separator"
+
+if sh "$terrapod" chezmoi -- >"$tmp_dir/missing-command.out" 2>"$tmp_dir/missing-command.err"; then
+  fail "raw chezmoi escape hatch requires a command after --"
+fi
+
+missing_command_error="$(cat "$tmp_dir/missing-command.err")"
+
+assert_contains \
+  "$missing_command_error" \
+  "terrapod: raw chezmoi command is required" \
+  "Terrapod explains missing raw chezmoi command"
