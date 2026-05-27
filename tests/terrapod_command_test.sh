@@ -187,6 +187,16 @@ assert_contains \
 
 assert_contains \
   "$help_output" \
+  "terrapod configure <minimal|development>" \
+  "Terrapod help documents Preset configuration"
+
+assert_contains \
+  "$help_output" \
+  "Expand a Preset into concrete chezmoi data values." \
+  "Terrapod help describes Preset configuration"
+
+assert_contains \
+  "$help_output" \
   "Run raw chezmoi for advanced maintenance." \
   "Terrapod help describes raw chezmoi as advanced maintenance"
 

@@ -7,13 +7,16 @@ Terrapod - Dotfiles Management Tool
 
 Usage:
   terrapod [help|--help|-h]
+  terrapod configure <minimal|development>
   terrapod chezmoi -- <args...>
 
 Commands:
-  help                 Show this help.
-  chezmoi -- <args...> Run raw chezmoi for advanced maintenance.
+  help                                  Show this help.
+  configure <minimal|development>       Expand a Preset into concrete chezmoi data values.
+  chezmoi -- <args...>                  Run raw chezmoi for advanced maintenance.
 
 Examples:
+  terrapod configure development
   terrapod chezmoi -- status
 EOF
 }
@@ -24,11 +27,227 @@ fail_usage() {
   exit 64
 }
 
+fatal() {
+  printf '%s\n' "terrapod: $1" >&2
+  exit 1
+}
+
+file_mode() {
+  path="$1"
+
+  if mode="$(stat -c %a "$path" 2>/dev/null)"; then
+    printf '%s\n' "$mode"
+    return 0
+  fi
+
+  stat -f %Lp "$path"
+}
+
+chezmoi_config_file() {
+  if [ -n "${TERRAPOD_CHEZMOI_CONFIG:-}" ]; then
+    printf '%s\n' "$TERRAPOD_CHEZMOI_CONFIG"
+    return
+  fi
+
+  if [ -n "${XDG_CONFIG_HOME:-}" ]; then
+    printf '%s\n' "$XDG_CONFIG_HOME/chezmoi/chezmoi.toml"
+    return
+  fi
+
+  printf '%s\n' "$HOME/.config/chezmoi/chezmoi.toml"
+}
+
+render_preset_data() {
+  preset="$1"
+
+  case "$preset" in
+    minimal)
+      cat <<'EOF'
+enableEditorStack = false
+enableAiCliTools = false
+enableDevelopmentWorkspace = false
+enableMacosDesktopApps = false
+EOF
+      ;;
+    development)
+      cat <<'EOF'
+enableEditorStack = true
+enableAiCliTools = true
+enableDevelopmentWorkspace = true
+enableMacosDesktopApps = false
+EOF
+      ;;
+    *)
+      fail_usage "unknown Preset: $preset"
+      ;;
+  esac
+}
+
+validate_preset() {
+  render_preset_data "$1" >/dev/null
+}
+
+confirm_existing_config_update() {
+  config_file="$1"
+
+  if [ ! -f "$config_file" ]; then
+    return 0
+  fi
+
+  printf 'Update Terrapod-managed data keys in %s? [y/N] ' "$config_file" >&2
+  IFS= read -r answer || answer=
+
+  case "$answer" in
+    y|Y|yes|YES)
+      return 0
+      ;;
+    *)
+      printf '%s\n' "terrapod: config update cancelled" >&2
+      exit 1
+      ;;
+  esac
+}
+
+reject_unusable_config_path() {
+  config_file="$1"
+
+  if [ -L "$config_file" ] || { [ -e "$config_file" ] && [ ! -f "$config_file" ]; }; then
+    fatal "config path is not a regular file: $config_file"
+  fi
+}
+
+backup_existing_config() {
+  config_file="$1"
+
+  if [ ! -f "$config_file" ]; then
+    return 0
+  fi
+
+  backup_file="$config_file.terrapod-backup-$(date +%Y%m%d%H%M%S)-$$"
+  cp "$config_file" "$backup_file"
+}
+
+cleanup_managed_config_temp() {
+  rm -f "${tmp_file:-}" "${managed_data_file:-}"
+}
+
+write_managed_config() {
+  config_file="$1"
+  preset="$2"
+  config_dir="$(dirname -- "$config_file")"
+  tmp_file=
+  managed_data_file=
+
+  reject_unusable_config_path "$config_file"
+
+  mkdir -p "$config_dir"
+  trap cleanup_managed_config_temp EXIT
+  trap 'cleanup_managed_config_temp; exit 1' HUP INT TERM
+
+  tmp_file="$(mktemp "$config_dir/.terrapod-config.XXXXXX")"
+  managed_data_file="$(mktemp "$config_dir/.terrapod-data.XXXXXX")"
+  render_preset_data "$preset" >"$managed_data_file"
+  backup_existing_config "$config_file"
+
+  if [ -f "$config_file" ]; then
+    config_mode="$(file_mode "$config_file")"
+
+    awk -v managed_data_file="$managed_data_file" '
+      function is_data_section(line) {
+        return line ~ /^[[:space:]]*\[data\][[:space:]]*($|#)/
+      }
+
+      function is_section(line) {
+        return line ~ /^[[:space:]]*(\[[^]]+\]|\[\[[^]]+\]\])[[:space:]]*($|#)/
+      }
+
+      function is_managed_key(line) {
+        return line ~ "^[[:space:]]*(\"enableEditorStack\"|\"enableAiCliTools\"|\"enableDevelopmentWorkspace\"|\"enableMacosDesktopApps\"|\"terrapodPreset\"|\047enableEditorStack\047|\047enableAiCliTools\047|\047enableDevelopmentWorkspace\047|\047enableMacosDesktopApps\047|\047terrapodPreset\047|enableEditorStack|enableAiCliTools|enableDevelopmentWorkspace|enableMacosDesktopApps|terrapodPreset)[[:space:]]*="
+      }
+
+      function print_managed_data(line) {
+        if (!printed_managed_data) {
+          while ((getline line < managed_data_file) > 0) {
+            print line
+          }
+          close(managed_data_file)
+          printed_managed_data = 1
+        }
+      }
+
+      {
+        if (is_data_section($0)) {
+          in_data = 1
+          saw_data = 1
+          print
+          next
+        }
+
+        if (in_data && is_section($0)) {
+          print_managed_data()
+          in_data = 0
+          print
+          next
+        }
+
+        if (in_data && is_managed_key($0)) {
+          next
+        }
+
+        print
+      }
+
+      END {
+        if (in_data) {
+          print_managed_data()
+        } else if (!saw_data) {
+          if (NR > 0) {
+            print ""
+          }
+          print "[data]"
+          print_managed_data()
+        }
+      }
+    ' "$config_file" >"$tmp_file"
+
+    chmod "$config_mode" "$tmp_file"
+  else
+    {
+      printf '%s\n' "[data]"
+      cat "$managed_data_file"
+    } >"$tmp_file"
+  fi
+
+  rm -f "$managed_data_file"
+  mv "$tmp_file" "$config_file"
+  trap - EXIT HUP INT TERM
+}
+
 command_name="${1:-help}"
 
 case "$command_name" in
   help|-h|--help)
     show_help
+    ;;
+  configure)
+    shift
+
+    preset="${1:-}"
+    if [ -z "$preset" ]; then
+      fail_usage "Preset is required"
+    fi
+
+    if [ "$#" -gt 1 ]; then
+      fail_usage "configure accepts exactly one Preset"
+    fi
+
+    validate_preset "$preset"
+
+    config_file="$(chezmoi_config_file)"
+    reject_unusable_config_path "$config_file"
+    confirm_existing_config_update "$config_file"
+    write_managed_config "$config_file" "$preset"
+    printf '%s\n' "Configured Terrapod Preset '$preset' in $config_file"
     ;;
   chezmoi)
     shift
