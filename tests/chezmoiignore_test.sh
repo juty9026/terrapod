@@ -27,6 +27,14 @@ managed_source_paths() {
     --path-style source-relative
 }
 
+managed_target_paths() {
+  data="$1"
+  chezmoi \
+    --source "$repo_root" \
+    --override-data "$data" \
+    managed
+}
+
 render_template() {
   data="$1"
   file="$2"
@@ -45,6 +53,30 @@ render_managed_file() {
     --destination "$tmp_dir/home" \
     --override-data "$data" \
     cat "$tmp_dir/home/$destination"
+}
+
+assert_contains_text() {
+  text="$1"
+  needle="$2"
+  message="$3"
+
+  if ! printf '%s\n' "$text" | grep -F "$needle" >/dev/null; then
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
+assert_not_contains_text() {
+  text="$1"
+  needle="$2"
+  message="$3"
+
+  if printf '%s\n' "$text" | grep -F "$needle" >/dev/null; then
+    fail "$message"
+  fi
+
+  pass "$message"
 }
 
 assert_managed_paths_exclude_prefix() {
@@ -89,6 +121,9 @@ ubuntu_data='{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24
 ubuntu_managed="$(managed_source_paths "$ubuntu_data")"
 macos_data='{"chezmoi":{"os":"darwin"},"enableEditorStack":false,"enableAiCliTools":false,"enableDevelopmentWorkspace":false}'
 macos_managed="$(managed_source_paths "$macos_data")"
+macos_managed_targets="$(managed_target_paths "$macos_data")"
+macos_desktop_apps_data='{"chezmoi":{"os":"darwin"},"enableEditorStack":false,"enableAiCliTools":false,"enableDevelopmentWorkspace":false,"enableMacosDesktopApps":true}'
+macos_desktop_apps_managed_targets="$(managed_target_paths "$macos_desktop_apps_data")"
 macos_ai_cli_tools_data='{"chezmoi":{"os":"darwin"},"enableEditorStack":false,"enableAiCliTools":true,"enableDevelopmentWorkspace":false}'
 macos_ai_cli_tools_managed="$(managed_source_paths "$macos_ai_cli_tools_data")"
 macos_development_workspace_data='{"chezmoi":{"os":"darwin"},"enableEditorStack":false,"enableAiCliTools":false,"enableDevelopmentWorkspace":true}'
@@ -117,6 +152,113 @@ for entry in $macos_only_entries; do
 done
 
 pass "Ubuntu VPS ignores macOS-only entries"
+
+macos_bootstrap="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
+macos_desktop_apps_bootstrap="$(render_template "$macos_desktop_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
+macos_development_workspace_bootstrap="$(render_template "$macos_development_workspace_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
+macos_karabiner_opener="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
+macos_desktop_apps_karabiner_opener="$(render_template "$macos_desktop_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
+
+assert_contains_text \
+  "$macos_bootstrap" \
+  'brew bundle --no-upgrade --file="$core_brewfile"' \
+  "macOS bootstrap always runs the core Brewfile"
+
+assert_not_contains_text \
+  "$macos_bootstrap" \
+  "Brewfile.macos-desktop-apps" \
+  "macOS bootstrap default skips macOS Desktop App Stack Brewfile"
+
+assert_contains_text \
+  "$macos_desktop_apps_bootstrap" \
+  "Brewfile.macos-desktop-apps" \
+  "enableMacosDesktopApps renders macOS Desktop App Stack Brewfile"
+
+assert_contains_text \
+  "$macos_desktop_apps_bootstrap" \
+  'brew bundle --no-upgrade --file="$desktop_brewfile"' \
+  "enableMacosDesktopApps runs macOS Desktop App Stack Brewfile"
+
+assert_not_contains_text \
+  "$macos_development_workspace_bootstrap" \
+  "Brewfile.macos-desktop-apps" \
+  "enableDevelopmentWorkspace does not imply macOS Desktop App Stack Brewfile"
+
+assert_contains_text \
+  "$macos_karabiner_opener" \
+  "macOS Desktop App Stack enabled: false" \
+  "Karabiner opener tracks disabled macOS Desktop App Stack state"
+
+assert_not_contains_text \
+  "$macos_karabiner_opener" \
+  "macOS Desktop App Stack Brewfile checksum" \
+  "Karabiner opener default skips macOS Desktop App Stack Brewfile checksum"
+
+assert_contains_text \
+  "$macos_desktop_apps_karabiner_opener" \
+  "macOS Desktop App Stack enabled: true" \
+  "Karabiner opener tracks enabled macOS Desktop App Stack state"
+
+assert_contains_text \
+  "$macos_desktop_apps_karabiner_opener" \
+  "macOS Desktop App Stack Brewfile checksum" \
+  "Karabiner opener tracks macOS Desktop App Stack Brewfile changes"
+
+for cask in \
+  font-jetbrains-mono-nerd-font \
+  font-d2coding
+do
+  if ! grep -Fx "cask \"$cask\"" "$repo_root/Brewfile" >/dev/null; then
+    fail "core Brewfile contains expected terminal font cask: $cask"
+  fi
+done
+
+pass "core Brewfile contains expected terminal font casks"
+
+if awk '/^[[:space:]]*cask[[:space:]]+"/ && $0 !~ /^[[:space:]]*cask[[:space:]]+"font-(jetbrains-mono-nerd-font|d2coding)"$/ { found=1 } END { exit found ? 0 : 1 }' "$repo_root/Brewfile"; then
+  fail "core Brewfile casks are terminal font casks only"
+fi
+
+pass "core Brewfile casks are terminal font casks only"
+
+for cask in \
+  ghostty \
+  cmux \
+  hammerspoon \
+  istat-menus \
+  karabiner-elements \
+  raycast \
+  1password-cli
+do
+  if ! grep -Fx "cask \"$cask\"" "$repo_root/Brewfile.macos-desktop-apps" >/dev/null; then
+    fail "macOS Desktop App Stack Brewfile contains expected cask: $cask"
+  fi
+done
+
+pass "macOS Desktop App Stack Brewfile contains expected casks"
+
+if grep -Ev '^[[:space:]]*($|#|cask[[:space:]])' "$repo_root/Brewfile.macos-desktop-apps" >/dev/null; then
+  fail "macOS Desktop App Stack Brewfile contains only cask entries"
+fi
+
+pass "macOS Desktop App Stack Brewfile contains only cask entries"
+
+for app_config in \
+  ".config/ghostty/config" \
+  ".config/cmux/settings.json" \
+  ".config/karabiner/karabiner.json" \
+  ".hammerspoon/init.lua"
+do
+  if ! printf '%s\n' "$macos_managed_targets" | grep -Fx "$app_config" >/dev/null; then
+    fail "macOS default manages user-scoped app config: $app_config"
+  fi
+
+  if ! printf '%s\n' "$macos_desktop_apps_managed_targets" | grep -Fx "$app_config" >/dev/null; then
+    fail "enableMacosDesktopApps manages user-scoped app config: $app_config"
+  fi
+done
+
+pass "user-scoped macOS app config remains managed regardless of enableMacosDesktopApps"
 
 assert_managed_paths_exclude_prefix \
   "$macos_managed" \

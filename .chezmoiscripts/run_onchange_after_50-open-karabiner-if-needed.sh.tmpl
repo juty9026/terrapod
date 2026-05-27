@@ -5,6 +5,10 @@ set -eu
 karabiner_cli="/Library/Application Support/org.pqrs/Karabiner-Elements/bin/karabiner_cli"
 
 # Brewfile checksum: {{ include "Brewfile" | sha256sum }}
+# macOS Desktop App Stack enabled: {{ default false (get . "enableMacosDesktopApps") }}
+{{- if default false (get . "enableMacosDesktopApps") }}
+# macOS Desktop App Stack Brewfile checksum: {{ include "Brewfile.macos-desktop-apps" | sha256sum }}
+{{- end }}
 # Karabiner config checksum: {{ include "dot_config/private_karabiner/private_karabiner.json" | sha256sum }}
 
 if [ ! -x "$karabiner_cli" ]; then

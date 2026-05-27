@@ -1,0 +1,9 @@
+# Opt-in macOS Desktop App Stack.
+
+cask "ghostty"
+cask "cmux"
+cask "hammerspoon"
+cask "istat-menus"
+cask "karabiner-elements"
+cask "raycast"
+cask "1password-cli"

@@ -37,10 +37,19 @@ fi
 eval "$("$brew_bin" shellenv)"
 brew analytics off >/dev/null 2>&1 || true
 
-brewfile="{{ .chezmoi.sourceDir }}/Brewfile"
+core_brewfile="{{ .chezmoi.sourceDir }}/Brewfile"
 
-# Brewfile checksum: {{ include "Brewfile" | sha256sum }}
-if [ -f "$brewfile" ]; then
-  brew bundle --no-upgrade --file="$brewfile"
+# Core Brewfile checksum: {{ include "Brewfile" | sha256sum }}
+if [ -f "$core_brewfile" ]; then
+  brew bundle --no-upgrade --file="$core_brewfile"
 fi
+
+{{ if default false (get . "enableMacosDesktopApps") -}}
+desktop_brewfile="{{ .chezmoi.sourceDir }}/Brewfile.macos-desktop-apps"
+
+# macOS Desktop App Stack Brewfile checksum: {{ include "Brewfile.macos-desktop-apps" | sha256sum }}
+if [ -f "$desktop_brewfile" ]; then
+  brew bundle --no-upgrade --file="$desktop_brewfile"
+fi
+{{- end }}
 {{- end }}
