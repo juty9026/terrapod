@@ -156,6 +156,8 @@ pass "Ubuntu VPS ignores macOS-only entries"
 macos_bootstrap="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
 macos_desktop_apps_bootstrap="$(render_template "$macos_desktop_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
 macos_development_workspace_bootstrap="$(render_template "$macos_development_workspace_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
+macos_karabiner_opener="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
+macos_desktop_apps_karabiner_opener="$(render_template "$macos_desktop_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 
 assert_contains_text \
   "$macos_bootstrap" \
@@ -181,6 +183,26 @@ assert_not_contains_text \
   "$macos_development_workspace_bootstrap" \
   "Brewfile.macos-desktop-apps" \
   "enableDevelopmentWorkspace does not imply macOS Desktop App Stack Brewfile"
+
+assert_contains_text \
+  "$macos_karabiner_opener" \
+  "macOS Desktop App Stack enabled: false" \
+  "Karabiner opener tracks disabled macOS Desktop App Stack state"
+
+assert_not_contains_text \
+  "$macos_karabiner_opener" \
+  "macOS Desktop App Stack Brewfile checksum" \
+  "Karabiner opener default skips macOS Desktop App Stack Brewfile checksum"
+
+assert_contains_text \
+  "$macos_desktop_apps_karabiner_opener" \
+  "macOS Desktop App Stack enabled: true" \
+  "Karabiner opener tracks enabled macOS Desktop App Stack state"
+
+assert_contains_text \
+  "$macos_desktop_apps_karabiner_opener" \
+  "macOS Desktop App Stack Brewfile checksum" \
+  "Karabiner opener tracks macOS Desktop App Stack Brewfile changes"
 
 for cask in \
   font-jetbrains-mono-nerd-font \
