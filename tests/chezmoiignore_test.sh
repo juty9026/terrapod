@@ -182,11 +182,22 @@ assert_not_contains_text \
   "Brewfile.macos-desktop-apps" \
   "enableDevelopmentWorkspace does not imply macOS Desktop App Stack Brewfile"
 
-if grep -E '^[[:space:]]*cask[[:space:]]+"' "$repo_root/Brewfile" >/dev/null; then
-  fail "core Brewfile contains no cask lines"
+for cask in \
+  font-jetbrains-mono-nerd-font \
+  font-d2coding
+do
+  if ! grep -Fx "cask \"$cask\"" "$repo_root/Brewfile" >/dev/null; then
+    fail "core Brewfile contains expected terminal font cask: $cask"
+  fi
+done
+
+pass "core Brewfile contains expected terminal font casks"
+
+if awk '/^[[:space:]]*cask[[:space:]]+"/ && $0 !~ /^[[:space:]]*cask[[:space:]]+"font-(jetbrains-mono-nerd-font|d2coding)"$/ { found=1 } END { exit found ? 0 : 1 }' "$repo_root/Brewfile"; then
+  fail "core Brewfile casks are terminal font casks only"
 fi
 
-pass "core Brewfile contains no cask lines"
+pass "core Brewfile casks are terminal font casks only"
 
 for cask in \
   ghostty \
@@ -195,9 +206,7 @@ for cask in \
   istat-menus \
   karabiner-elements \
   raycast \
-  1password-cli \
-  font-jetbrains-mono-nerd-font \
-  font-d2coding
+  1password-cli
 do
   if ! grep -Fx "cask \"$cask\"" "$repo_root/Brewfile.macos-desktop-apps" >/dev/null; then
     fail "macOS Desktop App Stack Brewfile contains expected cask: $cask"

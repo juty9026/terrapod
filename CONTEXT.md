@@ -45,7 +45,7 @@ The shared tool provider for modern command-line tools across supported machine 
 _Avoid_: Homebrew replacement, standalone aqua
 
 **macOS Desktop App Stack**:
-The opt-in macOS cask set for GUI apps, system-style desktop apps, fonts, and cask-delivered desktop support tools.
+The opt-in macOS cask set for GUI apps, system-style desktop apps, and cask-delivered desktop support tools.
 _Avoid_: Homebrew bootstrap, shared CLI formula, Core Shell Stack
 
 ## Relationships
@@ -68,7 +68,8 @@ _Avoid_: Homebrew bootstrap, shared CLI formula, Core Shell Stack
 - Homebrew and APT are **Bootstrap Package Managers**, not the **Modern CLI Provider**.
 - mise with its aqua backend is the **Modern CLI Provider**.
 - The **macOS Desktop App Stack** is opt-in because Homebrew casks can install shared applications and desktop support assets outside a single user's home directory.
-- The **macOS Desktop App Stack** excludes Homebrew itself and shared CLI formulae such as mise and btop.
+- The **macOS Desktop App Stack** excludes Homebrew itself, shared CLI formulae such as mise and btop, and terminal font casks.
+- Terminal font casks belong to the macOS Terminal Profile core bootstrap because the managed terminal configuration depends on them and they are not desktop applications.
 - Enabling the **Optional Development Workspace** does not enable the **macOS Desktop App Stack**.
 
 ## Example Dialogue

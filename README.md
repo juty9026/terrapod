@@ -27,6 +27,7 @@ the initial terminal environment:
 - mise
 - CLI tools such as ripgrep, neovim, zellij, lazygit, and starship via mise
 - btop via Homebrew, because its mise-managed release assets do not support macOS arm64
+- Terminal font casks
 - Oh My Zsh, zinit, and SCM Breeze
 - Bun, Python, uv/uvx, and Node.js via `~/.config/mise/config.toml`
 - pnpm through Node.js Corepack
@@ -34,7 +35,7 @@ the initial terminal environment:
 When `enableMacosDesktopApps` is `true`, macOS also installs the opt-in
 macOS Desktop App Stack from `Brewfile.macos-desktop-apps`:
 
-- Desktop terminals, launchers, keyboard automation, menu bar tools, password manager CLI, and fonts.
+- Desktop terminals, launchers, keyboard automation, menu bar tools, and password manager CLI.
 
 Machine-specific Homebrew packages should live outside the tracked `Brewfile`.
 
@@ -148,7 +149,7 @@ All three optional stack profiles are disabled by default.
 | `enableEditorStack` | `false` | Enables the Optional Editor Stack, which manages the rich Neovim configuration. Plain Neovim remains in the Core Shell Stack either way. |
 | `enableAiCliTools` | `false` | Installs Gemini CLI, Claude Code, and Codex with npm through the mise-managed Node.js runtime. |
 | `enableDevelopmentWorkspace` | `false` | Enables the Optional Development Workspace preset, including the Optional Editor Stack, Optional AI Tool Stack, and development-specific Zellij workspace surfaces. |
-| `enableMacosDesktopApps` | `false` | Installs the opt-in macOS Desktop App Stack from `Brewfile.macos-desktop-apps`. This remains separate from `enableDevelopmentWorkspace` because casks can affect shared applications outside one user's home directory. |
+| `enableMacosDesktopApps` | `false` | Installs the opt-in macOS Desktop App Stack from `Brewfile.macos-desktop-apps`. This remains separate from `enableDevelopmentWorkspace` because desktop casks can affect shared applications outside one user's home directory. |
 | `gitAllowedSigners` | `[]` | Adds workstation-specific SSH signing identities to `~/.ssh/allowed_signers`. |
 
 When `enableDevelopmentWorkspace` is `true`, it enables both the Optional Editor Stack and Optional AI Tool Stack even if `enableEditorStack` or `enableAiCliTools` are false or omitted.
