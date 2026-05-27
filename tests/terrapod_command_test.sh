@@ -78,6 +78,7 @@ assert_call_args() {
 mkdir -p "$tmp_dir/bin" "$tmp_dir/home"
 
 terrapod="$repo_root/dot_local/bin/executable_terrapod"
+tpod_source="$repo_root/dot_local/bin/symlink_tpod"
 
 managed_targets="$(
   chezmoi \
@@ -90,6 +91,11 @@ assert_line \
   "$managed_targets" \
   ".local/bin/terrapod" \
   "chezmoi manages Terrapod as the primary user-facing command"
+
+assert_line \
+  "$managed_targets" \
+  ".local/bin/tpod" \
+  "chezmoi manages tpod as an alias to Terrapod"
 
 terrapod_target="$(
   chezmoi \
@@ -105,6 +111,20 @@ fi
 
 pass "chezmoi installs Terrapod at ~/.local/bin/terrapod"
 
+tpod_target="$(
+  chezmoi \
+    --source "$repo_root" \
+    --destination "$tmp_dir/home" \
+    target-path dot_local/bin/symlink_tpod
+)"
+expected_tpod_target="$tmp_dir/home/.local/bin/tpod"
+
+if [ "$tpod_target" != "$expected_tpod_target" ]; then
+  fail "chezmoi installs tpod at ~/.local/bin/tpod; expected '$expected_tpod_target', got '$tpod_target'"
+fi
+
+pass "chezmoi installs tpod at ~/.local/bin/tpod"
+
 if [ ! -f "$terrapod" ]; then
   fail "Terrapod command source exists"
 fi
@@ -117,10 +137,33 @@ fi
 
 pass "Terrapod command source is executable"
 
+if [ ! -f "$tpod_source" ]; then
+  fail "tpod alias source exists"
+fi
+
+pass "tpod alias source exists"
+
+IFS= read -r tpod_source_line <"$tpod_source"
+
+if [ "$tpod_source_line" != "terrapod" ]; then
+  fail "tpod alias points to Terrapod"
+fi
+
+pass "tpod alias points to Terrapod"
+
 sh -n "$terrapod" || fail "Terrapod command is valid POSIX shell"
 pass "Terrapod command is valid POSIX shell"
 
 help_output="$(sh "$terrapod" help)"
+
+ln -s "$terrapod" "$tmp_dir/bin/tpod"
+tpod_help_output="$(PATH="$tmp_dir/bin:/usr/bin:/bin" "$tmp_dir/bin/tpod" help)"
+
+if [ "$tpod_help_output" != "$help_output" ]; then
+  fail "tpod shows the same help as Terrapod"
+fi
+
+pass "tpod shows the same help as Terrapod"
 
 assert_contains \
   "$help_output" \
@@ -194,6 +237,13 @@ assert_call_args \
   "$CHEZMOI_CALL_FILE" \
   "Terrapod passes raw arguments to chezmoi after --" \
   status --include files
+
+"$tmp_dir/bin/tpod" chezmoi -- diff
+
+assert_call_args \
+  "$CHEZMOI_CALL_FILE" \
+  "tpod uses the same raw chezmoi escape hatch as Terrapod" \
+  diff
 
 if sh "$terrapod" chezmoi status >"$tmp_dir/missing-separator.out" 2>"$tmp_dir/missing-separator.err"; then
   fail "raw chezmoi escape hatch requires -- separator"
