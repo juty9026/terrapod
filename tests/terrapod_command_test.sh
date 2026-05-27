@@ -187,7 +187,7 @@ assert_contains \
 
 assert_contains \
   "$help_output" \
-  "terrapod configure <minimal|development>" \
+  "terrapod configure <minimal|development|workstation>" \
   "Terrapod help documents Preset configuration"
 
 assert_contains \

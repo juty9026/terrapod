@@ -270,6 +270,25 @@ assert_data_key_once_with_value "$new_config" "enableMacosDesktopApps" "false" "
 assert_not_contains "$new_config" "terrapodPreset" "minimal Preset stores concrete values instead of a dynamic Preset"
 assert_backup_count "$new_config" 0 "new config creation does not create a backup"
 
+workstation_home="$tmp_dir/workstation-home"
+workstation_xdg="$tmp_dir/workstation-xdg"
+workstation_config="$workstation_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$workstation_home"
+
+run_terrapod_configure workstation "" "$workstation_home" "$workstation_xdg"
+
+if [ ! -f "$workstation_config" ]; then
+  fail "workstation Preset creates a chezmoi config file"
+fi
+pass "workstation Preset creates a chezmoi config file"
+
+assert_data_key_once_with_value "$workstation_config" "enableEditorStack" "true" "workstation Preset enables Optional Editor Stack exactly once in data"
+assert_data_key_once_with_value "$workstation_config" "enableAiCliTools" "true" "workstation Preset enables Optional AI Tool Stack exactly once in data"
+assert_data_key_once_with_value "$workstation_config" "enableDevelopmentWorkspace" "true" "workstation Preset enables Optional Development Workspace exactly once in data"
+assert_data_key_once_with_value "$workstation_config" "enableMacosDesktopApps" "true" "workstation Preset enables macOS App Groups through the desktop-app boundary exactly once in data"
+assert_not_contains "$workstation_config" "terrapodPreset" "workstation Preset stores concrete values instead of a dynamic Preset"
+assert_backup_count "$workstation_config" 0 "workstation config creation does not create a backup"
+
 default_env_home="$tmp_dir/default-env-home"
 default_env_xdg="$tmp_dir/default-env-xdg"
 default_env_config="$default_env_xdg/chezmoi/chezmoi.toml"

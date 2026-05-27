@@ -7,12 +7,13 @@ Terrapod - Dotfiles Management Tool
 
 Usage:
   terrapod [help|--help|-h]
-  terrapod configure <minimal|development>
+  terrapod configure <minimal|development|workstation>
   terrapod chezmoi -- <args...>
 
 Commands:
   help                                  Show this help.
-  configure <minimal|development>       Expand a Preset into concrete chezmoi data values.
+  configure <minimal|development|workstation>
+                                        Expand a Preset into concrete chezmoi data values.
   chezmoi -- <args...>                  Run raw chezmoi for advanced maintenance.
 
 Examples:
@@ -75,6 +76,14 @@ enableEditorStack = true
 enableAiCliTools = true
 enableDevelopmentWorkspace = true
 enableMacosDesktopApps = false
+EOF
+      ;;
+    workstation)
+      cat <<'EOF'
+enableEditorStack = true
+enableAiCliTools = true
+enableDevelopmentWorkspace = true
+enableMacosDesktopApps = true
 EOF
       ;;
     *)
