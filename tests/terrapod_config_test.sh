@@ -51,7 +51,7 @@ extract_data_section() {
 
   awk '
     function is_data_section(line) {
-      return line ~ /^[[:space:]]*\[data\][[:space:]]*($|#)/
+      return line ~ "^[[:space:]]*(\\[data\\]|\\[\"data\"\\]|\\[\047data\047\\])[[:space:]]*($|#)"
     }
 
     function is_section(line) {
@@ -323,6 +323,33 @@ assert_data_key_once_with_value "$existing_config" "enableDevelopmentWorkspace" 
 assert_data_key_once_with_value "$existing_config" "enableMacosDesktopApps" "false" "development Preset leaves macOS App Groups disabled exactly once in data"
 assert_not_contains "$existing_config" "terrapodPreset" "existing update removes stale dynamic Preset key"
 assert_single_backup_matches "$existing_config" "$tmp_dir/existing-before.toml" "existing update creates one backup before changing managed keys"
+
+quoted_table_home="$tmp_dir/quoted-table-home"
+quoted_table_xdg="$tmp_dir/quoted-table-xdg"
+quoted_table_config="$quoted_table_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$quoted_table_home" "$(dirname "$quoted_table_config")"
+
+cat >"$quoted_table_config" <<'TOML'
+["data"]
+keepQuotedTable = "preserve"
+enableEditorStack = false
+terrapodPreset = "minimal"
+
+[sourceState]
+branch = "main"
+TOML
+
+run_terrapod_configure development "y" "$quoted_table_home" "$quoted_table_xdg"
+
+assert_contains "$quoted_table_config" "[\"data\"]" "quoted data table header is preserved"
+assert_not_contains "$quoted_table_config" "[data]" "quoted data table update does not append a duplicate bare data table"
+assert_contains "$quoted_table_config" "keepQuotedTable = \"preserve\"" "quoted data table update preserves unrelated data values"
+assert_contains "$quoted_table_config" "branch = \"main\"" "quoted data table update preserves later sections"
+assert_data_key_once_with_value "$quoted_table_config" "enableEditorStack" "true" "quoted data table update writes Editor Stack in data"
+assert_data_key_once_with_value "$quoted_table_config" "enableAiCliTools" "true" "quoted data table update writes AI Tool Stack in data"
+assert_data_key_once_with_value "$quoted_table_config" "enableDevelopmentWorkspace" "true" "quoted data table update writes Development Workspace in data"
+assert_data_key_once_with_value "$quoted_table_config" "enableMacosDesktopApps" "false" "quoted data table update writes macOS desktop-app boundary in data"
+assert_not_contains "$quoted_table_config" "terrapodPreset" "quoted data table update removes stale dynamic Preset key"
 
 quoted_home="$tmp_dir/quoted-home"
 quoted_xdg="$tmp_dir/quoted-xdg"
