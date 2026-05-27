@@ -3,11 +3,14 @@ set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
+chezmoi_config="$tmp_dir/chezmoi.toml"
 
 cleanup() {
   rm -rf "$tmp_dir"
 }
 trap cleanup EXIT INT TERM
+
+: >"$chezmoi_config"
 
 fail() {
   printf '%s\n' "not ok - $1" >&2
@@ -21,6 +24,7 @@ pass() {
 managed_source_paths() {
   data="$1"
   chezmoi \
+    --config "$chezmoi_config" \
     --source "$repo_root" \
     --override-data "$data" \
     managed \
@@ -30,6 +34,7 @@ managed_source_paths() {
 managed_target_paths() {
   data="$1"
   chezmoi \
+    --config "$chezmoi_config" \
     --source "$repo_root" \
     --override-data "$data" \
     managed
@@ -39,7 +44,9 @@ render_template() {
   data="$1"
   file="$2"
 
-  chezmoi execute-template \
+  chezmoi \
+    --config "$chezmoi_config" \
+    execute-template \
     --override-data "$data" \
     --file "$repo_root/$file"
 }
@@ -49,6 +56,7 @@ render_managed_file() {
   destination="$2"
 
   chezmoi \
+    --config "$chezmoi_config" \
     --source "$repo_root" \
     --destination "$tmp_dir/home" \
     --override-data "$data" \
@@ -105,6 +113,7 @@ assert_managed_paths_include_prefix() {
 
 managed_tests="$(
   chezmoi \
+    --config "$chezmoi_config" \
     --source "$repo_root" \
     managed \
     --path-style source-relative |

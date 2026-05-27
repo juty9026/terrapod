@@ -1,0 +1,51 @@
+#!/bin/sh
+set -eu
+
+show_help() {
+  cat <<'EOF'
+Terrapod - Dotfiles Management Tool
+
+Usage:
+  terrapod [help|--help|-h]
+  terrapod chezmoi -- <args...>
+
+Commands:
+  help                 Show this help.
+  chezmoi -- <args...> Run raw chezmoi for advanced maintenance.
+
+Examples:
+  terrapod chezmoi -- status
+EOF
+}
+
+fail_usage() {
+  printf '%s\n' "terrapod: $1" >&2
+  printf '%s\n' "Run 'terrapod help' for usage." >&2
+  exit 64
+}
+
+command_name="${1:-help}"
+
+case "$command_name" in
+  help|-h|--help)
+    show_help
+    ;;
+  chezmoi)
+    shift
+
+    if [ "${1:-}" != "--" ]; then
+      fail_usage "raw chezmoi commands must be separated with '--'"
+    fi
+
+    shift
+
+    if [ "$#" -eq 0 ]; then
+      fail_usage "raw chezmoi command is required"
+    fi
+
+    exec chezmoi "$@"
+    ;;
+  *)
+    fail_usage "unknown command: $command_name"
+    ;;
+esac
