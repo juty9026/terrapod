@@ -136,6 +136,18 @@ assert_contains 'separate from `enableDevelopmentWorkspace`' \
   "README documents macOS Desktop App Stack separation from enableDevelopmentWorkspace"
 assert_contains 'casks can affect shared applications' \
   "README documents why macOS Desktop App Stack remains separate"
+assert_contains '`terrapod update` refreshes this dotfiles source and delegates to `chezmoi update --exclude scripts`.' \
+  "README documents Terrapod update as dotfiles-source maintenance"
+assert_contains 'Terrapod does not run broad Bootstrap Package Manager or Modern CLI Provider upgrades.' \
+  "README states Terrapod does not run broad package or tool upgrades"
+assert_contains 'Homebrew and APT are Bootstrap Package Managers here: they prepare a machine for the declared shell state.' \
+  "README preserves Bootstrap Package Manager boundary"
+assert_contains 'mise is the Modern CLI Provider for shared command-line tools and development runtimes.' \
+  "README preserves Modern CLI Provider boundary"
+assert_contains 'Use OS package managers directly only when intentionally updating OS-managed packages.' \
+  "README keeps OS package upgrades outside Terrapod"
+assert_contains 'Use mise directly when intentionally updating modern CLI tools or development runtimes.' \
+  "README keeps Modern CLI Provider upgrades outside Terrapod"
 assert_raycast_restore_contains '`enableMacosAppGroupLauncher`' \
   "README Raycast restore procedure mentions launcher App Group"
 assert_contains 'Opting out of an optional stack excludes its files from chezmoi management; it does not remove files already present on a machine.' \

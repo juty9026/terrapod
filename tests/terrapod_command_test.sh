@@ -972,6 +972,14 @@ assert_contains \
   "stub diff output" \
   "Terrapod diff includes delegated chezmoi diff output"
 
+if [ -e "$BROAD_UPGRADE_CALL_FILE" ]; then
+  printf '%s\n' "unexpected broad upgrade command calls during diff:" >&2
+  sed 's/^/  /' "$BROAD_UPGRADE_CALL_FILE" >&2
+  fail "Terrapod diff does not call brew, apt, sudo, mise, or npm upgrade flows"
+fi
+
+pass "Terrapod diff does not call brew, apt, sudo, mise, or npm upgrade flows"
+
 rm -f "$CHEZMOI_CALL_FILE" "$CHEZMOI_INVOKED_FILE"
 
 if HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" TERRAPOD_CHEZMOI_CONFIG="$diff_config" PATH="$tmp_dir/bin:/usr/bin:/bin" \
@@ -1052,6 +1060,7 @@ write_stub "$tmp_dir/bin/chezmoi" \
   'exit 91'
 
 rm -f "$CHEZMOI_APPLY_ARGS_FILE" "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
+rm -f "$BROAD_UPGRADE_CALL_FILE"
 
 if ! HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
   sh "$terrapod" apply >"$tmp_dir/apply.out" 2>"$tmp_dir/apply.err"; then
@@ -1158,6 +1167,14 @@ assert_contains \
   "$apply_output" \
   "Post-apply validation: tpod alias is managed" \
   "Terrapod apply validates the tpod alias managed target"
+
+if [ -e "$BROAD_UPGRADE_CALL_FILE" ]; then
+  printf '%s\n' "unexpected broad upgrade command calls during apply:" >&2
+  sed 's/^/  /' "$BROAD_UPGRADE_CALL_FILE" >&2
+  fail "Terrapod apply does not call brew, apt, sudo, mise, or npm upgrade flows"
+fi
+
+pass "Terrapod apply does not call brew, apt, sudo, mise, or npm upgrade flows"
 
 rm -f "$CHEZMOI_APPLY_ARGS_FILE" "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
 
