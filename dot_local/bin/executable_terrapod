@@ -1383,6 +1383,24 @@ write_preset_settings() {
   write_managed_config "$config_file" "$preset"
 }
 
+run_configure() {
+  if [ "$#" -eq 0 ]; then
+    fail_usage "Preset is required"
+  fi
+
+  if [ "$#" -gt 1 ]; then
+    fail_usage "configure accepts exactly one Preset"
+  fi
+
+  preset="$1"
+  profile="$(current_profile)"
+  config_file="$(chezmoi_config_file)"
+
+  validate_preset_for_profile "$preset" "$profile"
+  write_preset_settings "$config_file" "$preset"
+  printf '%s\n' "Configured Terrapod Preset '$preset' in $config_file"
+}
+
 command_name="${1:-help}"
 
 case "$command_name" in
@@ -1391,27 +1409,7 @@ case "$command_name" in
     ;;
   configure)
     shift
-
-    preset="${1:-}"
-    if [ -z "$preset" ]; then
-      fail_usage "Preset is required"
-    fi
-
-    if [ "$#" -gt 1 ]; then
-      fail_usage "configure accepts exactly one Preset"
-    fi
-
-    profile="$(current_profile)"
-    validate_preset_for_profile "$preset" "$profile"
-
-    config_file="$(chezmoi_config_file)"
-    reject_unusable_config_path "$config_file"
-    reject_unsupported_multiline_strings "$config_file"
-    reject_section_like_multiline_arrays "$config_file"
-    reject_unsupported_inline_data_table "$config_file"
-    confirm_existing_config_update "$config_file"
-    write_managed_config "$config_file" "$preset"
-    printf '%s\n' "Configured Terrapod Preset '$preset' in $config_file"
+    run_configure "$@"
     ;;
   status)
     shift
