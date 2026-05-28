@@ -345,6 +345,7 @@ run_terrapod_setup macos-terminal 'workstation
 
 
 
+
 y
 ' "$setup_workstation_home" "$setup_workstation_xdg"
 
@@ -488,6 +489,7 @@ setup_cancel_config="$setup_cancel_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$setup_cancel_home"
 
 if run_terrapod_setup macos-terminal 'development
+
 
 
 

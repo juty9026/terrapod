@@ -385,6 +385,7 @@ if ! run_terrapod_setup_command macos-terminal 'workstation
 
 
 
+
 y
 ' "$setup_home" "$setup_xdg" "$setup_output"; then
   sed 's/^/  /' "$setup_output" >&2
