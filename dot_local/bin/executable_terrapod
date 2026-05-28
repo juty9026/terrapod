@@ -8,16 +8,19 @@ Terrapod - Dotfiles Management Tool
 Usage:
   terrapod [help|--help|-h]
   terrapod configure <minimal|development|workstation>
+  terrapod update
   terrapod chezmoi -- <args...>
 
 Commands:
   help                                  Show this help.
   configure <minimal|development|workstation>
                                         Expand a Preset into concrete chezmoi data values.
+  update                                Run chezmoi update with Terrapod profile and config context.
   chezmoi -- <args...>                  Run raw chezmoi for advanced maintenance.
 
 Examples:
   terrapod configure development
+  terrapod update
   terrapod chezmoi -- status
 EOF
 }
@@ -56,6 +59,78 @@ chezmoi_config_file() {
   fi
 
   printf '%s\n' "$HOME/.config/chezmoi/chezmoi.toml"
+}
+
+os_release_value() {
+  key="$1"
+  file="$2"
+
+  if [ ! -r "$file" ]; then
+    return 1
+  fi
+
+  awk -F= -v key="$key" '
+    $1 == key {
+      value = $2
+      gsub(/^"/, "", value)
+      gsub(/"$/, "", value)
+      print value
+      found = 1
+      exit
+    }
+
+    END {
+      exit found ? 0 : 1
+    }
+  ' "$file"
+}
+
+terrapod_profile_context() {
+  os_name="$(uname -s 2>/dev/null || printf '%s\n' unknown)"
+
+  case "$os_name" in
+    Darwin)
+      printf '%s\n' "macOS Terminal Profile"
+      ;;
+    Linux)
+      os_release_file="${TERRAPOD_OS_RELEASE_FILE:-/etc/os-release}"
+      os_id="$(os_release_value ID "$os_release_file" 2>/dev/null || true)"
+      version_id="$(os_release_value VERSION_ID "$os_release_file" 2>/dev/null || true)"
+
+      if [ "$os_id" = "ubuntu" ] && [ "$version_id" = "24.04" ]; then
+        printf '%s\n' "VPS Shell Profile"
+      else
+        printf '%s\n' "unsupported Linux profile"
+      fi
+      ;;
+    *)
+      printf '%s\n' "unsupported profile"
+      ;;
+  esac
+}
+
+show_update_context() {
+  config_file="$(chezmoi_config_file)"
+
+  printf '%s\n' "Terrapod update"
+  printf '%s\n' "Profile: $(terrapod_profile_context)"
+
+  if [ -f "$config_file" ]; then
+    printf '%s\n' "Config: $config_file (present)"
+  else
+    printf '%s\n' "Config: $config_file (missing; chezmoi defaults apply)"
+  fi
+
+  printf '%s\n' "Delegating repository update to: chezmoi update"
+}
+
+run_update() {
+  if [ "$#" -ne 0 ]; then
+    fail_usage "update accepts no arguments"
+  fi
+
+  show_update_context
+  chezmoi update
 }
 
 render_preset_data() {
@@ -505,6 +580,10 @@ case "$command_name" in
     confirm_existing_config_update "$config_file"
     write_managed_config "$config_file" "$preset"
     printf '%s\n' "Configured Terrapod Preset '$preset' in $config_file"
+    ;;
+  update)
+    shift
+    run_update "$@"
     ;;
   chezmoi)
     shift

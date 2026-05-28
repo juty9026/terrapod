@@ -276,3 +276,123 @@ assert_contains \
   "$missing_command_error" \
   "terrapod: raw chezmoi command is required" \
   "Terrapod explains missing raw chezmoi command"
+
+export CHEZMOI_CALL_FILE="$tmp_dir/chezmoi-update.args"
+export CHEZMOI_INVOKED_FILE="$tmp_dir/chezmoi-update.invoked"
+export BROAD_UPGRADE_CALL_FILE="$tmp_dir/broad-upgrade.calls"
+
+write_stub "$tmp_dir/bin/chezmoi" \
+  'printf "%s\n" invoked >"$CHEZMOI_INVOKED_FILE"' \
+  ': >"$CHEZMOI_CALL_FILE"' \
+  'for arg do' \
+  '  printf "%s\n" "$arg" >>"$CHEZMOI_CALL_FILE"' \
+  'done' \
+  'exit 0'
+
+write_stub "$tmp_dir/bin/brew" \
+  'printf "%s\n" "brew $*" >>"$BROAD_UPGRADE_CALL_FILE"' \
+  'exit 90'
+
+write_stub "$tmp_dir/bin/apt" \
+  'printf "%s\n" "apt $*" >>"$BROAD_UPGRADE_CALL_FILE"' \
+  'exit 90'
+
+write_stub "$tmp_dir/bin/sudo" \
+  'printf "%s\n" "sudo $*" >>"$BROAD_UPGRADE_CALL_FILE"' \
+  'exit 90'
+
+write_stub "$tmp_dir/bin/mise" \
+  'printf "%s\n" "mise $*" >>"$BROAD_UPGRADE_CALL_FILE"' \
+  'exit 90'
+
+write_stub "$tmp_dir/bin/npm" \
+  'printf "%s\n" "npm $*" >>"$BROAD_UPGRADE_CALL_FILE"' \
+  'exit 90'
+
+write_stub "$tmp_dir/bin/uname" \
+  'printf "%s\n" "Darwin"'
+
+update_home="$tmp_dir/update-home"
+update_xdg="$tmp_dir/update-xdg"
+update_config="$update_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$update_home" "$(dirname "$update_config")"
+
+cat >"$update_config" <<'TOML'
+[data]
+enableEditorStack = true
+enableAiCliTools = false
+enableDevelopmentWorkspace = false
+enableMacosDesktopApps = false
+TOML
+
+if ! HOME="$update_home" XDG_CONFIG_HOME="$update_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$terrapod" update >"$tmp_dir/update.out" 2>"$tmp_dir/update.err"; then
+  printf '%s\n' "update stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/update.out" >&2
+  printf '%s\n' "update stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/update.err" >&2
+  fail "Terrapod update runs successfully"
+fi
+
+update_output="$(cat "$tmp_dir/update.out")"
+
+assert_call_args \
+  "$CHEZMOI_CALL_FILE" \
+  "Terrapod update delegates repository update semantics to chezmoi update" \
+  update
+
+assert_contains \
+  "$update_output" \
+  "Terrapod update" \
+  "Terrapod update prints command context"
+
+assert_contains \
+  "$update_output" \
+  "Profile: macOS Terminal Profile" \
+  "Terrapod update prints profile context"
+
+assert_contains \
+  "$update_output" \
+  "Config: $update_config (present)" \
+  "Terrapod update prints managed config context"
+
+assert_contains \
+  "$update_output" \
+  "Delegating repository update to: chezmoi update" \
+  "Terrapod update explains the delegated command"
+
+if [ -e "$BROAD_UPGRADE_CALL_FILE" ]; then
+  printf '%s\n' "unexpected broad upgrade command calls:" >&2
+  sed 's/^/  /' "$BROAD_UPGRADE_CALL_FILE" >&2
+  fail "Terrapod update does not call brew, apt, sudo, mise, or npm upgrade flows"
+fi
+
+pass "Terrapod update does not call brew, apt, sudo, mise, or npm upgrade flows"
+
+rm -f "$CHEZMOI_CALL_FILE" "$CHEZMOI_INVOKED_FILE"
+
+if HOME="$update_home" XDG_CONFIG_HOME="$update_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$terrapod" update --aggressive >"$tmp_dir/update-extra.out" 2>"$tmp_dir/update-extra.err"; then
+  fail "Terrapod update rejects extra arguments"
+fi
+
+update_extra_error="$(cat "$tmp_dir/update-extra.err")"
+
+assert_contains \
+  "$update_extra_error" \
+  "terrapod: update accepts no arguments" \
+  "Terrapod update explains rejected extra arguments"
+
+if [ -e "$CHEZMOI_INVOKED_FILE" ]; then
+  fail "Terrapod update rejects extra arguments before calling chezmoi"
+fi
+
+pass "Terrapod update rejects extra arguments before calling chezmoi"
+
+if [ -e "$BROAD_UPGRADE_CALL_FILE" ]; then
+  printf '%s\n' "unexpected broad upgrade command calls after rejected extra arguments:" >&2
+  sed 's/^/  /' "$BROAD_UPGRADE_CALL_FILE" >&2
+  fail "Terrapod update rejects extra arguments before broad upgrade flows"
+fi
+
+pass "Terrapod update rejects extra arguments before broad upgrade flows"
