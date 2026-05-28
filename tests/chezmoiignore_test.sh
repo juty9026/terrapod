@@ -46,6 +46,7 @@ render_template() {
 
   chezmoi \
     --config "$chezmoi_config" \
+    --source "$repo_root" \
     execute-template \
     --override-data "$data" \
     --file "$repo_root/$file"
@@ -81,6 +82,18 @@ assert_not_contains_text() {
   message="$3"
 
   if printf '%s\n' "$text" | grep -F "$needle" >/dev/null; then
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
+assert_texts_differ() {
+  left="$1"
+  right="$2"
+  message="$3"
+
+  if [ "$left" = "$right" ]; then
     fail "$message"
   fi
 
@@ -131,8 +144,11 @@ ubuntu_managed="$(managed_source_paths "$ubuntu_data")"
 macos_data='{"chezmoi":{"os":"darwin"},"enableEditorStack":false,"enableAiCliTools":false,"enableDevelopmentWorkspace":false}'
 macos_managed="$(managed_source_paths "$macos_data")"
 macos_managed_targets="$(managed_target_paths "$macos_data")"
-macos_desktop_apps_data='{"chezmoi":{"os":"darwin"},"enableEditorStack":false,"enableAiCliTools":false,"enableDevelopmentWorkspace":false,"enableMacosDesktopApps":true}'
-macos_desktop_apps_managed_targets="$(managed_target_paths "$macos_desktop_apps_data")"
+macos_terminal_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":true,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":false,"enableMacosAppGroupMonitoring":false}'
+macos_automation_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":true,"enableMacosAppGroupLauncher":false,"enableMacosAppGroupMonitoring":false}'
+macos_launcher_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":true,"enableMacosAppGroupMonitoring":false}'
+macos_monitoring_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":false,"enableMacosAppGroupMonitoring":true}'
+macos_terminal_apps_managed_targets="$(managed_target_paths "$macos_terminal_apps_data")"
 macos_ai_cli_tools_data='{"chezmoi":{"os":"darwin"},"enableEditorStack":false,"enableAiCliTools":true,"enableDevelopmentWorkspace":false}'
 macos_ai_cli_tools_managed="$(managed_source_paths "$macos_ai_cli_tools_data")"
 macos_development_workspace_data='{"chezmoi":{"os":"darwin"},"enableEditorStack":false,"enableAiCliTools":false,"enableDevelopmentWorkspace":true}'
@@ -162,11 +178,17 @@ done
 
 pass "Ubuntu VPS ignores macOS-only entries"
 
+macos_brewfile="$(render_template "$macos_data" "Brewfile.macos-desktop-apps.tmpl")"
+terminal_apps_brewfile="$(render_template "$macos_terminal_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
+automation_apps_brewfile="$(render_template "$macos_automation_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
+launcher_apps_brewfile="$(render_template "$macos_launcher_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
+monitoring_apps_brewfile="$(render_template "$macos_monitoring_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 macos_bootstrap="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
-macos_desktop_apps_bootstrap="$(render_template "$macos_desktop_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
+macos_terminal_apps_bootstrap="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
 macos_development_workspace_bootstrap="$(render_template "$macos_development_workspace_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
 macos_karabiner_opener="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
-macos_desktop_apps_karabiner_opener="$(render_template "$macos_desktop_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
+macos_terminal_apps_karabiner_opener="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
+macos_automation_apps_karabiner_opener="$(render_template "$macos_automation_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 
 assert_contains_text \
   "$macos_bootstrap" \
@@ -178,15 +200,55 @@ assert_not_contains_text \
   "Brewfile.macos-desktop-apps" \
   "macOS bootstrap default skips macOS Desktop App Stack Brewfile"
 
-assert_contains_text \
-  "$macos_desktop_apps_bootstrap" \
+assert_not_contains_text \
+  "$macos_bootstrap" \
+  "terrapod-macos-desktop-apps" \
+  "macOS bootstrap default skips macOS Desktop App Stack temp Brewfile"
+
+assert_not_contains_text \
+  "$macos_bootstrap" \
+  'brew bundle --no-upgrade --file="$desktop_brewfile"' \
+  "macOS bootstrap default skips macOS Desktop App Stack bundle"
+
+assert_managed_paths_exclude_prefix \
+  "$macos_managed_targets" \
   "Brewfile.macos-desktop-apps" \
-  "enableMacosDesktopApps renders macOS Desktop App Stack Brewfile"
+  "macOS default does not manage rendered macOS Desktop App Stack Brewfile target"
+
+assert_managed_paths_exclude_prefix \
+  "$macos_terminal_apps_managed_targets" \
+  "Brewfile.macos-desktop-apps" \
+  "terminal-apps group does not manage rendered macOS Desktop App Stack Brewfile target"
+
+assert_not_contains_text "$macos_brewfile" 'cask "ghostty"' "macOS default does not render Ghostty"
+assert_not_contains_text "$macos_brewfile" 'cask "cmux"' "macOS default does not render cmux"
+assert_not_contains_text "$macos_brewfile" 'cask "hammerspoon"' "macOS default does not render Hammerspoon"
+assert_not_contains_text "$macos_brewfile" 'cask "karabiner-elements"' "macOS default does not render Karabiner-Elements"
+assert_not_contains_text "$macos_brewfile" 'cask "raycast"' "macOS default does not render Raycast"
+assert_not_contains_text "$macos_brewfile" 'cask "1password-cli"' "macOS default does not render 1Password CLI"
+assert_not_contains_text "$macos_brewfile" 'cask "istat-menus"' "macOS default does not render iStat Menus"
+
+assert_contains_text "$terminal_apps_brewfile" 'cask "ghostty"' "terminal-apps group renders Ghostty"
+assert_contains_text "$terminal_apps_brewfile" 'cask "cmux"' "terminal-apps group renders cmux"
+assert_not_contains_text "$terminal_apps_brewfile" 'cask "hammerspoon"' "terminal-apps group does not render automation casks"
+
+assert_contains_text "$automation_apps_brewfile" 'cask "hammerspoon"' "automation group renders Hammerspoon"
+assert_contains_text "$automation_apps_brewfile" 'cask "karabiner-elements"' "automation group renders Karabiner-Elements"
+
+assert_contains_text "$launcher_apps_brewfile" 'cask "raycast"' "launcher group renders Raycast"
+assert_contains_text "$launcher_apps_brewfile" 'cask "1password-cli"' "launcher group renders 1Password CLI"
+
+assert_contains_text "$monitoring_apps_brewfile" 'cask "istat-menus"' "monitoring group renders iStat Menus"
 
 assert_contains_text \
-  "$macos_desktop_apps_bootstrap" \
+  "$macos_terminal_apps_bootstrap" \
+  "terrapod-macos-desktop-apps" \
+  "terminal-apps group renders macOS Desktop App Stack Brewfile"
+
+assert_contains_text \
+  "$macos_terminal_apps_bootstrap" \
   'brew bundle --no-upgrade --file="$desktop_brewfile"' \
-  "enableMacosDesktopApps runs macOS Desktop App Stack Brewfile"
+  "terminal-apps group runs macOS Desktop App Stack Brewfile"
 
 assert_not_contains_text \
   "$macos_development_workspace_bootstrap" \
@@ -204,14 +266,19 @@ assert_not_contains_text \
   "Karabiner opener default skips macOS Desktop App Stack Brewfile checksum"
 
 assert_contains_text \
-  "$macos_desktop_apps_karabiner_opener" \
+  "$macos_automation_apps_karabiner_opener" \
   "macOS Desktop App Stack enabled: true" \
   "Karabiner opener tracks enabled macOS Desktop App Stack state"
 
 assert_contains_text \
-  "$macos_desktop_apps_karabiner_opener" \
+  "$macos_automation_apps_karabiner_opener" \
   "macOS Desktop App Stack Brewfile checksum" \
   "Karabiner opener tracks macOS Desktop App Stack Brewfile changes"
+
+assert_texts_differ \
+  "$macos_terminal_apps_karabiner_opener" \
+  "$macos_automation_apps_karabiner_opener" \
+  "Karabiner opener tracks different macOS Desktop App Group combinations"
 
 for cask in \
   font-jetbrains-mono-nerd-font \
@@ -230,28 +297,6 @@ fi
 
 pass "core Brewfile casks are terminal font casks only"
 
-for cask in \
-  ghostty \
-  cmux \
-  hammerspoon \
-  istat-menus \
-  karabiner-elements \
-  raycast \
-  1password-cli
-do
-  if ! grep -Fx "cask \"$cask\"" "$repo_root/Brewfile.macos-desktop-apps" >/dev/null; then
-    fail "macOS Desktop App Stack Brewfile contains expected cask: $cask"
-  fi
-done
-
-pass "macOS Desktop App Stack Brewfile contains expected casks"
-
-if grep -Ev '^[[:space:]]*($|#|cask[[:space:]])' "$repo_root/Brewfile.macos-desktop-apps" >/dev/null; then
-  fail "macOS Desktop App Stack Brewfile contains only cask entries"
-fi
-
-pass "macOS Desktop App Stack Brewfile contains only cask entries"
-
 for app_config in \
   ".config/ghostty/config" \
   ".config/cmux/settings.json" \
@@ -262,12 +307,12 @@ do
     fail "macOS default manages user-scoped app config: $app_config"
   fi
 
-  if ! printf '%s\n' "$macos_desktop_apps_managed_targets" | grep -Fx "$app_config" >/dev/null; then
-    fail "enableMacosDesktopApps manages user-scoped app config: $app_config"
+  if ! printf '%s\n' "$macos_terminal_apps_managed_targets" | grep -Fx "$app_config" >/dev/null; then
+    fail "terminal-apps group manages user-scoped app config: $app_config"
   fi
 done
 
-pass "user-scoped macOS app config remains managed regardless of enableMacosDesktopApps"
+pass "user-scoped macOS app config remains managed regardless of app group selection"
 
 assert_managed_paths_exclude_prefix \
   "$macos_managed" \

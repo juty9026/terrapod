@@ -1,0 +1,20 @@
+# Rendered opt-in macOS Desktop App Stack.
+{{ if default false (get . "enableMacosAppGroupTerminalApps") -}}
+# terminal-apps macOS App Group
+cask "ghostty"
+cask "cmux"
+{{ end -}}
+{{ if default false (get . "enableMacosAppGroupAutomation") -}}
+# automation macOS App Group
+cask "hammerspoon"
+cask "karabiner-elements"
+{{ end -}}
+{{ if default false (get . "enableMacosAppGroupLauncher") -}}
+# launcher macOS App Group
+cask "raycast"
+cask "1password-cli"
+{{ end -}}
+{{ if default false (get . "enableMacosAppGroupMonitoring") -}}
+# monitoring macOS App Group
+cask "istat-menus"
+{{ end -}}

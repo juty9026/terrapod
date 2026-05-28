@@ -24,6 +24,29 @@ assert_contains() {
   pass "$message"
 }
 
+assert_not_contains() {
+  needle="$1"
+  message="$2"
+
+  if grep -F "$needle" "$readme" >/dev/null; then
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
+assert_key_row_contains() {
+  key="$1"
+  needle="$2"
+  message="$3"
+
+  if ! awk -v key="$key" -v needle="$needle" 'index($0, key) && index($0, needle) { found=1 } END { exit found ? 0 : 1 }' "$readme"; then
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
 assert_ubuntu_setup_contains() {
   needle="$1"
   message="$2"
@@ -39,22 +62,68 @@ assert_ubuntu_setup_contains() {
   pass "$message"
 }
 
+assert_raycast_restore_contains() {
+  needle="$1"
+  message="$2"
+
+  if ! awk '
+    /^### Raycast$/ { in_raycast = 1; next }
+    /^## Local overrides$/ { in_raycast = 0 }
+    in_raycast { print }
+  ' "$readme" | grep -F "$needle" >/dev/null; then
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
 assert_contains '| `enableEditorStack` | `false` |' \
   "README documents enableEditorStack default"
 assert_contains '| `enableAiCliTools` | `false` |' \
   "README documents enableAiCliTools default"
 assert_contains '| `enableDevelopmentWorkspace` | `false` |' \
   "README documents enableDevelopmentWorkspace default"
-assert_contains '`enableMacosDesktopApps`' \
-  "README documents enableMacosDesktopApps option"
-if ! awk -F '|' '/`enableMacosDesktopApps`/ { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); if ($3 == "`false`") found=1 } END { exit found ? 0 : 1 }' "$readme"; then
-  fail "README documents enableMacosDesktopApps default"
-fi
+assert_not_contains 'enableMacosDesktopApps' \
+  "README does not document legacy enableMacosDesktopApps option"
 
-pass "README documents enableMacosDesktopApps default"
+for key in \
+  enableMacosAppGroupTerminalApps \
+  enableMacosAppGroupAutomation \
+  enableMacosAppGroupLauncher \
+  enableMacosAppGroupMonitoring
+do
+  assert_contains "\`$key\`" "README documents $key option"
+  if ! awk -F '|' -v key="\`$key\`" '$0 ~ key { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); if ($3 == "`false`") found=1 } END { exit found ? 0 : 1 }' "$readme"; then
+    fail "README documents $key default"
+  fi
+  pass "README documents $key default"
+done
 
-assert_contains 'All three optional stack profiles are disabled by default.' \
-  "README states optional stack profiles are disabled by default"
+assert_key_row_contains '`enableMacosAppGroupTerminalApps`' 'terminal-apps' \
+  "README documents terminal-apps group on its option row"
+assert_key_row_contains '`enableMacosAppGroupTerminalApps`' 'Ghostty' \
+  "README documents Ghostty on the terminal-apps option row"
+assert_key_row_contains '`enableMacosAppGroupTerminalApps`' 'cmux' \
+  "README documents cmux on the terminal-apps option row"
+assert_key_row_contains '`enableMacosAppGroupAutomation`' 'automation' \
+  "README documents automation group on its option row"
+assert_key_row_contains '`enableMacosAppGroupAutomation`' 'Hammerspoon' \
+  "README documents Hammerspoon on the automation option row"
+assert_key_row_contains '`enableMacosAppGroupAutomation`' 'Karabiner-Elements' \
+  "README documents Karabiner-Elements on the automation option row"
+assert_key_row_contains '`enableMacosAppGroupLauncher`' 'launcher' \
+  "README documents launcher group on its option row"
+assert_key_row_contains '`enableMacosAppGroupLauncher`' 'Raycast' \
+  "README documents Raycast on the launcher option row"
+assert_key_row_contains '`enableMacosAppGroupLauncher`' '1Password CLI' \
+  "README documents 1Password CLI on the launcher option row"
+assert_key_row_contains '`enableMacosAppGroupMonitoring`' 'monitoring' \
+  "README documents monitoring group on its option row"
+assert_key_row_contains '`enableMacosAppGroupMonitoring`' 'iStat Menus' \
+  "README documents iStat Menus on the monitoring option row"
+
+assert_contains 'Optional stack profiles and macOS App Group settings are disabled by default.' \
+  "README states optional stack profiles and App Groups are disabled by default"
 assert_ubuntu_setup_contains 'GitHub CLI (`gh`)' \
   "README documents gh as part of the Ubuntu Core Shell Stack"
 assert_contains 'When `enableDevelopmentWorkspace` is `true`' \
@@ -64,9 +133,11 @@ assert_contains 'Optional Editor Stack and Optional AI Tool Stack' \
 assert_contains 'macOS Desktop App Stack' \
   "README documents macOS Desktop App Stack"
 assert_contains 'separate from `enableDevelopmentWorkspace`' \
-  "README documents enableMacosDesktopApps separation from enableDevelopmentWorkspace"
+  "README documents macOS Desktop App Stack separation from enableDevelopmentWorkspace"
 assert_contains 'casks can affect shared applications' \
   "README documents why macOS Desktop App Stack remains separate"
+assert_raycast_restore_contains '`enableMacosAppGroupLauncher`' \
+  "README Raycast restore procedure mentions launcher App Group"
 assert_contains 'Opting out of an optional stack excludes its files from chezmoi management; it does not remove files already present on a machine.' \
   "README documents non-destructive optional stack opt-out"
 

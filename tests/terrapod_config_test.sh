@@ -266,7 +266,11 @@ assert_contains "$new_config" "[data]" "new config contains a data section"
 assert_data_key_once_with_value "$new_config" "enableEditorStack" "false" "minimal Preset disables Optional Editor Stack exactly once in data"
 assert_data_key_once_with_value "$new_config" "enableAiCliTools" "false" "minimal Preset disables Optional AI Tool Stack exactly once in data"
 assert_data_key_once_with_value "$new_config" "enableDevelopmentWorkspace" "false" "minimal Preset disables Optional Development Workspace exactly once in data"
-assert_data_key_once_with_value "$new_config" "enableMacosDesktopApps" "false" "minimal Preset disables macOS App Groups through the desktop-app boundary exactly once in data"
+assert_data_key_once_with_value "$new_config" "enableMacosAppGroupTerminalApps" "false" "minimal Preset disables terminal-apps macOS App Group exactly once in data"
+assert_data_key_once_with_value "$new_config" "enableMacosAppGroupAutomation" "false" "minimal Preset disables automation macOS App Group exactly once in data"
+assert_data_key_once_with_value "$new_config" "enableMacosAppGroupLauncher" "false" "minimal Preset disables launcher macOS App Group exactly once in data"
+assert_data_key_once_with_value "$new_config" "enableMacosAppGroupMonitoring" "false" "minimal Preset disables monitoring macOS App Group exactly once in data"
+assert_not_contains "$new_config" "enableMacosDesktopApps" "minimal Preset does not write the legacy all-in desktop app toggle"
 assert_not_contains "$new_config" "terrapodPreset" "minimal Preset stores concrete values instead of a dynamic Preset"
 assert_backup_count "$new_config" 0 "new config creation does not create a backup"
 
@@ -275,7 +279,7 @@ workstation_xdg="$tmp_dir/workstation-xdg"
 workstation_config="$workstation_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$workstation_home"
 
-run_terrapod_configure workstation "" "$workstation_home" "$workstation_xdg"
+TERRAPOD_PROFILE=macos-terminal run_terrapod_configure workstation "" "$workstation_home" "$workstation_xdg"
 
 if [ ! -f "$workstation_config" ]; then
   fail "workstation Preset creates a chezmoi config file"
@@ -285,7 +289,11 @@ pass "workstation Preset creates a chezmoi config file"
 assert_data_key_once_with_value "$workstation_config" "enableEditorStack" "true" "workstation Preset enables Optional Editor Stack exactly once in data"
 assert_data_key_once_with_value "$workstation_config" "enableAiCliTools" "true" "workstation Preset enables Optional AI Tool Stack exactly once in data"
 assert_data_key_once_with_value "$workstation_config" "enableDevelopmentWorkspace" "true" "workstation Preset enables Optional Development Workspace exactly once in data"
-assert_data_key_once_with_value "$workstation_config" "enableMacosDesktopApps" "true" "workstation Preset enables macOS App Groups through the desktop-app boundary exactly once in data"
+assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupTerminalApps" "true" "workstation Preset enables terminal-apps macOS App Group exactly once in data"
+assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupAutomation" "true" "workstation Preset enables automation macOS App Group exactly once in data"
+assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupLauncher" "true" "workstation Preset enables launcher macOS App Group exactly once in data"
+assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupMonitoring" "true" "workstation Preset enables monitoring macOS App Group exactly once in data"
+assert_not_contains "$workstation_config" "enableMacosDesktopApps" "workstation Preset does not write the legacy all-in desktop app toggle"
 assert_not_contains "$workstation_config" "terrapodPreset" "workstation Preset stores concrete values instead of a dynamic Preset"
 assert_backup_count "$workstation_config" 0 "workstation config creation does not create a backup"
 
@@ -339,7 +347,11 @@ assert_contains "$existing_config" "command = \"nvim\"" "existing update preserv
 assert_data_key_once_with_value "$existing_config" "enableEditorStack" "true" "development Preset enables Optional Editor Stack exactly once in data"
 assert_data_key_once_with_value "$existing_config" "enableAiCliTools" "true" "development Preset enables Optional AI Tool Stack exactly once in data"
 assert_data_key_once_with_value "$existing_config" "enableDevelopmentWorkspace" "true" "development Preset enables Optional Development Workspace exactly once in data"
-assert_data_key_once_with_value "$existing_config" "enableMacosDesktopApps" "false" "development Preset leaves macOS App Groups disabled exactly once in data"
+assert_data_key_once_with_value "$existing_config" "enableMacosAppGroupTerminalApps" "false" "development Preset disables terminal-apps macOS App Group exactly once in data"
+assert_data_key_once_with_value "$existing_config" "enableMacosAppGroupAutomation" "false" "development Preset disables automation macOS App Group exactly once in data"
+assert_data_key_once_with_value "$existing_config" "enableMacosAppGroupLauncher" "false" "development Preset disables launcher macOS App Group exactly once in data"
+assert_data_key_once_with_value "$existing_config" "enableMacosAppGroupMonitoring" "false" "development Preset disables monitoring macOS App Group exactly once in data"
+assert_not_contains "$existing_config" "enableMacosDesktopApps" "existing update removes the legacy all-in desktop app toggle"
 assert_not_contains "$existing_config" "terrapodPreset" "existing update removes stale dynamic Preset key"
 assert_single_backup_matches "$existing_config" "$tmp_dir/existing-before.toml" "existing update creates one backup before changing managed keys"
 
@@ -352,6 +364,7 @@ cat >"$quoted_table_config" <<'TOML'
 ["data"]
 keepQuotedTable = "preserve"
 enableEditorStack = false
+enableMacosDesktopApps = true
 terrapodPreset = "minimal"
 
 [sourceState]
@@ -367,7 +380,11 @@ assert_contains "$quoted_table_config" "branch = \"main\"" "quoted data table up
 assert_data_key_once_with_value "$quoted_table_config" "enableEditorStack" "true" "quoted data table update writes Editor Stack in data"
 assert_data_key_once_with_value "$quoted_table_config" "enableAiCliTools" "true" "quoted data table update writes AI Tool Stack in data"
 assert_data_key_once_with_value "$quoted_table_config" "enableDevelopmentWorkspace" "true" "quoted data table update writes Development Workspace in data"
-assert_data_key_once_with_value "$quoted_table_config" "enableMacosDesktopApps" "false" "quoted data table update writes macOS desktop-app boundary in data"
+assert_data_key_once_with_value "$quoted_table_config" "enableMacosAppGroupTerminalApps" "false" "quoted data table update writes terminal-apps App Group in data"
+assert_data_key_once_with_value "$quoted_table_config" "enableMacosAppGroupAutomation" "false" "quoted data table update writes automation App Group in data"
+assert_data_key_once_with_value "$quoted_table_config" "enableMacosAppGroupLauncher" "false" "quoted data table update writes launcher App Group in data"
+assert_data_key_once_with_value "$quoted_table_config" "enableMacosAppGroupMonitoring" "false" "quoted data table update writes monitoring App Group in data"
+assert_not_contains "$quoted_table_config" "enableMacosDesktopApps" "quoted data table update removes the legacy all-in desktop app toggle"
 assert_not_contains "$quoted_table_config" "terrapodPreset" "quoted data table update removes stale dynamic Preset key"
 
 spaced_table_home="$tmp_dir/spaced-table-home"
@@ -379,6 +396,7 @@ cat >"$spaced_table_config" <<'TOML'
 [ data ]
 keepSpacedTable = "preserve"
 enableEditorStack = false
+enableMacosDesktopApps = true
 terrapodPreset = "minimal"
 
 [sourceState]
@@ -394,7 +412,11 @@ assert_contains "$spaced_table_config" "branch = \"main\"" "spaced data table up
 assert_data_key_once_with_value "$spaced_table_config" "enableEditorStack" "true" "spaced data table update writes Editor Stack in data"
 assert_data_key_once_with_value "$spaced_table_config" "enableAiCliTools" "true" "spaced data table update writes AI Tool Stack in data"
 assert_data_key_once_with_value "$spaced_table_config" "enableDevelopmentWorkspace" "true" "spaced data table update writes Development Workspace in data"
-assert_data_key_once_with_value "$spaced_table_config" "enableMacosDesktopApps" "false" "spaced data table update writes macOS desktop-app boundary in data"
+assert_data_key_once_with_value "$spaced_table_config" "enableMacosAppGroupTerminalApps" "false" "spaced data table update writes terminal-apps App Group in data"
+assert_data_key_once_with_value "$spaced_table_config" "enableMacosAppGroupAutomation" "false" "spaced data table update writes automation App Group in data"
+assert_data_key_once_with_value "$spaced_table_config" "enableMacosAppGroupLauncher" "false" "spaced data table update writes launcher App Group in data"
+assert_data_key_once_with_value "$spaced_table_config" "enableMacosAppGroupMonitoring" "false" "spaced data table update writes monitoring App Group in data"
+assert_not_contains "$spaced_table_config" "enableMacosDesktopApps" "spaced data table update removes the legacy all-in desktop app toggle"
 assert_not_contains "$spaced_table_config" "terrapodPreset" "spaced data table update removes stale dynamic Preset key"
 
 dotted_home="$tmp_dir/dotted-home"
@@ -422,7 +444,11 @@ assert_contains "$dotted_config" "branch = \"main\"" "dotted data update preserv
 assert_contains "$dotted_config" "data.enableEditorStack = true" "dotted data update writes Editor Stack as a dotted data key"
 assert_contains "$dotted_config" "data.enableAiCliTools = true" "dotted data update writes AI Tool Stack as a dotted data key"
 assert_contains "$dotted_config" "data.enableDevelopmentWorkspace = true" "dotted data update writes Development Workspace as a dotted data key"
-assert_contains "$dotted_config" "data.enableMacosDesktopApps = false" "dotted data update writes macOS desktop-app boundary as a dotted data key"
+assert_contains "$dotted_config" "data.enableMacosAppGroupTerminalApps = false" "dotted data update writes terminal-apps App Group as a dotted data key"
+assert_contains "$dotted_config" "data.enableMacosAppGroupAutomation = false" "dotted data update writes automation App Group as a dotted data key"
+assert_contains "$dotted_config" "data.enableMacosAppGroupLauncher = false" "dotted data update writes launcher App Group as a dotted data key"
+assert_contains "$dotted_config" "data.enableMacosAppGroupMonitoring = false" "dotted data update writes monitoring App Group as a dotted data key"
+assert_not_contains "$dotted_config" "data.enableMacosDesktopApps" "dotted data update removes the legacy all-in desktop app toggle"
 assert_not_contains "$dotted_config" "data.terrapodPreset" "dotted data update removes stale dynamic Preset key"
 
 if ! HOME="$dotted_home" XDG_CONFIG_HOME="$dotted_xdg" chezmoi --config "$dotted_config" data >"$tmp_dir/dotted-data.out" 2>"$tmp_dir/dotted-data.err"; then
@@ -452,7 +478,10 @@ run_terrapod_configure development "y" "$quoted_home" "$quoted_xdg"
 assert_data_key_once_with_value "$quoted_config" "enableEditorStack" "true" "quoted managed key update writes one Editor Stack value in data"
 assert_data_key_once_with_value "$quoted_config" "enableAiCliTools" "true" "quoted managed key update writes one AI Tool Stack value in data"
 assert_data_key_once_with_value "$quoted_config" "enableDevelopmentWorkspace" "true" "quoted managed key update writes one Development Workspace value in data"
-assert_data_key_once_with_value "$quoted_config" "enableMacosDesktopApps" "false" "quoted managed key update writes one macOS desktop-app boundary value in data"
+assert_data_key_once_with_value "$quoted_config" "enableMacosAppGroupTerminalApps" "false" "quoted managed key update writes one terminal-apps App Group value in data"
+assert_data_key_once_with_value "$quoted_config" "enableMacosAppGroupAutomation" "false" "quoted managed key update writes one automation App Group value in data"
+assert_data_key_once_with_value "$quoted_config" "enableMacosAppGroupLauncher" "false" "quoted managed key update writes one launcher App Group value in data"
+assert_data_key_once_with_value "$quoted_config" "enableMacosAppGroupMonitoring" "false" "quoted managed key update writes one monitoring App Group value in data"
 assert_not_contains "$quoted_config" "\"enableEditorStack\"" "quoted managed key update removes quoted Editor Stack key"
 assert_not_contains "$quoted_config" "\"enableAiCliTools\"" "quoted managed key update removes quoted AI Tool Stack key"
 assert_not_contains "$quoted_config" "\"enableDevelopmentWorkspace\"" "quoted managed key update removes quoted Development Workspace key"
@@ -486,12 +515,18 @@ assert_contains "$array_config" "keepMe = \"yes\"" "array-table update preserves
 assert_data_key_once_with_value "$array_config" "enableEditorStack" "true" "array-table update writes Editor Stack only in data"
 assert_data_key_once_with_value "$array_config" "enableAiCliTools" "true" "array-table update writes AI Tool Stack only in data"
 assert_data_key_once_with_value "$array_config" "enableDevelopmentWorkspace" "true" "array-table update writes Development Workspace only in data"
-assert_data_key_once_with_value "$array_config" "enableMacosDesktopApps" "false" "array-table update writes macOS desktop-app boundary only in data"
+assert_data_key_once_with_value "$array_config" "enableMacosAppGroupTerminalApps" "false" "array-table update writes terminal-apps App Group only in data"
+assert_data_key_once_with_value "$array_config" "enableMacosAppGroupAutomation" "false" "array-table update writes automation App Group only in data"
+assert_data_key_once_with_value "$array_config" "enableMacosAppGroupLauncher" "false" "array-table update writes launcher App Group only in data"
+assert_data_key_once_with_value "$array_config" "enableMacosAppGroupMonitoring" "false" "array-table update writes monitoring App Group only in data"
 assert_contains "$array_config" "[[merge.command]]" "array-table update preserves TOML array table"
 assert_contains "$array_config" "enableEditorStack = \"do-not-touch\"" "array-table update preserves same-named external key"
 assert_lines_after_header_not_contains "$array_config" "[[merge.command]]" "enableAiCliTools = true" "array-table update does not append AI Tool Stack under array table"
 assert_lines_after_header_not_contains "$array_config" "[[merge.command]]" "enableDevelopmentWorkspace = true" "array-table update does not append Development Workspace under array table"
-assert_lines_after_header_not_contains "$array_config" "[[merge.command]]" "enableMacosDesktopApps = false" "array-table update does not append macOS desktop-app boundary under array table"
+assert_lines_after_header_not_contains "$array_config" "[[merge.command]]" "enableMacosAppGroupTerminalApps = false" "array-table update does not append terminal-apps App Group under array table"
+assert_lines_after_header_not_contains "$array_config" "[[merge.command]]" "enableMacosAppGroupAutomation = false" "array-table update does not append automation App Group under array table"
+assert_lines_after_header_not_contains "$array_config" "[[merge.command]]" "enableMacosAppGroupLauncher = false" "array-table update does not append launcher App Group under array table"
+assert_lines_after_header_not_contains "$array_config" "[[merge.command]]" "enableMacosAppGroupMonitoring = false" "array-table update does not append monitoring App Group under array table"
 
 array_mode="$(file_mode "$array_config")"
 if [ "$array_mode" != "600" ]; then
@@ -525,7 +560,10 @@ assert_contains "$signers_config" "name@company.com ssh-ed25519 AAAA_COMPANY_PUB
 assert_data_key_once_with_value "$signers_config" "enableEditorStack" "true" "documented signer array update writes Editor Stack in data"
 assert_data_key_once_with_value "$signers_config" "enableAiCliTools" "true" "documented signer array update writes AI Tool Stack in data"
 assert_data_key_once_with_value "$signers_config" "enableDevelopmentWorkspace" "true" "documented signer array update writes Development Workspace in data"
-assert_data_key_once_with_value "$signers_config" "enableMacosDesktopApps" "false" "documented signer array update writes macOS desktop-app boundary in data"
+assert_data_key_once_with_value "$signers_config" "enableMacosAppGroupTerminalApps" "false" "documented signer array update writes terminal-apps App Group in data"
+assert_data_key_once_with_value "$signers_config" "enableMacosAppGroupAutomation" "false" "documented signer array update writes automation App Group in data"
+assert_data_key_once_with_value "$signers_config" "enableMacosAppGroupLauncher" "false" "documented signer array update writes launcher App Group in data"
+assert_data_key_once_with_value "$signers_config" "enableMacosAppGroupMonitoring" "false" "documented signer array update writes monitoring App Group in data"
 assert_contains "$signers_config" "branch = \"main\"" "documented signer array update preserves later sections"
 
 multiline_array_home="$tmp_dir/multiline-array-home"

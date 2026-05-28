@@ -32,10 +32,15 @@ the initial terminal environment:
 - Bun, Python, uv/uvx, and Node.js via `~/.config/mise/config.toml`
 - pnpm through Node.js Corepack
 
-When `enableMacosDesktopApps` is `true`, macOS also installs the opt-in
-macOS Desktop App Stack from `Brewfile.macos-desktop-apps`:
+macOS desktop applications are split into opt-in App Groups controlled by
+machine-local data keys. During Homebrew bootstrap, chezmoi renders selected
+groups from `Brewfile.macos-desktop-apps.tmpl` into a temporary Brewfile and
+installs that rendered bundle:
 
-- Desktop terminals, launchers, keyboard automation, menu bar tools, and password manager CLI.
+- `terminal-apps`: Ghostty and cmux.
+- `automation`: Hammerspoon and Karabiner-Elements.
+- `launcher`: Raycast and 1Password CLI.
+- `monitoring`: iStat Menus.
 
 Machine-specific Homebrew packages should live outside the tracked `Brewfile`.
 
@@ -125,7 +130,7 @@ Raycast Store extensions and app state are restored manually from a
 `.rayconfig` backup stored in 1Password, rather than tracked directly in this
 repo.
 
-1. Enable/install the opt-in macOS Desktop App Stack, or otherwise ensure Raycast is installed.
+1. Enable/install the launcher macOS App Group with `enableMacosAppGroupLauncher`, or otherwise ensure Raycast is installed.
 2. Open the 1Password item for the Raycast settings export.
 3. Download the latest `.rayconfig` file.
 4. Run `Import Settings & Data` in Raycast.
@@ -142,17 +147,22 @@ Machine-local options are configured outside this repo with
 `chezmoi edit-config`. Keep only the option names, defaults, and examples here;
 do not commit workstation-specific values.
 
-All three optional stack profiles are disabled by default.
+Optional stack profiles and macOS App Group settings are disabled by default.
 
 | Key | Default | Purpose |
 | --- | --- | --- |
 | `enableEditorStack` | `false` | Enables the Optional Editor Stack, which manages the rich Neovim configuration. Plain Neovim remains in the Core Shell Stack either way. |
 | `enableAiCliTools` | `false` | Installs Gemini CLI, Claude Code, and Codex with npm through the mise-managed Node.js runtime. |
 | `enableDevelopmentWorkspace` | `false` | Enables the Optional Development Workspace preset, including the Optional Editor Stack, Optional AI Tool Stack, and development-specific Zellij workspace surfaces. |
-| `enableMacosDesktopApps` | `false` | Installs the opt-in macOS Desktop App Stack from `Brewfile.macos-desktop-apps`. This remains separate from `enableDevelopmentWorkspace` because desktop casks can affect shared applications outside one user's home directory. |
+| `enableMacosAppGroupTerminalApps` | `false` | Installs the terminal-apps macOS App Group: Ghostty and cmux. |
+| `enableMacosAppGroupAutomation` | `false` | Installs the automation macOS App Group: Hammerspoon and Karabiner-Elements. |
+| `enableMacosAppGroupLauncher` | `false` | Installs the launcher macOS App Group: Raycast and 1Password CLI. |
+| `enableMacosAppGroupMonitoring` | `false` | Installs the monitoring macOS App Group: iStat Menus. |
 | `gitAllowedSigners` | `[]` | Adds workstation-specific SSH signing identities to `~/.ssh/allowed_signers`. |
 
 When `enableDevelopmentWorkspace` is `true`, it enables both the Optional Editor Stack and Optional AI Tool Stack even if `enableEditorStack` or `enableAiCliTools` are false or omitted.
+
+macOS Desktop App Stack installation remains separate from `enableDevelopmentWorkspace` because desktop casks can affect shared applications outside one user's home directory.
 
 Opting out of an optional stack excludes its files from chezmoi management; it does not remove files already present on a machine.
 
