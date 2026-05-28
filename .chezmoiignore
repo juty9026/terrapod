@@ -3,6 +3,7 @@ Brewfile
 Brewfile.macos-desktop-apps
 AGENTS.md
 CONTEXT.md
+install.sh
 docs/**
 .github/**
 tests/**
