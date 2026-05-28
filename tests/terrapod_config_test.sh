@@ -274,6 +274,29 @@ assert_not_contains "$new_config" "enableMacosDesktopApps" "minimal Preset does 
 assert_not_contains "$new_config" "terrapodPreset" "minimal Preset stores concrete values instead of a dynamic Preset"
 assert_backup_count "$new_config" 0 "new config creation does not create a backup"
 
+development_home="$tmp_dir/development-home"
+development_xdg="$tmp_dir/development-xdg"
+development_config="$development_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$development_home"
+
+run_terrapod_configure development "" "$development_home" "$development_xdg"
+
+if [ ! -f "$development_config" ]; then
+  fail "development Preset creates a chezmoi config file"
+fi
+pass "development Preset creates a chezmoi config file"
+
+assert_data_key_once_with_value "$development_config" "enableEditorStack" "true" "development Preset enables Optional Editor Stack in a new config"
+assert_data_key_once_with_value "$development_config" "enableAiCliTools" "true" "development Preset enables Optional AI Tool Stack in a new config"
+assert_data_key_once_with_value "$development_config" "enableDevelopmentWorkspace" "true" "development Preset enables Optional Development Workspace in a new config"
+assert_data_key_once_with_value "$development_config" "enableMacosAppGroupTerminalApps" "false" "development Preset disables terminal-apps macOS App Group in a new config"
+assert_data_key_once_with_value "$development_config" "enableMacosAppGroupAutomation" "false" "development Preset disables automation macOS App Group in a new config"
+assert_data_key_once_with_value "$development_config" "enableMacosAppGroupLauncher" "false" "development Preset disables launcher macOS App Group in a new config"
+assert_data_key_once_with_value "$development_config" "enableMacosAppGroupMonitoring" "false" "development Preset disables monitoring macOS App Group in a new config"
+assert_not_contains "$development_config" "enableMacosDesktopApps" "development Preset does not write the legacy all-in desktop app toggle"
+assert_not_contains "$development_config" "terrapodPreset" "development Preset stores concrete values instead of a dynamic Preset"
+assert_backup_count "$development_config" 0 "development config creation does not create a backup"
+
 workstation_home="$tmp_dir/workstation-home"
 workstation_xdg="$tmp_dir/workstation-xdg"
 workstation_config="$workstation_xdg/chezmoi/chezmoi.toml"
@@ -895,6 +918,43 @@ fi
 pass "dangling symlink target remains missing after failed update"
 
 assert_no_terrapod_artifacts_near_path "$dangling_config" "dangling symlink config path leaves no Terrapod artifacts"
+
+empty_preset_home="$tmp_dir/empty-preset-home"
+empty_preset_xdg="$tmp_dir/empty-preset-xdg"
+empty_preset_config="$empty_preset_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$empty_preset_home" "$(dirname "$empty_preset_config")"
+
+cat >"$empty_preset_config" <<'TOML'
+[data]
+enableEditorStack = false
+keepMe = "yes"
+TOML
+cp "$empty_preset_config" "$tmp_dir/empty-preset-before.toml"
+
+if HOME="$empty_preset_home" XDG_CONFIG_HOME="$empty_preset_xdg" sh "$terrapod" configure "" >"$tmp_dir/empty-preset.out" 2>"$tmp_dir/empty-preset.err" </dev/null; then
+  fail "empty Preset fails before prompting"
+else
+  empty_preset_status="$?"
+fi
+
+if [ "$empty_preset_status" -ne 64 ]; then
+  fail "empty Preset exits with usage status 64; got $empty_preset_status"
+fi
+pass "empty Preset exits with usage status 64"
+
+assert_contains "$tmp_dir/empty-preset.err" "Preset is required" "empty Preset reports required Preset"
+assert_not_contains "$tmp_dir/empty-preset.err" "unknown Preset" "empty Preset does not report unknown Preset"
+assert_not_contains "$tmp_dir/empty-preset.err" "Update Terrapod-managed data keys" "empty Preset does not prompt before failing"
+assert_not_contains "$tmp_dir/empty-preset.out" "Update Terrapod-managed data keys" "empty Preset does not prompt on stdout before failing"
+assert_not_contains "$tmp_dir/empty-preset.out" "Configured Terrapod Preset" "empty Preset does not report success"
+
+if ! cmp -s "$empty_preset_config" "$tmp_dir/empty-preset-before.toml"; then
+  fail "empty Preset leaves existing config unchanged"
+fi
+pass "empty Preset leaves existing config unchanged"
+
+assert_backup_count "$empty_preset_config" 0 "empty Preset does not create a backup"
+assert_no_terrapod_temp_files "$empty_preset_config" "empty Preset leaves no Terrapod temp files"
 
 invalid_home="$tmp_dir/invalid-home"
 invalid_xdg="$tmp_dir/invalid-xdg"

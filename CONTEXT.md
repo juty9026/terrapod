@@ -68,6 +68,10 @@ _Avoid_: dotfiles repository, legacy source URL
 The short command alias for **Terrapod**.
 _Avoid_: separate tool, primary brand name
 
+**Terrapod Setup**:
+The interactive setup workflow that turns a **Preset** into concrete machine-local **Terrapod** settings before the initial apply.
+_Avoid_: OS provisioning wizard, standalone installer, configure shortcut
+
 **Preset**:
 A first-run setup choice that expands into concrete optional stack and app-group settings for a machine.
 _Avoid_: machine preset, permanent mode, dynamic policy
@@ -93,12 +97,17 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - The first-run **Terrapod** installer delegates chezmoi binary installation to the official `get.chezmoi.io` installer and installs it under `~/.local/bin`.
 - The first-run **Terrapod** installer uses `https://github.com/juty9026/terrapod.git` as the default source repository URL.
 - The first-run **Terrapod** installer stops with guidance when the default chezmoi source directory already exists instead of overwriting an existing checkout.
+- The first-run **Terrapod** installer invokes **Terrapod Setup** before the initial apply instead of asking users to run a second setup command manually.
 - chezmoi remains the internal apply engine for the **Dotfiles Management Tool**, not the primary workflow users need to remember.
 - The **Dotfiles Management Tool** exposes first-class maintenance commands when they add profile, preset, installer, or validation context around chezmoi behavior.
 - Direct chezmoi commands remain an escape hatch for advanced maintenance, not the default documented workflow.
+- **Terrapod Setup** belongs to the `terrapod` command surface, while `install.sh` remains the thin first-run bootstrap entry point.
+- `terrapod setup` is the human-facing **Terrapod Setup** wizard, while `terrapod configure <Preset>` remains the script-friendly command for writing concrete settings from one **Preset**.
 - A **Preset** is a starting point for concrete settings, not a permanent dynamic policy.
 - A **Preset** shows a summary of the optional stack and app-group settings it will enable before installation.
 - First-run setup allows users to customize the concrete settings produced by a **Preset** before they are saved.
+- **Terrapod Setup** lets users customize **Optional Editor Stack**, **Optional AI Tool Stack**, **Optional Development Workspace**, and applicable **macOS App Group** settings before saving concrete machine-local settings.
+- In **Terrapod Setup**, enabling **Optional Development Workspace** presents **Optional Editor Stack** and **Optional AI Tool Stack** as included by the workspace rather than independently disabled.
 - Changing a **Preset** in the future must not silently change machines that already saved concrete optional stack and app-group settings.
 - The first **Preset** choices are minimal, development, and workstation.
 - The minimal **Preset** keeps optional stacks and macOS app groups disabled.
@@ -170,6 +179,9 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Routine command output uses stable labels such as Profile, Config, Preflight, Delegating, Post-apply validation, and Guidance instead of brand metaphors.
 - Routine command stage labels may be lightly polished when the result stays concise, stable, and clear in copied logs.
 - The current command-output pass stays simple and does not add emoji or terminal color behavior.
+- The first-run **Terrapod** installer may use a richer terminal presentation for initial setup prompts such as **Preset** selection.
+- Rich first-run installer presentation is progressive enhancement: it must preserve a plain text fallback for non-TTY, dumb terminal, scripted, and test environments.
+- Rich first-run installer presentation does not imply emoji or terminal color behavior for routine **Terrapod** command output.
 - Error output avoids product metaphor and states the failed condition plus the next useful action.
 
 ## Example Dialogue
@@ -185,3 +197,4 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - "preset" means a **Preset** in first-run setup unless specifically referring to the **Optional Development Workspace** stack bundle.
 - "dotfiles command" means **Terrapod** unless discussing legacy naming or chezmoi internals.
 - "dotfiles repository" means the **Terrapod Source Repository** unless discussing the unsupported legacy `juty9026/dotfiles` slug.
+- "colorful output" can mean first-run installer prompt polish or routine command log styling; resolved here as first-run installer prompt polish only.

@@ -147,15 +147,56 @@ current_profile() {
   esac
 }
 
-available_preset_args() {
+known_presets() {
+  printf '%s\n' "minimal" "development" "workstation"
+}
+
+is_known_preset() {
   case "$1" in
-    macos-terminal)
-      printf '%s\n' "minimal|development|workstation"
+    minimal|development|workstation)
+      return 0
       ;;
     *)
-      printf '%s\n' "minimal|development"
+      return 1
       ;;
   esac
+}
+
+is_preset_available_for_profile() {
+  preset="$1"
+  profile="$2"
+
+  case "$preset" in
+    minimal|development)
+      return 0
+      ;;
+    workstation)
+      if [ "$profile" = "macos-terminal" ]; then
+        return 0
+      fi
+      return 1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+available_preset_args() {
+  profile="$1"
+  preset_args=
+
+  for preset in $(known_presets); do
+    if is_preset_available_for_profile "$preset" "$profile"; then
+      if [ -z "$preset_args" ]; then
+        preset_args="$preset"
+      else
+        preset_args="$preset_args|$preset"
+      fi
+    fi
+  done
+
+  printf '%s\n' "$preset_args"
 }
 
 profile_context_label() {
@@ -873,13 +914,17 @@ enableMacosAppGroupMonitoring = true
 EOF
       ;;
     *)
-      fail_usage "unknown Preset: $preset"
+      return 1
       ;;
   esac
 }
 
 validate_preset() {
-  render_preset_data "$1" >/dev/null
+  preset="$1"
+
+  if ! is_known_preset "$preset"; then
+    fail_usage "unknown Preset: $preset"
+  fi
 }
 
 validate_preset_for_profile() {
@@ -888,7 +933,7 @@ validate_preset_for_profile() {
 
   validate_preset "$preset"
 
-  if [ "$preset" = "workstation" ] && [ "$profile" != "macos-terminal" ]; then
+  if ! is_preset_available_for_profile "$preset" "$profile"; then
     fail_usage "workstation Preset is only available for the macOS Terminal Profile"
   fi
 }
@@ -920,6 +965,15 @@ reject_unusable_config_path() {
   if [ -L "$config_file" ] || { [ -e "$config_file" ] && [ ! -f "$config_file" ]; }; then
     fatal "config path is not a regular file: $config_file"
   fi
+}
+
+reject_unsupported_managed_config() {
+  config_file="$1"
+
+  reject_unusable_config_path "$config_file"
+  reject_unsupported_multiline_strings "$config_file"
+  reject_section_like_multiline_arrays "$config_file"
+  reject_unsupported_inline_data_table "$config_file"
 }
 
 reject_unsupported_inline_data_table() {
@@ -1139,10 +1193,7 @@ write_managed_config() {
   tmp_file=
   managed_data_file=
 
-  reject_unusable_config_path "$config_file"
-  reject_unsupported_multiline_strings "$config_file"
-  reject_section_like_multiline_arrays "$config_file"
-  reject_unsupported_inline_data_table "$config_file"
+  reject_unsupported_managed_config "$config_file"
 
   mkdir -p "$config_dir"
   trap cleanup_managed_config_temp EXIT
@@ -1322,6 +1373,38 @@ write_managed_config() {
   trap - EXIT HUP INT TERM
 }
 
+write_preset_settings() {
+  config_file="$1"
+  preset="$2"
+
+  validate_preset "$preset"
+  reject_unsupported_managed_config "$config_file"
+  confirm_existing_config_update "$config_file"
+  write_managed_config "$config_file" "$preset"
+}
+
+run_configure() {
+  if [ "$#" -eq 0 ]; then
+    fail_usage "Preset is required"
+  fi
+
+  if [ "$#" -gt 1 ]; then
+    fail_usage "configure accepts exactly one Preset"
+  fi
+
+  preset="$1"
+  if [ -z "$preset" ]; then
+    fail_usage "Preset is required"
+  fi
+
+  profile="$(current_profile)"
+  config_file="$(chezmoi_config_file)"
+
+  validate_preset_for_profile "$preset" "$profile"
+  write_preset_settings "$config_file" "$preset"
+  printf '%s\n' "Configured Terrapod Preset '$preset' in $config_file"
+}
+
 command_name="${1:-help}"
 
 case "$command_name" in
@@ -1330,27 +1413,7 @@ case "$command_name" in
     ;;
   configure)
     shift
-
-    preset="${1:-}"
-    if [ -z "$preset" ]; then
-      fail_usage "Preset is required"
-    fi
-
-    if [ "$#" -gt 1 ]; then
-      fail_usage "configure accepts exactly one Preset"
-    fi
-
-    profile="$(current_profile)"
-    validate_preset_for_profile "$preset" "$profile"
-
-    config_file="$(chezmoi_config_file)"
-    reject_unusable_config_path "$config_file"
-    reject_unsupported_multiline_strings "$config_file"
-    reject_section_like_multiline_arrays "$config_file"
-    reject_unsupported_inline_data_table "$config_file"
-    confirm_existing_config_update "$config_file"
-    write_managed_config "$config_file" "$preset"
-    printf '%s\n' "Configured Terrapod Preset '$preset' in $config_file"
+    run_configure "$@"
     ;;
   status)
     shift
