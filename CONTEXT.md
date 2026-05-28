@@ -40,6 +40,10 @@ _Avoid_: core terminal multiplexer config, default dev layout, mandatory workspa
 The operating-system package manager used only to prepare a machine for the shared tool stack.
 _Avoid_: primary CLI provider, runtime manager
 
+**Bootstrap UI Dependency**:
+A command-line UI tool that Terrapod requires before **Terrapod Setup** so first-run interactive choices use a reliable selection interface.
+_Avoid_: optional UI tool, setup-only helper, plain fallback enhancement, Core Shell Stack synonym
+
 **Modern CLI Provider**:
 The shared tool provider for modern command-line tools across supported machine profiles.
 _Avoid_: Homebrew replacement, standalone aqua
@@ -98,11 +102,23 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - The first-run **Terrapod** installer uses `https://github.com/juty9026/terrapod.git` as the default source repository URL.
 - The first-run **Terrapod** installer stops with guidance when the default chezmoi source directory already exists instead of overwriting an existing checkout.
 - The first-run **Terrapod** installer invokes **Terrapod Setup** before the initial apply instead of asking users to run a second setup command manually.
+- A **Bootstrap UI Dependency** is not a temporary setup-only helper; it remains available after first-run so later **Terrapod Setup** runs can use the same interaction model.
+- The first **Bootstrap UI Dependency** is gum, installed through the platform **Bootstrap Package Manager** before **Terrapod Setup**.
+- Failure to install a **Bootstrap UI Dependency** fails first-run installation before **Terrapod Setup** rather than falling back to a separate plain text interaction model.
+- **Terrapod Setup** uses gum for Preset selection, setting customization, and final confirmation instead of maintaining parallel rich and plain interaction models.
+- gum-backed setting customization uses sequential questions rather than a stateful toggle menu.
+- gum belongs to the declared machine state as well as the first-run bootstrap path, so **Terrapod** restores it through the macOS `Brewfile` and Ubuntu bootstrap scripts after initial apply.
+- Cancelling gum-backed **Terrapod Setup** preserves the existing setup cancellation contract: no config write, non-zero exit, and `terrapod: setup cancelled` guidance.
+- The first-run installer explains **Bootstrap UI Dependency** bootstrap failures before **Terrapod Setup**, and `terrapod setup` also explains missing gum when run directly after bootstrap.
+- On the **macOS Terminal Profile**, the first-run installer may run a best-effort Homebrew and gum bootstrap before **Terrapod Setup** for setup UI only; the declared-state Homebrew bootstrap still belongs to the initial apply.
+- On the **VPS Shell Profile**, the first-run installer may add the Charm APT repository and install gum before **Terrapod Setup** for setup UI only; failure stops first-run installation with guidance.
 - chezmoi remains the internal apply engine for the **Dotfiles Management Tool**, not the primary workflow users need to remember.
 - The **Dotfiles Management Tool** exposes first-class maintenance commands when they add profile, preset, installer, or validation context around chezmoi behavior.
 - Direct chezmoi commands remain an escape hatch for advanced maintenance, not the default documented workflow.
 - **Terrapod Setup** belongs to the `terrapod` command surface, while `install.sh` remains the thin first-run bootstrap entry point.
 - `terrapod setup` is the human-facing **Terrapod Setup** wizard, while `terrapod configure <Preset>` remains the script-friendly command for writing concrete settings from one **Preset**.
+- `terrapod configure <Preset>` is not a plain fallback for **Terrapod Setup**; it is a separate script-friendly configuration command without interactive customization.
+- **Terrapod Setup** does not expose a setup presentation mode switch; it has one gum-backed interactive presentation.
 - A **Preset** is a starting point for concrete settings, not a permanent dynamic policy.
 - A **Preset** shows a summary of the optional stack and app-group settings it will enable before installation.
 - First-run setup allows users to customize the concrete settings produced by a **Preset** before they are saved.
@@ -153,7 +169,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - The monitoring **macOS App Group** contains iStat Menus.
 - Individual macOS app toggles are excluded from the current **Terrapod** setup scope.
 - Repository renaming makes `juty9026/terrapod` the canonical slug for the **Terrapod Source Repository** without adding legacy URL fallback behavior.
-- Non-interactive setup options are deferred outside the current **Terrapod** installer and management command work.
+- Non-interactive setup options are deferred outside the current **Terrapod** installer and management command work, so **Terrapod Setup** may require an interactive terminal and the **Bootstrap UI Dependency**.
 - README presentation should make **Terrapod** feel like a small product with a clear identity and a quick-start guide, not primarily like an operations manual.
 - README still pairs the evocative **Terrapod** product promise with visible chezmoi and package-manager boundaries.
 - README treats chezmoi as visible underlying machinery, not as the main story or default workflow.
@@ -179,8 +195,8 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Routine command output uses stable labels such as Profile, Config, Preflight, Delegating, Post-apply validation, and Guidance instead of brand metaphors.
 - Routine command stage labels may be lightly polished when the result stays concise, stable, and clear in copied logs.
 - The current command-output pass stays simple and does not add emoji or terminal color behavior.
-- The first-run **Terrapod** installer may use a richer terminal presentation for initial setup prompts such as **Preset** selection.
-- Rich first-run installer presentation is progressive enhancement: it must preserve a plain text fallback for non-TTY, dumb terminal, scripted, and test environments.
+- The first-run **Terrapod** installer uses a gum-backed terminal presentation for initial setup prompts such as **Preset** selection.
+- The gum-backed first-run installer presentation is a required interactive path; non-TTY, dumb terminal, scripted, and missing-gum environments fail with guidance until non-interactive setup options are designed.
 - Rich first-run installer presentation does not imply emoji or terminal color behavior for routine **Terrapod** command output.
 - Error output avoids product metaphor and states the failed condition plus the next useful action.
 
@@ -198,3 +214,4 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - "dotfiles command" means **Terrapod** unless discussing legacy naming or chezmoi internals.
 - "dotfiles repository" means the **Terrapod Source Repository** unless discussing the unsupported legacy `juty9026/dotfiles` slug.
 - "colorful output" can mean first-run installer prompt polish or routine command log styling; resolved here as first-run installer prompt polish only.
+- "plain fallback" previously meant preserving a separate text-only **Terrapod Setup** path for non-TTY or missing UI tools; resolved: first-run **Terrapod Setup** now requires the **Bootstrap UI Dependency** and fails with guidance instead.
