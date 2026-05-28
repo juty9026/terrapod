@@ -519,3 +519,457 @@ if [ -e "$BROAD_UPGRADE_CALL_FILE" ]; then
 fi
 
 pass "Terrapod update rejects extra arguments before broad upgrade flows"
+
+export CHEZMOI_CALL_FILE="$tmp_dir/chezmoi-diff.args"
+export CHEZMOI_INVOKED_FILE="$tmp_dir/chezmoi-diff.invoked"
+
+write_stub "$tmp_dir/bin/chezmoi" \
+  'printf "%s\n" invoked >"$CHEZMOI_INVOKED_FILE"' \
+  ': >"$CHEZMOI_CALL_FILE"' \
+  'for arg do' \
+  '  printf "%s\n" "$arg" >>"$CHEZMOI_CALL_FILE"' \
+  'done' \
+  'printf "%s\n" "stub diff output"' \
+  'exit 0'
+
+write_stub "$tmp_dir/bin/uname" \
+  'printf "%s\n" "Darwin"'
+
+diff_home="$tmp_dir/diff-home"
+diff_xdg="$tmp_dir/diff-xdg"
+diff_config="$diff_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$diff_home" "$(dirname "$diff_config")"
+
+cat >"$diff_config" <<'TOML'
+[data]
+enableEditorStack = false
+enableAiCliTools = false
+enableDevelopmentWorkspace = true
+enableMacosAppGroupTerminalApps = true
+enableMacosAppGroupAutomation = false
+enableMacosAppGroupLauncher = true
+enableMacosAppGroupMonitoring = false
+TOML
+
+if ! HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$terrapod" diff >"$tmp_dir/diff.out" 2>"$tmp_dir/diff.err"; then
+  printf '%s\n' "diff stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/diff.out" >&2
+  printf '%s\n' "diff stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/diff.err" >&2
+  fail "Terrapod diff runs successfully"
+fi
+
+diff_output="$(cat "$tmp_dir/diff.out")"
+
+assert_call_args \
+  "$CHEZMOI_CALL_FILE" \
+  "Terrapod diff delegates target-state diff behavior to chezmoi diff" \
+  diff
+
+assert_contains \
+  "$diff_output" \
+  "Terrapod diff" \
+  "Terrapod diff prints command context"
+
+assert_contains \
+  "$diff_output" \
+  "Profile: macOS Terminal Profile" \
+  "Terrapod diff prints active profile context"
+
+assert_contains \
+  "$diff_output" \
+  "Config: $diff_config (present)" \
+  "Terrapod diff prints config context"
+
+assert_contains \
+  "$diff_output" \
+  "Optional stacks:" \
+  "Terrapod diff prints optional stack section header"
+
+assert_contains \
+  "$diff_output" \
+  "Optional Editor Stack: enabled" \
+  "Terrapod diff prints effective enabled Optional Editor Stack state"
+
+assert_contains \
+  "$diff_output" \
+  "Optional AI Tool Stack: enabled" \
+  "Terrapod diff prints effective enabled Optional AI Tool Stack state"
+
+assert_contains \
+  "$diff_output" \
+  "Optional Development Workspace: enabled" \
+  "Terrapod diff prints enabled Optional Development Workspace state"
+
+assert_contains \
+  "$diff_output" \
+  "macOS App Groups:" \
+  "Terrapod diff prints macOS App Groups section header"
+
+assert_contains \
+  "$diff_output" \
+  "terminal-apps: enabled" \
+  "Terrapod diff prints enabled terminal-apps macOS App Group state"
+
+assert_contains \
+  "$diff_output" \
+  "automation: disabled" \
+  "Terrapod diff prints disabled automation macOS App Group state"
+
+assert_contains \
+  "$diff_output" \
+  "launcher: enabled" \
+  "Terrapod diff prints enabled launcher macOS App Group state"
+
+assert_contains \
+  "$diff_output" \
+  "monitoring: disabled" \
+  "Terrapod diff prints disabled monitoring macOS App Group state"
+
+assert_contains \
+  "$diff_output" \
+  "Delegating target-state diff to: chezmoi diff" \
+  "Terrapod diff explains the delegated command"
+
+assert_contains \
+  "$diff_output" \
+  "stub diff output" \
+  "Terrapod diff includes delegated chezmoi diff output"
+
+rm -f "$CHEZMOI_CALL_FILE" "$CHEZMOI_INVOKED_FILE"
+
+if HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" TERRAPOD_CHEZMOI_CONFIG="$diff_config" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$terrapod" diff --verbose >"$tmp_dir/diff-extra.out" 2>"$tmp_dir/diff-extra.err"; then
+  fail "Terrapod diff rejects extra arguments"
+fi
+
+diff_extra_error="$(cat "$tmp_dir/diff-extra.err")"
+
+assert_contains \
+  "$diff_extra_error" \
+  "terrapod: diff accepts no arguments" \
+  "Terrapod diff explains rejected extra arguments"
+
+if [ -e "$CHEZMOI_INVOKED_FILE" ]; then
+  fail "Terrapod diff rejects extra arguments before calling chezmoi"
+fi
+
+pass "Terrapod diff rejects extra arguments before calling chezmoi"
+
+rm -f "$CHEZMOI_CALL_FILE" "$CHEZMOI_INVOKED_FILE"
+
+if ! HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" TERRAPOD_CHEZMOI_CONFIG="$diff_config" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$terrapod" diff >"$tmp_dir/diff-override.out" 2>"$tmp_dir/diff-override.err"; then
+  printf '%s\n' "override diff stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/diff-override.out" >&2
+  printf '%s\n' "override diff stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/diff-override.err" >&2
+  fail "Terrapod diff runs successfully with an explicit config override"
+fi
+
+diff_override_output="$(cat "$tmp_dir/diff-override.out")"
+
+assert_call_args \
+  "$CHEZMOI_CALL_FILE" \
+  "Terrapod diff passes explicit config overrides to chezmoi diff" \
+  --config "$diff_config" diff
+
+assert_contains \
+  "$diff_override_output" \
+  "Delegating target-state diff to: chezmoi --config $diff_config diff" \
+  "Terrapod diff explains delegated explicit config command"
+
+export CHEZMOI_APPLY_ARGS_FILE="$tmp_dir/chezmoi-apply.args"
+export CHEZMOI_APPLY_INVOKED_FILE="$tmp_dir/chezmoi-apply.invoked"
+export CHEZMOI_MANAGED_ARGS_FILE="$tmp_dir/chezmoi-managed.args"
+
+write_stub "$tmp_dir/bin/chezmoi" \
+  'command_name=' \
+  'for arg do' \
+  '  case "$arg" in' \
+  '    apply|managed)' \
+  '      command_name="$arg"' \
+  '      ;;' \
+  '  esac' \
+  'done' \
+  'case "$command_name" in' \
+  '  apply)' \
+  '    printf "%s\n" invoked >"$CHEZMOI_APPLY_INVOKED_FILE"' \
+  '    : >"$CHEZMOI_APPLY_ARGS_FILE"' \
+  '    for arg do' \
+  '      printf "%s\n" "$arg" >>"$CHEZMOI_APPLY_ARGS_FILE"' \
+  '    done' \
+  '    printf "%s\n" "stub apply output"' \
+  '    exit 0' \
+  '    ;;' \
+  '  managed)' \
+  '    : >"$CHEZMOI_MANAGED_ARGS_FILE"' \
+  '    for arg do' \
+  '      printf "%s\n" "$arg" >>"$CHEZMOI_MANAGED_ARGS_FILE"' \
+  '    done' \
+  '    printf "%s\n" ".local/bin/terrapod"' \
+  '    printf "%s\n" ".local/bin/tpod"' \
+  '    exit 0' \
+  '    ;;' \
+  'esac' \
+  'printf "%s\n" "unexpected chezmoi command: $*" >&2' \
+  'exit 91'
+
+rm -f "$CHEZMOI_APPLY_ARGS_FILE" "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
+
+if ! HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$terrapod" apply >"$tmp_dir/apply.out" 2>"$tmp_dir/apply.err"; then
+  printf '%s\n' "apply stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/apply.out" >&2
+  printf '%s\n' "apply stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/apply.err" >&2
+  fail "Terrapod apply runs successfully"
+fi
+
+apply_output="$(cat "$tmp_dir/apply.out")"
+
+assert_call_args \
+  "$CHEZMOI_APPLY_ARGS_FILE" \
+  "Terrapod apply delegates target-state apply behavior to chezmoi apply" \
+  apply
+
+assert_call_args \
+  "$CHEZMOI_MANAGED_ARGS_FILE" \
+  "Terrapod apply validates managed targets with chezmoi managed" \
+  managed
+
+assert_contains \
+  "$apply_output" \
+  "Terrapod apply" \
+  "Terrapod apply prints command context"
+
+assert_contains \
+  "$apply_output" \
+  "Profile: macOS Terminal Profile" \
+  "Terrapod apply prints active profile context"
+
+assert_contains \
+  "$apply_output" \
+  "Config: $diff_config (present)" \
+  "Terrapod apply prints config context"
+
+assert_contains \
+  "$apply_output" \
+  "Optional stacks:" \
+  "Terrapod apply prints optional stack section header"
+
+assert_contains \
+  "$apply_output" \
+  "Optional Editor Stack: enabled" \
+  "Terrapod apply prints effective enabled Optional Editor Stack state"
+
+assert_contains \
+  "$apply_output" \
+  "Optional AI Tool Stack: enabled" \
+  "Terrapod apply prints effective enabled Optional AI Tool Stack state"
+
+assert_contains \
+  "$apply_output" \
+  "Optional Development Workspace: enabled" \
+  "Terrapod apply prints enabled Optional Development Workspace state"
+
+assert_contains \
+  "$apply_output" \
+  "terminal-apps: enabled" \
+  "Terrapod apply prints enabled terminal-apps macOS App Group state"
+
+assert_contains \
+  "$apply_output" \
+  "automation: disabled" \
+  "Terrapod apply prints disabled automation macOS App Group state"
+
+assert_contains \
+  "$apply_output" \
+  "launcher: enabled" \
+  "Terrapod apply prints enabled launcher macOS App Group state"
+
+assert_contains \
+  "$apply_output" \
+  "monitoring: disabled" \
+  "Terrapod apply prints disabled monitoring macOS App Group state"
+
+assert_contains \
+  "$apply_output" \
+  "Preflight: chezmoi is available" \
+  "Terrapod apply confirms chezmoi preflight"
+
+assert_contains \
+  "$apply_output" \
+  "Preflight: config file is readable" \
+  "Terrapod apply confirms readable config preflight"
+
+assert_contains \
+  "$apply_output" \
+  "Delegating target-state apply to: chezmoi apply" \
+  "Terrapod apply explains the delegated command"
+
+assert_contains \
+  "$apply_output" \
+  "stub apply output" \
+  "Terrapod apply includes delegated chezmoi apply output"
+
+assert_contains \
+  "$apply_output" \
+  "Post-apply validation: Terrapod command is managed" \
+  "Terrapod apply validates the Terrapod command managed target"
+
+assert_contains \
+  "$apply_output" \
+  "Post-apply validation: tpod alias is managed" \
+  "Terrapod apply validates the tpod alias managed target"
+
+rm -f "$CHEZMOI_APPLY_ARGS_FILE" "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
+
+if HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$terrapod" apply --dry-run >"$tmp_dir/apply-extra.out" 2>"$tmp_dir/apply-extra.err"; then
+  fail "Terrapod apply rejects extra arguments"
+fi
+
+apply_extra_error="$(cat "$tmp_dir/apply-extra.err")"
+
+assert_contains \
+  "$apply_extra_error" \
+  "terrapod: apply accepts no arguments" \
+  "Terrapod apply explains rejected extra arguments"
+
+if [ -e "$CHEZMOI_APPLY_INVOKED_FILE" ]; then
+  fail "Terrapod apply rejects extra arguments before calling chezmoi apply"
+fi
+
+pass "Terrapod apply rejects extra arguments before calling chezmoi apply"
+
+rm -f "$CHEZMOI_APPLY_ARGS_FILE" "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
+
+if ! HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" TERRAPOD_CHEZMOI_CONFIG="$diff_config" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$terrapod" apply >"$tmp_dir/apply-override.out" 2>"$tmp_dir/apply-override.err"; then
+  printf '%s\n' "override apply stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/apply-override.out" >&2
+  printf '%s\n' "override apply stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/apply-override.err" >&2
+  fail "Terrapod apply runs successfully with an explicit config override"
+fi
+
+apply_override_output="$(cat "$tmp_dir/apply-override.out")"
+
+assert_call_args \
+  "$CHEZMOI_APPLY_ARGS_FILE" \
+  "Terrapod apply passes explicit config overrides to chezmoi apply" \
+  --config "$diff_config" apply
+
+assert_call_args \
+  "$CHEZMOI_MANAGED_ARGS_FILE" \
+  "Terrapod apply passes explicit config overrides to chezmoi managed" \
+  --config "$diff_config" managed
+
+assert_contains \
+  "$apply_override_output" \
+  "Delegating target-state apply to: chezmoi --config $diff_config apply" \
+  "Terrapod apply explains delegated explicit config command"
+
+symlink_config_target="$tmp_dir/symlink-target-chezmoi.toml"
+symlink_config="$tmp_dir/symlink-chezmoi.toml"
+cp "$diff_config" "$symlink_config_target"
+ln -s "$symlink_config_target" "$symlink_config"
+
+rm -f "$CHEZMOI_APPLY_ARGS_FILE" "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
+
+if ! HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" TERRAPOD_CHEZMOI_CONFIG="$symlink_config" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$terrapod" apply >"$tmp_dir/apply-symlink.out" 2>"$tmp_dir/apply-symlink.err"; then
+  printf '%s\n' "symlink config apply stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/apply-symlink.out" >&2
+  printf '%s\n' "symlink config apply stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/apply-symlink.err" >&2
+  fail "Terrapod apply accepts a symlink to a regular config file"
+fi
+
+apply_symlink_output="$(cat "$tmp_dir/apply-symlink.out")"
+
+assert_call_args \
+  "$CHEZMOI_APPLY_ARGS_FILE" \
+  "Terrapod apply delegates with a symlink config path" \
+  --config "$symlink_config" apply
+
+assert_call_args \
+  "$CHEZMOI_MANAGED_ARGS_FILE" \
+  "Terrapod apply validates managed targets with a symlink config path" \
+  --config "$symlink_config" managed
+
+assert_contains \
+  "$apply_symlink_output" \
+  "Preflight: config file is readable" \
+  "Terrapod apply treats symlinked config files as readable"
+
+write_stub "$tmp_dir/bin/chezmoi" \
+  'command_name=' \
+  'for arg do' \
+  '  case "$arg" in' \
+  '    apply|managed)' \
+  '      command_name="$arg"' \
+  '      ;;' \
+  '  esac' \
+  'done' \
+  'case "$command_name" in' \
+  '  apply)' \
+  '    printf "%s\n" invoked >"$CHEZMOI_APPLY_INVOKED_FILE"' \
+  '    : >"$CHEZMOI_APPLY_ARGS_FILE"' \
+  '    for arg do' \
+  '      printf "%s\n" "$arg" >>"$CHEZMOI_APPLY_ARGS_FILE"' \
+  '    done' \
+  '    printf "%s\n" "stub apply output"' \
+  '    exit 0' \
+  '    ;;' \
+  '  managed)' \
+  '    : >"$CHEZMOI_MANAGED_ARGS_FILE"' \
+  '    for arg do' \
+  '      printf "%s\n" "$arg" >>"$CHEZMOI_MANAGED_ARGS_FILE"' \
+  '    done' \
+  '    printf "%s\n" ".local/bin/terrapod"' \
+  '    exit 0' \
+  '    ;;' \
+  'esac' \
+  'printf "%s\n" "unexpected chezmoi command: $*" >&2' \
+  'exit 91'
+
+rm -f "$CHEZMOI_APPLY_ARGS_FILE" "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
+
+if HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$terrapod" apply >"$tmp_dir/apply-validation.out" 2>"$tmp_dir/apply-validation.err"; then
+  fail "Terrapod apply fails when tpod alias is not managed"
+fi
+
+apply_validation_error="$(cat "$tmp_dir/apply-validation.err")"
+
+assert_contains \
+  "$apply_validation_error" \
+  "terrapod: post-apply validation failed: tpod alias is not managed (.local/bin/tpod missing)" \
+  "Terrapod apply explains missing tpod alias managed target"
+
+assert_contains \
+  "$apply_validation_error" \
+  "Run 'terrapod chezmoi -- managed' to inspect managed targets, then rerun 'terrapod apply'." \
+  "Terrapod apply gives actionable post-apply validation guidance"
+
+rm -f "$CHEZMOI_APPLY_ARGS_FILE" "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
+
+if HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" TERRAPOD_CHEZMOI_CONFIG="$diff_config" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$terrapod" apply >"$tmp_dir/apply-override-validation.out" 2>"$tmp_dir/apply-override-validation.err"; then
+  fail "Terrapod apply fails when tpod alias is not managed with an explicit config override"
+fi
+
+apply_override_validation_error="$(cat "$tmp_dir/apply-override-validation.err")"
+
+assert_contains \
+  "$apply_override_validation_error" \
+  "terrapod: post-apply validation failed: tpod alias is not managed (.local/bin/tpod missing)" \
+  "Terrapod apply explains missing tpod alias managed target with an explicit config override"
+
+assert_contains \
+  "$apply_override_validation_error" \
+  "Run 'terrapod chezmoi -- --config $diff_config managed' to inspect managed targets, then rerun 'terrapod apply'." \
+  "Terrapod apply gives config-aware post-apply validation guidance"
