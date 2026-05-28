@@ -159,6 +159,89 @@ reject_unsupported_inline_data_table() {
   fi
 }
 
+reject_unsupported_multiline_string_data_markers() {
+  config_file="$1"
+
+  if [ ! -f "$config_file" ]; then
+    return 0
+  fi
+
+  if awk '
+    BEGIN {
+      multiline_literal = sprintf("%c%c%c", 39, 39, 39)
+      multiline_basic = "\"\"\""
+    }
+
+    function marker_count(line, marker, count, position) {
+      count = 0
+      while ((position = index(line, marker)) > 0) {
+        count++
+        line = substr(line, position + length(marker))
+      }
+      return count
+    }
+
+    function is_data_section(line) {
+      return line ~ "^[[:space:]]*\\[[[:space:]]*(data|\"data\"|\047data\047)[[:space:]]*\\][[:space:]]*($|#)"
+    }
+
+    function is_managed_key(line) {
+      return line ~ "^[[:space:]]*(\"enableEditorStack\"|\"enableAiCliTools\"|\"enableDevelopmentWorkspace\"|\"enableMacosDesktopApps\"|\"terrapodPreset\"|\047enableEditorStack\047|\047enableAiCliTools\047|\047enableDevelopmentWorkspace\047|\047enableMacosDesktopApps\047|\047terrapodPreset\047|enableEditorStack|enableAiCliTools|enableDevelopmentWorkspace|enableMacosDesktopApps|terrapodPreset)[[:space:]]*="
+    }
+
+    function is_root_dotted_data_key(line) {
+      return line ~ "^[[:space:]]*(data|\"data\"|\047data\047)[[:space:]]*\\."
+    }
+
+    function is_inline_data_table(line) {
+      return line ~ "^[[:space:]]*(data|\"data\"|\047data\047)[[:space:]]*=[[:space:]]*\\{"
+    }
+
+    function has_data_marker(line) {
+      return is_data_section(line) || is_managed_key(line) || is_root_dotted_data_key(line) || is_inline_data_table(line)
+    }
+
+    function toggle_multiline_if_needed(line, marker) {
+      if (marker_count(line, marker) % 2 == 1) {
+        if (in_multiline) {
+          in_multiline = 0
+          multiline_marker = ""
+        } else {
+          in_multiline = 1
+          multiline_marker = marker
+        }
+      }
+    }
+
+    {
+      if (in_multiline) {
+        if (has_data_marker($0)) {
+          found = 1
+        }
+        toggle_multiline_if_needed($0, multiline_marker)
+        next
+      }
+
+      if (marker_count($0, multiline_literal) % 2 == 1) {
+        in_multiline = 1
+        multiline_marker = multiline_literal
+        next
+      }
+
+      if (marker_count($0, multiline_basic) % 2 == 1) {
+        in_multiline = 1
+        multiline_marker = multiline_basic
+      }
+    }
+
+    END {
+      exit found ? 0 : 1
+    }
+  ' "$config_file"; then
+    fatal "unsupported multiline string containing data-like config lines; rewrite that string or convert the real data values to a [data] table before running configure: $config_file"
+  fi
+}
+
 backup_existing_config() {
   config_file="$1"
 
@@ -182,6 +265,7 @@ write_managed_config() {
   managed_data_file=
 
   reject_unusable_config_path "$config_file"
+  reject_unsupported_multiline_string_data_markers "$config_file"
   reject_unsupported_inline_data_table "$config_file"
 
   mkdir -p "$config_dir"
@@ -336,6 +420,7 @@ case "$command_name" in
 
     config_file="$(chezmoi_config_file)"
     reject_unusable_config_path "$config_file"
+    reject_unsupported_multiline_string_data_markers "$config_file"
     reject_unsupported_inline_data_table "$config_file"
     confirm_existing_config_update "$config_file"
     write_managed_config "$config_file" "$preset"

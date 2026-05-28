@@ -581,6 +581,41 @@ pass "inline data table rejection leaves existing config unchanged"
 assert_backup_count "$inline_table_config" 0 "inline data table rejection does not create a backup"
 assert_no_terrapod_temp_files "$inline_table_config" "inline data table rejection leaves no Terrapod temp files"
 
+multiline_string_home="$tmp_dir/multiline-string-home"
+multiline_string_xdg="$tmp_dir/multiline-string-xdg"
+multiline_string_config="$multiline_string_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$multiline_string_home" "$(dirname "$multiline_string_config")"
+
+cat >"$multiline_string_config" <<'TOML'
+notes = '''
+[data]
+enableEditorStack = false
+keep this line in the string
+'''
+
+[sourceState]
+branch = "main"
+TOML
+cp "$multiline_string_config" "$tmp_dir/multiline-string-before.toml"
+
+if printf '%s\n' "y" |
+  HOME="$multiline_string_home" XDG_CONFIG_HOME="$multiline_string_xdg" sh "$terrapod" configure development >"$tmp_dir/multiline-string.out" 2>"$tmp_dir/multiline-string.err"; then
+  fail "multiline string with data-like content is rejected instead of rewritten"
+fi
+pass "multiline string with data-like content is rejected instead of rewritten"
+
+assert_contains "$tmp_dir/multiline-string.err" "unsupported multiline string" "multiline string rejection explains unsupported format"
+assert_not_contains "$tmp_dir/multiline-string.err" "Update Terrapod-managed data keys" "multiline string rejection does not prompt before failing"
+assert_not_contains "$tmp_dir/multiline-string.out" "Configured Terrapod Preset" "multiline string rejection does not report success"
+
+if ! cmp -s "$multiline_string_config" "$tmp_dir/multiline-string-before.toml"; then
+  fail "multiline string rejection leaves existing config unchanged"
+fi
+pass "multiline string rejection leaves existing config unchanged"
+
+assert_backup_count "$multiline_string_config" 0 "multiline string rejection does not create a backup"
+assert_no_terrapod_temp_files "$multiline_string_config" "multiline string rejection leaves no Terrapod temp files"
+
 decline_home="$tmp_dir/decline-home"
 decline_xdg="$tmp_dir/decline-xdg"
 decline_config="$decline_xdg/chezmoi/chezmoi.toml"
