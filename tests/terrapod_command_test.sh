@@ -389,9 +389,9 @@ if ! run_terrapod_setup_command macos-terminal 'workstation
 y
 ' "$setup_home" "$setup_xdg" "$setup_output"; then
   sed 's/^/  /' "$setup_output" >&2
-  fail "macOS Terminal Profile setup completes with workstation"
+  fail "macOS Terminal Profile setup prompts for customization before final confirmation and completes with workstation"
 fi
-pass "macOS Terminal Profile setup completes with workstation"
+pass "macOS Terminal Profile setup prompts for customization before final confirmation and completes with workstation"
 
 setup_output_text="$(cat "$setup_output")"
 assert_contains "$setup_output_text" "Terrapod setup" "plain setup prints a command heading"

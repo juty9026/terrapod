@@ -340,14 +340,21 @@ setup_workstation_xdg="$tmp_dir/setup-workstation-xdg"
 setup_workstation_config="$setup_workstation_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$setup_workstation_home"
 
-run_terrapod_setup macos-terminal 'workstation
+if ! run_terrapod_setup macos-terminal 'workstation
 
 
 
 
 
 y
-' "$setup_workstation_home" "$setup_workstation_xdg"
+' "$setup_workstation_home" "$setup_workstation_xdg" >"$tmp_dir/setup-workstation.out" 2>"$tmp_dir/setup-workstation.err"; then
+  printf '%s\n' "setup stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/setup-workstation.out" >&2
+  printf '%s\n' "setup stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/setup-workstation.err" >&2
+  fail "confirmed setup accepts customization prompts before final confirmation"
+fi
+pass "confirmed setup accepts customization prompts before final confirmation"
 
 if [ ! -f "$setup_workstation_config" ]; then
   fail "confirmed setup creates a chezmoi config file"
@@ -382,11 +389,10 @@ y
   sed 's/^/  /' "$tmp_dir/setup-custom-workspace.out" >&2
   printf '%s\n' "setup stderr:" >&2
   sed 's/^/  /' "$tmp_dir/setup-custom-workspace.err" >&2
-  fail "macOS setup customizes Optional Development Workspace and App Groups"
+  fail "macOS setup prompts for customization before final confirmation and customizes Optional Development Workspace and App Groups"
 fi
-pass "macOS setup customizes Optional Development Workspace and App Groups"
+pass "macOS setup prompts for customization before final confirmation and customizes Optional Development Workspace and App Groups"
 
-setup_custom_workspace_output="$(cat "$tmp_dir/setup-custom-workspace.out" "$tmp_dir/setup-custom-workspace.err")"
 assert_contains "$tmp_dir/setup-custom-workspace.out" "Optional Editor Stack: included by Optional Development Workspace" "workspace-enabled setup presents Optional Editor Stack as included"
 assert_contains "$tmp_dir/setup-custom-workspace.out" "Optional AI Tool Stack: included by Optional Development Workspace" "workspace-enabled setup presents Optional AI Tool Stack as included"
 assert_contains "$tmp_dir/setup-custom-workspace.out" "enableEditorStack = true" "workspace-enabled setup summary reflects included Optional Editor Stack"
@@ -429,13 +435,18 @@ y
   sed 's/^/  /' "$tmp_dir/setup-leaf.out" >&2
   printf '%s\n' "setup stderr:" >&2
   sed 's/^/  /' "$tmp_dir/setup-leaf.err" >&2
-  fail "workspace-disabled setup customizes leaf stacks independently"
+  fail "workspace-disabled setup prompts for customization before final confirmation and customizes leaf stacks independently"
 fi
-pass "workspace-disabled setup customizes leaf stacks independently"
+pass "workspace-disabled setup prompts for customization before final confirmation and customizes leaf stacks independently"
 
 assert_contains "$tmp_dir/setup-leaf.out" "enableEditorStack = false" "workspace-disabled setup summary reflects customized Optional Editor Stack"
 assert_contains "$tmp_dir/setup-leaf.out" "enableAiCliTools = true" "workspace-disabled setup summary reflects customized Optional AI Tool Stack"
 assert_contains "$tmp_dir/setup-leaf.out" "enableDevelopmentWorkspace = false" "workspace-disabled setup summary reflects disabled Optional Development Workspace"
+
+if [ ! -f "$setup_leaf_config" ]; then
+  fail "workspace-disabled customized setup creates a chezmoi config file"
+fi
+pass "workspace-disabled customized setup creates a chezmoi config file"
 
 assert_data_key_once_with_value "$setup_leaf_config" "enableEditorStack" "false" "workspace-disabled setup writes customized Optional Editor Stack"
 assert_data_key_once_with_value "$setup_leaf_config" "enableAiCliTools" "true" "workspace-disabled setup writes customized Optional AI Tool Stack"
@@ -460,9 +471,9 @@ y
   sed 's/^/  /' "$tmp_dir/setup-vps-custom.out" >&2
   printf '%s\n' "setup stderr:" >&2
   sed 's/^/  /' "$tmp_dir/setup-vps-custom.err" >&2
-  fail "VPS setup customizes optional stacks without macOS App Groups"
+  fail "VPS setup prompts for customization before final confirmation and customizes optional stacks without macOS App Groups"
 fi
-pass "VPS setup customizes optional stacks without macOS App Groups"
+pass "VPS setup prompts for customization before final confirmation and customizes optional stacks without macOS App Groups"
 
 setup_vps_custom_output="$(cat "$tmp_dir/setup-vps-custom.out" "$tmp_dir/setup-vps-custom.err")"
 if printf '%s\n' "$setup_vps_custom_output" | grep -F "terminal-apps macOS App Group" >/dev/null; then
@@ -474,6 +485,11 @@ assert_contains "$tmp_dir/setup-vps-custom.out" "macOS App Groups: not applicabl
 assert_contains "$tmp_dir/setup-vps-custom.out" "enableEditorStack = true" "VPS setup summary reflects customized Optional Editor Stack"
 assert_contains "$tmp_dir/setup-vps-custom.out" "enableAiCliTools = false" "VPS setup summary reflects customized Optional AI Tool Stack"
 assert_contains "$tmp_dir/setup-vps-custom.out" "enableDevelopmentWorkspace = false" "VPS setup summary reflects disabled Optional Development Workspace"
+
+if [ ! -f "$setup_vps_custom_config" ]; then
+  fail "VPS customized setup creates a chezmoi config file"
+fi
+pass "VPS customized setup creates a chezmoi config file"
 
 assert_data_key_once_with_value "$setup_vps_custom_config" "enableEditorStack" "true" "VPS setup writes customized Optional Editor Stack"
 assert_data_key_once_with_value "$setup_vps_custom_config" "enableAiCliTools" "false" "VPS setup writes customized Optional AI Tool Stack"
