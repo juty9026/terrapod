@@ -72,6 +72,14 @@ _Avoid_: separate tool, primary brand name
 A first-run setup choice that expands into concrete optional stack and app-group settings for a machine.
 _Avoid_: machine preset, permanent mode, dynamic policy
 
+**Canonical README**:
+The English `README.md` that defines the authoritative Terrapod README content.
+_Avoid_: primary docs, source README
+
+**Korean README**:
+The Korean-language README that follows the **Canonical README** for Korean readers.
+_Avoid_: separate Korean introduction, independent README, self-labeled translation
+
 ## Relationships
 
 - The **Dotfiles Management Tool** is the user-facing entry point for first install, configuration changes, and routine dotfiles maintenance.
@@ -147,6 +155,16 @@ _Avoid_: machine preset, permanent mode, dynamic policy
 - README section naming should support the product-first quick-start shape, using names such as Quick Start, What Terrapod Carries, Choose a Preset, What Terrapod Leaves Alone, Daily Commands, Platform Details, Local Overrides, Manual Restore, and Repository Conventions.
 - README section titles and command examples use canonical domain terms such as **Preset**, while product metaphor stays in supporting explanatory copy.
 - README should explain **Preset** choices by the kind of machine they suit before listing the concrete optional stack and app-group settings they expand into.
+- The **Canonical README** is the source of truth for README content.
+- The **Korean README** follows the **Canonical README**, but it does not need to label itself as a translation.
+- The **Korean README** lives at `README.ko.md`.
+- The **Korean README** keeps canonical domain terms such as **Terrapod**, **Preset**, optional stack names, and **macOS App Group** in English while explaining them in natural Korean.
+- The **Korean README** keeps section headings in English to mirror the **Canonical README** heading structure directly.
+- The **Korean README** translates body copy, table headers, and list explanations into natural Korean while preserving command names, config keys, file names, literal values, and canonical domain terms in English.
+- The **Canonical README** and **Korean README** use a compact globe-marked language switcher directly below the `# Terrapod` heading, with the current language bolded and the other README linked.
+- Changes to the **Canonical README** should make heading-structure drift in the **Korean README** visible during maintenance.
+- README drift checks compare corresponding section headings only; they do not enforce paragraph, table, or code block parity.
+- README drift checks compare all Markdown heading lines from `README.md` and `README.ko.md` for exact text and order.
 - `terrapod help` may carry a concise product introduction, but routine command output stays operational and scan-friendly.
 - `terrapod help` introduces **Terrapod** as a small landing pod for dotfiles and immediately states that chezmoi remains underneath while package-manager upgrades stay outside scope.
 - Routine command output uses stable labels such as Profile, Config, Preflight, Delegating, Post-apply validation, and Guidance instead of brand metaphors.

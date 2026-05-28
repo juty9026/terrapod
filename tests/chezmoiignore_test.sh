@@ -139,6 +139,21 @@ fi
 
 pass "development tests are ignored by chezmoi"
 
+managed_repository_docs="$(
+  chezmoi \
+    --config "$chezmoi_config" \
+    --source "$repo_root" \
+    managed \
+    --path-style source-relative |
+    grep -E '^(README(\.ko)?\.md|AGENTS\.md|CONTEXT\.md|docs/)' || true
+)"
+
+if [ -n "$managed_repository_docs" ]; then
+  fail "repository documentation should not be managed by chezmoi: $managed_repository_docs"
+fi
+
+pass "repository documentation is ignored by chezmoi"
+
 ubuntu_data='{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableEditorStack":false,"enableAiCliTools":false,"enableDevelopmentWorkspace":false}'
 ubuntu_managed="$(managed_source_paths "$ubuntu_data")"
 macos_data='{"chezmoi":{"os":"darwin"},"enableEditorStack":false,"enableAiCliTools":false,"enableDevelopmentWorkspace":false}'
