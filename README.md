@@ -1,5 +1,7 @@
 # Terrapod
 
+🌐 Language: **English** | [한국어](README.ko.md)
+
 Terrapod is a small landing pod for your machines: it brings your familiar
 shell, editor, runtime, and desktop habits to a fresh Mac or Ubuntu 24.04 VPS.
 
