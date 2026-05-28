@@ -10,6 +10,7 @@ Uses chezmoi underneath; keeps package-manager upgrades outside its scope.
 
 Usage:
   terrapod [help|--help|-h]
+  terrapod setup
   terrapod configure <$preset_args>
   terrapod status
   terrapod doctor
@@ -20,6 +21,7 @@ Usage:
 
 Commands:
   help                                  Show this help.
+  setup                                 Run plain interactive Terrapod Setup.
   configure <$preset_args>
                                         Expand a Preset into concrete chezmoi data values.
   status                                Explain this machine's Terrapod profile, config, stack, and tool state.
@@ -30,6 +32,7 @@ Commands:
   chezmoi -- <args...>                  Run raw chezmoi for advanced maintenance.
 
 Examples:
+  terrapod setup
   terrapod configure development
   terrapod status
   terrapod doctor
@@ -209,6 +212,47 @@ profile_context_label() {
       ;;
     *)
       printf '%s\n' "unsupported profile"
+      ;;
+  esac
+}
+
+prompt_for_setup_preset() {
+  profile="$1"
+  preset_args="$(available_preset_args "$profile")"
+
+  printf 'Choose Terrapod Preset (%s): ' "$preset_args" >&2
+  if ! IFS= read -r preset; then
+    fatal "no Terrapod Preset selected"
+  fi
+
+  if [ -z "$preset" ]; then
+    fatal "no Terrapod Preset selected"
+  fi
+
+  validate_preset_for_profile "$preset" "$profile"
+  printf '%s\n' "$preset"
+}
+
+show_preset_settings_summary() {
+  preset="$1"
+
+  printf '%s\n' "Settings to write:"
+  render_preset_data "$preset" | sed 's/^/  /'
+}
+
+confirm_setup_write() {
+  config_file="$1"
+
+  printf 'Write these Terrapod settings to %s? [y/N] ' "$config_file" >&2
+  IFS= read -r answer || answer=
+
+  case "$answer" in
+    y|Y|yes|YES)
+      return 0
+      ;;
+    *)
+      printf '%s\n' "terrapod: setup cancelled" >&2
+      return 1
       ;;
   esac
 }
@@ -1383,6 +1427,38 @@ write_preset_settings() {
   write_managed_config "$config_file" "$preset"
 }
 
+write_setup_settings() {
+  config_file="$1"
+  preset="$2"
+
+  validate_preset "$preset"
+  reject_unsupported_managed_config "$config_file"
+  write_managed_config "$config_file" "$preset"
+}
+
+run_setup() {
+  if [ "$#" -ne 0 ]; then
+    fail_usage "setup accepts no arguments"
+  fi
+
+  profile="$(current_profile)"
+  config_file="$(chezmoi_config_file)"
+
+  printf '%s\n' "Terrapod setup"
+  printf '%s\n' "Profile: $(profile_context_label)"
+  show_config_context "$config_file"
+
+  preset="$(prompt_for_setup_preset "$profile")"
+  show_preset_settings_summary "$preset"
+
+  if ! confirm_setup_write "$config_file"; then
+    return 1
+  fi
+
+  write_setup_settings "$config_file" "$preset"
+  printf '%s\n' "Configured Terrapod Preset '$preset' in $config_file"
+}
+
 run_configure() {
   if [ "$#" -eq 0 ]; then
     fail_usage "Preset is required"
@@ -1410,6 +1486,10 @@ command_name="${1:-help}"
 case "$command_name" in
   help|-h|--help)
     show_help
+    ;;
+  setup)
+    shift
+    run_setup "$@"
     ;;
   configure)
     shift

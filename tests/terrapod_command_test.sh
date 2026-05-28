@@ -64,6 +64,39 @@ assert_line() {
   pass "$message"
 }
 
+assert_first_occurrence_before() {
+  haystack="$1"
+  earlier="$2"
+  later="$3"
+  message="$4"
+
+  earlier_line="$(
+    printf '%s\n' "$haystack" |
+      awk -v needle="$earlier" 'index($0, needle) { print NR; exit }'
+  )"
+  later_line="$(
+    printf '%s\n' "$haystack" |
+      awk -v needle="$later" 'index($0, needle) { print NR; exit }'
+  )"
+
+  if [ -z "$earlier_line" ] || [ -z "$later_line" ] || [ "$earlier_line" -ge "$later_line" ]; then
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
+run_terrapod_setup_command() {
+  profile="$1"
+  input="$2"
+  home_dir="$3"
+  xdg_config_home="$4"
+  output_file="$5"
+
+  printf '%s' "$input" |
+    TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" setup >"$output_file" 2>&1
+}
+
 assert_call_args() {
   call_file="$1"
   message="$2"
@@ -283,6 +316,16 @@ assert_contains \
 
 assert_contains \
   "$help_output" \
+  "terrapod setup" \
+  "Terrapod help lists setup"
+
+assert_contains \
+  "$help_output" \
+  "setup" \
+  "Terrapod help describes plain setup"
+
+assert_contains \
+  "$help_output" \
   "terrapod status" \
   "Terrapod help documents status"
 
@@ -330,6 +373,61 @@ assert_contains \
   "$vps_workstation_error" \
   "workstation Preset is only available for the macOS Terminal Profile" \
   "VPS Shell Profile explains workstation Preset rejection"
+
+setup_home="$tmp_dir/setup-home"
+setup_xdg="$tmp_dir/setup-xdg"
+setup_output="$tmp_dir/setup.out"
+setup_config="$setup_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$setup_home"
+
+if ! run_terrapod_setup_command macos-terminal 'workstation
+y
+' "$setup_home" "$setup_xdg" "$setup_output"; then
+  sed 's/^/  /' "$setup_output" >&2
+  fail "macOS Terminal Profile setup completes with workstation"
+fi
+pass "macOS Terminal Profile setup completes with workstation"
+
+setup_output_text="$(cat "$setup_output")"
+assert_contains "$setup_output_text" "Terrapod setup" "plain setup prints a command heading"
+assert_contains "$setup_output_text" "Profile: macOS Terminal Profile" "plain setup shows detected macOS profile"
+assert_contains "$setup_output_text" "Choose Terrapod Preset (minimal|development|workstation):" "plain setup shows macOS Preset choices"
+assert_contains "$setup_output_text" "Settings to write:" "plain setup shows concrete settings summary"
+assert_contains "$setup_output_text" "enableEditorStack = true" "plain setup summary includes concrete Editor Stack setting"
+assert_contains "$setup_output_text" "enableMacosAppGroupMonitoring = true" "plain setup summary includes concrete macOS App Group setting"
+assert_contains "$setup_output_text" "Write these Terrapod settings" "plain setup asks for final confirmation"
+assert_contains "$setup_output_text" "Configured Terrapod Preset 'workstation'" "plain setup reports successful configuration"
+assert_first_occurrence_before "$setup_output_text" "Profile: macOS Terminal Profile" "Choose Terrapod Preset" "plain setup shows profile before Preset selection"
+assert_first_occurrence_before "$setup_output_text" "Settings to write:" "Write these Terrapod settings" "plain setup shows summary before final confirmation"
+
+if [ ! -f "$setup_config" ]; then
+  fail "plain setup writes config after final confirmation"
+fi
+pass "plain setup writes config after final confirmation"
+
+vps_setup_home="$tmp_dir/vps-setup-home"
+vps_setup_xdg="$tmp_dir/vps-setup-xdg"
+vps_setup_output="$tmp_dir/vps-setup.out"
+mkdir -p "$vps_setup_home"
+
+if run_terrapod_setup_command vps-shell 'workstation
+y
+' "$vps_setup_home" "$vps_setup_xdg" "$vps_setup_output"; then
+  fail "VPS Shell Profile setup rejects workstation Preset"
+fi
+pass "VPS Shell Profile setup rejects workstation Preset"
+
+vps_setup_output_text="$(cat "$vps_setup_output")"
+assert_contains "$vps_setup_output_text" "Profile: VPS Shell Profile" "VPS setup shows detected profile before rejection"
+assert_contains "$vps_setup_output_text" "Choose Terrapod Preset (minimal|development):" "VPS setup hides workstation from choices"
+assert_contains "$vps_setup_output_text" "workstation Preset is only available for the macOS Terminal Profile" "VPS setup explains workstation rejection"
+
+if [ -e "$vps_setup_xdg/chezmoi/chezmoi.toml" ]; then
+  fail "VPS rejected setup does not write config"
+fi
+pass "VPS rejected setup does not write config"
+
+assert_no_terrapod_artifacts_under "$vps_setup_xdg" "VPS rejected setup leaves no Terrapod artifacts"
 
 assert_contains \
   "$help_output" \

@@ -217,6 +217,11 @@ assert_no_terrapod_artifacts_near_path() {
   path_base="$(basename -- "$path")"
   found_file="$tmp_dir/found-artifacts"
 
+  if [ ! -d "$path_dir" ]; then
+    pass "$message"
+    return
+  fi
+
   find "$path_dir" \
     \( -name '.terrapod-config.*' \
     -o -name '.terrapod-data.*' \
@@ -246,6 +251,16 @@ run_terrapod_configure() {
   else
     TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" configure "$preset" </dev/null
   fi
+}
+
+run_terrapod_setup() {
+  profile="$1"
+  input="$2"
+  home_dir="$3"
+  xdg_config_home="$4"
+
+  printf '%s' "$input" |
+    TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" setup
 }
 
 terrapod="$repo_root/dot_local/bin/executable_terrapod"
@@ -319,6 +334,81 @@ assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupMonito
 assert_not_contains "$workstation_config" "enableMacosDesktopApps" "workstation Preset does not write the legacy all-in desktop app toggle"
 assert_not_contains "$workstation_config" "terrapodPreset" "workstation Preset stores concrete values instead of a dynamic Preset"
 assert_backup_count "$workstation_config" 0 "workstation config creation does not create a backup"
+
+setup_workstation_home="$tmp_dir/setup-workstation-home"
+setup_workstation_xdg="$tmp_dir/setup-workstation-xdg"
+setup_workstation_config="$setup_workstation_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$setup_workstation_home"
+
+run_terrapod_setup macos-terminal 'workstation
+y
+' "$setup_workstation_home" "$setup_workstation_xdg"
+
+if [ ! -f "$setup_workstation_config" ]; then
+  fail "confirmed setup creates a chezmoi config file"
+fi
+pass "confirmed setup creates a chezmoi config file"
+
+assert_data_key_once_with_value "$setup_workstation_config" "enableEditorStack" "true" "confirmed setup enables Optional Editor Stack exactly once in data"
+assert_data_key_once_with_value "$setup_workstation_config" "enableAiCliTools" "true" "confirmed setup enables Optional AI Tool Stack exactly once in data"
+assert_data_key_once_with_value "$setup_workstation_config" "enableDevelopmentWorkspace" "true" "confirmed setup enables Optional Development Workspace exactly once in data"
+assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroupTerminalApps" "true" "confirmed setup enables terminal-apps macOS App Group exactly once in data"
+assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroupAutomation" "true" "confirmed setup enables automation macOS App Group exactly once in data"
+assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroupLauncher" "true" "confirmed setup enables launcher macOS App Group exactly once in data"
+assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroupMonitoring" "true" "confirmed setup enables monitoring macOS App Group exactly once in data"
+assert_not_contains "$setup_workstation_config" "enableMacosDesktopApps" "confirmed setup does not write the legacy all-in desktop app toggle"
+assert_not_contains "$setup_workstation_config" "terrapodPreset" "confirmed setup stores concrete values instead of a dynamic Preset"
+assert_backup_count "$setup_workstation_config" 0 "confirmed setup new config creation does not create a backup"
+
+setup_cancel_home="$tmp_dir/setup-cancel-home"
+setup_cancel_xdg="$tmp_dir/setup-cancel-xdg"
+setup_cancel_config="$setup_cancel_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$setup_cancel_home"
+
+if run_terrapod_setup macos-terminal 'development
+n
+' "$setup_cancel_home" "$setup_cancel_xdg" >"$tmp_dir/setup-cancel.out" 2>"$tmp_dir/setup-cancel.err"; then
+  fail "cancelled setup exits non-zero"
+fi
+pass "cancelled setup exits non-zero"
+
+assert_contains "$tmp_dir/setup-cancel.err" "setup cancelled" "cancelled setup explains cancellation"
+
+if [ -e "$setup_cancel_config" ]; then
+  fail "cancelled setup does not create a new config"
+fi
+pass "cancelled setup does not create a new config"
+
+assert_no_terrapod_artifacts_near_path "$setup_cancel_config" "cancelled setup leaves no Terrapod artifacts near new config path"
+
+setup_existing_cancel_home="$tmp_dir/setup-existing-cancel-home"
+setup_existing_cancel_xdg="$tmp_dir/setup-existing-cancel-xdg"
+setup_existing_cancel_config="$setup_existing_cancel_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$setup_existing_cancel_home" "$(dirname "$setup_existing_cancel_config")"
+
+cat >"$setup_existing_cancel_config" <<'TOML'
+[data]
+email = "minu@example.com"
+enableEditorStack = false
+TOML
+cp "$setup_existing_cancel_config" "$tmp_dir/setup-existing-cancel-before.toml"
+
+if run_terrapod_setup macos-terminal 'development
+
+' "$setup_existing_cancel_home" "$setup_existing_cancel_xdg" >"$tmp_dir/setup-existing-cancel.out" 2>"$tmp_dir/setup-existing-cancel.err"; then
+  fail "empty final confirmation cancels setup"
+fi
+pass "empty final confirmation cancels setup"
+
+assert_contains "$tmp_dir/setup-existing-cancel.err" "setup cancelled" "empty final confirmation explains cancellation"
+
+if ! cmp -s "$setup_existing_cancel_config" "$tmp_dir/setup-existing-cancel-before.toml"; then
+  fail "cancelled setup leaves existing config unchanged"
+fi
+pass "cancelled setup leaves existing config unchanged"
+
+assert_backup_count "$setup_existing_cancel_config" 0 "cancelled setup does not create a backup for existing config"
+assert_no_terrapod_temp_files "$setup_existing_cancel_config" "cancelled setup leaves no Terrapod temp files for existing config"
 
 default_env_home="$tmp_dir/default-env-home"
 default_env_xdg="$tmp_dir/default-env-xdg"
