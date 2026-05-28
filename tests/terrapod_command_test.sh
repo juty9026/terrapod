@@ -87,6 +87,55 @@ assert_call_args() {
   pass "$message"
 }
 
+write_success_stub() {
+  name="$1"
+  write_stub "$tmp_dir/bin/$name" \
+    'exit 0'
+}
+
+write_failing_command_stub() {
+  path="$1"
+  call_file="$2"
+  write_stub "$path" \
+    'printf "%s\n" "$0 $*" >>"'"$call_file"'"' \
+    'exit 90'
+}
+
+write_os_release() {
+  path="$1"
+  id="$2"
+  version_id="$3"
+  pretty_name="$4"
+
+  cat >"$path" <<EOF
+ID=$id
+VERSION_ID="$version_id"
+PRETTY_NAME="$pretty_name"
+EOF
+}
+
+status_doctor_path() {
+  name="$1"
+  shift
+
+  isolated_path="$tmp_dir/status-doctor-path-$name"
+  rm -rf "$isolated_path"
+  mkdir -p "$isolated_path"
+
+  awk_path="$(command -v awk 2>/dev/null || true)"
+  if [ -z "$awk_path" ]; then
+    fail "status/doctor tests require awk"
+  fi
+  ln -s "$awk_path" "$isolated_path/awk"
+
+  for command_name do
+    write_stub "$isolated_path/$command_name" \
+      'exit 0'
+  done
+
+  printf '%s\n' "$isolated_path"
+}
+
 assert_no_terrapod_artifacts_under() {
   dir="$1"
   message="$2"
@@ -227,6 +276,16 @@ assert_contains \
   "terrapod configure <minimal|development|workstation>" \
   "Terrapod help documents Preset configuration"
 
+assert_contains \
+  "$help_output" \
+  "terrapod status" \
+  "Terrapod help documents status"
+
+assert_contains \
+  "$help_output" \
+  "terrapod doctor" \
+  "Terrapod help documents doctor"
+
 macos_help_output="$(TERRAPOD_PROFILE=macos-terminal sh "$terrapod" help)"
 
 assert_contains \
@@ -353,6 +412,282 @@ assert_contains \
   "$missing_command_error" \
   "terrapod: raw chezmoi command is required" \
   "Terrapod explains missing raw chezmoi command"
+
+status_config="$tmp_dir/status-macos.toml"
+cat >"$status_config" <<'TOML'
+[data]
+enableEditorStack = true
+enableAiCliTools = true
+enableDevelopmentWorkspace = true
+enableMacosAppGroupTerminalApps = true
+enableMacosAppGroupAutomation = false
+enableMacosAppGroupLauncher = true
+enableMacosAppGroupMonitoring = false
+TOML
+
+macos_status_path="$(status_doctor_path macos chezmoi git zsh mise brew nvim gemini claude codex zellij ghostty cmux op)"
+
+macos_status_output="$(
+  TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$status_config" PATH="$macos_status_path" \
+    /bin/sh "$terrapod" status
+)"
+
+assert_contains "$macos_status_output" "Terrapod status" "Terrapod status prints a command heading"
+assert_contains "$macos_status_output" "Profile: macOS Terminal Profile" "Terrapod status reports macOS Terminal Profile context"
+assert_contains "$macos_status_output" "Config: $status_config (present)" "Terrapod status reports explicit config path"
+assert_contains "$macos_status_output" "Optional Editor Stack: enabled (rich Neovim configuration)" "Terrapod status reports enabled Optional Editor Stack state"
+assert_contains "$macos_status_output" "Optional AI Tool Stack: enabled (tools available: gemini, claude, codex)" "Terrapod status reports enabled Optional AI Tool Stack tool state"
+assert_contains "$macos_status_output" "Optional Development Workspace: enabled (development Zellij layouts)" "Terrapod status reports enabled Optional Development Workspace state"
+assert_contains "$macos_status_output" "terminal-apps: enabled (Ghostty and cmux)" "Terrapod status reports enabled terminal-apps macOS App Group"
+assert_contains "$macos_status_output" "automation: disabled" "Terrapod status reports disabled automation macOS App Group"
+assert_contains "$macos_status_output" "launcher: enabled (Raycast and 1Password CLI)" "Terrapod status reports enabled launcher macOS App Group"
+assert_contains "$macos_status_output" "monitoring: disabled" "Terrapod status reports disabled monitoring macOS App Group"
+assert_contains "$macos_status_output" "chezmoi: available" "Terrapod status reports chezmoi availability"
+assert_contains "$macos_status_output" "brew: available" "Terrapod status reports macOS Bootstrap Package Manager availability"
+assert_contains "$macos_status_output" "Warnings: none" "Terrapod status reports no warnings when enabled tools are present"
+assert_not_contains "$macos_status_output" "Warning:" "Terrapod status emits no warning lines when enabled tools are present"
+
+status_dotted_config="$tmp_dir/status-dotted.toml"
+cat >"$status_dotted_config" <<'TOML'
+data.enableEditorStack = false
+data.enableAiCliTools = false
+data.enableDevelopmentWorkspace = true
+data.enableMacosAppGroupTerminalApps = true
+TOML
+
+dotted_status_path="$(status_doctor_path dotted chezmoi git zsh mise brew nvim gemini claude codex zellij)"
+
+dotted_status_output="$(
+  TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$status_dotted_config" PATH="$dotted_status_path" \
+    /bin/sh "$terrapod" status
+)"
+
+assert_contains "$dotted_status_output" "Optional Editor Stack: enabled (rich Neovim configuration)" "Terrapod status reads root dotted data keys for effective editor stack state"
+assert_contains "$dotted_status_output" "Optional AI Tool Stack: enabled (tools available: gemini, claude, codex)" "Terrapod status reads root dotted data keys for effective AI stack state"
+assert_contains "$dotted_status_output" "terminal-apps: enabled (Ghostty and cmux)" "Terrapod status reads root dotted data keys for macOS App Groups"
+assert_contains "$dotted_status_output" "Warnings: none" "Terrapod status has no warnings for root dotted data keys when tools are present"
+
+status_ubuntu_config="$tmp_dir/status-ubuntu.toml"
+status_ubuntu_os_release="$tmp_dir/status-ubuntu-os-release"
+cat >"$status_ubuntu_config" <<'TOML'
+[data]
+enableEditorStack = false
+enableAiCliTools = false
+enableDevelopmentWorkspace = false
+enableMacosAppGroupTerminalApps = false
+enableMacosAppGroupAutomation = false
+enableMacosAppGroupLauncher = false
+enableMacosAppGroupMonitoring = false
+TOML
+write_os_release "$status_ubuntu_os_release" ubuntu 24.04 "Ubuntu 24.04 LTS"
+
+ubuntu_status_path="$(status_doctor_path ubuntu chezmoi git zsh mise nvim zellij apt)"
+write_stub "$ubuntu_status_path/uname" 'printf "%s\n" "Linux"'
+
+ubuntu_status_output="$(
+  TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_ubuntu_config" PATH="$ubuntu_status_path" \
+    /bin/sh "$terrapod" status
+)"
+
+assert_contains "$ubuntu_status_output" "Profile: VPS Shell Profile" "Terrapod status reports VPS Shell Profile context on Ubuntu 24.04"
+assert_contains "$ubuntu_status_output" "Optional Editor Stack: disabled" "Terrapod status reports disabled Optional Editor Stack without treating nvim as missing"
+assert_contains "$ubuntu_status_output" "Optional AI Tool Stack: disabled" "Terrapod status reports disabled Optional AI Tool Stack without missing-tool warnings"
+assert_contains "$ubuntu_status_output" "Optional Development Workspace: disabled" "Terrapod status reports disabled Optional Development Workspace without missing-tool warnings"
+assert_contains "$ubuntu_status_output" "macOS App Groups: not applicable for VPS Shell Profile" "Terrapod status omits macOS App Group details on VPS Shell Profile"
+assert_contains "$ubuntu_status_output" "apt: available" "Terrapod status reports Ubuntu Bootstrap Package Manager availability"
+assert_contains "$ubuntu_status_output" "Warnings: none" "Terrapod status has no warnings for disabled optional stacks"
+assert_not_contains "$ubuntu_status_output" "Warning:" "Terrapod status emits no warning lines for disabled optional stacks"
+assert_not_contains "$ubuntu_status_output" "missing tools: nvim" "Terrapod status distinguishes disabled Optional Editor Stack from missing tools"
+assert_not_contains "$ubuntu_status_output" "missing tools: gemini" "Terrapod status distinguishes disabled Optional AI Tool Stack from missing tools"
+
+core_missing_status_path="$(status_doctor_path core-missing-status chezmoi git zsh mise apt)"
+write_stub "$core_missing_status_path/uname" 'printf "%s\n" "Linux"'
+
+core_missing_status_output="$(
+  TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_ubuntu_config" PATH="$core_missing_status_path" \
+    /bin/sh "$terrapod" status
+)"
+
+assert_contains "$core_missing_status_output" "Optional Editor Stack: disabled" "Terrapod status keeps disabled Optional Editor Stack separate from missing core Neovim"
+assert_contains "$core_missing_status_output" "Optional Development Workspace: disabled" "Terrapod status keeps disabled Optional Development Workspace separate from missing core Zellij"
+assert_contains "$core_missing_status_output" "nvim: missing" "Terrapod status reports missing plain Neovim as a key tool"
+assert_contains "$core_missing_status_output" "zellij: missing" "Terrapod status reports missing Zellij as a key tool"
+assert_contains "$core_missing_status_output" "Warning: missing key tools: nvim, zellij" "Terrapod status warns about missing core Neovim and Zellij even when optional stacks are disabled"
+
+status_missing_config="$tmp_dir/status-missing.toml"
+cat >"$status_missing_config" <<'TOML'
+[data]
+enableEditorStack = true
+enableAiCliTools = true
+enableDevelopmentWorkspace = true
+TOML
+
+missing_status_path="$(status_doctor_path missing chezmoi git zsh mise nvim zellij apt)"
+write_stub "$missing_status_path/uname" 'printf "%s\n" "Linux"'
+
+missing_status_output="$(
+  TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_missing_config" PATH="$missing_status_path" \
+    /bin/sh "$terrapod" status
+)"
+
+assert_contains "$missing_status_output" "Optional Editor Stack: enabled (rich Neovim configuration)" "Terrapod status reports enabled Optional Editor Stack as rich config state"
+assert_contains "$missing_status_output" "Optional AI Tool Stack: enabled (missing tools: gemini, claude, codex)" "Terrapod status reports missing tools only for enabled Optional AI Tool Stack"
+assert_contains "$missing_status_output" "Optional Development Workspace: enabled (development Zellij layouts)" "Terrapod status reports enabled Optional Development Workspace as layout state"
+assert_contains "$missing_status_output" "Warning: Optional AI Tool Stack is enabled but missing tools: gemini, claude, codex" "Terrapod status warns for enabled missing AI tools"
+
+status_workspace_bundle_config="$tmp_dir/status-workspace-bundle.toml"
+cat >"$status_workspace_bundle_config" <<'TOML'
+[data]
+enableEditorStack = false
+enableAiCliTools = false
+enableDevelopmentWorkspace = true
+TOML
+
+workspace_bundle_status_path="$(status_doctor_path workspace-bundle chezmoi git zsh mise nvim zellij apt)"
+write_stub "$workspace_bundle_status_path/uname" 'printf "%s\n" "Linux"'
+
+workspace_bundle_status_output="$(
+  TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_workspace_bundle_config" PATH="$workspace_bundle_status_path" \
+    /bin/sh "$terrapod" status
+)"
+
+assert_contains "$workspace_bundle_status_output" "Optional Editor Stack: enabled (rich Neovim configuration)" "Terrapod status treats Optional Development Workspace as enabling Optional Editor Stack"
+assert_contains "$workspace_bundle_status_output" "Optional AI Tool Stack: enabled (missing tools: gemini, claude, codex)" "Terrapod status treats Optional Development Workspace as enabling Optional AI Tool Stack"
+assert_contains "$workspace_bundle_status_output" "Optional Development Workspace: enabled (development Zellij layouts)" "Terrapod status reports enabled Optional Development Workspace"
+assert_contains "$workspace_bundle_status_output" "Warning: Optional AI Tool Stack is enabled but missing tools: gemini, claude, codex" "Terrapod status warns when workspace-enabled Optional AI Tool Stack tools are missing"
+
+status_unsupported_os_release="$tmp_dir/status-unsupported-os-release"
+write_os_release "$status_unsupported_os_release" debian 12 "Debian GNU/Linux 12"
+
+unsupported_status_output="$(
+  TERRAPOD_OS_RELEASE_FILE="$status_unsupported_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_ubuntu_config" PATH="$ubuntu_status_path" \
+    /bin/sh "$terrapod" status
+)"
+
+assert_contains "$unsupported_status_output" "Profile: unsupported profile" "Terrapod status reports unsupported Linux as unsupported"
+assert_contains "$unsupported_status_output" "Warning: unsupported Linux release: Debian GNU/Linux 12. Terrapod supports Ubuntu 24.04 for the VPS Shell Profile." "Terrapod status explains unsupported Linux"
+
+doctor_config="$tmp_dir/doctor-ok.toml"
+doctor_os_release="$tmp_dir/doctor-os-release"
+cat >"$doctor_config" <<'TOML'
+[data]
+enableEditorStack = false
+enableAiCliTools = false
+enableDevelopmentWorkspace = false
+TOML
+write_os_release "$doctor_os_release" ubuntu 24.04 "Ubuntu 24.04 LTS"
+
+doctor_ok_path="$(status_doctor_path doctor-ok chezmoi git zsh mise nvim zellij apt)"
+write_stub "$doctor_ok_path/uname" 'printf "%s\n" "Linux"'
+
+if ! doctor_ok_output="$(
+  TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_ok_path" \
+    /bin/sh "$terrapod" doctor
+)"; then
+  fail "Terrapod doctor succeeds when VPS prerequisites are present and optional stacks are disabled"
+fi
+
+assert_contains "$doctor_ok_output" "Terrapod doctor" "Terrapod doctor prints a command heading"
+assert_contains "$doctor_ok_output" "ok - Profile is supported: VPS Shell Profile" "Terrapod doctor validates supported Ubuntu profile"
+assert_contains "$doctor_ok_output" "ok - chezmoi is available" "Terrapod doctor validates chezmoi availability"
+assert_contains "$doctor_ok_output" "ok - nvim is available" "Terrapod doctor validates plain Neovim as a Core Shell Stack tool"
+assert_contains "$doctor_ok_output" "ok - zellij is available" "Terrapod doctor validates Zellij as a Core Shell Stack tool"
+assert_contains "$doctor_ok_output" "ok - apt is available" "Terrapod doctor validates Ubuntu Bootstrap Package Manager availability"
+assert_contains "$doctor_ok_output" "ok - Optional Editor Stack is disabled" "Terrapod doctor treats disabled Optional Editor Stack as valid"
+assert_contains "$doctor_ok_output" "ok - Optional AI Tool Stack is disabled" "Terrapod doctor treats disabled Optional AI Tool Stack as valid"
+assert_contains "$doctor_ok_output" "ok - Optional Development Workspace is disabled" "Terrapod doctor treats disabled Optional Development Workspace as valid"
+assert_contains "$doctor_ok_output" "Guidance: none" "Terrapod doctor prints no guidance when checks pass"
+
+doctor_missing_key_path="$(status_doctor_path doctor-missing-key git zsh mise nvim zellij apt)"
+write_stub "$doctor_missing_key_path/uname" 'printf "%s\n" "Linux"'
+
+if TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_missing_key_path" \
+  /bin/sh "$terrapod" doctor >"$tmp_dir/doctor-missing-key.out" 2>"$tmp_dir/doctor-missing-key.err"; then
+  fail "Terrapod doctor fails when a required key tool is missing"
+fi
+
+doctor_missing_key_output="$(cat "$tmp_dir/doctor-missing-key.out")"
+
+assert_contains "$doctor_missing_key_output" "warn - chezmoi is missing" "Terrapod doctor warns when required chezmoi is missing"
+assert_contains "$doctor_missing_key_output" "Install or apply the configured Core Shell Stack so 'chezmoi' is available on PATH." "Terrapod doctor gives actionable guidance for missing key tools"
+
+doctor_missing_core_path="$(status_doctor_path doctor-missing-core chezmoi git zsh mise apt)"
+write_stub "$doctor_missing_core_path/uname" 'printf "%s\n" "Linux"'
+
+if TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_missing_core_path" \
+  /bin/sh "$terrapod" doctor >"$tmp_dir/doctor-missing-core.out" 2>"$tmp_dir/doctor-missing-core.err"; then
+  fail "Terrapod doctor fails when Core Shell Stack Neovim or Zellij is missing"
+fi
+
+doctor_missing_core_output="$(cat "$tmp_dir/doctor-missing-core.out")"
+
+assert_contains "$doctor_missing_core_output" "warn - nvim is missing" "Terrapod doctor warns when plain Neovim is missing even if Optional Editor Stack is disabled"
+assert_contains "$doctor_missing_core_output" "warn - zellij is missing" "Terrapod doctor warns when Zellij is missing even if Optional Development Workspace is disabled"
+assert_contains "$doctor_missing_core_output" "ok - Optional Editor Stack is disabled" "Terrapod doctor keeps disabled Optional Editor Stack separate from missing core Neovim"
+assert_contains "$doctor_missing_core_output" "ok - Optional Development Workspace is disabled" "Terrapod doctor keeps disabled Optional Development Workspace separate from missing core Zellij"
+
+doctor_missing_config="$tmp_dir/doctor-missing.toml"
+cat >"$doctor_missing_config" <<'TOML'
+[data]
+enableEditorStack = true
+enableAiCliTools = true
+enableDevelopmentWorkspace = true
+TOML
+
+doctor_missing_path="$(status_doctor_path doctor-missing chezmoi git zsh mise nvim zellij apt)"
+write_stub "$doctor_missing_path/uname" 'printf "%s\n" "Linux"'
+
+if TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_missing_config" PATH="$doctor_missing_path" \
+  /bin/sh "$terrapod" doctor >"$tmp_dir/doctor-missing.out" 2>"$tmp_dir/doctor-missing.err"; then
+  fail "Terrapod doctor fails when enabled optional stack tools are missing"
+fi
+
+doctor_missing_output="$(cat "$tmp_dir/doctor-missing.out")"
+
+assert_contains "$doctor_missing_output" "ok - Optional Editor Stack is enabled (rich Neovim configuration)" "Terrapod doctor reports enabled Optional Editor Stack as rich config state"
+assert_contains "$doctor_missing_output" "warn - Optional AI Tool Stack is enabled but missing tools: gemini, claude, codex" "Terrapod doctor warns about missing enabled AI tools"
+assert_contains "$doctor_missing_output" "ok - Optional Development Workspace is enabled (development Zellij layouts)" "Terrapod doctor reports enabled Optional Development Workspace as layout state"
+assert_contains "$doctor_missing_output" "Run terrapod chezmoi -- apply after enabling Optional AI Tool Stack, or install/apply the configured tools before relying on them." "Terrapod doctor gives actionable missing optional-stack guidance"
+
+doctor_unsupported_os_release="$tmp_dir/doctor-unsupported-os-release"
+write_os_release "$doctor_unsupported_os_release" debian 12 "Debian GNU/Linux 12"
+
+doctor_unsupported_path="$(status_doctor_path doctor-unsupported chezmoi git zsh mise nvim zellij apt)"
+write_stub "$doctor_unsupported_path/uname" 'printf "%s\n" "Linux"'
+
+if TERRAPOD_OS_RELEASE_FILE="$doctor_unsupported_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_unsupported_path" \
+  /bin/sh "$terrapod" doctor >"$tmp_dir/doctor-unsupported.out" 2>"$tmp_dir/doctor-unsupported.err"; then
+  fail "Terrapod doctor fails on unsupported Linux"
+fi
+
+doctor_unsupported_output="$(cat "$tmp_dir/doctor-unsupported.out")"
+assert_contains "$doctor_unsupported_output" "warn - unsupported Linux release: Debian GNU/Linux 12. Terrapod supports Ubuntu 24.04 for the VPS Shell Profile." "Terrapod doctor explains unsupported Linux"
+
+doctor_broad_upgrade_calls="$tmp_dir/doctor-broad-upgrade.calls"
+rm -f "$doctor_broad_upgrade_calls"
+doctor_broad_upgrade_path="$(status_doctor_path doctor-broad-upgrade chezmoi git zsh nvim gemini claude codex zellij)"
+for command_name in brew apt sudo mise npm; do
+  write_failing_command_stub "$doctor_broad_upgrade_path/$command_name" "$doctor_broad_upgrade_calls"
+done
+write_stub "$doctor_broad_upgrade_path/uname" 'printf "%s\n" "Darwin"'
+
+if TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_broad_upgrade_path" \
+  /bin/sh "$terrapod" status >/dev/null 2>/dev/null; then
+  :
+fi
+
+if TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_broad_upgrade_path" \
+  /bin/sh "$terrapod" doctor >/dev/null 2>/dev/null; then
+  :
+fi
+
+if [ -e "$doctor_broad_upgrade_calls" ]; then
+  printf '%s\n' "unexpected broad upgrade command calls from status/doctor:" >&2
+  sed 's/^/  /' "$doctor_broad_upgrade_calls" >&2
+  fail "Terrapod status and doctor do not call brew, apt, sudo, mise, or npm upgrade flows"
+fi
+
+pass "Terrapod status and doctor do not call brew, apt, sudo, mise, or npm upgrade flows"
 
 export CHEZMOI_CALL_FILE="$tmp_dir/chezmoi-update.args"
 export CHEZMOI_INVOKED_FILE="$tmp_dir/chezmoi-update.invoked"

@@ -10,6 +10,8 @@ Terrapod - Dotfiles Management Tool
 Usage:
   terrapod [help|--help|-h]
   terrapod configure <$preset_args>
+  terrapod status
+  terrapod doctor
   terrapod diff
   terrapod apply
   terrapod update
@@ -19,6 +21,8 @@ Commands:
   help                                  Show this help.
   configure <$preset_args>
                                         Expand a Preset into concrete chezmoi data values.
+  status                                Explain this machine's Terrapod profile, config, stack, and tool state.
+  doctor                                Validate Terrapod prerequisites and report actionable guidance.
   diff                                  Run chezmoi diff with Terrapod profile and stack context.
   apply                                 Run preflight checks, chezmoi apply, and post-apply validation.
   update                                Run chezmoi update with Terrapod profile and config context.
@@ -26,6 +30,8 @@ Commands:
 
 Examples:
   terrapod configure development
+  terrapod status
+  terrapod doctor
   terrapod diff
   terrapod apply
   terrapod update
@@ -69,6 +75,52 @@ chezmoi_config_file() {
   printf '%s\n' "$HOME/.config/chezmoi/chezmoi.toml"
 }
 
+os_release_file() {
+  printf '%s\n' "${TERRAPOD_OS_RELEASE_FILE:-/etc/os-release}"
+}
+
+os_release_value() {
+  key="$1"
+  file="$(os_release_file)"
+
+  if [ ! -f "$file" ]; then
+    return 1
+  fi
+
+  awk -F= -v wanted="$key" '
+    $1 == wanted {
+      value = $0
+      sub("^[^=]*=", "", value)
+      sub(/^"/, "", value)
+      sub(/"$/, "", value)
+      print value
+      found = 1
+      exit
+    }
+
+    END {
+      exit found ? 0 : 1
+    }
+  ' "$file"
+}
+
+is_supported_ubuntu_release() {
+  [ "$(os_release_value ID 2>/dev/null || printf unknown)" = "ubuntu" ] &&
+    [ "$(os_release_value VERSION_ID 2>/dev/null || printf unknown)" = "24.04" ]
+}
+
+unsupported_profile_reason() {
+  case "$(uname -s 2>/dev/null || printf unknown)" in
+    Linux)
+      pretty_name="$(os_release_value PRETTY_NAME 2>/dev/null || printf 'unknown Linux release')"
+      printf '%s\n' "unsupported Linux release: $pretty_name. Terrapod supports Ubuntu 24.04 for the VPS Shell Profile."
+      ;;
+    *)
+      printf '%s\n' "unsupported operating system: $(uname -s 2>/dev/null || printf unknown). Terrapod supports macOS and Ubuntu 24.04."
+      ;;
+  esac
+}
+
 current_profile() {
   case "${TERRAPOD_PROFILE:-}" in
     macos-terminal|vps-shell)
@@ -82,7 +134,11 @@ current_profile() {
       printf '%s\n' "macos-terminal"
       ;;
     Linux)
-      printf '%s\n' "vps-shell"
+      if is_supported_ubuntu_release; then
+        printf '%s\n' "vps-shell"
+      else
+        printf '%s\n' "unsupported"
+      fi
       ;;
     *)
       printf '%s\n' "unsupported"
@@ -259,6 +315,232 @@ effective_optional_stack_state_label() {
   fi
 }
 
+is_enabled() {
+  [ "$1" = "true" ]
+}
+
+effective_editor_stack_enabled() {
+  config_file="$1"
+
+  if [ "$(config_data_bool "$config_file" enableEditorStack)" = "true" ] ||
+    [ "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" = "true" ]; then
+    printf '%s\n' "true"
+  else
+    printf '%s\n' "false"
+  fi
+}
+
+effective_ai_cli_tools_enabled() {
+  config_file="$1"
+
+  if [ "$(config_data_bool "$config_file" enableAiCliTools)" = "true" ] ||
+    [ "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" = "true" ]; then
+    printf '%s\n' "true"
+  else
+    printf '%s\n' "false"
+  fi
+}
+
+join_tools() {
+  joined=
+  for tool do
+    if [ -z "$joined" ]; then
+      joined="$tool"
+    else
+      joined="$joined, $tool"
+    fi
+  done
+  printf '%s\n' "$joined"
+}
+
+missing_tools() {
+  missing=
+  for tool do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      if [ -z "$missing" ]; then
+        missing="$tool"
+      else
+        missing="$missing, $tool"
+      fi
+    fi
+  done
+  printf '%s\n' "$missing"
+}
+
+tool_phrase() {
+  missing="$(missing_tools "$@")"
+  if [ -n "$missing" ]; then
+    printf '%s\n' "missing tools: $missing"
+  else
+    printf '%s\n' "tools available: $(join_tools "$@")"
+  fi
+}
+
+print_stack_status() {
+  label="$1"
+  enabled="$2"
+  shift 2
+
+  if is_enabled "$enabled"; then
+    printf '  %s: enabled (%s)\n' "$label" "$(tool_phrase "$@")"
+  else
+    printf '  %s: disabled\n' "$label"
+  fi
+}
+
+print_optional_setting_status() {
+  label="$1"
+  enabled="$2"
+  detail="$3"
+
+  if is_enabled "$enabled"; then
+    printf '  %s: enabled (%s)\n' "$label" "$detail"
+  else
+    printf '  %s: disabled\n' "$label"
+  fi
+}
+
+print_macos_app_group_status() {
+  config_file="$1"
+  profile="$2"
+
+  if [ "$profile" != "macos-terminal" ]; then
+    printf '%s\n' "macOS App Groups: not applicable for $(profile_context_label)"
+    return
+  fi
+
+  printf '%s\n' "macOS App Groups:"
+  if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupTerminalApps)"; then
+    printf '%s\n' "  terminal-apps: enabled (Ghostty and cmux)"
+  else
+    printf '%s\n' "  terminal-apps: disabled"
+  fi
+  if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupAutomation)"; then
+    printf '%s\n' "  automation: enabled (Hammerspoon and Karabiner-Elements)"
+  else
+    printf '%s\n' "  automation: disabled"
+  fi
+  if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupLauncher)"; then
+    printf '%s\n' "  launcher: enabled (Raycast and 1Password CLI)"
+  else
+    printf '%s\n' "  launcher: disabled"
+  fi
+  if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupMonitoring)"; then
+    printf '%s\n' "  monitoring: enabled (iStat Menus)"
+  else
+    printf '%s\n' "  monitoring: disabled"
+  fi
+}
+
+print_key_tool_status() {
+  profile="$1"
+
+  printf '%s\n' "Key tools:"
+  for tool in chezmoi git zsh mise nvim zellij; do
+    if command -v "$tool" >/dev/null 2>&1; then
+      printf '  %s: available\n' "$tool"
+    else
+      printf '  %s: missing\n' "$tool"
+    fi
+  done
+
+  case "$profile" in
+    macos-terminal)
+      if command -v brew >/dev/null 2>&1; then
+        printf '%s\n' "  brew: available"
+      else
+        printf '%s\n' "  brew: missing"
+      fi
+      ;;
+    vps-shell)
+      if command -v apt >/dev/null 2>&1; then
+        printf '%s\n' "  apt: available"
+      else
+        printf '%s\n' "  apt: missing"
+      fi
+      ;;
+  esac
+}
+
+status_key_tool_warnings() {
+  profile="$1"
+  missing="$(missing_tools chezmoi git zsh mise nvim zellij)"
+
+  case "$profile" in
+    macos-terminal)
+      platform_missing="$(missing_tools brew)"
+      ;;
+    vps-shell)
+      platform_missing="$(missing_tools apt)"
+      ;;
+    *)
+      platform_missing=
+      ;;
+  esac
+
+  if [ -n "$platform_missing" ]; then
+    if [ -n "$missing" ]; then
+      missing="$missing, $platform_missing"
+    else
+      missing="$platform_missing"
+    fi
+  fi
+
+  if [ -n "$missing" ]; then
+    printf '%s\n' "Warning: missing key tools: $missing"
+    return 0
+  fi
+
+  return 1
+}
+
+print_status_warnings() {
+  config_file="$1"
+  profile="$2"
+  printed=0
+
+  if [ "$profile" = "unsupported" ]; then
+    printf '%s\n' "Warning: $(unsupported_profile_reason)"
+    printed=1
+  fi
+
+  if status_key_tool_warnings "$profile"; then
+    printed=1
+  fi
+
+  if is_enabled "$(effective_ai_cli_tools_enabled "$config_file")"; then
+    missing="$(missing_tools gemini claude codex)"
+    if [ -n "$missing" ]; then
+      printf '%s\n' "Warning: Optional AI Tool Stack is enabled but missing tools: $missing"
+      printed=1
+    fi
+  fi
+
+  if [ "$printed" -eq 0 ]; then
+    printf '%s\n' "Warnings: none"
+  fi
+}
+
+run_status() {
+  if [ "$#" -ne 0 ]; then
+    fail_usage "status accepts no arguments"
+  fi
+
+  config_file="$(chezmoi_config_file)"
+  profile="$(current_profile)"
+
+  printf '%s\n' "Terrapod status"
+  printf '%s\n' "Profile: $(profile_context_label)"
+  show_config_context "$config_file"
+  printf '%s\n' "Optional stacks:"
+  print_optional_setting_status "Optional Editor Stack" "$(effective_editor_stack_enabled "$config_file")" "rich Neovim configuration"
+  print_stack_status "Optional AI Tool Stack" "$(effective_ai_cli_tools_enabled "$config_file")" gemini claude codex
+  print_optional_setting_status "Optional Development Workspace" "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" "development Zellij layouts"
+  print_macos_app_group_status "$config_file" "$profile"
+  print_key_tool_status "$profile"
+  print_status_warnings "$config_file" "$profile"
+}
+
 show_config_context() {
   config_file="$1"
 
@@ -409,6 +691,129 @@ run_apply() {
   fi
 
   run_post_apply_validation
+}
+
+doctor_failed=0
+doctor_guidance_printed=0
+
+doctor_ok() {
+  printf '  ok - %s\n' "$1"
+}
+
+doctor_warn() {
+  printf '  warn - %s\n' "$1"
+  doctor_failed=1
+}
+
+doctor_guidance() {
+  if [ "$doctor_guidance_printed" -eq 0 ]; then
+    printf '%s\n' "Guidance:"
+    doctor_guidance_printed=1
+  fi
+  printf '  - %s\n' "$1"
+}
+
+doctor_check_command() {
+  tool="$1"
+
+  if command -v "$tool" >/dev/null 2>&1; then
+    doctor_ok "$tool is available"
+  else
+    doctor_warn "$tool is missing"
+    doctor_guidance "Install or apply the configured Core Shell Stack so '$tool' is available on PATH."
+  fi
+}
+
+doctor_check_optional_stack() {
+  label="$1"
+  enabled="$2"
+  guidance="$3"
+  shift 3
+
+  if ! is_enabled "$enabled"; then
+    doctor_ok "$label is disabled"
+    return
+  fi
+
+  missing="$(missing_tools "$@")"
+  if [ -n "$missing" ]; then
+    doctor_warn "$label is enabled but missing tools: $missing"
+    doctor_guidance "$guidance"
+  else
+    doctor_ok "$label is enabled and tools are available: $(join_tools "$@")"
+  fi
+}
+
+doctor_check_optional_setting() {
+  label="$1"
+  enabled="$2"
+  detail="$3"
+
+  if is_enabled "$enabled"; then
+    doctor_ok "$label is enabled ($detail)"
+  else
+    doctor_ok "$label is disabled"
+  fi
+}
+
+run_doctor() {
+  if [ "$#" -ne 0 ]; then
+    fail_usage "doctor accepts no arguments"
+  fi
+
+  doctor_failed=0
+  doctor_guidance_printed=0
+  config_file="$(chezmoi_config_file)"
+  profile="$(current_profile)"
+
+  printf '%s\n' "Terrapod doctor"
+  printf '%s\n' "Profile: $(profile_context_label)"
+  show_config_context "$config_file"
+  printf '%s\n' "Checks:"
+
+  if [ "$profile" = "unsupported" ]; then
+    doctor_warn "$(unsupported_profile_reason)"
+    doctor_guidance "Run Terrapod on macOS or Ubuntu 24.04, or use 'terrapod chezmoi -- <args>' as an advanced escape hatch on unsupported systems."
+  else
+    doctor_ok "Profile is supported: $(profile_context_label)"
+  fi
+
+  for tool in chezmoi git zsh mise nvim zellij; do
+    doctor_check_command "$tool"
+  done
+
+  case "$profile" in
+    macos-terminal)
+      doctor_check_command brew
+      ;;
+    vps-shell)
+      doctor_check_command apt
+      ;;
+  esac
+
+  doctor_check_optional_setting \
+    "Optional Editor Stack" \
+    "$(effective_editor_stack_enabled "$config_file")" \
+    "rich Neovim configuration"
+
+  doctor_check_optional_stack \
+    "Optional AI Tool Stack" \
+    "$(effective_ai_cli_tools_enabled "$config_file")" \
+    "Run terrapod chezmoi -- apply after enabling Optional AI Tool Stack, or install/apply the configured tools before relying on them." \
+    gemini claude codex
+
+  doctor_check_optional_setting \
+    "Optional Development Workspace" \
+    "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" \
+    "development Zellij layouts"
+
+  if [ "$doctor_guidance_printed" -eq 0 ]; then
+    printf '%s\n' "Guidance: none"
+  fi
+
+  if [ "$doctor_failed" -ne 0 ]; then
+    return 1
+  fi
 }
 
 show_update_context() {
@@ -945,6 +1350,14 @@ case "$command_name" in
     confirm_existing_config_update "$config_file"
     write_managed_config "$config_file" "$preset"
     printf '%s\n' "Configured Terrapod Preset '$preset' in $config_file"
+    ;;
+  status)
+    shift
+    run_status "$@"
+    ;;
+  doctor)
+    shift
+    run_doctor "$@"
     ;;
   diff)
     shift
