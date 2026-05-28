@@ -4,23 +4,20 @@ Personal dotfiles managed with chezmoi.
 
 ## Setup
 
+The Terrapod first-run installer is the primary entry point for a new machine.
+It installs `chezmoi` into `~/.local/bin`, asks for a Preset, writes
+Terrapod-managed config values, initializes
+`https://github.com/juty9026/dotfiles.git`, and runs the initial apply.
+
 ### macOS
 
-Install chezmoi with Homebrew on macOS.
+Run the installer on macOS.
 
 ```sh
-brew install chezmoi
+sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/dotfiles/main/install.sh)"
 ```
 
-Initialize the source repo, review the diff, then apply it.
-
-```sh
-chezmoi init git@github.com:juty9026/dotfiles.git
-chezmoi diff
-chezmoi apply
-```
-
-On macOS, `chezmoi apply` also runs setup scripts under `.chezmoiscripts` for
+On macOS, the initial apply also runs setup scripts under `.chezmoiscripts` for
 the initial terminal environment:
 
 - Homebrew bootstrap and the macOS `Brewfile` bundle
@@ -53,25 +50,18 @@ chezmoi cd
 ### Ubuntu 24.04 VPS
 
 Ubuntu support targets 24.04 LTS only. The VPS profile is read-only by
-default, so no GitHub authentication is required for the initial setup. Install
-chezmoi, initialize this public repo over HTTPS, review the diff, then apply it.
+default, so no GitHub authentication is required for the initial setup. Run the
+installer.
 
 ```sh
-sudo apt update
-sudo apt install -y ca-certificates curl git
-sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin"
-export PATH="$HOME/.local/bin:$PATH"
-
-chezmoi init https://github.com/juty9026/dotfiles.git
-chezmoi diff
-chezmoi apply
+sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/dotfiles/main/install.sh)"
 ```
 
-The `export PATH=...` line is only for the current bootstrap shell. After the
-first `chezmoi apply`, managed zsh sessions keep `~/.local/bin` on `PATH` so
+The installer adds `~/.local/bin` to `PATH` for the bootstrap process. After
+the first apply, managed zsh sessions keep `~/.local/bin` on `PATH` so
 user-local binaries such as `chezmoi` remain available after reconnecting.
 
-On Ubuntu, `chezmoi apply` runs setup scripts for the VPS shell profile:
+On Ubuntu, the initial apply runs setup scripts for the VPS shell profile:
 
 - APT bootstrap packages: zsh, git, curl, ca-certificates, gpg, unzip, and build-essential
 - Python build dependencies required by the mise-managed Python runtime
@@ -92,6 +82,13 @@ first apply and reconnect.
 ```sh
 chsh -s "$(command -v zsh)"
 ```
+
+Direct `chezmoi` commands are mainly for maintenance after bootstrap, such as
+reviewing changes with `chezmoi diff`, applying later changes with
+`chezmoi apply`, or using `chezmoi cd` to edit the source checkout. For an
+unusual recovery path, install `chezmoi` manually and initialize
+`https://github.com/juty9026/dotfiles.git` directly, then review and apply the
+result.
 
 ## Updates
 
