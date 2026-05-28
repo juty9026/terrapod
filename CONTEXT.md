@@ -122,6 +122,8 @@ _Avoid_: machine preset, permanent mode, dynamic policy
 - **Terrapod** applies this repository's declared dotfiles state; it does not act as the package manager for OS packages or mise-managed tool upgrades.
 - **Terrapod** may install declared dependencies needed to reach the target state, but it does not run broad version upgrade commands such as `brew upgrade`, `apt upgrade`, or `mise upgrade`.
 - `terrapod update` delegates repository update semantics to `chezmoi update` and adds Terrapod-specific context and validation around it.
+- README and command output describe `terrapod update` as a source update so it is not confused with Homebrew, APT, or mise upgrades.
+- README and command output describe `terrapod diff` and `terrapod apply` as declared-state operations delegated to chezmoi.
 - The **macOS Desktop App Stack** is opt-in because Homebrew casks can install shared applications and desktop support assets outside a single user's home directory.
 - The **macOS Desktop App Stack** excludes Homebrew itself, shared CLI formulae such as mise and btop, and terminal font casks.
 - Terminal font casks belong to the macOS Terminal Profile core bootstrap because the managed terminal configuration depends on them and they are not desktop applications.
@@ -135,7 +137,22 @@ _Avoid_: machine preset, permanent mode, dynamic policy
 - Individual macOS app toggles are excluded from the current **Terrapod** setup scope.
 - Repository renaming makes `juty9026/terrapod` the canonical slug for the **Terrapod Source Repository** without adding legacy URL fallback behavior.
 - Non-interactive setup options are deferred outside the current **Terrapod** installer and management command work.
-- README and command output should use the **Terrapod** name where needed for consistency; broader branding and log-output design are deferred.
+- README presentation should make **Terrapod** feel like a small product with a clear identity and a quick-start guide, not primarily like an operations manual.
+- README still pairs the evocative **Terrapod** product promise with visible chezmoi and package-manager boundaries.
+- README treats chezmoi as visible underlying machinery, not as the main story or default workflow.
+- README should lead with a lightweight quick start that shows the first-run installer and a few normal management commands before platform details.
+- README should show Terrapod's non-goals near the top as product boundaries, especially broad OS package upgrades, mise-managed upgrades, machine-local secrets, and untracked overrides.
+- README should summarize what **Terrapod** carries near the top using domain concepts: machine profiles, **Preset** choices, optional stacks, and **macOS App Groups**.
+- README should move deeper platform, Preset, optional stack, app-group, and update-boundary details below the product introduction and quick start.
+- README section naming should support the product-first quick-start shape, using names such as Quick Start, What Terrapod Carries, Choose a Preset, What Terrapod Leaves Alone, Daily Commands, Platform Details, Local Overrides, Manual Restore, and Repository Conventions.
+- README section titles and command examples use canonical domain terms such as **Preset**, while product metaphor stays in supporting explanatory copy.
+- README should explain **Preset** choices by the kind of machine they suit before listing the concrete optional stack and app-group settings they expand into.
+- `terrapod help` may carry a concise product introduction, but routine command output stays operational and scan-friendly.
+- `terrapod help` introduces **Terrapod** as a small landing pod for dotfiles and immediately states that chezmoi remains underneath while package-manager upgrades stay outside scope.
+- Routine command output uses stable labels such as Profile, Config, Preflight, Delegating, Post-apply validation, and Guidance instead of brand metaphors.
+- Routine command stage labels may be lightly polished when the result stays concise, stable, and clear in copied logs.
+- The current command-output pass stays simple and does not add emoji or terminal color behavior.
+- Error output avoids product metaphor and states the failed condition plus the next useful action.
 
 ## Example Dialogue
 

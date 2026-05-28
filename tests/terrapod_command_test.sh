@@ -253,8 +253,13 @@ pass "tpod shows the same help as Terrapod"
 
 assert_contains \
   "$help_output" \
-  "Terrapod - Dotfiles Management Tool" \
-  "Terrapod help names the Dotfiles Management Tool"
+  "Terrapod - a small landing pod for your dotfiles" \
+  "Terrapod help introduces the landing pod product promise"
+
+assert_contains \
+  "$help_output" \
+  "Uses chezmoi underneath; keeps package-manager upgrades outside its scope." \
+  "Terrapod help states chezmoi and package-manager boundaries"
 
 assert_contains \
   "$help_output" \
@@ -340,14 +345,14 @@ default_output="$(sh "$terrapod")"
 
 assert_contains \
   "$default_output" \
-  "Terrapod - Dotfiles Management Tool" \
+  "Terrapod - a small landing pod for your dotfiles" \
   "Terrapod with no arguments shows help"
 
 dash_help_output="$(sh "$terrapod" --help)"
 
 assert_contains \
   "$dash_help_output" \
-  "Terrapod - Dotfiles Management Tool" \
+  "Terrapod - a small landing pod for your dotfiles" \
   "Terrapod --help shows help"
 
 if sh "$terrapod" frobnicate >"$tmp_dir/unknown.out" 2>"$tmp_dir/unknown.err"; then
@@ -750,7 +755,7 @@ update_output="$(cat "$tmp_dir/update.out")"
 
 assert_call_args \
   "$CHEZMOI_CALL_FILE" \
-  "Terrapod update delegates repository update semantics to chezmoi update" \
+  "Terrapod update delegates source update semantics to chezmoi update" \
   update --exclude scripts
 
 assert_contains \
@@ -770,7 +775,7 @@ assert_contains \
 
 assert_contains \
   "$update_output" \
-  "Delegating repository update to: chezmoi update --exclude scripts" \
+  "Delegating source update to: chezmoi update --exclude scripts" \
   "Terrapod update explains the delegated command"
 
 if [ -e "$BROAD_UPGRADE_CALL_FILE" ]; then
@@ -816,7 +821,7 @@ assert_contains \
 
 assert_contains \
   "$override_update_output" \
-  "Delegating repository update to: chezmoi --config $override_config update --exclude scripts" \
+  "Delegating source update to: chezmoi --config $override_config update --exclude scripts" \
   "Terrapod update explains delegated explicit config command"
 
 if [ -e "$BROAD_UPGRADE_CALL_FILE" ]; then
@@ -899,7 +904,7 @@ diff_output="$(cat "$tmp_dir/diff.out")"
 
 assert_call_args \
   "$CHEZMOI_CALL_FILE" \
-  "Terrapod diff delegates target-state diff behavior to chezmoi diff" \
+  "Terrapod diff delegates declared-state diff behavior to chezmoi diff" \
   diff
 
 assert_contains \
@@ -964,7 +969,7 @@ assert_contains \
 
 assert_contains \
   "$diff_output" \
-  "Delegating target-state diff to: chezmoi diff" \
+  "Delegating declared-state diff to: chezmoi diff" \
   "Terrapod diff explains the delegated command"
 
 assert_contains \
@@ -1020,7 +1025,7 @@ assert_call_args \
 
 assert_contains \
   "$diff_override_output" \
-  "Delegating target-state diff to: chezmoi --config $diff_config diff" \
+  "Delegating declared-state diff to: chezmoi --config $diff_config diff" \
   "Terrapod diff explains delegated explicit config command"
 
 export CHEZMOI_APPLY_ARGS_FILE="$tmp_dir/chezmoi-apply.args"
@@ -1075,7 +1080,7 @@ apply_output="$(cat "$tmp_dir/apply.out")"
 
 assert_call_args \
   "$CHEZMOI_APPLY_ARGS_FILE" \
-  "Terrapod apply delegates target-state apply behavior to chezmoi apply" \
+  "Terrapod apply delegates declared-state apply behavior to chezmoi apply" \
   apply
 
 assert_call_args \
@@ -1150,7 +1155,7 @@ assert_contains \
 
 assert_contains \
   "$apply_output" \
-  "Delegating target-state apply to: chezmoi apply" \
+  "Delegating declared-state apply to: chezmoi apply" \
   "Terrapod apply explains the delegated command"
 
 assert_contains \
@@ -1221,7 +1226,7 @@ assert_call_args \
 
 assert_contains \
   "$apply_override_output" \
-  "Delegating target-state apply to: chezmoi --config $diff_config apply" \
+  "Delegating declared-state apply to: chezmoi --config $diff_config apply" \
   "Terrapod apply explains delegated explicit config command"
 
 symlink_config_target="$tmp_dir/symlink-target-chezmoi.toml"

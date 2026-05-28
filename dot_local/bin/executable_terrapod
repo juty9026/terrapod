@@ -5,7 +5,8 @@ show_help() {
   preset_args="$(available_preset_args "$(current_profile)")"
 
   cat <<EOF
-Terrapod - Dotfiles Management Tool
+Terrapod - a small landing pod for your dotfiles
+Uses chezmoi underneath; keeps package-manager upgrades outside its scope.
 
 Usage:
   terrapod [help|--help|-h]
@@ -594,7 +595,7 @@ show_diff_context() {
   printf '%s\n' "Profile: $(profile_context_label)"
   show_config_context "$config_file"
   show_stack_context "$config_file"
-  printf '%s\n' "Delegating target-state diff to: $(render_chezmoi_command diff)"
+  printf '%s\n' "Delegating declared-state diff to: $(render_chezmoi_command diff)"
 }
 
 run_diff() {
@@ -673,7 +674,7 @@ show_apply_context() {
   printf '%s\n' "Profile: $(profile_context_label)"
   show_config_context "$config_file"
   show_stack_context "$config_file"
-  printf '%s\n' "Delegating target-state apply to: $(render_chezmoi_command apply)"
+  printf '%s\n' "Delegating declared-state apply to: $(render_chezmoi_command apply)"
 }
 
 run_apply() {
@@ -822,7 +823,7 @@ show_update_context() {
   printf '%s\n' "Terrapod update"
   printf '%s\n' "Profile: $(profile_context_label)"
   show_config_context "$config_file"
-  printf '%s\n' "Delegating repository update to: $(render_chezmoi_command update --exclude scripts)"
+  printf '%s\n' "Delegating source update to: $(render_chezmoi_command update --exclude scripts)"
 }
 
 run_update() {
