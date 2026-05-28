@@ -122,9 +122,9 @@ show_update_context() {
   fi
 
   if [ -n "${TERRAPOD_CHEZMOI_CONFIG:-}" ]; then
-    printf '%s\n' "Delegating repository update to: chezmoi --config $TERRAPOD_CHEZMOI_CONFIG update"
+    printf '%s\n' "Delegating repository update to: chezmoi --config $TERRAPOD_CHEZMOI_CONFIG update --exclude scripts"
   else
-    printf '%s\n' "Delegating repository update to: chezmoi update"
+    printf '%s\n' "Delegating repository update to: chezmoi update --exclude scripts"
   fi
 }
 
@@ -135,9 +135,9 @@ run_update() {
 
   show_update_context
   if [ -n "${TERRAPOD_CHEZMOI_CONFIG:-}" ]; then
-    chezmoi --config "$TERRAPOD_CHEZMOI_CONFIG" update
+    chezmoi --config "$TERRAPOD_CHEZMOI_CONFIG" update --exclude scripts
   else
-    chezmoi update
+    chezmoi update --exclude scripts
   fi
 }
 

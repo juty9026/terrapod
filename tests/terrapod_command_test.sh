@@ -339,7 +339,7 @@ update_output="$(cat "$tmp_dir/update.out")"
 assert_call_args \
   "$CHEZMOI_CALL_FILE" \
   "Terrapod update delegates repository update semantics to chezmoi update" \
-  update
+  update --exclude scripts
 
 assert_contains \
   "$update_output" \
@@ -358,7 +358,7 @@ assert_contains \
 
 assert_contains \
   "$update_output" \
-  "Delegating repository update to: chezmoi update" \
+  "Delegating repository update to: chezmoi update --exclude scripts" \
   "Terrapod update explains the delegated command"
 
 if [ -e "$BROAD_UPGRADE_CALL_FILE" ]; then
@@ -395,7 +395,7 @@ override_update_output="$(cat "$tmp_dir/update-override.out")"
 assert_call_args \
   "$CHEZMOI_CALL_FILE" \
   "Terrapod update passes explicit config overrides to chezmoi update" \
-  --config "$override_config" update
+  --config "$override_config" update --exclude scripts
 
 assert_contains \
   "$override_update_output" \
@@ -404,7 +404,7 @@ assert_contains \
 
 assert_contains \
   "$override_update_output" \
-  "Delegating repository update to: chezmoi --config $override_config update" \
+  "Delegating repository update to: chezmoi --config $override_config update --exclude scripts" \
   "Terrapod update explains delegated explicit config command"
 
 if [ -e "$BROAD_UPGRADE_CALL_FILE" ]; then
