@@ -10,16 +10,19 @@ Terrapod - Dotfiles Management Tool
 Usage:
   terrapod [help|--help|-h]
   terrapod configure <$preset_args>
+  terrapod update
   terrapod chezmoi -- <args...>
 
 Commands:
   help                                  Show this help.
   configure <$preset_args>
                                         Expand a Preset into concrete chezmoi data values.
+  update                                Run chezmoi update with Terrapod profile and config context.
   chezmoi -- <args...>                  Run raw chezmoi for advanced maintenance.
 
 Examples:
   terrapod configure development
+  terrapod update
   terrapod chezmoi -- status
 EOF
 }
@@ -90,6 +93,52 @@ available_preset_args() {
       printf '%s\n' "minimal|development"
       ;;
   esac
+}
+
+profile_context_label() {
+  case "$(current_profile)" in
+    macos-terminal)
+      printf '%s\n' "macOS Terminal Profile"
+      ;;
+    vps-shell)
+      printf '%s\n' "VPS Shell Profile"
+      ;;
+    *)
+      printf '%s\n' "unsupported profile"
+      ;;
+  esac
+}
+
+show_update_context() {
+  config_file="$(chezmoi_config_file)"
+
+  printf '%s\n' "Terrapod update"
+  printf '%s\n' "Profile: $(profile_context_label)"
+
+  if [ -f "$config_file" ]; then
+    printf '%s\n' "Config: $config_file (present)"
+  else
+    printf '%s\n' "Config: $config_file (missing; chezmoi defaults apply)"
+  fi
+
+  if [ -n "${TERRAPOD_CHEZMOI_CONFIG:-}" ]; then
+    printf '%s\n' "Delegating repository update to: chezmoi --config $TERRAPOD_CHEZMOI_CONFIG update --exclude scripts"
+  else
+    printf '%s\n' "Delegating repository update to: chezmoi update --exclude scripts"
+  fi
+}
+
+run_update() {
+  if [ "$#" -ne 0 ]; then
+    fail_usage "update accepts no arguments"
+  fi
+
+  show_update_context
+  if [ -n "${TERRAPOD_CHEZMOI_CONFIG:-}" ]; then
+    chezmoi --config "$TERRAPOD_CHEZMOI_CONFIG" update --exclude scripts
+  else
+    chezmoi update --exclude scripts
+  fi
 }
 
 render_preset_data() {
@@ -608,6 +657,10 @@ case "$command_name" in
     confirm_existing_config_update "$config_file"
     write_managed_config "$config_file" "$preset"
     printf '%s\n' "Configured Terrapod Preset '$preset' in $config_file"
+    ;;
+  update)
+    shift
+    run_update "$@"
     ;;
   chezmoi)
     shift
