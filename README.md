@@ -1,6 +1,6 @@
 # dotfiles
 
-Personal dotfiles managed with chezmoi.
+Personal dotfiles managed with Terrapod, a chezmoi-backed dotfiles management tool.
 
 ## Setup
 
@@ -8,6 +8,10 @@ The Terrapod first-run installer is the primary entry point for a new machine.
 It installs `chezmoi` into `~/.local/bin`, asks for a Preset, writes
 Terrapod-managed config values, initializes
 `https://github.com/juty9026/dotfiles.git`, and runs the initial apply.
+
+You do not need to install `chezmoi` manually before running this installer.
+The installer installs its own user-local `chezmoi` binary when needed, then
+uses Terrapod to configure the machine before the first apply.
 
 ### macOS
 
@@ -40,12 +44,6 @@ installs that rendered bundle:
 - `monitoring`: iStat Menus.
 
 Machine-specific Homebrew packages should live outside the tracked `Brewfile`.
-
-To edit an existing checkout, move to the chezmoi source directory.
-
-```sh
-chezmoi cd
-```
 
 ### Ubuntu 24.04 VPS
 
@@ -83,16 +81,42 @@ first apply and reconnect.
 chsh -s "$(command -v zsh)"
 ```
 
-Direct `chezmoi` commands are mainly for maintenance after bootstrap, such as
-reviewing changes with `chezmoi diff`, applying later changes with
-`chezmoi apply`, or using `chezmoi cd` to edit the source checkout. For an
-unusual recovery path, install `chezmoi` manually and initialize
+Terrapod handles normal management after bootstrap. For an unusual recovery
+path, install `chezmoi` manually and initialize
 `https://github.com/juty9026/dotfiles.git` directly, then review and apply the
 result.
 
+## Management
+
+Use `terrapod` as the primary management command after bootstrap.
+`tpod` is the short alias for the same command.
+
+```sh
+terrapod status
+terrapod doctor
+terrapod diff
+terrapod apply
+terrapod update
+tpod status
+```
+
+`terrapod update` refreshes this dotfiles source and delegates to `chezmoi update --exclude scripts`.
+It does not update OS packages or mise-managed tools.
+
+Direct chezmoi use remains an advanced escape hatch.
+
+```sh
+terrapod chezmoi -- cd
+terrapod chezmoi -- status
+```
+
 ## Updates
 
-Update OS-managed packages with the OS package manager.
+Terrapod does not run broad Bootstrap Package Manager or Modern CLI Provider upgrades.
+Homebrew and APT are Bootstrap Package Managers here: they prepare a machine for the declared shell state.
+mise is the Modern CLI Provider for shared command-line tools and development runtimes.
+
+Use OS package managers directly only when intentionally updating OS-managed packages.
 
 ```sh
 # macOS
@@ -104,7 +128,7 @@ sudo apt update
 sudo apt upgrade
 ```
 
-Update modern CLI tools and development runtimes with mise.
+Use mise directly when intentionally updating modern CLI tools or development runtimes.
 
 ```sh
 mise outdated
@@ -206,7 +230,7 @@ gitAllowedSigners = [
 Then apply the dotfiles.
 
 ```sh
-chezmoi apply
+terrapod apply
 ```
 
 ## Conventions

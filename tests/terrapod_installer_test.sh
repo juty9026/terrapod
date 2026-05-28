@@ -37,6 +37,18 @@ assert_contains() {
   pass "$message"
 }
 
+assert_not_contains() {
+  haystack="$1"
+  needle="$2"
+  message="$3"
+
+  if printf '%s\n' "$haystack" | grep -F -e "$needle" >/dev/null; then
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
 assert_line() {
   haystack="$1"
   expected_line="$2"
@@ -114,6 +126,14 @@ readme_text="$(cat "$readme_file")"
 assert_contains "$readme_text" "Terrapod first-run installer" "README documents the Terrapod first-run installer"
 assert_contains "$readme_text" 'sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/dotfiles/main/install.sh)"' "README documents the full installer command"
 assert_contains "$readme_text" "https://github.com/juty9026/dotfiles.git" "README documents the HTTPS source repository"
+assert_contains "$readme_text" "You do not need to install \`chezmoi\` manually before running this installer." "README states chezmoi is not a first-run prerequisite"
+assert_contains "$readme_text" "Use \`terrapod\` as the primary management command after bootstrap." "README documents Terrapod as the primary management command"
+assert_contains "$readme_text" "\`tpod\` is the short alias for the same command." "README documents tpod as the short Terrapod alias"
+assert_contains "$readme_text" "terrapod chezmoi -- status" "README documents raw chezmoi access through Terrapod"
+assert_contains "$readme_text" "Direct chezmoi use remains an advanced escape hatch." "README keeps direct chezmoi as an advanced escape hatch"
+assert_not_contains "$readme_text" "--non-interactive" "README keeps non-interactive installer options out of scope"
+assert_not_contains "$readme_text" "repository rename" "README keeps repository renaming out of scope"
+assert_not_contains "$readme_text" "log-output" "README keeps broader log-output design out of scope"
 
 chezmoiignore_file="$repo_root/.chezmoiignore"
 if [ ! -f "$chezmoiignore_file" ]; then
