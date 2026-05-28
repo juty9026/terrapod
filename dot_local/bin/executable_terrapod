@@ -21,7 +21,7 @@ Usage:
 
 Commands:
   help                                  Show this help.
-  setup                                 Run plain interactive Terrapod Setup.
+  setup                                 Run interactive Terrapod Setup.
   configure <$preset_args>
                                         Expand a Preset into concrete chezmoi data values.
   status                                Explain this machine's Terrapod profile, config, stack, and tool state.
@@ -202,6 +202,88 @@ available_preset_args() {
   printf '%s\n' "$preset_args"
 }
 
+available_preset_at_index() {
+  profile="$1"
+  wanted_index="$2"
+  index=1
+
+  for preset in $(known_presets); do
+    if is_preset_available_for_profile "$preset" "$profile"; then
+      if [ "$index" -eq "$wanted_index" ]; then
+        printf '%s\n' "$preset"
+        return 0
+      fi
+      index=$((index + 1))
+    fi
+  done
+
+  return 1
+}
+
+available_preset_count() {
+  profile="$1"
+  count=0
+
+  for preset in $(known_presets); do
+    if is_preset_available_for_profile "$preset" "$profile"; then
+      count=$((count + 1))
+    fi
+  done
+
+  printf '%s\n' "$count"
+}
+
+rich_next_index() {
+  current="$1"
+  count="$2"
+
+  if [ "$current" -ge "$count" ]; then
+    printf '%s\n' 1
+  else
+    printf '%s\n' "$((current + 1))"
+  fi
+}
+
+rich_previous_index() {
+  current="$1"
+  count="$2"
+
+  if [ "$current" -le 1 ]; then
+    printf '%s\n' "$count"
+  else
+    printf '%s\n' "$((current - 1))"
+  fi
+}
+
+rich_preset_index_for_input() {
+  profile="$1"
+  input="$2"
+  count="$(available_preset_count "$profile")"
+
+  case "$input" in
+    1|2|3)
+      if [ "$input" -le "$count" ]; then
+        printf '%s\n' "$input"
+        return 0
+      fi
+      return 1
+      ;;
+  esac
+
+  index=1
+  for preset in $(known_presets); do
+    if is_preset_available_for_profile "$preset" "$profile"; then
+      if [ "$input" = "$preset" ]; then
+        printf '%s\n' "$index"
+        return 0
+      fi
+      index=$((index + 1))
+    fi
+  done
+
+  return 1
+}
+
 profile_context_label() {
   case "$(current_profile)" in
     macos-terminal)
@@ -216,7 +298,58 @@ profile_context_label() {
   esac
 }
 
+setup_rich_presentation_enabled() {
+  case "${TERRAPOD_SETUP_PRESENTATION:-auto}" in
+    rich)
+      return 0
+      ;;
+    plain)
+      return 1
+      ;;
+    auto|"")
+      ;;
+    *)
+      fatal "unsupported TERRAPOD_SETUP_PRESENTATION: ${TERRAPOD_SETUP_PRESENTATION:-}"
+      ;;
+  esac
+
+  [ -t 0 ] || return 1
+  [ -t 2 ] || return 1
+  [ -n "${TERM:-}" ] || return 1
+  [ "${TERM:-}" != "dumb" ] || return 1
+  [ -z "${CI:-}" ] || return 1
+
+  return 0
+}
+
+setup_rich_color_enabled() {
+  setup_rich_presentation_enabled || return 1
+  [ -z "${NO_COLOR:-}" ] || return 1
+  return 0
+}
+
+setup_rich_text() {
+  color_code="$1"
+  text="$2"
+
+  if setup_rich_color_enabled; then
+    printf '\033[%sm%s\033[0m' "$color_code" "$text"
+  else
+    printf '%s' "$text"
+  fi
+}
+
 prompt_for_setup_preset() {
+  profile="$1"
+
+  if setup_rich_presentation_enabled; then
+    prompt_for_setup_preset_rich "$profile"
+  else
+    prompt_for_setup_preset_plain "$profile"
+  fi
+}
+
+prompt_for_setup_preset_plain() {
   profile="$1"
   preset_args="$(available_preset_args "$profile")"
 
@@ -232,6 +365,52 @@ prompt_for_setup_preset() {
 
   validate_preset_for_profile "$preset" "$profile"
   printf '%s\n' "$preset"
+}
+
+prompt_for_setup_preset_rich() {
+  profile="$1"
+  count="$(available_preset_count "$profile")"
+  selected=1
+
+  while :; do
+    printf '%s\n' "$(setup_rich_text 36 '🌱 Terrapod Setup') Preset" >&2
+    index=1
+    for preset in $(known_presets); do
+      if is_preset_available_for_profile "$preset" "$profile"; then
+        marker=" "
+        if [ "$index" -eq "$selected" ]; then
+          marker="$(setup_rich_text 32 '▸')"
+        fi
+        printf '%s %s. %s\n' "$marker" "$index" "$preset" >&2
+        index=$((index + 1))
+      fi
+    done
+
+    printf '%s ' "$(setup_rich_text 35 'Preset [j/k, number/name, Enter]')" >&2
+    if ! IFS= read -r answer; then
+      fatal "no Terrapod Preset selected"
+    fi
+
+    case "$answer" in
+      "")
+        available_preset_at_index "$profile" "$selected"
+        return
+        ;;
+      j|J|down|Down|DOWN|"$(printf '\033[B')")
+        selected="$(rich_next_index "$selected" "$count")"
+        ;;
+      k|K|up|Up|UP|"$(printf '\033[A')")
+        selected="$(rich_previous_index "$selected" "$count")"
+        ;;
+      *)
+        if next_selected="$(rich_preset_index_for_input "$profile" "$answer")"; then
+          available_preset_at_index "$profile" "$next_selected"
+          return
+        fi
+        printf '%s\n' "terrapod: choose a Preset with j/k, number, or name" >&2
+        ;;
+    esac
+  done
 }
 
 show_setup_settings_summary() {
@@ -285,6 +464,17 @@ prompt_for_setup_settings() {
   preset="$1"
   profile="$2"
 
+  if setup_rich_presentation_enabled; then
+    prompt_for_setup_settings_rich "$preset" "$profile"
+  else
+    prompt_for_setup_settings_plain "$preset" "$profile"
+  fi
+}
+
+prompt_for_setup_settings_plain() {
+  preset="$1"
+  profile="$2"
+
   load_setup_defaults "$preset"
 
   printf '%s\n' "Customize Terrapod settings." >&2
@@ -314,6 +504,172 @@ prompt_for_setup_settings() {
     setup_enableMacosAppGroupLauncher=false
     setup_enableMacosAppGroupMonitoring=false
     printf '%s\n' "macOS App Groups: not applicable for $(profile_context_label)" >&2
+  fi
+
+  render_setup_data
+}
+
+rich_setup_field_count() {
+  profile="$1"
+
+  if is_enabled "$setup_enableDevelopmentWorkspace"; then
+    if [ "$profile" = "macos-terminal" ]; then
+      printf '%s\n' 5
+    else
+      printf '%s\n' 1
+    fi
+    return
+  fi
+
+  if [ "$profile" = "macos-terminal" ]; then
+    printf '%s\n' 7
+  else
+    printf '%s\n' 3
+  fi
+}
+
+rich_setup_field_name() {
+  profile="$1"
+  index="$2"
+
+  if is_enabled "$setup_enableDevelopmentWorkspace"; then
+    case "$index" in
+      1) printf '%s\n' "enableDevelopmentWorkspace" ;;
+      2) printf '%s\n' "enableMacosAppGroupTerminalApps" ;;
+      3) printf '%s\n' "enableMacosAppGroupAutomation" ;;
+      4) printf '%s\n' "enableMacosAppGroupLauncher" ;;
+      5) printf '%s\n' "enableMacosAppGroupMonitoring" ;;
+      *) return 1 ;;
+    esac
+    return
+  fi
+
+  case "$index" in
+    1) printf '%s\n' "enableDevelopmentWorkspace" ;;
+    2) printf '%s\n' "enableEditorStack" ;;
+    3) printf '%s\n' "enableAiCliTools" ;;
+    4) printf '%s\n' "enableMacosAppGroupTerminalApps" ;;
+    5) printf '%s\n' "enableMacosAppGroupAutomation" ;;
+    6) printf '%s\n' "enableMacosAppGroupLauncher" ;;
+    7) printf '%s\n' "enableMacosAppGroupMonitoring" ;;
+    *) return 1 ;;
+  esac
+}
+
+rich_setup_field_label() {
+  case "$1" in
+    enableDevelopmentWorkspace) printf '%s\n' "Optional Development Workspace" ;;
+    enableEditorStack) printf '%s\n' "Optional Editor Stack" ;;
+    enableAiCliTools) printf '%s\n' "Optional AI Tool Stack" ;;
+    enableMacosAppGroupTerminalApps) printf '%s\n' "terminal-apps macOS App Group" ;;
+    enableMacosAppGroupAutomation) printf '%s\n' "automation macOS App Group" ;;
+    enableMacosAppGroupLauncher) printf '%s\n' "launcher macOS App Group" ;;
+    enableMacosAppGroupMonitoring) printf '%s\n' "monitoring macOS App Group" ;;
+    *) return 1 ;;
+  esac
+}
+
+rich_setup_field_value() {
+  eval "printf '%s\n' \"\$setup_$1\""
+}
+
+rich_set_setup_field_value() {
+  field="$1"
+  value="$2"
+
+  eval "setup_$field=\$value"
+
+  if [ "$field" = "enableDevelopmentWorkspace" ] && is_enabled "$value"; then
+    setup_enableEditorStack=true
+    setup_enableAiCliTools=true
+  fi
+}
+
+prompt_for_setup_settings_rich() {
+  preset="$1"
+  profile="$2"
+
+  load_setup_defaults "$preset"
+  selected=1
+
+  while :; do
+    count="$(rich_setup_field_count "$profile")"
+    if [ "$selected" -gt "$count" ]; then
+      selected="$count"
+    fi
+
+    printf '%s\n' "$(setup_rich_text 36 '✨ Setup settings')" >&2
+
+    index=1
+    while [ "$index" -le "$count" ]; do
+      field="$(rich_setup_field_name "$profile" "$index")"
+      label="$(rich_setup_field_label "$field")"
+      value="$(rich_setup_field_value "$field")"
+      marker=" "
+      if [ "$index" -eq "$selected" ]; then
+        marker="$(setup_rich_text 32 '▸')"
+      fi
+      printf '%s %s [%s]\n' "$marker" "$label" "$(bool_state_label "$value")" >&2
+      index=$((index + 1))
+    done
+
+    if is_enabled "$setup_enableDevelopmentWorkspace"; then
+      printf '%s\n' "  Optional Editor Stack: included by Optional Development Workspace" >&2
+      printf '%s\n' "  Optional AI Tool Stack: included by Optional Development Workspace" >&2
+    fi
+
+    if [ "$profile" != "macos-terminal" ]; then
+      printf '%s\n' "  macOS App Groups: not applicable for $(profile_context_label)" >&2
+    fi
+
+    printf '%s ' "$(setup_rich_text 35 'Settings [j/k, t, y/n, Enter]')" >&2
+    if ! IFS= read -r answer; then
+      break
+    fi
+
+    case "$answer" in
+      "")
+        break
+        ;;
+      j|J|down|Down|DOWN|"$(printf '\033[B')")
+        selected="$(rich_next_index "$selected" "$count")"
+        ;;
+      k|K|up|Up|UP|"$(printf '\033[A')")
+        selected="$(rich_previous_index "$selected" "$count")"
+        ;;
+      t|T|" ")
+        field="$(rich_setup_field_name "$profile" "$selected")"
+        value="$(rich_setup_field_value "$field")"
+        if is_enabled "$value"; then
+          rich_set_setup_field_value "$field" false
+        else
+          rich_set_setup_field_value "$field" true
+        fi
+        ;;
+      y|Y|yes|YES|true|TRUE|on|ON|1|enabled|ENABLED)
+        field="$(rich_setup_field_name "$profile" "$selected")"
+        rich_set_setup_field_value "$field" true
+        ;;
+      n|N|no|NO|false|FALSE|off|OFF|0|disabled|DISABLED)
+        field="$(rich_setup_field_name "$profile" "$selected")"
+        rich_set_setup_field_value "$field" false
+        ;;
+      *)
+        printf '%s\n' "terrapod: use j/k, t, y/n, or Enter for setup settings" >&2
+        ;;
+    esac
+  done
+
+  if is_enabled "$setup_enableDevelopmentWorkspace"; then
+    setup_enableEditorStack=true
+    setup_enableAiCliTools=true
+  fi
+
+  if [ "$profile" != "macos-terminal" ]; then
+    setup_enableMacosAppGroupTerminalApps=false
+    setup_enableMacosAppGroupAutomation=false
+    setup_enableMacosAppGroupLauncher=false
+    setup_enableMacosAppGroupMonitoring=false
   fi
 
   render_setup_data
