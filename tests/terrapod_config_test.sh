@@ -370,6 +370,41 @@ assert_data_key_once_with_value "$quoted_table_config" "enableDevelopmentWorkspa
 assert_data_key_once_with_value "$quoted_table_config" "enableMacosDesktopApps" "false" "quoted data table update writes macOS desktop-app boundary in data"
 assert_not_contains "$quoted_table_config" "terrapodPreset" "quoted data table update removes stale dynamic Preset key"
 
+dotted_home="$tmp_dir/dotted-home"
+dotted_xdg="$tmp_dir/dotted-xdg"
+dotted_config="$dotted_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$dotted_home" "$(dirname "$dotted_config")"
+
+cat >"$dotted_config" <<'TOML'
+data.email = "minu@example.com"
+data.enableEditorStack = false
+data.enableAiCliTools = false
+data.enableDevelopmentWorkspace = false
+data.enableMacosDesktopApps = true
+data.terrapodPreset = "minimal"
+
+[sourceState]
+branch = "main"
+TOML
+
+run_terrapod_configure development "y" "$dotted_home" "$dotted_xdg"
+
+assert_not_contains "$dotted_config" "[data]" "dotted data update does not append a duplicate data table"
+assert_contains "$dotted_config" "data.email = \"minu@example.com\"" "dotted data update preserves unrelated data values"
+assert_contains "$dotted_config" "branch = \"main\"" "dotted data update preserves later sections"
+assert_contains "$dotted_config" "data.enableEditorStack = true" "dotted data update writes Editor Stack as a dotted data key"
+assert_contains "$dotted_config" "data.enableAiCliTools = true" "dotted data update writes AI Tool Stack as a dotted data key"
+assert_contains "$dotted_config" "data.enableDevelopmentWorkspace = true" "dotted data update writes Development Workspace as a dotted data key"
+assert_contains "$dotted_config" "data.enableMacosDesktopApps = false" "dotted data update writes macOS desktop-app boundary as a dotted data key"
+assert_not_contains "$dotted_config" "data.terrapodPreset" "dotted data update removes stale dynamic Preset key"
+
+if ! HOME="$dotted_home" XDG_CONFIG_HOME="$dotted_xdg" chezmoi --config "$dotted_config" data >"$tmp_dir/dotted-data.out" 2>"$tmp_dir/dotted-data.err"; then
+  printf '%s\n' "stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/dotted-data.err" >&2
+  fail "dotted data update leaves a chezmoi-parseable config"
+fi
+pass "dotted data update leaves a chezmoi-parseable config"
+
 quoted_home="$tmp_dir/quoted-home"
 quoted_xdg="$tmp_dir/quoted-xdg"
 quoted_config="$quoted_xdg/chezmoi/chezmoi.toml"
