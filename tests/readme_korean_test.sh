@@ -58,8 +58,45 @@ assert_not_contains() {
 extract_headings() {
   file="$1"
 
-  grep -E '^#{1,6} ' "$file" || true
+  awk '
+    /^```/ {
+      in_fence = !in_fence
+      next
+    }
+
+    !in_fence && /^#{1,6} / {
+      print
+    }
+  ' "$file" || true
 }
+
+assert_headings_ignore_fenced_code() {
+  fixture="$tmp_dir/fenced-headings.md"
+  actual="$tmp_dir/fenced-headings.actual"
+  expected="$tmp_dir/fenced-headings.expected"
+
+  cat >"$fixture" <<'EOF'
+# Visible heading
+```sh
+# Ignored shell comment
+```
+## Second visible heading
+EOF
+
+  extract_headings "$fixture" >"$actual"
+  {
+    printf '%s\n' "# Visible heading"
+    printf '%s\n' "## Second visible heading"
+  } >"$expected"
+
+  if ! cmp -s "$expected" "$actual"; then
+    fail "heading extraction ignores fenced code blocks"
+  fi
+
+  pass "heading extraction ignores fenced code blocks"
+}
+
+assert_headings_ignore_fenced_code
 
 assert_file_exists "$readme" "README.md exists"
 assert_file_exists "$korean_readme" "README.ko.md exists"
