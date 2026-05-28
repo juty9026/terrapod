@@ -10,6 +10,8 @@ Terrapod - Dotfiles Management Tool
 Usage:
   terrapod [help|--help|-h]
   terrapod configure <$preset_args>
+  terrapod diff
+  terrapod apply
   terrapod update
   terrapod chezmoi -- <args...>
 
@@ -17,11 +19,15 @@ Commands:
   help                                  Show this help.
   configure <$preset_args>
                                         Expand a Preset into concrete chezmoi data values.
+  diff                                  Run chezmoi diff with Terrapod profile and stack context.
+  apply                                 Run preflight checks, chezmoi apply, and post-apply validation.
   update                                Run chezmoi update with Terrapod profile and config context.
   chezmoi -- <args...>                  Run raw chezmoi for advanced maintenance.
 
 Examples:
   terrapod configure development
+  terrapod diff
+  terrapod apply
   terrapod update
   terrapod chezmoi -- status
 EOF
@@ -109,23 +115,309 @@ profile_context_label() {
   esac
 }
 
-show_update_context() {
-  config_file="$(chezmoi_config_file)"
+config_data_bool() {
+  config_file="$1"
+  key="$2"
 
-  printf '%s\n' "Terrapod update"
-  printf '%s\n' "Profile: $(profile_context_label)"
+  if [ ! -f "$config_file" ]; then
+    printf '%s\n' "false"
+    return
+  fi
+
+  awk -v wanted_key="$key" '
+    function strip_space(value) {
+      sub(/^[[:space:]]*/, "", value)
+      sub(/[[:space:]]*$/, "", value)
+      return value
+    }
+
+    function strip_comment(value) {
+      sub(/[[:space:]]*#.*/, "", value)
+      return value
+    }
+
+    function unquote_key(value, quote) {
+      value = strip_space(value)
+      quote = substr(value, 1, 1)
+
+      if ((quote == "\"" || quote == "\047") && substr(value, length(value), 1) == quote) {
+        return substr(value, 2, length(value) - 2)
+      }
+
+      return value
+    }
+
+    function is_comment(line) {
+      return line ~ "^[[:space:]]*#"
+    }
+
+    function is_data_section(line) {
+      return line ~ "^[[:space:]]*\\[[[:space:]]*(data|\"data\"|\047data\047)[[:space:]]*\\][[:space:]]*($|#)"
+    }
+
+    function is_section(line) {
+      return line ~ /^[[:space:]]*(\[[^]]+\]|\[\[[^]]+\]\])[[:space:]]*($|#)/
+    }
+
+    function is_key_assignment(line) {
+      return line ~ "^[[:space:]]*(\"[^\"]+\"|\047[^\047]+\047|[A-Za-z0-9_-]+)[[:space:]]*="
+    }
+
+    function is_root_dotted_data_key(line) {
+      return line ~ "^[[:space:]]*(data|\"data\"|\047data\047)[[:space:]]*\\."
+    }
+
+    function assignment_key_name(line, key) {
+      key = line
+      sub(/^[[:space:]]*/, "", key)
+      sub(/[[:space:]]*=.*/, "", key)
+      return unquote_key(key)
+    }
+
+    function dotted_data_key_name(line, key) {
+      key = line
+      sub(/^[[:space:]]*/, "", key)
+      sub(/[[:space:]]*=.*/, "", key)
+      sub("^[[:space:]]*(data|\"data\"|\047data\047)[[:space:]]*\\.[[:space:]]*", "", key)
+      return unquote_key(key)
+    }
+
+    function assignment_value(line, value) {
+      value = line
+      sub(/^[^=]*=/, "", value)
+      return strip_space(strip_comment(value))
+    }
+
+    BEGIN {
+      in_root = 1
+      result = "false"
+    }
+
+    {
+      if (is_comment($0)) {
+        next
+      }
+
+      if (in_root && is_root_dotted_data_key($0)) {
+        if (dotted_data_key_name($0) == wanted_key) {
+          result = assignment_value($0)
+        }
+        next
+      }
+
+      if (is_data_section($0)) {
+        in_root = 0
+        in_data = 1
+        next
+      }
+
+      if (is_section($0)) {
+        in_root = 0
+        in_data = 0
+        next
+      }
+
+      if (in_data && is_key_assignment($0) && assignment_key_name($0) == wanted_key) {
+        result = assignment_value($0)
+      }
+    }
+
+    END {
+      if (result == "true") {
+        print "true"
+      } else {
+        print "false"
+      }
+    }
+  ' "$config_file"
+}
+
+bool_state_label() {
+  case "$1" in
+    true)
+      printf '%s\n' "enabled"
+      ;;
+    *)
+      printf '%s\n' "disabled"
+      ;;
+  esac
+}
+
+config_bool_state_label() {
+  bool_state_label "$(config_data_bool "$1" "$2")"
+}
+
+effective_optional_stack_state_label() {
+  config_file="$1"
+  key="$2"
+
+  if [ "$(config_data_bool "$config_file" "$key")" = "true" ] ||
+    [ "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" = "true" ]; then
+    bool_state_label true
+  else
+    bool_state_label false
+  fi
+}
+
+show_config_context() {
+  config_file="$1"
 
   if [ -f "$config_file" ]; then
     printf '%s\n' "Config: $config_file (present)"
   else
     printf '%s\n' "Config: $config_file (missing; chezmoi defaults apply)"
   fi
+}
+
+show_stack_context() {
+  config_file="$1"
+
+  printf '%s\n' "Optional stacks:"
+  printf '%s\n' "Optional Editor Stack: $(effective_optional_stack_state_label "$config_file" enableEditorStack)"
+  printf '%s\n' "Optional AI Tool Stack: $(effective_optional_stack_state_label "$config_file" enableAiCliTools)"
+  printf '%s\n' "Optional Development Workspace: $(config_bool_state_label "$config_file" enableDevelopmentWorkspace)"
+  printf '%s\n' "macOS App Groups:"
+  printf '%s\n' "terminal-apps: $(config_bool_state_label "$config_file" enableMacosAppGroupTerminalApps)"
+  printf '%s\n' "automation: $(config_bool_state_label "$config_file" enableMacosAppGroupAutomation)"
+  printf '%s\n' "launcher: $(config_bool_state_label "$config_file" enableMacosAppGroupLauncher)"
+  printf '%s\n' "monitoring: $(config_bool_state_label "$config_file" enableMacosAppGroupMonitoring)"
+}
+
+render_chezmoi_command() {
+  printf '%s' "chezmoi"
 
   if [ -n "${TERRAPOD_CHEZMOI_CONFIG:-}" ]; then
-    printf '%s\n' "Delegating repository update to: chezmoi --config $TERRAPOD_CHEZMOI_CONFIG update --exclude scripts"
-  else
-    printf '%s\n' "Delegating repository update to: chezmoi update --exclude scripts"
+    printf ' --config %s' "$TERRAPOD_CHEZMOI_CONFIG"
   fi
+
+  for arg do
+    printf ' %s' "$arg"
+  done
+
+  printf '\n'
+}
+
+run_chezmoi_command() {
+  if [ -n "${TERRAPOD_CHEZMOI_CONFIG:-}" ]; then
+    chezmoi --config "$TERRAPOD_CHEZMOI_CONFIG" "$@"
+  else
+    chezmoi "$@"
+  fi
+}
+
+show_diff_context() {
+  config_file="$(chezmoi_config_file)"
+
+  printf '%s\n' "Terrapod diff"
+  printf '%s\n' "Profile: $(profile_context_label)"
+  show_config_context "$config_file"
+  show_stack_context "$config_file"
+  printf '%s\n' "Delegating target-state diff to: $(render_chezmoi_command diff)"
+}
+
+run_diff() {
+  if [ "$#" -ne 0 ]; then
+    fail_usage "diff accepts no arguments"
+  fi
+
+  show_diff_context
+  run_chezmoi_command diff
+}
+
+run_apply_preflight() {
+  config_file="$1"
+
+  if ! command -v chezmoi >/dev/null 2>&1; then
+    fatal "chezmoi is required before apply; install it or run the Terrapod installer, then rerun 'terrapod apply'"
+  fi
+
+  printf '%s\n' "Preflight: chezmoi is available"
+
+  if [ -e "$config_file" ] || [ -L "$config_file" ]; then
+    if [ ! -f "$config_file" ] || [ ! -r "$config_file" ]; then
+      fatal "config path is not a readable file: $config_file"
+    fi
+
+    printf '%s\n' "Preflight: config file is readable"
+  else
+    printf '%s\n' "Preflight: config file is missing; chezmoi defaults will apply"
+  fi
+}
+
+validate_managed_target() {
+  managed_output="$1"
+  target="$2"
+  label="$3"
+
+  if printf '%s\n' "$managed_output" | grep -Fx "$target" >/dev/null; then
+    printf '%s\n' "Post-apply validation: $label is managed"
+    return 0
+  fi
+
+  printf '%s\n' "terrapod: post-apply validation failed: $label is not managed ($target missing)" >&2
+  print_post_apply_validation_guidance
+  return 1
+}
+
+print_post_apply_validation_guidance() {
+  if [ -n "${TERRAPOD_CHEZMOI_CONFIG:-}" ]; then
+    printf '%s\n' "Run 'terrapod chezmoi -- --config $TERRAPOD_CHEZMOI_CONFIG managed' to inspect managed targets, then rerun 'terrapod apply'." >&2
+  else
+    printf '%s\n' "Run 'terrapod chezmoi -- managed' to inspect managed targets, then rerun 'terrapod apply'." >&2
+  fi
+}
+
+run_post_apply_validation() {
+  validation_status=0
+
+  if ! managed_output="$(run_chezmoi_command managed)"; then
+    printf '%s\n' "terrapod: post-apply validation failed: unable to inspect managed targets" >&2
+    print_post_apply_validation_guidance
+    return 1
+  fi
+
+  validate_managed_target "$managed_output" ".local/bin/terrapod" "Terrapod command" ||
+    validation_status=1
+  validate_managed_target "$managed_output" ".local/bin/tpod" "tpod alias" ||
+    validation_status=1
+
+  return "$validation_status"
+}
+
+show_apply_context() {
+  config_file="$1"
+
+  printf '%s\n' "Terrapod apply"
+  printf '%s\n' "Profile: $(profile_context_label)"
+  show_config_context "$config_file"
+  show_stack_context "$config_file"
+  printf '%s\n' "Delegating target-state apply to: $(render_chezmoi_command apply)"
+}
+
+run_apply() {
+  if [ "$#" -ne 0 ]; then
+    fail_usage "apply accepts no arguments"
+  fi
+
+  config_file="$(chezmoi_config_file)"
+  show_apply_context "$config_file"
+  run_apply_preflight "$config_file"
+
+  if ! run_chezmoi_command apply; then
+    printf '%s\n' "terrapod: chezmoi apply failed; fix the error above, then rerun 'terrapod apply'." >&2
+    return 1
+  fi
+
+  run_post_apply_validation
+}
+
+show_update_context() {
+  config_file="$(chezmoi_config_file)"
+
+  printf '%s\n' "Terrapod update"
+  printf '%s\n' "Profile: $(profile_context_label)"
+  show_config_context "$config_file"
+  printf '%s\n' "Delegating repository update to: $(render_chezmoi_command update --exclude scripts)"
 }
 
 run_update() {
@@ -134,11 +426,7 @@ run_update() {
   fi
 
   show_update_context
-  if [ -n "${TERRAPOD_CHEZMOI_CONFIG:-}" ]; then
-    chezmoi --config "$TERRAPOD_CHEZMOI_CONFIG" update --exclude scripts
-  else
-    chezmoi update --exclude scripts
-  fi
+  run_chezmoi_command update --exclude scripts
 }
 
 render_preset_data() {
@@ -657,6 +945,14 @@ case "$command_name" in
     confirm_existing_config_update "$config_file"
     write_managed_config "$config_file" "$preset"
     printf '%s\n' "Configured Terrapod Preset '$preset' in $config_file"
+    ;;
+  diff)
+    shift
+    run_diff "$@"
+    ;;
+  apply)
+    shift
+    run_apply "$@"
     ;;
   update)
     shift
