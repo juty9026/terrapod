@@ -388,6 +388,18 @@ print_stack_status() {
   fi
 }
 
+print_optional_setting_status() {
+  label="$1"
+  enabled="$2"
+  detail="$3"
+
+  if is_enabled "$enabled"; then
+    printf '  %s: enabled (%s)\n' "$label" "$detail"
+  else
+    printf '  %s: disabled\n' "$label"
+  fi
+}
+
 print_macos_app_group_status() {
   config_file="$1"
   profile="$2"
@@ -424,7 +436,7 @@ print_key_tool_status() {
   profile="$1"
 
   printf '%s\n' "Key tools:"
-  for tool in chezmoi git zsh mise; do
+  for tool in chezmoi git zsh mise nvim zellij; do
     if command -v "$tool" >/dev/null 2>&1; then
       printf '  %s: available\n' "$tool"
     else
@@ -452,7 +464,7 @@ print_key_tool_status() {
 
 status_key_tool_warnings() {
   profile="$1"
-  missing="$(missing_tools chezmoi git zsh mise)"
+  missing="$(missing_tools chezmoi git zsh mise nvim zellij)"
 
   case "$profile" in
     macos-terminal)
@@ -496,26 +508,10 @@ print_status_warnings() {
     printed=1
   fi
 
-  if is_enabled "$(effective_editor_stack_enabled "$config_file")"; then
-    missing="$(missing_tools nvim)"
-    if [ -n "$missing" ]; then
-      printf '%s\n' "Warning: Optional Editor Stack is enabled but missing tools: $missing"
-      printed=1
-    fi
-  fi
-
   if is_enabled "$(effective_ai_cli_tools_enabled "$config_file")"; then
     missing="$(missing_tools gemini claude codex)"
     if [ -n "$missing" ]; then
       printf '%s\n' "Warning: Optional AI Tool Stack is enabled but missing tools: $missing"
-      printed=1
-    fi
-  fi
-
-  if is_enabled "$(config_data_bool "$config_file" enableDevelopmentWorkspace)"; then
-    missing="$(missing_tools zellij)"
-    if [ -n "$missing" ]; then
-      printf '%s\n' "Warning: Optional Development Workspace is enabled but missing tools: $missing"
       printed=1
     fi
   fi
@@ -537,9 +533,9 @@ run_status() {
   printf '%s\n' "Profile: $(profile_context_label)"
   show_config_context "$config_file"
   printf '%s\n' "Optional stacks:"
-  print_stack_status "Optional Editor Stack" "$(effective_editor_stack_enabled "$config_file")" nvim
+  print_optional_setting_status "Optional Editor Stack" "$(effective_editor_stack_enabled "$config_file")" "rich Neovim configuration"
   print_stack_status "Optional AI Tool Stack" "$(effective_ai_cli_tools_enabled "$config_file")" gemini claude codex
-  print_stack_status "Optional Development Workspace" "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" zellij
+  print_optional_setting_status "Optional Development Workspace" "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" "development Zellij layouts"
   print_macos_app_group_status "$config_file" "$profile"
   print_key_tool_status "$profile"
   print_status_warnings "$config_file" "$profile"
@@ -748,6 +744,18 @@ doctor_check_optional_stack() {
   fi
 }
 
+doctor_check_optional_setting() {
+  label="$1"
+  enabled="$2"
+  detail="$3"
+
+  if is_enabled "$enabled"; then
+    doctor_ok "$label is enabled ($detail)"
+  else
+    doctor_ok "$label is disabled"
+  fi
+}
+
 run_doctor() {
   if [ "$#" -ne 0 ]; then
     fail_usage "doctor accepts no arguments"
@@ -770,7 +778,7 @@ run_doctor() {
     doctor_ok "Profile is supported: $(profile_context_label)"
   fi
 
-  for tool in chezmoi git zsh mise; do
+  for tool in chezmoi git zsh mise nvim zellij; do
     doctor_check_command "$tool"
   done
 
@@ -783,11 +791,10 @@ run_doctor() {
       ;;
   esac
 
-  doctor_check_optional_stack \
+  doctor_check_optional_setting \
     "Optional Editor Stack" \
     "$(effective_editor_stack_enabled "$config_file")" \
-    "Run terrapod chezmoi -- apply after enabling Optional Editor Stack, or install/apply the configured editor tools before relying on them." \
-    nvim
+    "rich Neovim configuration"
 
   doctor_check_optional_stack \
     "Optional AI Tool Stack" \
@@ -795,11 +802,10 @@ run_doctor() {
     "Run terrapod chezmoi -- apply after enabling Optional AI Tool Stack, or install/apply the configured tools before relying on them." \
     gemini claude codex
 
-  doctor_check_optional_stack \
+  doctor_check_optional_setting \
     "Optional Development Workspace" \
     "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" \
-    "Run terrapod chezmoi -- apply after enabling Optional Development Workspace, or install/apply the configured workspace tools before relying on them." \
-    zellij
+    "development Zellij layouts"
 
   if [ "$doctor_guidance_printed" -eq 0 ]; then
     printf '%s\n' "Guidance: none"
