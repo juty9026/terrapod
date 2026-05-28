@@ -147,15 +147,54 @@ current_profile() {
   esac
 }
 
-available_preset_args() {
+known_presets() {
+  printf '%s\n' "minimal" "development" "workstation"
+}
+
+is_known_preset() {
   case "$1" in
-    macos-terminal)
-      printf '%s\n' "minimal|development|workstation"
+    minimal|development|workstation)
+      return 0
       ;;
     *)
-      printf '%s\n' "minimal|development"
+      return 1
       ;;
   esac
+}
+
+is_preset_available_for_profile() {
+  preset="$1"
+  profile="$2"
+
+  case "$preset" in
+    minimal|development)
+      return 0
+      ;;
+    workstation)
+      [ "$profile" = "macos-terminal" ]
+      return
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+available_preset_args() {
+  profile="$1"
+  preset_args=
+
+  for preset in $(known_presets); do
+    if is_preset_available_for_profile "$preset" "$profile"; then
+      if [ -z "$preset_args" ]; then
+        preset_args="$preset"
+      else
+        preset_args="$preset_args|$preset"
+      fi
+    fi
+  done
+
+  printf '%s\n' "$preset_args"
 }
 
 profile_context_label() {
@@ -873,13 +912,17 @@ enableMacosAppGroupMonitoring = true
 EOF
       ;;
     *)
-      fail_usage "unknown Preset: $preset"
+      return 1
       ;;
   esac
 }
 
 validate_preset() {
-  render_preset_data "$1" >/dev/null
+  preset="$1"
+
+  if ! is_known_preset "$preset"; then
+    fail_usage "unknown Preset: $preset"
+  fi
 }
 
 validate_preset_for_profile() {
@@ -888,7 +931,7 @@ validate_preset_for_profile() {
 
   validate_preset "$preset"
 
-  if [ "$preset" = "workstation" ] && [ "$profile" != "macos-terminal" ]; then
+  if ! is_preset_available_for_profile "$preset" "$profile"; then
     fail_usage "workstation Preset is only available for the macOS Terminal Profile"
   fi
 }
