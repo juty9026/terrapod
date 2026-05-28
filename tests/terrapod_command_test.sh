@@ -40,6 +40,18 @@ assert_contains() {
   pass "$message"
 }
 
+assert_not_contains() {
+  haystack="$1"
+  needle="$2"
+  message="$3"
+
+  if printf '%s\n' "$haystack" | grep -F "$needle" >/dev/null; then
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
 assert_line() {
   haystack="$1"
   expected_line="$2"
@@ -69,6 +81,31 @@ assert_call_args() {
     sed 's/^/  /' "$expected_file" >&2
     printf '%s\n' "actual args:" >&2
     sed 's/^/  /' "$call_file" >&2
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
+assert_no_terrapod_artifacts_under() {
+  dir="$1"
+  message="$2"
+  found_file="$tmp_dir/found-terrapod-artifacts"
+
+  : >"$found_file"
+  if [ -d "$dir" ]; then
+    find "$dir" \
+      \( -name '.terrapod-config.*' \
+      -o -name '.terrapod-data.*' \
+      -o -name '*.terrapod-backup-*' \
+      -o -name '*.terrapod-tmp-*' \
+      -o -name '*.terrapod-data-*' \) \
+      -print >"$found_file"
+  fi
+
+  if [ -s "$found_file" ]; then
+    printf '%s\n' "unexpected Terrapod artifacts:" >&2
+    sed 's/^/  /' "$found_file" >&2
     fail "$message"
   fi
 
@@ -154,10 +191,10 @@ pass "tpod alias points to Terrapod"
 sh -n "$terrapod" || fail "Terrapod command is valid POSIX shell"
 pass "Terrapod command is valid POSIX shell"
 
-help_output="$(sh "$terrapod" help)"
+help_output="$(TERRAPOD_PROFILE=macos-terminal sh "$terrapod" help)"
 
 ln -s "$terrapod" "$tmp_dir/bin/tpod"
-tpod_help_output="$(PATH="$tmp_dir/bin:/usr/bin:/bin" "$tmp_dir/bin/tpod" help)"
+tpod_help_output="$(TERRAPOD_PROFILE=macos-terminal PATH="$tmp_dir/bin:/usr/bin:/bin" "$tmp_dir/bin/tpod" help)"
 
 if [ "$tpod_help_output" != "$help_output" ]; then
   fail "tpod shows the same help as Terrapod"
@@ -189,6 +226,46 @@ assert_contains \
   "$help_output" \
   "terrapod configure <minimal|development|workstation>" \
   "Terrapod help documents Preset configuration"
+
+macos_help_output="$(TERRAPOD_PROFILE=macos-terminal sh "$terrapod" help)"
+
+assert_contains \
+  "$macos_help_output" \
+  "terrapod configure <minimal|development|workstation>" \
+  "macOS Terminal Profile help exposes workstation Preset"
+
+vps_help_output="$(TERRAPOD_PROFILE=vps-shell sh "$terrapod" help)"
+
+assert_contains \
+  "$vps_help_output" \
+  "terrapod configure <minimal|development>" \
+  "VPS Shell Profile help hides workstation Preset"
+
+assert_not_contains \
+  "$vps_help_output" \
+  "workstation" \
+  "VPS Shell Profile help does not mention workstation anywhere"
+
+if TERRAPOD_PROFILE=vps-shell HOME="$tmp_dir/home" XDG_CONFIG_HOME="$tmp_dir/xdg" sh "$terrapod" configure workstation >"$tmp_dir/vps-workstation.out" 2>"$tmp_dir/vps-workstation.err"; then
+  fail "VPS Shell Profile rejects workstation Preset"
+fi
+pass "VPS Shell Profile rejects workstation Preset"
+
+if [ -e "$tmp_dir/xdg/chezmoi/chezmoi.toml" ]; then
+  fail "VPS Shell Profile rejects workstation Preset before writing config"
+fi
+pass "VPS Shell Profile rejects workstation Preset before writing config"
+
+assert_no_terrapod_artifacts_under \
+  "$tmp_dir/xdg/chezmoi" \
+  "VPS Shell Profile workstation rejection leaves no Terrapod artifacts"
+
+vps_workstation_error="$(cat "$tmp_dir/vps-workstation.err")"
+
+assert_contains \
+  "$vps_workstation_error" \
+  "workstation Preset is only available for the macOS Terminal Profile" \
+  "VPS Shell Profile explains workstation Preset rejection"
 
 assert_contains \
   "$help_output" \

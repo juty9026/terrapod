@@ -2,17 +2,19 @@
 set -eu
 
 show_help() {
-  cat <<'EOF'
+  preset_args="$(available_preset_args "$(current_profile)")"
+
+  cat <<EOF
 Terrapod - Dotfiles Management Tool
 
 Usage:
   terrapod [help|--help|-h]
-  terrapod configure <minimal|development|workstation>
+  terrapod configure <$preset_args>
   terrapod chezmoi -- <args...>
 
 Commands:
   help                                  Show this help.
-  configure <minimal|development|workstation>
+  configure <$preset_args>
                                         Expand a Preset into concrete chezmoi data values.
   chezmoi -- <args...>                  Run raw chezmoi for advanced maintenance.
 
@@ -58,6 +60,38 @@ chezmoi_config_file() {
   printf '%s\n' "$HOME/.config/chezmoi/chezmoi.toml"
 }
 
+current_profile() {
+  case "${TERRAPOD_PROFILE:-}" in
+    macos-terminal|vps-shell)
+      printf '%s\n' "$TERRAPOD_PROFILE"
+      return
+      ;;
+  esac
+
+  case "$(uname -s 2>/dev/null || printf unknown)" in
+    Darwin)
+      printf '%s\n' "macos-terminal"
+      ;;
+    Linux)
+      printf '%s\n' "vps-shell"
+      ;;
+    *)
+      printf '%s\n' "unsupported"
+      ;;
+  esac
+}
+
+available_preset_args() {
+  case "$1" in
+    macos-terminal)
+      printf '%s\n' "minimal|development|workstation"
+      ;;
+    *)
+      printf '%s\n' "minimal|development"
+      ;;
+  esac
+}
+
 render_preset_data() {
   preset="$1"
 
@@ -67,7 +101,10 @@ render_preset_data() {
 enableEditorStack = false
 enableAiCliTools = false
 enableDevelopmentWorkspace = false
-enableMacosDesktopApps = false
+enableMacosAppGroupTerminalApps = false
+enableMacosAppGroupAutomation = false
+enableMacosAppGroupLauncher = false
+enableMacosAppGroupMonitoring = false
 EOF
       ;;
     development)
@@ -75,7 +112,10 @@ EOF
 enableEditorStack = true
 enableAiCliTools = true
 enableDevelopmentWorkspace = true
-enableMacosDesktopApps = false
+enableMacosAppGroupTerminalApps = false
+enableMacosAppGroupAutomation = false
+enableMacosAppGroupLauncher = false
+enableMacosAppGroupMonitoring = false
 EOF
       ;;
     workstation)
@@ -83,7 +123,10 @@ EOF
 enableEditorStack = true
 enableAiCliTools = true
 enableDevelopmentWorkspace = true
-enableMacosDesktopApps = true
+enableMacosAppGroupTerminalApps = true
+enableMacosAppGroupAutomation = true
+enableMacosAppGroupLauncher = true
+enableMacosAppGroupMonitoring = true
 EOF
       ;;
     *)
@@ -94,6 +137,17 @@ EOF
 
 validate_preset() {
   render_preset_data "$1" >/dev/null
+}
+
+validate_preset_for_profile() {
+  preset="$1"
+  profile="$2"
+
+  validate_preset "$preset"
+
+  if [ "$preset" = "workstation" ] && [ "$profile" != "macos-terminal" ]; then
+    fail_usage "workstation Preset is only available for the macOS Terminal Profile"
+  fi
 }
 
 confirm_existing_config_update() {
@@ -368,8 +422,56 @@ write_managed_config() {
         return line ~ /^[[:space:]]*(\[[^]]+\]|\[\[[^]]+\]\])[[:space:]]*($|#)/
       }
 
+      function strip_space(value) {
+        sub(/^[[:space:]]*/, "", value)
+        sub(/[[:space:]]*$/, "", value)
+        return value
+      }
+
+      function unquote_key(value, quote) {
+        value = strip_space(value)
+        quote = substr(value, 1, 1)
+
+        if ((quote == "\"" || quote == "\047") && substr(value, length(value), 1) == quote) {
+          return substr(value, 2, length(value) - 2)
+        }
+
+        return value
+      }
+
+      function assignment_key_name(line, key) {
+        key = line
+        sub(/^[[:space:]]*/, "", key)
+        sub(/[[:space:]]*=.*/, "", key)
+        return unquote_key(key)
+      }
+
+      function dotted_data_key_name(line, key) {
+        key = line
+        sub(/^[[:space:]]*/, "", key)
+        sub(/[[:space:]]*=.*/, "", key)
+        sub("^[[:space:]]*(data|\"data\"|\047data\047)[[:space:]]*\\.[[:space:]]*", "", key)
+        return unquote_key(key)
+      }
+
+      function is_managed_name(name) {
+        return name == "enableEditorStack" ||
+          name == "enableAiCliTools" ||
+          name == "enableDevelopmentWorkspace" ||
+          name == "enableMacosAppGroupTerminalApps" ||
+          name == "enableMacosAppGroupAutomation" ||
+          name == "enableMacosAppGroupLauncher" ||
+          name == "enableMacosAppGroupMonitoring" ||
+          name == "enableMacosDesktopApps" ||
+          name == "terrapodPreset"
+      }
+
+      function is_key_assignment(line) {
+        return line ~ "^[[:space:]]*(\"[^\"]+\"|\047[^\047]+\047|[A-Za-z0-9_-]+)[[:space:]]*="
+      }
+
       function is_managed_key(line) {
-        return line ~ "^[[:space:]]*(\"enableEditorStack\"|\"enableAiCliTools\"|\"enableDevelopmentWorkspace\"|\"enableMacosDesktopApps\"|\"terrapodPreset\"|\047enableEditorStack\047|\047enableAiCliTools\047|\047enableDevelopmentWorkspace\047|\047enableMacosDesktopApps\047|\047terrapodPreset\047|enableEditorStack|enableAiCliTools|enableDevelopmentWorkspace|enableMacosDesktopApps|terrapodPreset)[[:space:]]*="
+        return is_key_assignment(line) && is_managed_name(assignment_key_name(line))
       }
 
       function is_root_dotted_data_key(line) {
@@ -377,7 +479,7 @@ write_managed_config() {
       }
 
       function is_root_dotted_managed_key(line) {
-        return line ~ "^[[:space:]]*(data|\"data\"|\047data\047)[[:space:]]*\\.[[:space:]]*(\"enableEditorStack\"|\"enableAiCliTools\"|\"enableDevelopmentWorkspace\"|\"enableMacosDesktopApps\"|\"terrapodPreset\"|\047enableEditorStack\047|\047enableAiCliTools\047|\047enableDevelopmentWorkspace\047|\047enableMacosDesktopApps\047|\047terrapodPreset\047|enableEditorStack|enableAiCliTools|enableDevelopmentWorkspace|enableMacosDesktopApps|terrapodPreset)[[:space:]]*="
+        return is_root_dotted_data_key(line) && is_managed_name(dotted_data_key_name(line))
       }
 
       function print_managed_data(line) {
@@ -495,7 +597,8 @@ case "$command_name" in
       fail_usage "configure accepts exactly one Preset"
     fi
 
-    validate_preset "$preset"
+    profile="$(current_profile)"
+    validate_preset_for_profile "$preset" "$profile"
 
     config_file="$(chezmoi_config_file)"
     reject_unusable_config_path "$config_file"

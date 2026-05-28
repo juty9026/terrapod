@@ -1,4 +1,10 @@
 {{- if eq .chezmoi.os "darwin" -}}
+{{- $enableMacosAppGroups := or
+  (default false (get . "enableMacosAppGroupTerminalApps"))
+  (default false (get . "enableMacosAppGroupAutomation"))
+  (default false (get . "enableMacosAppGroupLauncher"))
+  (default false (get . "enableMacosAppGroupMonitoring"))
+-}}
 #!/bin/sh
 set -eu
 
@@ -44,11 +50,19 @@ if [ -f "$core_brewfile" ]; then
   brew bundle --no-upgrade --file="$core_brewfile"
 fi
 
-{{ if default false (get . "enableMacosDesktopApps") -}}
-desktop_brewfile="{{ .chezmoi.sourceDir }}/Brewfile.macos-desktop-apps"
+{{ if $enableMacosAppGroups -}}
+desktop_brewfile="$(mktemp "${TMPDIR:-/tmp}/terrapod-macos-desktop-apps.XXXXXX")"
+cleanup_desktop_brewfile() {
+  rm -f "$desktop_brewfile"
+}
+trap cleanup_desktop_brewfile EXIT HUP INT TERM
 
-# macOS Desktop App Stack Brewfile checksum: {{ include "Brewfile.macos-desktop-apps" | sha256sum }}
-if [ -f "$desktop_brewfile" ]; then
+# macOS Desktop App Stack App Groups checksum: {{ include "Brewfile.macos-desktop-apps.tmpl" | sha256sum }}
+cat >"$desktop_brewfile" <<'BREWFILE'
+{{ includeTemplate "Brewfile.macos-desktop-apps.tmpl" . -}}
+BREWFILE
+
+if [ -s "$desktop_brewfile" ]; then
   brew bundle --no-upgrade --file="$desktop_brewfile"
 fi
 {{- end }}
