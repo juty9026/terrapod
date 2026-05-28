@@ -194,7 +194,7 @@ reject_unsupported_multiline_strings() {
   fi
 }
 
-reject_unsupported_multiline_arrays() {
+reject_section_like_multiline_arrays() {
   config_file="$1"
 
   if [ ! -f "$config_file" ]; then
@@ -206,20 +206,13 @@ reject_unsupported_multiline_arrays() {
       return line ~ "^[[:space:]]*#"
     }
 
-    function starts_multiline_array(line, i, ch, after_equals, saw_value, in_basic_string, in_literal_string, escaped, balance) {
-      if (is_comment(line)) {
-        return 0
-      }
+    function is_section(line) {
+      return line ~ /^[[:space:]]*(\[[^]]+\]|\[\[[^]]+\]\])[[:space:]]*($|#)/
+    }
 
-      for (i = 1; i <= length(line); i++) {
+    function array_balance_delta(line, start, i, ch, in_basic_string, in_literal_string, escaped, balance) {
+      for (i = start; i <= length(line); i++) {
         ch = substr(line, i, 1)
-
-        if (!after_equals) {
-          if (ch == "=") {
-            after_equals = 1
-          }
-          continue
-        }
 
         if (in_basic_string) {
           if (escaped) {
@@ -243,18 +236,6 @@ reject_unsupported_multiline_arrays() {
           break
         }
 
-        if (!saw_value) {
-          if (ch ~ /[[:space:]]/) {
-            continue
-          }
-
-          if (ch != "[") {
-            return 0
-          }
-
-          saw_value = 1
-        }
-
         if (ch == "\"") {
           in_basic_string = 1
           continue
@@ -272,12 +253,62 @@ reject_unsupported_multiline_arrays() {
         }
       }
 
-      return saw_value && balance > 0
+      return balance
+    }
+
+    function multiline_array_balance(line, i, ch, after_equals, saw_value) {
+      if (is_comment(line)) {
+        return 0
+      }
+
+      for (i = 1; i <= length(line); i++) {
+        ch = substr(line, i, 1)
+
+        if (!after_equals) {
+          if (ch == "=") {
+            after_equals = 1
+          }
+          continue
+        }
+
+        if (ch == "#") {
+          break
+        }
+
+        if (!saw_value) {
+          if (ch ~ /[[:space:]]/) {
+            continue
+          }
+
+          if (ch != "[") {
+            return 0
+          }
+
+          saw_value = 1
+          return array_balance_delta(line, i)
+        }
+      }
+
+      return 0
     }
 
     {
-      if (starts_multiline_array($0)) {
-        found = 1
+      if (in_multiline_array) {
+        if (is_section($0)) {
+          found = 1
+        }
+
+        array_balance += array_balance_delta($0, 1)
+        if (array_balance <= 0) {
+          in_multiline_array = 0
+          array_balance = 0
+        }
+        next
+      }
+
+      array_balance = multiline_array_balance($0)
+      if (array_balance > 0) {
+        in_multiline_array = 1
       }
     }
 
@@ -285,7 +316,7 @@ reject_unsupported_multiline_arrays() {
       exit found ? 0 : 1
     }
   ' "$config_file"; then
-    fatal "unsupported multiline array in config; rewrite multiline arrays before running configure: $config_file"
+    fatal "unsupported multiline array with section-like entries in config; rewrite that array before running configure: $config_file"
   fi
 }
 
@@ -313,7 +344,7 @@ write_managed_config() {
 
   reject_unusable_config_path "$config_file"
   reject_unsupported_multiline_strings "$config_file"
-  reject_unsupported_multiline_arrays "$config_file"
+  reject_section_like_multiline_arrays "$config_file"
   reject_unsupported_inline_data_table "$config_file"
 
   mkdir -p "$config_dir"
@@ -469,7 +500,7 @@ case "$command_name" in
     config_file="$(chezmoi_config_file)"
     reject_unusable_config_path "$config_file"
     reject_unsupported_multiline_strings "$config_file"
-    reject_unsupported_multiline_arrays "$config_file"
+    reject_section_like_multiline_arrays "$config_file"
     reject_unsupported_inline_data_table "$config_file"
     confirm_existing_config_update "$config_file"
     write_managed_config "$config_file" "$preset"

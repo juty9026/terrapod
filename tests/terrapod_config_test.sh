@@ -501,6 +501,33 @@ pass "existing update preserves config file mode"
 
 assert_no_terrapod_temp_files "$array_config" "successful array-table update cleans Terrapod temp files"
 
+signers_home="$tmp_dir/signers-home"
+signers_xdg="$tmp_dir/signers-xdg"
+signers_config="$signers_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$signers_home" "$(dirname "$signers_config")"
+
+cat >"$signers_config" <<'TOML'
+[data]
+gitAllowedSigners = [
+  "name@company.com ssh-ed25519 AAAA_COMPANY_PUBLIC_KEY company",
+]
+enableEditorStack = false
+enableAiCliTools = false
+
+[sourceState]
+branch = "main"
+TOML
+
+run_terrapod_configure development "y" "$signers_home" "$signers_xdg"
+
+assert_contains "$signers_config" "gitAllowedSigners = [" "documented signer array update preserves array header"
+assert_contains "$signers_config" "name@company.com ssh-ed25519 AAAA_COMPANY_PUBLIC_KEY company" "documented signer array update preserves signer value"
+assert_data_key_once_with_value "$signers_config" "enableEditorStack" "true" "documented signer array update writes Editor Stack in data"
+assert_data_key_once_with_value "$signers_config" "enableAiCliTools" "true" "documented signer array update writes AI Tool Stack in data"
+assert_data_key_once_with_value "$signers_config" "enableDevelopmentWorkspace" "true" "documented signer array update writes Development Workspace in data"
+assert_data_key_once_with_value "$signers_config" "enableMacosDesktopApps" "false" "documented signer array update writes macOS desktop-app boundary in data"
+assert_contains "$signers_config" "branch = \"main\"" "documented signer array update preserves later sections"
+
 multiline_array_home="$tmp_dir/multiline-array-home"
 multiline_array_xdg="$tmp_dir/multiline-array-xdg"
 multiline_array_config="$multiline_array_xdg/chezmoi/chezmoi.toml"
@@ -522,21 +549,21 @@ cp "$multiline_array_config" "$tmp_dir/multiline-array-before.toml"
 
 if printf '%s\n' "y" |
   HOME="$multiline_array_home" XDG_CONFIG_HOME="$multiline_array_xdg" sh "$terrapod" configure development >"$tmp_dir/multiline-array.out" 2>"$tmp_dir/multiline-array.err"; then
-  fail "multiline array config is rejected before rewriting"
+  fail "section-like multiline array config is rejected before rewriting"
 fi
-pass "multiline array config is rejected before rewriting"
+pass "section-like multiline array config is rejected before rewriting"
 
-assert_contains "$tmp_dir/multiline-array.err" "unsupported multiline array" "multiline array rejection explains unsupported format"
-assert_not_contains "$tmp_dir/multiline-array.err" "Update Terrapod-managed data keys" "multiline array rejection does not prompt before failing"
-assert_not_contains "$tmp_dir/multiline-array.out" "Configured Terrapod Preset" "multiline array rejection does not report success"
+assert_contains "$tmp_dir/multiline-array.err" "unsupported multiline array" "section-like multiline array rejection explains unsupported format"
+assert_not_contains "$tmp_dir/multiline-array.err" "Update Terrapod-managed data keys" "section-like multiline array rejection does not prompt before failing"
+assert_not_contains "$tmp_dir/multiline-array.out" "Configured Terrapod Preset" "section-like multiline array rejection does not report success"
 
 if ! cmp -s "$multiline_array_config" "$tmp_dir/multiline-array-before.toml"; then
-  fail "multiline array rejection leaves existing config unchanged"
+  fail "section-like multiline array rejection leaves existing config unchanged"
 fi
-pass "multiline array rejection leaves existing config unchanged"
+pass "section-like multiline array rejection leaves existing config unchanged"
 
-assert_backup_count "$multiline_array_config" 0 "multiline array rejection does not create a backup"
-assert_no_terrapod_temp_files "$multiline_array_config" "multiline array rejection leaves no Terrapod temp files"
+assert_backup_count "$multiline_array_config" 0 "section-like multiline array rejection does not create a backup"
+assert_no_terrapod_temp_files "$multiline_array_config" "section-like multiline array rejection leaves no Terrapod temp files"
 
 fake_stat_home="$tmp_dir/fake-stat-home"
 fake_stat_xdg="$tmp_dir/fake-stat-xdg"
