@@ -125,6 +125,40 @@ reject_unusable_config_path() {
   fi
 }
 
+reject_unsupported_inline_data_table() {
+  config_file="$1"
+
+  if [ ! -f "$config_file" ]; then
+    return 0
+  fi
+
+  if awk '
+    function is_section(line) {
+      return line ~ /^[[:space:]]*(\[[^]]+\]|\[\[[^]]+\]\])[[:space:]]*($|#)/
+    }
+
+    function is_inline_data_table(line) {
+      return line ~ "^[[:space:]]*(data|\"data\"|\047data\047)[[:space:]]*=[[:space:]]*\\{"
+    }
+
+    {
+      if (is_section($0)) {
+        exit
+      }
+
+      if (is_inline_data_table($0)) {
+        found = 1
+      }
+    }
+
+    END {
+      exit found ? 0 : 1
+    }
+  ' "$config_file"; then
+    fatal "unsupported inline data table in config; rewrite data = {...} as a [data] table before running configure: $config_file"
+  fi
+}
+
 backup_existing_config() {
   config_file="$1"
 
@@ -148,6 +182,7 @@ write_managed_config() {
   managed_data_file=
 
   reject_unusable_config_path "$config_file"
+  reject_unsupported_inline_data_table "$config_file"
 
   mkdir -p "$config_dir"
   trap cleanup_managed_config_temp EXIT
@@ -301,6 +336,7 @@ case "$command_name" in
 
     config_file="$(chezmoi_config_file)"
     reject_unusable_config_path "$config_file"
+    reject_unsupported_inline_data_table "$config_file"
     confirm_existing_config_update "$config_file"
     write_managed_config "$config_file" "$preset"
     printf '%s\n' "Configured Terrapod Preset '$preset' in $config_file"

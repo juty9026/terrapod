@@ -550,6 +550,37 @@ if [ "$fake_stat_mode" != "600" ]; then
 fi
 pass "existing update preserves mode with GNU-first stat fallback"
 
+inline_table_home="$tmp_dir/inline-table-home"
+inline_table_xdg="$tmp_dir/inline-table-xdg"
+inline_table_config="$inline_table_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$inline_table_home" "$(dirname "$inline_table_config")"
+
+cat >"$inline_table_config" <<'TOML'
+data = { email = "minu@example.com", enableEditorStack = false }
+
+[sourceState]
+branch = "main"
+TOML
+cp "$inline_table_config" "$tmp_dir/inline-table-before.toml"
+
+if printf '%s\n' "y" |
+  HOME="$inline_table_home" XDG_CONFIG_HOME="$inline_table_xdg" sh "$terrapod" configure development >"$tmp_dir/inline-table.out" 2>"$tmp_dir/inline-table.err"; then
+  fail "inline data table config is rejected instead of rewritten"
+fi
+pass "inline data table config is rejected instead of rewritten"
+
+assert_contains "$tmp_dir/inline-table.err" "unsupported inline data table" "inline data table rejection explains unsupported format"
+assert_not_contains "$tmp_dir/inline-table.err" "Update Terrapod-managed data keys" "inline data table rejection does not prompt before failing"
+assert_not_contains "$tmp_dir/inline-table.out" "Configured Terrapod Preset" "inline data table rejection does not report success"
+
+if ! cmp -s "$inline_table_config" "$tmp_dir/inline-table-before.toml"; then
+  fail "inline data table rejection leaves existing config unchanged"
+fi
+pass "inline data table rejection leaves existing config unchanged"
+
+assert_backup_count "$inline_table_config" 0 "inline data table rejection does not create a backup"
+assert_no_terrapod_temp_files "$inline_table_config" "inline data table rejection leaves no Terrapod temp files"
+
 decline_home="$tmp_dir/decline-home"
 decline_xdg="$tmp_dir/decline-xdg"
 decline_config="$decline_xdg/chezmoi/chezmoi.toml"
