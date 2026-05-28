@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-DEFAULT_SOURCE_REPO="https://github.com/juty9026/dotfiles.git"
+DEFAULT_SOURCE_REPO="https://github.com/juty9026/terrapod.git"
 
 fatal() {
   printf '%s\n' "terrapod installer: $*" >&2

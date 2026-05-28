@@ -2,7 +2,7 @@
 
 ### Issue tracker
 
-Issues and PRDs are tracked in GitHub Issues for `juty9026/dotfiles`. See `docs/agents/issue-tracker.md`.
+Issues and PRDs are tracked in GitHub Issues for `juty9026/terrapod`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

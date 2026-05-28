@@ -60,6 +60,10 @@ _Avoid_: plain chezmoi repo, standalone package manager, OS provisioning platfor
 The branded name for the **Dotfiles Management Tool**, evoking a pod that lands on an unknown machine and terraforms it into a familiar environment.
 _Avoid_: dotfiles command, chezmoi wrapper
 
+**Terrapod Source Repository**:
+The GitHub repository that hosts **Terrapod** and this repository's declared dotfiles state.
+_Avoid_: dotfiles repository, legacy source URL
+
 **tpod**:
 The short command alias for **Terrapod**.
 _Avoid_: separate tool, primary brand name
@@ -73,9 +77,13 @@ _Avoid_: machine preset, permanent mode, dynamic policy
 - The **Dotfiles Management Tool** is the user-facing entry point for first install, configuration changes, and routine dotfiles maintenance.
 - **Terrapod** is the primary command and brand name for the **Dotfiles Management Tool**.
 - **tpod** is a compatibility and convenience alias for **Terrapod**, not a separate interface.
+- The **Terrapod Source Repository** uses `juty9026/terrapod` as its canonical GitHub slug.
+- Public first-run installation references use the HTTPS **Terrapod Source Repository** URL `https://github.com/juty9026/terrapod.git`.
+- Maintainer remotes may use the SSH **Terrapod Source Repository** URL `git@github.com:juty9026/terrapod.git`.
+- The legacy `juty9026/dotfiles` slug is not a supported **Terrapod** installation path after repository renaming.
 - **Terrapod** and its first-run installer are implemented as POSIX shell entry points.
 - The first-run **Terrapod** installer delegates chezmoi binary installation to the official `get.chezmoi.io` installer and installs it under `~/.local/bin`.
-- The first-run **Terrapod** installer uses `https://github.com/juty9026/dotfiles.git` as the default source repository URL until repository renaming is handled separately.
+- The first-run **Terrapod** installer uses `https://github.com/juty9026/terrapod.git` as the default source repository URL.
 - The first-run **Terrapod** installer stops with guidance when the default chezmoi source directory already exists instead of overwriting an existing checkout.
 - chezmoi remains the internal apply engine for the **Dotfiles Management Tool**, not the primary workflow users need to remember.
 - The **Dotfiles Management Tool** exposes first-class maintenance commands when they add profile, preset, installer, or validation context around chezmoi behavior.
@@ -94,7 +102,7 @@ _Avoid_: machine preset, permanent mode, dynamic policy
 - Interactive setup asks before updating an existing chezmoi config.
 - Config writes use a conservative POSIX shell upsert for managed `[data]` keys instead of attempting to parse all TOML features.
 - Config writes back up an existing chezmoi config before changing managed `[data]` keys.
-- The **macOS Terminal Profile** and **VPS Shell Profile** are separate machine profiles in one dotfiles repository.
+- The **macOS Terminal Profile** and **VPS Shell Profile** are separate machine profiles in one **Terrapod Source Repository**.
 - The **VPS Shell Profile** targets exactly one **Supported Ubuntu Release**.
 - The **VPS Shell Profile** includes the **Core Shell Stack**.
 - The **VPS Shell Profile** includes the **Development Runtime Stack**.
@@ -125,7 +133,7 @@ _Avoid_: machine preset, permanent mode, dynamic policy
 - The launcher **macOS App Group** contains Raycast and 1Password CLI.
 - The monitoring **macOS App Group** contains iStat Menus.
 - Individual macOS app toggles are excluded from the current **Terrapod** setup scope.
-- Repository renaming is deferred outside the current **Terrapod** installer and management command work.
+- Repository renaming makes `juty9026/terrapod` the canonical slug for the **Terrapod Source Repository** without adding legacy URL fallback behavior.
 - Non-interactive setup options are deferred outside the current **Terrapod** installer and management command work.
 - README and command output should use the **Terrapod** name where needed for consistency; broader branding and log-output design are deferred.
 
@@ -141,3 +149,4 @@ _Avoid_: machine preset, permanent mode, dynamic policy
 - "dev layout" means the **Optional Development Workspace**, not the baseline Zellij installation.
 - "preset" means a **Preset** in first-run setup unless specifically referring to the **Optional Development Workspace** stack bundle.
 - "dotfiles command" means **Terrapod** unless discussing legacy naming or chezmoi internals.
+- "dotfiles repository" means the **Terrapod Source Repository** unless discussing the unsupported legacy `juty9026/dotfiles` slug.

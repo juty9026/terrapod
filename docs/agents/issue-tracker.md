@@ -4,7 +4,7 @@ Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all op
 
 ## Repository
 
-GitHub repository: `juty9026/dotfiles`
+GitHub repository: `juty9026/terrapod`
 
 Infer the repo from `git remote -v`; `gh` does this automatically when run inside this clone.
 

@@ -1,4 +1,4 @@
-# dotfiles
+# Terrapod
 
 Personal dotfiles managed with Terrapod, a chezmoi-backed dotfiles management tool.
 
@@ -7,7 +7,7 @@ Personal dotfiles managed with Terrapod, a chezmoi-backed dotfiles management to
 The Terrapod first-run installer is the primary entry point for a new machine.
 It installs `chezmoi` into `~/.local/bin`, asks for a Preset, writes
 Terrapod-managed config values, initializes
-`https://github.com/juty9026/dotfiles.git`, and runs the initial apply.
+`https://github.com/juty9026/terrapod.git`, and runs the initial apply.
 
 You do not need to install `chezmoi` manually before running this installer.
 The installer installs its own user-local `chezmoi` binary when needed, then
@@ -18,7 +18,7 @@ uses Terrapod to configure the machine before the first apply.
 Run the installer on macOS.
 
 ```sh
-sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/dotfiles/main/install.sh)"
+sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/install.sh)"
 ```
 
 On macOS, the initial apply also runs setup scripts under `.chezmoiscripts` for
@@ -52,7 +52,7 @@ default, so no GitHub authentication is required for the initial setup. Run the
 installer.
 
 ```sh
-sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/dotfiles/main/install.sh)"
+sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/install.sh)"
 ```
 
 The installer adds `~/.local/bin` to `PATH` for the bootstrap process. After
@@ -83,7 +83,7 @@ chsh -s "$(command -v zsh)"
 
 Terrapod handles normal management after bootstrap. For an unusual recovery
 path, install `chezmoi` manually and initialize
-`https://github.com/juty9026/dotfiles.git` directly, then review and apply the
+`https://github.com/juty9026/terrapod.git` directly, then review and apply the
 result.
 
 ## Management

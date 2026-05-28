@@ -13,6 +13,6 @@ This repository will present Terrapod as the user-facing installer and managemen
 - `install.sh` becomes the first-run entry point, installs chezmoi under `~/.local/bin` through the official `get.chezmoi.io` installer as needed, collects interactive setup choices, and runs the initial chezmoi apply.
 - `terrapod` becomes the primary post-install management command, with `tpod` as a short alias.
 - Direct chezmoi commands remain available as an advanced escape hatch rather than the default workflow.
-- The first-run installer uses `https://github.com/juty9026/dotfiles.git` as the default source repository URL until repository renaming is handled separately.
+- The first-run installer uses `https://github.com/juty9026/terrapod.git` as the default source repository URL after repository renaming.
 - The first-run installer stops with guidance if the default chezmoi source directory already exists instead of overwriting an existing checkout.
-- Repository renaming, non-interactive installer options, and broader README or log-output design are deferred.
+- Non-interactive installer options and broader README or log-output design are deferred.

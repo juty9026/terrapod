@@ -124,8 +124,9 @@ fi
 pass "README.md exists"
 readme_text="$(cat "$readme_file")"
 assert_contains "$readme_text" "Terrapod first-run installer" "README documents the Terrapod first-run installer"
-assert_contains "$readme_text" 'sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/dotfiles/main/install.sh)"' "README documents the full installer command"
-assert_contains "$readme_text" "https://github.com/juty9026/dotfiles.git" "README documents the HTTPS source repository"
+assert_contains "$readme_text" 'sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/install.sh)"' "README documents the full installer command"
+assert_contains "$readme_text" "https://github.com/juty9026/terrapod.git" "README documents the HTTPS source repository"
+assert_not_contains "$readme_text" "juty9026/dotfiles" "README does not document the unsupported legacy repository slug"
 assert_contains "$readme_text" "You do not need to install \`chezmoi\` manually before running this installer." "README states chezmoi is not a first-run prerequisite"
 assert_contains "$readme_text" "Use \`terrapod\` as the primary management command after bootstrap." "README documents Terrapod as the primary management command"
 assert_contains "$readme_text" "\`tpod\` is the short alias for the same command." "README documents tpod as the short Terrapod alias"
@@ -134,6 +135,26 @@ assert_contains "$readme_text" "Direct chezmoi use remains an advanced escape ha
 assert_not_contains "$readme_text" "--non-interactive" "README keeps non-interactive installer options out of scope"
 assert_not_contains "$readme_text" "repository rename" "README keeps repository renaming out of scope"
 assert_not_contains "$readme_text" "log-output" "README keeps broader log-output design out of scope"
+
+agents_file="$repo_root/AGENTS.md"
+if [ ! -f "$agents_file" ]; then
+  fail "AGENTS.md exists"
+fi
+
+pass "AGENTS.md exists"
+agents_text="$(cat "$agents_file")"
+assert_contains "$agents_text" "juty9026/terrapod" "AGENTS.md documents the renamed GitHub issue tracker repository"
+assert_not_contains "$agents_text" "juty9026/dotfiles" "AGENTS.md does not document the unsupported legacy repository slug"
+
+issue_tracker_file="$repo_root/docs/agents/issue-tracker.md"
+if [ ! -f "$issue_tracker_file" ]; then
+  fail "issue tracker agent doc exists"
+fi
+
+pass "issue tracker agent doc exists"
+issue_tracker_text="$(cat "$issue_tracker_file")"
+assert_contains "$issue_tracker_text" "GitHub repository: \`juty9026/terrapod\`" "issue tracker doc uses the renamed GitHub repository"
+assert_not_contains "$issue_tracker_text" "juty9026/dotfiles" "issue tracker doc does not document the unsupported legacy repository slug"
 
 chezmoiignore_file="$repo_root/.chezmoiignore"
 if [ ! -f "$chezmoiignore_file" ]; then
@@ -490,7 +511,7 @@ assert_status "$installer_status" 0 "Ubuntu installer installs source prerequisi
 ubuntu_missing_git_log_text="$(cat "$ubuntu_missing_git_log")"
 assert_contains "$ubuntu_missing_git_log_text" "apt-get args:update -y" "Ubuntu missing git case updates package metadata"
 assert_contains "$ubuntu_missing_git_log_text" "apt-get args:install -y ca-certificates git" "Ubuntu missing git case installs git before init"
-assert_first_occurrence_before "$ubuntu_missing_git_log_text" "apt-get args:install -y ca-certificates git" "chezmoi args:init https://github.com/juty9026/dotfiles.git" "Ubuntu missing git case installs git before chezmoi init"
+assert_first_occurrence_before "$ubuntu_missing_git_log_text" "apt-get args:install -y ca-certificates git" "chezmoi args:init https://github.com/juty9026/terrapod.git" "Ubuntu missing git case installs git before chezmoi init"
 
 first_run_case="$(make_case_dir first-run-macos)"
 write_uname_stub "$first_run_case" "Darwin"
@@ -533,7 +554,7 @@ if [ ! -x "$first_run_case/home/.local/bin/chezmoi" ]; then
 fi
 pass "stubbed chezmoi installer creates user-local chezmoi"
 assert_all_chezmoi_paths_equal "$first_run_log_text" "$first_run_case/home/.local/bin/chezmoi" "only user-local chezmoi is invoked"
-assert_contains "$first_run_log_text" "chezmoi args:init https://github.com/juty9026/dotfiles.git" "chezmoi init receives source repository"
+assert_contains "$first_run_log_text" "chezmoi args:init https://github.com/juty9026/terrapod.git" "chezmoi init receives source repository"
 if [ ! -x "$first_run_case/xdg-data/chezmoi/dot_local/bin/executable_terrapod" ]; then
   fail "chezmoi init creates checked-out Terrapod executable"
 fi
