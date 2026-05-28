@@ -263,6 +263,16 @@ run_terrapod_setup() {
     TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" setup
 }
 
+run_terrapod_setup_rich() {
+  profile="$1"
+  input="$2"
+  home_dir="$3"
+  xdg_config_home="$4"
+
+  printf '%s' "$input" |
+    TERRAPOD_SETUP_PRESENTATION=rich TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" setup
+}
+
 terrapod="$repo_root/dot_local/bin/executable_terrapod"
 
 new_home="$tmp_dir/new-home"
@@ -415,6 +425,111 @@ assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosApp
 assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosAppGroupAutomation" "true" "workspace-enabled setup writes customized automation App Group"
 assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosAppGroupLauncher" "false" "workspace-enabled setup writes customized launcher App Group"
 assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosAppGroupMonitoring" "true" "workspace-enabled setup writes customized monitoring App Group"
+
+rich_equivalent_home="$tmp_dir/rich-equivalent-home"
+rich_equivalent_xdg="$tmp_dir/rich-equivalent-xdg"
+rich_equivalent_config="$rich_equivalent_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$rich_equivalent_home"
+
+if ! run_terrapod_setup_rich macos-terminal '1
+t
+j
+n
+j
+y
+j
+n
+j
+y
+
+y
+' "$rich_equivalent_home" "$rich_equivalent_xdg" >"$tmp_dir/rich-equivalent.out" 2>"$tmp_dir/rich-equivalent.err"; then
+  printf '%s\n' "rich setup stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/rich-equivalent.out" >&2
+  printf '%s\n' "rich setup stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/rich-equivalent.err" >&2
+  fail "rich setup customizes concrete settings and completes"
+fi
+pass "rich setup customizes concrete settings and completes"
+
+assert_contains "$tmp_dir/rich-equivalent.err" "Terrapod Setup" "rich setup prints setup-only rich heading"
+assert_data_key_once_with_value "$rich_equivalent_config" "enableEditorStack" "true" "rich setup writes included Optional Editor Stack"
+assert_data_key_once_with_value "$rich_equivalent_config" "enableAiCliTools" "true" "rich setup writes included Optional AI Tool Stack"
+assert_data_key_once_with_value "$rich_equivalent_config" "enableDevelopmentWorkspace" "true" "rich setup writes enabled Optional Development Workspace"
+assert_data_key_once_with_value "$rich_equivalent_config" "enableMacosAppGroupTerminalApps" "false" "rich setup writes customized terminal-apps App Group"
+assert_data_key_once_with_value "$rich_equivalent_config" "enableMacosAppGroupAutomation" "true" "rich setup writes customized automation App Group"
+assert_data_key_once_with_value "$rich_equivalent_config" "enableMacosAppGroupLauncher" "false" "rich setup writes customized launcher App Group"
+assert_data_key_once_with_value "$rich_equivalent_config" "enableMacosAppGroupMonitoring" "true" "rich setup writes customized monitoring App Group"
+
+if ! cmp -s "$setup_custom_workspace_config" "$rich_equivalent_config"; then
+  printf '%s\n' "plain setup config:" >&2
+  sed 's/^/  /' "$setup_custom_workspace_config" >&2
+  printf '%s\n' "rich setup config:" >&2
+  sed 's/^/  /' "$rich_equivalent_config" >&2
+  fail "rich setup writes the same concrete settings as equivalent plain setup choices"
+fi
+pass "rich setup writes the same concrete settings as equivalent plain setup choices"
+
+rich_navigation_home="$tmp_dir/rich-navigation-home"
+rich_navigation_xdg="$tmp_dir/rich-navigation-xdg"
+rich_navigation_config="$rich_navigation_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$rich_navigation_home"
+
+if ! run_terrapod_setup_rich macos-terminal 'j
+j
+k
+
+
+y
+' "$rich_navigation_home" "$rich_navigation_xdg" >"$tmp_dir/rich-navigation.out" 2>"$tmp_dir/rich-navigation.err"; then
+  printf '%s\n' "rich navigation stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/rich-navigation.out" >&2
+  printf '%s\n' "rich navigation stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/rich-navigation.err" >&2
+  fail "rich Preset navigation selects development and completes"
+fi
+pass "rich Preset navigation selects development and completes"
+
+assert_contains "$tmp_dir/rich-navigation.out" "Configured Terrapod Preset 'development'" "rich Preset navigation selects development"
+assert_data_key_once_with_value "$rich_navigation_config" "enableEditorStack" "true" "rich navigation writes development Editor Stack setting"
+assert_data_key_once_with_value "$rich_navigation_config" "enableAiCliTools" "true" "rich navigation writes development AI Tool Stack setting"
+assert_data_key_once_with_value "$rich_navigation_config" "enableDevelopmentWorkspace" "true" "rich navigation writes development workspace setting"
+assert_data_key_once_with_value "$rich_navigation_config" "enableMacosAppGroupTerminalApps" "false" "rich navigation keeps terminal-apps disabled for development"
+
+rich_vps_home="$tmp_dir/rich-vps-home"
+rich_vps_xdg="$tmp_dir/rich-vps-xdg"
+rich_vps_config="$rich_vps_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$rich_vps_home"
+
+if ! run_terrapod_setup_rich vps-shell 'minimal
+j
+y
+j
+n
+
+y
+' "$rich_vps_home" "$rich_vps_xdg" >"$tmp_dir/rich-vps.out" 2>"$tmp_dir/rich-vps.err"; then
+  printf '%s\n' "rich VPS stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/rich-vps.out" >&2
+  printf '%s\n' "rich VPS stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/rich-vps.err" >&2
+  fail "rich VPS setup customizes optional stacks without macOS App Groups"
+fi
+pass "rich VPS setup customizes optional stacks without macOS App Groups"
+
+rich_vps_combined="$(cat "$tmp_dir/rich-vps.out" "$tmp_dir/rich-vps.err")"
+if printf '%s\n' "$rich_vps_combined" | grep -F "terminal-apps macOS App Group" >/dev/null; then
+  fail "rich VPS setup does not show macOS App Group items"
+fi
+pass "rich VPS setup does not show macOS App Group items"
+
+assert_data_key_once_with_value "$rich_vps_config" "enableEditorStack" "true" "rich VPS setup writes customized Optional Editor Stack"
+assert_data_key_once_with_value "$rich_vps_config" "enableAiCliTools" "false" "rich VPS setup writes customized Optional AI Tool Stack"
+assert_data_key_once_with_value "$rich_vps_config" "enableDevelopmentWorkspace" "false" "rich VPS setup writes disabled Optional Development Workspace"
+assert_data_key_once_with_value "$rich_vps_config" "enableMacosAppGroupTerminalApps" "false" "rich VPS setup writes terminal-apps App Group disabled"
+assert_data_key_once_with_value "$rich_vps_config" "enableMacosAppGroupAutomation" "false" "rich VPS setup writes automation App Group disabled"
+assert_data_key_once_with_value "$rich_vps_config" "enableMacosAppGroupLauncher" "false" "rich VPS setup writes launcher App Group disabled"
+assert_data_key_once_with_value "$rich_vps_config" "enableMacosAppGroupMonitoring" "false" "rich VPS setup writes monitoring App Group disabled"
 
 setup_leaf_home="$tmp_dir/setup-leaf-home"
 setup_leaf_xdg="$tmp_dir/setup-leaf-xdg"

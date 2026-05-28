@@ -52,6 +52,29 @@ assert_not_contains() {
   pass "$message"
 }
 
+assert_no_ansi_escape() {
+  haystack="$1"
+  message="$2"
+  escape_char="$(printf '\033')"
+
+  if printf '%s\n' "$haystack" | grep -F "$escape_char" >/dev/null; then
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
+assert_no_rich_setup_emoji() {
+  haystack="$1"
+  message="$2"
+
+  if printf '%s\n' "$haystack" | grep -E '🌱|✨|▸' >/dev/null; then
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
 assert_line() {
   haystack="$1"
   expected_line="$2"
@@ -95,6 +118,18 @@ run_terrapod_setup_command() {
 
   printf '%s' "$input" |
     TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" setup >"$output_file" 2>&1
+}
+
+run_terrapod_setup_command_with_presentation() {
+  presentation="$1"
+  profile="$2"
+  input="$3"
+  home_dir="$4"
+  xdg_config_home="$5"
+  output_file="$6"
+
+  printf '%s' "$input" |
+    TERRAPOD_SETUP_PRESENTATION="$presentation" TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" setup >"$output_file" 2>&1
 }
 
 assert_call_args() {
@@ -322,7 +357,7 @@ assert_contains \
 assert_contains \
   "$help_output" \
   "setup" \
-  "Terrapod help describes plain setup"
+  "Terrapod help describes setup"
 
 assert_contains \
   "$help_output" \
@@ -415,6 +450,54 @@ if [ ! -f "$setup_config" ]; then
   fail "plain setup writes config after final confirmation"
 fi
 pass "plain setup writes config after final confirmation"
+
+assert_no_ansi_escape "$setup_output_text" "auto setup fallback does not use ANSI color with piped input"
+assert_no_rich_setup_emoji "$setup_output_text" "auto setup fallback does not use rich setup emoji with piped input"
+
+dumb_setup_home="$tmp_dir/dumb-setup-home"
+dumb_setup_xdg="$tmp_dir/dumb-setup-xdg"
+dumb_setup_output="$tmp_dir/dumb-setup.out"
+mkdir -p "$dumb_setup_home"
+
+if ! printf '%s' 'minimal
+n
+n
+n
+n
+n
+n
+n
+y
+' |
+  TERM=dumb TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG= HOME="$dumb_setup_home" XDG_CONFIG_HOME="$dumb_setup_xdg" sh "$terrapod" setup >"$dumb_setup_output" 2>&1; then
+  sed 's/^/  /' "$dumb_setup_output" >&2
+  fail "TERM=dumb setup uses plain fallback"
+fi
+pass "TERM=dumb setup uses plain fallback"
+
+dumb_setup_output_text="$(cat "$dumb_setup_output")"
+assert_contains "$dumb_setup_output_text" "Choose Terrapod Preset (minimal|development|workstation):" "TERM=dumb setup keeps plain Preset prompt"
+assert_no_ansi_escape "$dumb_setup_output_text" "TERM=dumb setup does not use ANSI color"
+assert_no_rich_setup_emoji "$dumb_setup_output_text" "TERM=dumb setup does not use rich setup emoji"
+
+rich_setup_home="$tmp_dir/rich-setup-home"
+rich_setup_xdg="$tmp_dir/rich-setup-xdg"
+rich_setup_output="$tmp_dir/rich-setup.out"
+mkdir -p "$rich_setup_home"
+
+if ! run_terrapod_setup_command_with_presentation rich macos-terminal '1
+
+y
+' "$rich_setup_home" "$rich_setup_xdg" "$rich_setup_output"; then
+  sed 's/^/  /' "$rich_setup_output" >&2
+  fail "forced rich setup uses rich prompt path"
+fi
+pass "forced rich setup uses rich prompt path"
+
+rich_setup_output_text="$(cat "$rich_setup_output")"
+assert_contains "$rich_setup_output_text" "Terrapod Setup" "rich setup shows setup-only rich heading"
+assert_contains "$rich_setup_output_text" "Preset [j/k, number/name, Enter]" "rich setup shows keyboard Preset controls"
+assert_contains "$rich_setup_output_text" "Settings [j/k, t, y/n, Enter]" "rich setup shows keyboard setting controls"
 
 vps_setup_home="$tmp_dir/vps-setup-home"
 vps_setup_xdg="$tmp_dir/vps-setup-xdg"
@@ -560,6 +643,10 @@ assert_contains "$macos_status_output" "chezmoi: available" "Terrapod status rep
 assert_contains "$macos_status_output" "brew: available" "Terrapod status reports macOS Bootstrap Package Manager availability"
 assert_contains "$macos_status_output" "Warnings: none" "Terrapod status reports no warnings when enabled tools are present"
 assert_not_contains "$macos_status_output" "Warning:" "Terrapod status emits no warning lines when enabled tools are present"
+assert_no_ansi_escape "$help_output" "Terrapod help does not use setup ANSI presentation"
+assert_no_rich_setup_emoji "$help_output" "Terrapod help does not use setup emoji presentation"
+assert_no_ansi_escape "$macos_status_output" "Terrapod status does not use setup ANSI presentation"
+assert_no_rich_setup_emoji "$macos_status_output" "Terrapod status does not use setup emoji presentation"
 
 status_dotted_config="$tmp_dir/status-dotted.toml"
 cat >"$status_dotted_config" <<'TOML'
