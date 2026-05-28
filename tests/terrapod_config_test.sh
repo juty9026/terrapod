@@ -501,6 +501,43 @@ pass "existing update preserves config file mode"
 
 assert_no_terrapod_temp_files "$array_config" "successful array-table update cleans Terrapod temp files"
 
+multiline_array_home="$tmp_dir/multiline-array-home"
+multiline_array_xdg="$tmp_dir/multiline-array-xdg"
+multiline_array_config="$multiline_array_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$multiline_array_home" "$(dirname "$multiline_array_config")"
+
+cat >"$multiline_array_config" <<'TOML'
+[data]
+keepMe = "yes"
+matrix = [
+[1, 2]
+]
+enableEditorStack = false
+enableAiCliTools = false
+
+[sourceState]
+branch = "main"
+TOML
+cp "$multiline_array_config" "$tmp_dir/multiline-array-before.toml"
+
+if printf '%s\n' "y" |
+  HOME="$multiline_array_home" XDG_CONFIG_HOME="$multiline_array_xdg" sh "$terrapod" configure development >"$tmp_dir/multiline-array.out" 2>"$tmp_dir/multiline-array.err"; then
+  fail "multiline array config is rejected before rewriting"
+fi
+pass "multiline array config is rejected before rewriting"
+
+assert_contains "$tmp_dir/multiline-array.err" "unsupported multiline array" "multiline array rejection explains unsupported format"
+assert_not_contains "$tmp_dir/multiline-array.err" "Update Terrapod-managed data keys" "multiline array rejection does not prompt before failing"
+assert_not_contains "$tmp_dir/multiline-array.out" "Configured Terrapod Preset" "multiline array rejection does not report success"
+
+if ! cmp -s "$multiline_array_config" "$tmp_dir/multiline-array-before.toml"; then
+  fail "multiline array rejection leaves existing config unchanged"
+fi
+pass "multiline array rejection leaves existing config unchanged"
+
+assert_backup_count "$multiline_array_config" 0 "multiline array rejection does not create a backup"
+assert_no_terrapod_temp_files "$multiline_array_config" "multiline array rejection leaves no Terrapod temp files"
+
 fake_stat_home="$tmp_dir/fake-stat-home"
 fake_stat_xdg="$tmp_dir/fake-stat-xdg"
 fake_stat_config="$fake_stat_xdg/chezmoi/chezmoi.toml"
