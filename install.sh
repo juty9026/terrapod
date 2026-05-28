@@ -159,58 +159,48 @@ ensure_source_repo_prerequisites() {
   fi
 }
 
-choose_preset() {
-  profile="$1"
-
-  case "$profile" in
-    macos-terminal)
-      choices="minimal|development|workstation"
-      ;;
-    vps-shell)
-      choices="minimal|development"
-      ;;
-    *)
-      fatal "unknown profile: $profile"
-      ;;
-  esac
-
-  printf 'Choose Terrapod Preset (%s): ' "$choices" >&2
-  if ! IFS= read -r preset; then
-    fatal "no Terrapod preset selected"
-  fi
-
-  case "$preset" in
-    minimal|development)
-      printf '%s\n' "$preset"
-      ;;
-    workstation)
-      if [ "$profile" = "macos-terminal" ]; then
-        printf '%s\n' "$preset"
-      else
-        fatal "workstation preset is only supported for macos-terminal"
-      fi
-      ;;
-    *)
-      fatal "unknown Terrapod preset: $preset. Supported presets: $choices"
-      ;;
-  esac
-}
-
-run_initial_apply() {
+initialize_source_repository() {
   chezmoi_bin="$1"
-  profile="$2"
-  source_dir="$3"
-  preset="$4"
 
   "$chezmoi_bin" init "$DEFAULT_SOURCE_REPO" || fatal "chezmoi init failed"
+}
+
+checked_out_terrapod() {
+  source_dir="$1"
 
   terrapod_source="$source_dir/dot_local/bin/executable_terrapod"
   if [ ! -x "$terrapod_source" ]; then
     fatal "checked-out Terrapod executable is missing: $terrapod_source"
   fi
 
-  TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= "$terrapod_source" configure "$preset" \
-    || fatal "Terrapod configure failed"
+  printf '%s\n' "$terrapod_source"
+}
+
+print_setup_recovery() {
+  profile="$1"
+  source_dir="$2"
+
+  printf '%s\n' "terrapod installer: Terrapod Setup did not complete." >&2
+  printf '%s\n' "terrapod installer: Resume Terrapod Setup from the checked-out source repository:" >&2
+  printf '%s\n' "terrapod installer:   cd \"$source_dir\" && TERRAPOD_PROFILE=\"$profile\" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup" >&2
+}
+
+run_terrapod_setup() {
+  profile="$1"
+  source_dir="$2"
+  terrapod_source="$(checked_out_terrapod "$source_dir")"
+
+  if TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= "$terrapod_source" setup; then
+    return 0
+  fi
+
+  print_setup_recovery "$profile" "$source_dir"
+  return 1
+}
+
+run_initial_apply() {
+  chezmoi_bin="$1"
+
   "$chezmoi_bin" apply || fatal "chezmoi apply failed"
 }
 
@@ -227,9 +217,10 @@ main() {
   ensure_user_local_bin "$local_bin_dir"
   reject_existing_source_dir "$source_dir"
   chezmoi_bin="$(install_chezmoi_if_needed "$local_bin_dir")"
-  preset="$(choose_preset "$profile")"
   ensure_source_repo_prerequisites "$profile"
-  run_initial_apply "$chezmoi_bin" "$profile" "$source_dir" "$preset"
+  initialize_source_repository "$chezmoi_bin"
+  run_terrapod_setup "$profile" "$source_dir"
+  run_initial_apply "$chezmoi_bin"
 
   printf '%s\n' "Terrapod first-run apply complete."
 }

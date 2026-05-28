@@ -346,6 +346,25 @@ case ":${PATH:-}:" in
     printf '%s\n' "terrapod path_has_local_bin:no" >>"$log_file"
     ;;
 esac
+
+case "${1-}" in
+  setup)
+    setup_stdin_line_number=0
+    while IFS= read -r setup_stdin_line || [ -n "$setup_stdin_line" ]; do
+      setup_stdin_line_number=$((setup_stdin_line_number + 1))
+      printf '%s\n' "terrapod setup stdin $setup_stdin_line_number:$setup_stdin_line" >>"$log_file"
+    done
+    printf '%s\n' "terrapod setup stdin lines:$setup_stdin_line_number" >>"$log_file"
+
+    setup_status="${TERRAPOD_SETUP_STUB_STATUS:-0}"
+    if [ "$setup_status" != "0" ]; then
+      printf '%s\n' "${TERRAPOD_SETUP_STUB_MESSAGE:-terrapod setup failed}" >&2
+      exit "$setup_status"
+    fi
+    ;;
+  configure)
+    ;;
+esac
 TERRAPOD_STUB
     chmod +x "$source_dir/dot_local/bin/executable_terrapod"
     ;;
@@ -530,6 +549,12 @@ export TERRAPOD_INSTALLER_STDIN_CAPTURE
 export TERRAPOD_INSTALLER_SCRIPT_CAPTURE
 export TERRAPOD_CHEZMOI_STUB_TEMPLATE
 first_run_input='workstation
+
+
+
+
+
+y
 '
 run_installer_case "$first_run_case" "$first_run_input"
 unset TERRAPOD_STUB_CALL_LOG
@@ -559,11 +584,118 @@ if [ ! -x "$first_run_case/xdg-data/chezmoi/dot_local/bin/executable_terrapod" ]
   fail "chezmoi init creates checked-out Terrapod executable"
 fi
 pass "chezmoi init creates checked-out Terrapod executable"
-assert_contains "$first_run_log_text" "terrapod TERRAPOD_PROFILE:macos-terminal" "configure receives macOS Terrapod profile"
-assert_contains "$first_run_log_text" "terrapod args:configure workstation" "configure receives workstation preset"
-assert_first_occurrence_before "$first_run_log_text" "terrapod args:configure workstation" "chezmoi args:apply" "configure runs before chezmoi apply"
-assert_contains "$first_run_log_text" "chezmoi args:apply" "chezmoi apply runs"
+assert_contains "$first_run_log_text" "terrapod TERRAPOD_PROFILE:macos-terminal" "setup receives macOS Terrapod profile"
+assert_contains "$first_run_log_text" "terrapod TERRAPOD_CHEZMOI_CONFIG:" "setup receives an empty Terrapod chezmoi config override"
+assert_contains "$first_run_log_text" "terrapod args:setup" "checked-out Terrapod Setup runs"
+assert_contains "$first_run_log_text" "terrapod setup stdin 1:workstation" "checked-out Terrapod Setup receives Preset input"
+assert_contains "$first_run_log_text" "terrapod setup stdin 7:y" "checked-out Terrapod Setup receives final confirmation input"
+assert_contains "$first_run_log_text" "terrapod setup stdin lines:7" "checked-out Terrapod Setup receives the full workstation setup input"
+assert_not_contains "$first_run_log_text" "terrapod args:configure" "first-run installer does not bypass setup with configure"
+assert_first_occurrence_before "$first_run_log_text" "chezmoi args:init https://github.com/juty9026/terrapod.git" "terrapod args:setup" "setup runs after source repository initialization"
+assert_first_occurrence_before "$first_run_log_text" "terrapod args:setup" "chezmoi args:apply" "setup runs before chezmoi apply"
+assert_contains "$first_run_log_text" "chezmoi args:apply" "chezmoi apply runs after setup"
 assert_contains "$first_run_log_text" "chezmoi path_has_local_bin:yes" "child command PATH contains user local bin"
+
+setup_failure_case="$(make_case_dir setup-failure)"
+write_uname_stub "$setup_failure_case" "Darwin"
+write_chezmoi_flow_stub "$setup_failure_case/chezmoi-template"
+write_installer_download_stubs "$setup_failure_case"
+write_command_call_stubs "$setup_failure_case" "wget" "git"
+setup_failure_log="$setup_failure_case/command-calls"
+setup_failure_stdin_capture="$setup_failure_case/installer-stdin"
+setup_failure_script_capture="$setup_failure_case/installer-script"
+TERRAPOD_STUB_CALL_LOG="$setup_failure_log"
+TERRAPOD_INSTALLER_STDIN_CAPTURE="$setup_failure_stdin_capture"
+TERRAPOD_INSTALLER_SCRIPT_CAPTURE="$setup_failure_script_capture"
+TERRAPOD_CHEZMOI_STUB_TEMPLATE="$setup_failure_case/chezmoi-template"
+TERRAPOD_SETUP_STUB_STATUS=17
+TERRAPOD_SETUP_STUB_MESSAGE="simulated Terrapod Setup failure"
+export TERRAPOD_STUB_CALL_LOG
+export TERRAPOD_INSTALLER_STDIN_CAPTURE
+export TERRAPOD_INSTALLER_SCRIPT_CAPTURE
+export TERRAPOD_CHEZMOI_STUB_TEMPLATE
+export TERRAPOD_SETUP_STUB_STATUS
+export TERRAPOD_SETUP_STUB_MESSAGE
+setup_failure_input='minimal
+n
+n
+n
+n
+n
+n
+n
+y
+'
+run_installer_case "$setup_failure_case" "$setup_failure_input"
+unset TERRAPOD_STUB_CALL_LOG
+unset TERRAPOD_INSTALLER_STDIN_CAPTURE
+unset TERRAPOD_INSTALLER_SCRIPT_CAPTURE
+unset TERRAPOD_CHEZMOI_STUB_TEMPLATE
+unset TERRAPOD_SETUP_STUB_STATUS
+unset TERRAPOD_SETUP_STUB_MESSAGE
+assert_failure "$installer_status" "setup failure makes installer exit unsuccessfully"
+setup_failure_stdout="$(cat "$setup_failure_case/stdout")"
+setup_failure_stderr="$(cat "$setup_failure_case/stderr")"
+setup_failure_log_text="$(cat "$setup_failure_log")"
+assert_contains "$setup_failure_log_text" "terrapod args:setup" "setup failure case runs checked-out Terrapod Setup"
+assert_contains "$setup_failure_log_text" "terrapod setup stdin 1:minimal" "setup failure case forwards Preset input to Terrapod Setup"
+assert_contains "$setup_failure_log_text" "terrapod setup stdin lines:9" "setup failure case forwards full minimal setup input to Terrapod Setup"
+assert_first_occurrence_before "$setup_failure_log_text" "chezmoi args:init https://github.com/juty9026/terrapod.git" "terrapod args:setup" "setup failure case initializes source before setup"
+assert_not_contains "$setup_failure_log_text" "chezmoi args:apply" "setup failure case does not run initial apply"
+assert_not_contains "$setup_failure_stdout" "Terrapod first-run apply complete." "setup failure case does not print first-run completion"
+assert_contains "$setup_failure_stderr" "simulated Terrapod Setup failure" "setup failure case preserves setup error output"
+assert_contains "$setup_failure_stderr" "Terrapod Setup did not complete." "setup failure case explains setup did not complete"
+assert_contains "$setup_failure_stderr" "Resume Terrapod Setup from the checked-out source repository:" "setup failure case prints recovery heading"
+assert_contains "$setup_failure_stderr" "cd \"$setup_failure_case/xdg-data/chezmoi\" && TERRAPOD_PROFILE=\"macos-terminal\" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup" "setup failure case prints resume command"
+
+setup_cancel_case="$(make_case_dir setup-cancel)"
+write_uname_stub "$setup_cancel_case" "Darwin"
+write_chezmoi_flow_stub "$setup_cancel_case/chezmoi-template"
+write_installer_download_stubs "$setup_cancel_case"
+write_command_call_stubs "$setup_cancel_case" "wget" "git"
+setup_cancel_log="$setup_cancel_case/command-calls"
+setup_cancel_stdin_capture="$setup_cancel_case/installer-stdin"
+setup_cancel_script_capture="$setup_cancel_case/installer-script"
+TERRAPOD_STUB_CALL_LOG="$setup_cancel_log"
+TERRAPOD_INSTALLER_STDIN_CAPTURE="$setup_cancel_stdin_capture"
+TERRAPOD_INSTALLER_SCRIPT_CAPTURE="$setup_cancel_script_capture"
+TERRAPOD_CHEZMOI_STUB_TEMPLATE="$setup_cancel_case/chezmoi-template"
+TERRAPOD_SETUP_STUB_STATUS=1
+TERRAPOD_SETUP_STUB_MESSAGE="terrapod: setup cancelled"
+export TERRAPOD_STUB_CALL_LOG
+export TERRAPOD_INSTALLER_STDIN_CAPTURE
+export TERRAPOD_INSTALLER_SCRIPT_CAPTURE
+export TERRAPOD_CHEZMOI_STUB_TEMPLATE
+export TERRAPOD_SETUP_STUB_STATUS
+export TERRAPOD_SETUP_STUB_MESSAGE
+setup_cancel_input='development
+
+
+
+
+
+n
+'
+run_installer_case "$setup_cancel_case" "$setup_cancel_input"
+unset TERRAPOD_STUB_CALL_LOG
+unset TERRAPOD_INSTALLER_STDIN_CAPTURE
+unset TERRAPOD_INSTALLER_SCRIPT_CAPTURE
+unset TERRAPOD_CHEZMOI_STUB_TEMPLATE
+unset TERRAPOD_SETUP_STUB_STATUS
+unset TERRAPOD_SETUP_STUB_MESSAGE
+assert_failure "$installer_status" "setup cancellation makes installer exit unsuccessfully"
+setup_cancel_stdout="$(cat "$setup_cancel_case/stdout")"
+setup_cancel_stderr="$(cat "$setup_cancel_case/stderr")"
+setup_cancel_log_text="$(cat "$setup_cancel_log")"
+assert_contains "$setup_cancel_log_text" "terrapod args:setup" "setup cancellation case runs checked-out Terrapod Setup"
+assert_contains "$setup_cancel_log_text" "terrapod setup stdin 1:development" "setup cancellation case forwards Preset input to Terrapod Setup"
+assert_contains "$setup_cancel_log_text" "terrapod setup stdin 7:n" "setup cancellation case forwards final cancellation input to Terrapod Setup"
+assert_contains "$setup_cancel_log_text" "terrapod setup stdin lines:7" "setup cancellation case forwards full development setup input to Terrapod Setup"
+assert_not_contains "$setup_cancel_log_text" "chezmoi args:apply" "setup cancellation case does not run initial apply"
+assert_not_contains "$setup_cancel_stdout" "Terrapod first-run apply complete." "setup cancellation case does not print first-run completion"
+assert_contains "$setup_cancel_stderr" "terrapod: setup cancelled" "setup cancellation case preserves setup cancellation output"
+assert_contains "$setup_cancel_stderr" "Terrapod Setup did not complete." "setup cancellation case explains setup did not complete"
+assert_contains "$setup_cancel_stderr" "cd \"$setup_cancel_case/xdg-data/chezmoi\" && TERRAPOD_PROFILE=\"macos-terminal\" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup" "setup cancellation case prints resume command"
 
 system_chezmoi_case="$(make_case_dir system-chezmoi)"
 write_uname_stub "$system_chezmoi_case" "Darwin"
