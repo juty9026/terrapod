@@ -233,11 +233,11 @@ prompt_for_setup_preset() {
   printf '%s\n' "$preset"
 }
 
-show_preset_settings_summary() {
-  preset="$1"
+show_setup_settings_summary() {
+  settings_data="$1"
 
   printf '%s\n' "Settings to write:"
-  render_preset_data "$preset" | sed 's/^/  /'
+  printf '%s\n' "$settings_data" | sed 's/^/  /'
 }
 
 confirm_setup_write() {
@@ -255,6 +255,67 @@ confirm_setup_write() {
       return 1
       ;;
   esac
+}
+
+prompt_setup_bool() {
+  label="$1"
+  current="$2"
+
+  printf '%s [%s]: ' "$label" "$(bool_state_label "$current")" >&2
+  IFS= read -r answer || answer=
+
+  case "$answer" in
+    "")
+      printf '%s\n' "$current"
+      ;;
+    y|Y|yes|YES|true|TRUE|on|ON|1|enabled|ENABLED)
+      printf '%s\n' "true"
+      ;;
+    n|N|no|NO|false|FALSE|off|OFF|0|disabled|DISABLED)
+      printf '%s\n' "false"
+      ;;
+    *)
+      fatal "invalid answer for $label; enter y or n"
+      ;;
+  esac
+}
+
+prompt_for_setup_settings() {
+  preset="$1"
+  profile="$2"
+
+  load_setup_defaults "$preset"
+
+  printf '%s\n' "Customize Terrapod settings." >&2
+  printf '%s\n' "Press Enter to keep the value shown in brackets." >&2
+
+  setup_enableDevelopmentWorkspace="$(prompt_setup_bool "Optional Development Workspace" "$setup_enableDevelopmentWorkspace")"
+
+  if is_enabled "$setup_enableDevelopmentWorkspace"; then
+    setup_enableEditorStack=true
+    setup_enableAiCliTools=true
+    printf '%s\n' "Optional Editor Stack: included by Optional Development Workspace" >&2
+    printf '%s\n' "Optional AI Tool Stack: included by Optional Development Workspace" >&2
+  else
+    setup_enableEditorStack="$(prompt_setup_bool "Optional Editor Stack" "$setup_enableEditorStack")"
+    setup_enableAiCliTools="$(prompt_setup_bool "Optional AI Tool Stack" "$setup_enableAiCliTools")"
+  fi
+
+  if [ "$profile" = "macos-terminal" ]; then
+    printf '%s\n' "macOS App Groups:" >&2
+    setup_enableMacosAppGroupTerminalApps="$(prompt_setup_bool "terminal-apps macOS App Group" "$setup_enableMacosAppGroupTerminalApps")"
+    setup_enableMacosAppGroupAutomation="$(prompt_setup_bool "automation macOS App Group" "$setup_enableMacosAppGroupAutomation")"
+    setup_enableMacosAppGroupLauncher="$(prompt_setup_bool "launcher macOS App Group" "$setup_enableMacosAppGroupLauncher")"
+    setup_enableMacosAppGroupMonitoring="$(prompt_setup_bool "monitoring macOS App Group" "$setup_enableMacosAppGroupMonitoring")"
+  else
+    setup_enableMacosAppGroupTerminalApps=false
+    setup_enableMacosAppGroupAutomation=false
+    setup_enableMacosAppGroupLauncher=false
+    setup_enableMacosAppGroupMonitoring=false
+    printf '%s\n' "macOS App Groups: not applicable for $(profile_context_label)" >&2
+  fi
+
+  render_setup_data
 }
 
 config_data_bool() {
@@ -1485,13 +1546,14 @@ run_setup() {
   show_config_context "$config_file"
 
   preset="$(prompt_for_setup_preset "$profile")"
-  show_preset_settings_summary "$preset"
+  setup_settings_data="$(prompt_for_setup_settings "$preset" "$profile")"
+  show_setup_settings_summary "$setup_settings_data"
 
   if ! confirm_setup_write "$config_file"; then
     return 1
   fi
 
-  write_setup_settings "$config_file" "$preset"
+  write_setup_settings "$config_file" "$setup_settings_data"
   printf '%s\n' "Configured Terrapod Preset '$preset' in $config_file"
 }
 
