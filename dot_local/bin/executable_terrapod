@@ -967,6 +967,15 @@ reject_unusable_config_path() {
   fi
 }
 
+reject_unsupported_managed_config() {
+  config_file="$1"
+
+  reject_unusable_config_path "$config_file"
+  reject_unsupported_multiline_strings "$config_file"
+  reject_section_like_multiline_arrays "$config_file"
+  reject_unsupported_inline_data_table "$config_file"
+}
+
 reject_unsupported_inline_data_table() {
   config_file="$1"
 
@@ -1184,10 +1193,7 @@ write_managed_config() {
   tmp_file=
   managed_data_file=
 
-  reject_unusable_config_path "$config_file"
-  reject_unsupported_multiline_strings "$config_file"
-  reject_section_like_multiline_arrays "$config_file"
-  reject_unsupported_inline_data_table "$config_file"
+  reject_unsupported_managed_config "$config_file"
 
   mkdir -p "$config_dir"
   trap cleanup_managed_config_temp EXIT
@@ -1365,6 +1371,16 @@ write_managed_config() {
   rm -f "$managed_data_file"
   mv "$tmp_file" "$config_file"
   trap - EXIT HUP INT TERM
+}
+
+write_preset_settings() {
+  config_file="$1"
+  preset="$2"
+
+  validate_preset "$preset"
+  reject_unsupported_managed_config "$config_file"
+  confirm_existing_config_update "$config_file"
+  write_managed_config "$config_file" "$preset"
 }
 
 command_name="${1:-help}"
