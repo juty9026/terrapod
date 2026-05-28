@@ -171,8 +171,10 @@ is_preset_available_for_profile() {
       return 0
       ;;
     workstation)
-      [ "$profile" = "macos-terminal" ]
-      return
+      if [ "$profile" = "macos-terminal" ]; then
+        return 0
+      fi
+      return 1
       ;;
     *)
       return 1
