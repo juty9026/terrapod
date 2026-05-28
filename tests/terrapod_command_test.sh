@@ -381,23 +381,34 @@ setup_config="$setup_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$setup_home"
 
 if ! run_terrapod_setup_command macos-terminal 'workstation
+
+
+
+
+
 y
 ' "$setup_home" "$setup_xdg" "$setup_output"; then
   sed 's/^/  /' "$setup_output" >&2
-  fail "macOS Terminal Profile setup completes with workstation"
+  fail "macOS Terminal Profile setup prompts for customization before final confirmation and completes with workstation"
 fi
-pass "macOS Terminal Profile setup completes with workstation"
+pass "macOS Terminal Profile setup prompts for customization before final confirmation and completes with workstation"
 
 setup_output_text="$(cat "$setup_output")"
 assert_contains "$setup_output_text" "Terrapod setup" "plain setup prints a command heading"
 assert_contains "$setup_output_text" "Profile: macOS Terminal Profile" "plain setup shows detected macOS profile"
 assert_contains "$setup_output_text" "Choose Terrapod Preset (minimal|development|workstation):" "plain setup shows macOS Preset choices"
 assert_contains "$setup_output_text" "Settings to write:" "plain setup shows concrete settings summary"
+assert_contains "$setup_output_text" "Customize Terrapod settings." "plain setup offers concrete setting customization"
+assert_contains "$setup_output_text" "Optional Development Workspace [enabled]:" "plain setup prompts for Optional Development Workspace"
+assert_contains "$setup_output_text" "Optional Editor Stack: included by Optional Development Workspace" "plain setup presents workspace-included Optional Editor Stack"
+assert_contains "$setup_output_text" "terminal-apps macOS App Group [enabled]:" "plain setup prompts for terminal-apps macOS App Group"
 assert_contains "$setup_output_text" "enableEditorStack = true" "plain setup summary includes concrete Editor Stack setting"
 assert_contains "$setup_output_text" "enableMacosAppGroupMonitoring = true" "plain setup summary includes concrete macOS App Group setting"
 assert_contains "$setup_output_text" "Write these Terrapod settings" "plain setup asks for final confirmation"
 assert_contains "$setup_output_text" "Configured Terrapod Preset 'workstation'" "plain setup reports successful configuration"
 assert_first_occurrence_before "$setup_output_text" "Profile: macOS Terminal Profile" "Choose Terrapod Preset" "plain setup shows profile before Preset selection"
+assert_first_occurrence_before "$setup_output_text" "Choose Terrapod Preset" "Customize Terrapod settings." "plain setup customizes settings after Preset selection"
+assert_first_occurrence_before "$setup_output_text" "Customize Terrapod settings." "Settings to write:" "plain setup shows customized settings before summary"
 assert_first_occurrence_before "$setup_output_text" "Settings to write:" "Write these Terrapod settings" "plain setup shows summary before final confirmation"
 
 if [ ! -f "$setup_config" ]; then

@@ -340,9 +340,21 @@ setup_workstation_xdg="$tmp_dir/setup-workstation-xdg"
 setup_workstation_config="$setup_workstation_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$setup_workstation_home"
 
-run_terrapod_setup macos-terminal 'workstation
+if ! run_terrapod_setup macos-terminal 'workstation
+
+
+
+
+
 y
-' "$setup_workstation_home" "$setup_workstation_xdg"
+' "$setup_workstation_home" "$setup_workstation_xdg" >"$tmp_dir/setup-workstation.out" 2>"$tmp_dir/setup-workstation.err"; then
+  printf '%s\n' "setup stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/setup-workstation.out" >&2
+  printf '%s\n' "setup stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/setup-workstation.err" >&2
+  fail "confirmed setup accepts customization prompts before final confirmation"
+fi
+pass "confirmed setup accepts customization prompts before final confirmation"
 
 if [ ! -f "$setup_workstation_config" ]; then
   fail "confirmed setup creates a chezmoi config file"
@@ -360,12 +372,188 @@ assert_not_contains "$setup_workstation_config" "enableMacosDesktopApps" "confir
 assert_not_contains "$setup_workstation_config" "terrapodPreset" "confirmed setup stores concrete values instead of a dynamic Preset"
 assert_backup_count "$setup_workstation_config" 0 "confirmed setup new config creation does not create a backup"
 
+setup_custom_workspace_home="$tmp_dir/setup-custom-workspace-home"
+setup_custom_workspace_xdg="$tmp_dir/setup-custom-workspace-xdg"
+setup_custom_workspace_config="$setup_custom_workspace_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$setup_custom_workspace_home"
+
+if ! run_terrapod_setup macos-terminal 'minimal
+y
+n
+y
+n
+y
+y
+' "$setup_custom_workspace_home" "$setup_custom_workspace_xdg" >"$tmp_dir/setup-custom-workspace.out" 2>"$tmp_dir/setup-custom-workspace.err"; then
+  printf '%s\n' "setup stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/setup-custom-workspace.out" >&2
+  printf '%s\n' "setup stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/setup-custom-workspace.err" >&2
+  fail "macOS setup prompts for customization before final confirmation and customizes Optional Development Workspace and App Groups"
+fi
+pass "macOS setup prompts for customization before final confirmation and customizes Optional Development Workspace and App Groups"
+
+assert_contains "$tmp_dir/setup-custom-workspace.err" "Optional Editor Stack: included by Optional Development Workspace" "workspace-enabled setup presents Optional Editor Stack as included"
+assert_contains "$tmp_dir/setup-custom-workspace.err" "Optional AI Tool Stack: included by Optional Development Workspace" "workspace-enabled setup presents Optional AI Tool Stack as included"
+assert_contains "$tmp_dir/setup-custom-workspace.out" "enableEditorStack = true" "workspace-enabled setup summary reflects included Optional Editor Stack"
+assert_contains "$tmp_dir/setup-custom-workspace.out" "enableAiCliTools = true" "workspace-enabled setup summary reflects included Optional AI Tool Stack"
+assert_contains "$tmp_dir/setup-custom-workspace.out" "enableDevelopmentWorkspace = true" "workspace-enabled setup summary reflects enabled Optional Development Workspace"
+assert_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupTerminalApps = false" "macOS setup summary reflects customized terminal-apps App Group"
+assert_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupAutomation = true" "macOS setup summary reflects customized automation App Group"
+assert_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupLauncher = false" "macOS setup summary reflects customized launcher App Group"
+assert_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupMonitoring = true" "macOS setup summary reflects customized monitoring App Group"
+
+if [ ! -f "$setup_custom_workspace_config" ]; then
+  fail "macOS customized setup creates a chezmoi config file"
+fi
+pass "macOS customized setup creates a chezmoi config file"
+
+assert_data_key_once_with_value "$setup_custom_workspace_config" "enableEditorStack" "true" "workspace-enabled setup writes included Optional Editor Stack"
+assert_data_key_once_with_value "$setup_custom_workspace_config" "enableAiCliTools" "true" "workspace-enabled setup writes included Optional AI Tool Stack"
+assert_data_key_once_with_value "$setup_custom_workspace_config" "enableDevelopmentWorkspace" "true" "workspace-enabled setup writes enabled Optional Development Workspace"
+assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosAppGroupTerminalApps" "false" "workspace-enabled setup writes customized terminal-apps App Group"
+assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosAppGroupAutomation" "true" "workspace-enabled setup writes customized automation App Group"
+assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosAppGroupLauncher" "false" "workspace-enabled setup writes customized launcher App Group"
+assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosAppGroupMonitoring" "true" "workspace-enabled setup writes customized monitoring App Group"
+
+setup_leaf_home="$tmp_dir/setup-leaf-home"
+setup_leaf_xdg="$tmp_dir/setup-leaf-xdg"
+setup_leaf_config="$setup_leaf_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$setup_leaf_home"
+
+if ! run_terrapod_setup macos-terminal 'development
+n
+n
+y
+y
+n
+y
+n
+y
+' "$setup_leaf_home" "$setup_leaf_xdg" >"$tmp_dir/setup-leaf.out" 2>"$tmp_dir/setup-leaf.err"; then
+  printf '%s\n' "setup stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/setup-leaf.out" >&2
+  printf '%s\n' "setup stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/setup-leaf.err" >&2
+  fail "workspace-disabled setup prompts for customization before final confirmation and customizes leaf stacks independently"
+fi
+pass "workspace-disabled setup prompts for customization before final confirmation and customizes leaf stacks independently"
+
+assert_contains "$tmp_dir/setup-leaf.out" "enableEditorStack = false" "workspace-disabled setup summary reflects customized Optional Editor Stack"
+assert_contains "$tmp_dir/setup-leaf.out" "enableAiCliTools = true" "workspace-disabled setup summary reflects customized Optional AI Tool Stack"
+assert_contains "$tmp_dir/setup-leaf.out" "enableDevelopmentWorkspace = false" "workspace-disabled setup summary reflects disabled Optional Development Workspace"
+
+if [ ! -f "$setup_leaf_config" ]; then
+  fail "workspace-disabled customized setup creates a chezmoi config file"
+fi
+pass "workspace-disabled customized setup creates a chezmoi config file"
+
+assert_data_key_once_with_value "$setup_leaf_config" "enableEditorStack" "false" "workspace-disabled setup writes customized Optional Editor Stack"
+assert_data_key_once_with_value "$setup_leaf_config" "enableAiCliTools" "true" "workspace-disabled setup writes customized Optional AI Tool Stack"
+assert_data_key_once_with_value "$setup_leaf_config" "enableDevelopmentWorkspace" "false" "workspace-disabled setup writes disabled Optional Development Workspace"
+assert_data_key_once_with_value "$setup_leaf_config" "enableMacosAppGroupTerminalApps" "true" "workspace-disabled setup writes customized terminal-apps App Group"
+assert_data_key_once_with_value "$setup_leaf_config" "enableMacosAppGroupAutomation" "false" "workspace-disabled setup writes customized automation App Group"
+assert_data_key_once_with_value "$setup_leaf_config" "enableMacosAppGroupLauncher" "true" "workspace-disabled setup writes customized launcher App Group"
+assert_data_key_once_with_value "$setup_leaf_config" "enableMacosAppGroupMonitoring" "false" "workspace-disabled setup writes customized monitoring App Group"
+
+setup_vps_custom_home="$tmp_dir/setup-vps-custom-home"
+setup_vps_custom_xdg="$tmp_dir/setup-vps-custom-xdg"
+setup_vps_custom_config="$setup_vps_custom_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$setup_vps_custom_home"
+
+if ! run_terrapod_setup vps-shell 'minimal
+n
+y
+n
+y
+' "$setup_vps_custom_home" "$setup_vps_custom_xdg" >"$tmp_dir/setup-vps-custom.out" 2>"$tmp_dir/setup-vps-custom.err"; then
+  printf '%s\n' "setup stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/setup-vps-custom.out" >&2
+  printf '%s\n' "setup stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/setup-vps-custom.err" >&2
+  fail "VPS setup prompts for customization before final confirmation and customizes optional stacks without macOS App Groups"
+fi
+pass "VPS setup prompts for customization before final confirmation and customizes optional stacks without macOS App Groups"
+
+setup_vps_custom_output="$(cat "$tmp_dir/setup-vps-custom.out" "$tmp_dir/setup-vps-custom.err")"
+if printf '%s\n' "$setup_vps_custom_output" | grep -F "terminal-apps macOS App Group" >/dev/null; then
+  fail "VPS setup does not prompt for terminal-apps macOS App Group"
+fi
+pass "VPS setup does not prompt for terminal-apps macOS App Group"
+
+assert_contains "$tmp_dir/setup-vps-custom.err" "macOS App Groups: not applicable for VPS Shell Profile" "VPS setup explains macOS App Groups are not applicable"
+assert_contains "$tmp_dir/setup-vps-custom.out" "enableEditorStack = true" "VPS setup summary reflects customized Optional Editor Stack"
+assert_contains "$tmp_dir/setup-vps-custom.out" "enableAiCliTools = false" "VPS setup summary reflects customized Optional AI Tool Stack"
+assert_contains "$tmp_dir/setup-vps-custom.out" "enableDevelopmentWorkspace = false" "VPS setup summary reflects disabled Optional Development Workspace"
+
+if [ ! -f "$setup_vps_custom_config" ]; then
+  fail "VPS customized setup creates a chezmoi config file"
+fi
+pass "VPS customized setup creates a chezmoi config file"
+
+assert_data_key_once_with_value "$setup_vps_custom_config" "enableEditorStack" "true" "VPS setup writes customized Optional Editor Stack"
+assert_data_key_once_with_value "$setup_vps_custom_config" "enableAiCliTools" "false" "VPS setup writes customized Optional AI Tool Stack"
+assert_data_key_once_with_value "$setup_vps_custom_config" "enableDevelopmentWorkspace" "false" "VPS setup writes disabled Optional Development Workspace"
+assert_data_key_once_with_value "$setup_vps_custom_config" "enableMacosAppGroupTerminalApps" "false" "VPS setup writes terminal-apps App Group disabled"
+assert_data_key_once_with_value "$setup_vps_custom_config" "enableMacosAppGroupAutomation" "false" "VPS setup writes automation App Group disabled"
+assert_data_key_once_with_value "$setup_vps_custom_config" "enableMacosAppGroupLauncher" "false" "VPS setup writes launcher App Group disabled"
+assert_data_key_once_with_value "$setup_vps_custom_config" "enableMacosAppGroupMonitoring" "false" "VPS setup writes monitoring App Group disabled"
+
+setup_vps_workstation_error_home="$tmp_dir/setup-vps-workstation-error-home"
+setup_vps_workstation_error_xdg="$tmp_dir/setup-vps-workstation-error-xdg"
+setup_vps_workstation_error_config="$setup_vps_workstation_error_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$setup_vps_workstation_error_home"
+
+if run_terrapod_setup vps-shell 'workstation
+y
+' "$setup_vps_workstation_error_home" "$setup_vps_workstation_error_xdg" >"$tmp_dir/setup-vps-workstation-error.out" 2>"$tmp_dir/setup-vps-workstation-error.err"; then
+  fail "VPS setup workstation rejection exits non-zero"
+fi
+pass "VPS setup workstation rejection exits non-zero"
+
+assert_contains "$tmp_dir/setup-vps-workstation-error.err" "workstation Preset is only available for the macOS Terminal Profile" "VPS setup workstation rejection writes the error to stderr"
+assert_not_contains "$tmp_dir/setup-vps-workstation-error.out" "workstation Preset is only available for the macOS Terminal Profile" "VPS setup workstation rejection does not write the error to stdout"
+
+if [ -e "$setup_vps_workstation_error_config" ]; then
+  fail "VPS setup workstation rejection does not create a config"
+fi
+pass "VPS setup workstation rejection does not create a config"
+
+assert_no_terrapod_artifacts_near_path "$setup_vps_workstation_error_config" "VPS setup workstation rejection leaves no Terrapod artifacts"
+
+setup_invalid_bool_home="$tmp_dir/setup-invalid-bool-home"
+setup_invalid_bool_xdg="$tmp_dir/setup-invalid-bool-xdg"
+setup_invalid_bool_config="$setup_invalid_bool_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$setup_invalid_bool_home"
+
+if run_terrapod_setup macos-terminal 'minimal
+maybe
+' "$setup_invalid_bool_home" "$setup_invalid_bool_xdg" >"$tmp_dir/setup-invalid-bool.out" 2>"$tmp_dir/setup-invalid-bool.err"; then
+  fail "setup invalid boolean answer exits non-zero"
+fi
+pass "setup invalid boolean answer exits non-zero"
+
+assert_contains "$tmp_dir/setup-invalid-bool.err" "invalid answer for Optional Development Workspace; enter y or n" "setup invalid boolean answer writes the error to stderr"
+assert_not_contains "$tmp_dir/setup-invalid-bool.out" "invalid answer for Optional Development Workspace; enter y or n" "setup invalid boolean answer does not write the error to stdout"
+
+if [ -e "$setup_invalid_bool_config" ]; then
+  fail "setup invalid boolean answer does not create a config"
+fi
+pass "setup invalid boolean answer does not create a config"
+
+assert_no_terrapod_artifacts_near_path "$setup_invalid_bool_config" "setup invalid boolean answer leaves no Terrapod artifacts"
+
 setup_cancel_home="$tmp_dir/setup-cancel-home"
 setup_cancel_xdg="$tmp_dir/setup-cancel-xdg"
 setup_cancel_config="$setup_cancel_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$setup_cancel_home"
 
 if run_terrapod_setup macos-terminal 'development
+
+
+
+
+
 n
 ' "$setup_cancel_home" "$setup_cancel_xdg" >"$tmp_dir/setup-cancel.out" 2>"$tmp_dir/setup-cancel.err"; then
   fail "cancelled setup exits non-zero"
@@ -394,6 +582,12 @@ TOML
 cp "$setup_existing_cancel_config" "$tmp_dir/setup-existing-cancel-before.toml"
 
 if run_terrapod_setup macos-terminal 'development
+
+
+
+
+
+
 
 ' "$setup_existing_cancel_home" "$setup_existing_cancel_xdg" >"$tmp_dir/setup-existing-cancel.out" 2>"$tmp_dir/setup-existing-cancel.err"; then
   fail "empty final confirmation cancels setup"
