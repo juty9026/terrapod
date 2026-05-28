@@ -393,8 +393,8 @@ y
 fi
 pass "macOS setup prompts for customization before final confirmation and customizes Optional Development Workspace and App Groups"
 
-assert_contains "$tmp_dir/setup-custom-workspace.out" "Optional Editor Stack: included by Optional Development Workspace" "workspace-enabled setup presents Optional Editor Stack as included"
-assert_contains "$tmp_dir/setup-custom-workspace.out" "Optional AI Tool Stack: included by Optional Development Workspace" "workspace-enabled setup presents Optional AI Tool Stack as included"
+assert_contains "$tmp_dir/setup-custom-workspace.err" "Optional Editor Stack: included by Optional Development Workspace" "workspace-enabled setup presents Optional Editor Stack as included"
+assert_contains "$tmp_dir/setup-custom-workspace.err" "Optional AI Tool Stack: included by Optional Development Workspace" "workspace-enabled setup presents Optional AI Tool Stack as included"
 assert_contains "$tmp_dir/setup-custom-workspace.out" "enableEditorStack = true" "workspace-enabled setup summary reflects included Optional Editor Stack"
 assert_contains "$tmp_dir/setup-custom-workspace.out" "enableAiCliTools = true" "workspace-enabled setup summary reflects included Optional AI Tool Stack"
 assert_contains "$tmp_dir/setup-custom-workspace.out" "enableDevelopmentWorkspace = true" "workspace-enabled setup summary reflects enabled Optional Development Workspace"
@@ -481,7 +481,7 @@ if printf '%s\n' "$setup_vps_custom_output" | grep -F "terminal-apps macOS App G
 fi
 pass "VPS setup does not prompt for terminal-apps macOS App Group"
 
-assert_contains "$tmp_dir/setup-vps-custom.out" "macOS App Groups: not applicable for VPS Shell Profile" "VPS setup explains macOS App Groups are not applicable"
+assert_contains "$tmp_dir/setup-vps-custom.err" "macOS App Groups: not applicable for VPS Shell Profile" "VPS setup explains macOS App Groups are not applicable"
 assert_contains "$tmp_dir/setup-vps-custom.out" "enableEditorStack = true" "VPS setup summary reflects customized Optional Editor Stack"
 assert_contains "$tmp_dir/setup-vps-custom.out" "enableAiCliTools = false" "VPS setup summary reflects customized Optional AI Tool Stack"
 assert_contains "$tmp_dir/setup-vps-custom.out" "enableDevelopmentWorkspace = false" "VPS setup summary reflects disabled Optional Development Workspace"
@@ -498,6 +498,50 @@ assert_data_key_once_with_value "$setup_vps_custom_config" "enableMacosAppGroupT
 assert_data_key_once_with_value "$setup_vps_custom_config" "enableMacosAppGroupAutomation" "false" "VPS setup writes automation App Group disabled"
 assert_data_key_once_with_value "$setup_vps_custom_config" "enableMacosAppGroupLauncher" "false" "VPS setup writes launcher App Group disabled"
 assert_data_key_once_with_value "$setup_vps_custom_config" "enableMacosAppGroupMonitoring" "false" "VPS setup writes monitoring App Group disabled"
+
+setup_vps_workstation_error_home="$tmp_dir/setup-vps-workstation-error-home"
+setup_vps_workstation_error_xdg="$tmp_dir/setup-vps-workstation-error-xdg"
+setup_vps_workstation_error_config="$setup_vps_workstation_error_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$setup_vps_workstation_error_home"
+
+if run_terrapod_setup vps-shell 'workstation
+y
+' "$setup_vps_workstation_error_home" "$setup_vps_workstation_error_xdg" >"$tmp_dir/setup-vps-workstation-error.out" 2>"$tmp_dir/setup-vps-workstation-error.err"; then
+  fail "VPS setup workstation rejection exits non-zero"
+fi
+pass "VPS setup workstation rejection exits non-zero"
+
+assert_contains "$tmp_dir/setup-vps-workstation-error.err" "workstation Preset is only available for the macOS Terminal Profile" "VPS setup workstation rejection writes the error to stderr"
+assert_not_contains "$tmp_dir/setup-vps-workstation-error.out" "workstation Preset is only available for the macOS Terminal Profile" "VPS setup workstation rejection does not write the error to stdout"
+
+if [ -e "$setup_vps_workstation_error_config" ]; then
+  fail "VPS setup workstation rejection does not create a config"
+fi
+pass "VPS setup workstation rejection does not create a config"
+
+assert_no_terrapod_artifacts_near_path "$setup_vps_workstation_error_config" "VPS setup workstation rejection leaves no Terrapod artifacts"
+
+setup_invalid_bool_home="$tmp_dir/setup-invalid-bool-home"
+setup_invalid_bool_xdg="$tmp_dir/setup-invalid-bool-xdg"
+setup_invalid_bool_config="$setup_invalid_bool_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$setup_invalid_bool_home"
+
+if run_terrapod_setup macos-terminal 'minimal
+maybe
+' "$setup_invalid_bool_home" "$setup_invalid_bool_xdg" >"$tmp_dir/setup-invalid-bool.out" 2>"$tmp_dir/setup-invalid-bool.err"; then
+  fail "setup invalid boolean answer exits non-zero"
+fi
+pass "setup invalid boolean answer exits non-zero"
+
+assert_contains "$tmp_dir/setup-invalid-bool.err" "invalid answer for Optional Development Workspace; enter y or n" "setup invalid boolean answer writes the error to stderr"
+assert_not_contains "$tmp_dir/setup-invalid-bool.out" "invalid answer for Optional Development Workspace; enter y or n" "setup invalid boolean answer does not write the error to stdout"
+
+if [ -e "$setup_invalid_bool_config" ]; then
+  fail "setup invalid boolean answer does not create a config"
+fi
+pass "setup invalid boolean answer does not create a config"
+
+assert_no_terrapod_artifacts_near_path "$setup_invalid_bool_config" "setup invalid boolean answer leaves no Terrapod artifacts"
 
 setup_cancel_home="$tmp_dir/setup-cancel-home"
 setup_cancel_xdg="$tmp_dir/setup-cancel-xdg"

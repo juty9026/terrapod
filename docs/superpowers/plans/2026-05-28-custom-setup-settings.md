@@ -33,8 +33,7 @@
 - Modify: `tests/terrapod_config_test.sh`
 - Modify: `tests/terrapod_command_test.sh`
 - Test: `tests/terrapod_config_test.sh`, `tests/terrapod_command_test.sh`
-
-- [ ] **Step 1: Update existing setup input fixtures**
+- [x] **Step 1: Update existing setup input fixtures**
 
 In `tests/terrapod_config_test.sh`, update the existing confirmed workstation setup input from:
 
@@ -121,8 +120,7 @@ if ! run_terrapod_setup_command macos-terminal 'workstation
 y
 ' "$setup_home" "$setup_xdg" "$setup_output"; then
 ```
-
-- [ ] **Step 2: Add macOS workspace-precedence and App Group customization coverage**
+- [x] **Step 2: Add macOS workspace-precedence and App Group customization coverage**
 
 Insert this block in `tests/terrapod_config_test.sh` after the existing confirmed workstation setup assertions and before `setup_cancel_home=...`:
 
@@ -172,8 +170,7 @@ assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosApp
 assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosAppGroupLauncher" "false" "workspace-enabled setup writes customized launcher App Group"
 assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosAppGroupMonitoring" "true" "workspace-enabled setup writes customized monitoring App Group"
 ```
-
-- [ ] **Step 3: Add independent leaf-stack customization coverage**
+- [x] **Step 3: Add independent leaf-stack customization coverage**
 
 Insert this block immediately after the block from Step 2:
 
@@ -213,8 +210,7 @@ assert_data_key_once_with_value "$setup_leaf_config" "enableMacosAppGroupAutomat
 assert_data_key_once_with_value "$setup_leaf_config" "enableMacosAppGroupLauncher" "true" "workspace-disabled setup writes customized launcher App Group"
 assert_data_key_once_with_value "$setup_leaf_config" "enableMacosAppGroupMonitoring" "false" "workspace-disabled setup writes customized monitoring App Group"
 ```
-
-- [ ] **Step 4: Add VPS non-applicability coverage**
+- [x] **Step 4: Add VPS non-applicability coverage**
 
 Insert this block immediately after the block from Step 3:
 
@@ -257,8 +253,7 @@ assert_data_key_once_with_value "$setup_vps_custom_config" "enableMacosAppGroupA
 assert_data_key_once_with_value "$setup_vps_custom_config" "enableMacosAppGroupLauncher" "false" "VPS setup writes launcher App Group disabled"
 assert_data_key_once_with_value "$setup_vps_custom_config" "enableMacosAppGroupMonitoring" "false" "VPS setup writes monitoring App Group disabled"
 ```
-
-- [ ] **Step 5: Update command test assertions for customization prompts**
+- [x] **Step 5: Update command test assertions for customization prompts**
 
 In `tests/terrapod_command_test.sh`, after this assertion:
 
@@ -276,8 +271,7 @@ assert_contains "$setup_output_text" "terminal-apps macOS App Group [enabled]:" 
 assert_first_occurrence_before "$setup_output_text" "Choose Terrapod Preset" "Customize Terrapod settings." "plain setup customizes settings after Preset selection"
 assert_first_occurrence_before "$setup_output_text" "Customize Terrapod settings." "Settings to write:" "plain setup shows customized settings before summary"
 ```
-
-- [ ] **Step 6: Run focused tests and verify they fail**
+- [x] **Step 6: Run focused tests and verify they fail**
 
 Run:
 
@@ -287,8 +281,7 @@ sh tests/terrapod_command_test.sh
 ```
 
 Expected: FAIL before implementation because Terrapod Setup does not yet prompt for concrete setting customization.
-
-- [ ] **Step 7: Commit the failing tests**
+- [x] **Step 7: Commit the failing tests**
 
 Run:
 
@@ -306,8 +299,7 @@ Expected: commit succeeds.
 **Files:**
 - Modify: `dot_local/bin/executable_terrapod`
 - Test: `tests/terrapod_config_test.sh`, `tests/terrapod_command_test.sh`
-
-- [ ] **Step 1: Replace `render_preset_data` with shared rendering helpers**
+- [x] **Step 1: Replace `render_preset_data` with shared rendering helpers**
 
 Replace the existing `render_preset_data` function with:
 
@@ -343,8 +335,7 @@ render_preset_data() {
   esac
 }
 ```
-
-- [ ] **Step 2: Add setup default-loading and rendering helpers**
+- [x] **Step 2: Add setup default-loading and rendering helpers**
 
 Add these functions immediately after `render_preset_data`:
 
@@ -397,8 +388,7 @@ render_setup_data() {
     "$setup_enableMacosAppGroupMonitoring"
 }
 ```
-
-- [ ] **Step 3: Run syntax and focused tests**
+- [x] **Step 3: Run syntax and focused tests**
 
 Run:
 
@@ -409,8 +399,7 @@ sh tests/terrapod_command_test.sh
 ```
 
 Expected: syntax passes, tests still fail on the missing setup customization prompts.
-
-- [ ] **Step 4: Commit shared data rendering**
+- [x] **Step 4: Commit shared data rendering**
 
 Run:
 
@@ -428,8 +417,7 @@ Expected: commit succeeds.
 **Files:**
 - Modify: `dot_local/bin/executable_terrapod`
 - Test: `tests/terrapod_config_test.sh`, `tests/terrapod_command_test.sh`
-
-- [ ] **Step 1: Add boolean setup prompt helpers**
+- [x] **Step 1: Add boolean setup prompt helpers**
 
 Add these functions after `confirm_setup_write`:
 
@@ -495,8 +483,7 @@ prompt_for_setup_settings() {
   render_setup_data
 }
 ```
-
-- [ ] **Step 2: Replace the setup summary helper**
+- [x] **Step 2: Replace the setup summary helper**
 
 Replace `show_preset_settings_summary`:
 
@@ -519,8 +506,7 @@ show_setup_settings_summary() {
   printf '%s\n' "$settings_data" | sed 's/^/  /'
 }
 ```
-
-- [ ] **Step 3: Update `run_setup` to customize before final confirmation**
+- [x] **Step 3: Update `run_setup` to customize before final confirmation**
 
 Replace this block in `run_setup`:
 
@@ -550,8 +536,7 @@ with:
   write_setup_settings "$config_file" "$setup_settings_data"
   printf '%s\n' "Configured Terrapod Preset '$preset' in $config_file"
 ```
-
-- [ ] **Step 4: Run focused tests and observe the writer failure**
+- [x] **Step 4: Run focused tests and observe the writer failure**
 
 Run:
 
@@ -562,8 +547,7 @@ sh tests/terrapod_command_test.sh
 ```
 
 Expected: syntax passes. Tests may still fail because `write_setup_settings` still expects a Preset instead of customized managed data.
-
-- [ ] **Step 5: Commit setup prompting**
+- [x] **Step 5: Commit setup prompting**
 
 Run:
 
@@ -581,8 +565,7 @@ Expected: commit succeeds.
 **Files:**
 - Modify: `dot_local/bin/executable_terrapod`
 - Test: `tests/terrapod_config_test.sh`, `tests/terrapod_command_test.sh`
-
-- [ ] **Step 1: Split the managed config writer**
+- [x] **Step 1: Split the managed config writer**
 
 Replace the start of `write_managed_config`:
 
@@ -646,8 +629,7 @@ write_managed_config() {
   write_managed_settings "$config_file" "$(render_preset_data "$preset")"
 }
 ```
-
-- [ ] **Step 2: Update setup writing to accept customized data**
+- [x] **Step 2: Update setup writing to accept customized data**
 
 Replace `write_setup_settings`:
 
@@ -686,8 +668,7 @@ write_preset_settings() {
   write_managed_config "$config_file" "$preset"
 }
 ```
-
-- [ ] **Step 3: Run focused tests and verify they pass**
+- [x] **Step 3: Run focused tests and verify they pass**
 
 Run:
 
@@ -698,8 +679,7 @@ sh tests/terrapod_command_test.sh
 ```
 
 Expected: PASS.
-
-- [ ] **Step 4: Commit customized setup writes**
+- [x] **Step 4: Commit customized setup writes**
 
 Run:
 
@@ -716,8 +696,7 @@ Expected: commit succeeds.
 
 **Files:**
 - Test: all shell tests
-
-- [ ] **Step 1: Run the full shell test suite**
+- [x] **Step 1: Run the full shell test suite**
 
 Run:
 
@@ -732,8 +711,7 @@ done
 ```
 
 Expected: PASS.
-
-- [ ] **Step 2: Review the final diff**
+- [x] **Step 2: Review the final diff**
 
 Run:
 
@@ -743,8 +721,7 @@ git diff origin/main...HEAD -- dot_local/bin/executable_terrapod tests/terrapod_
 ```
 
 Expected: diff contains only the plan, setup customization tests, and Terrapod setup implementation.
-
-- [ ] **Step 3: Commit any verification-only fixes**
+- [x] **Step 3: Commit any verification-only fixes**
 
 If Step 1 or Step 2 required small fixes, run:
 

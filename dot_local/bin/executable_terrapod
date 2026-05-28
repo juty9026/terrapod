@@ -244,7 +244,7 @@ show_setup_settings_summary() {
 confirm_setup_write() {
   config_file="$1"
 
-  printf 'Write these Terrapod settings to %s? [y/N] ' "$config_file"
+  printf 'Write these Terrapod settings to %s? [y/N] ' "$config_file" >&2
   IFS= read -r answer || answer=
 
   case "$answer" in
@@ -1552,16 +1552,13 @@ run_setup() {
   printf '%s\n' "Profile: $(profile_context_label)"
   show_config_context "$config_file"
 
-  exec 3>&1
-  preset="$(prompt_for_setup_preset "$profile" 2>&3)"
-  setup_settings_data="$(prompt_for_setup_settings "$preset" "$profile" 2>&3)"
+  preset="$(prompt_for_setup_preset "$profile")"
+  setup_settings_data="$(prompt_for_setup_settings "$preset" "$profile")"
   show_setup_settings_summary "$setup_settings_data"
 
   if ! confirm_setup_write "$config_file"; then
-    exec 3>&-
     return 1
   fi
-  exec 3>&-
 
   write_setup_settings "$config_file" "$setup_settings_data"
   printf '%s\n' "Configured Terrapod Preset '$preset' in $config_file"
