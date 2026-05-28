@@ -121,7 +121,11 @@ show_update_context() {
     printf '%s\n' "Config: $config_file (missing; chezmoi defaults apply)"
   fi
 
-  printf '%s\n' "Delegating repository update to: chezmoi update"
+  if [ -n "${TERRAPOD_CHEZMOI_CONFIG:-}" ]; then
+    printf '%s\n' "Delegating repository update to: chezmoi --config $TERRAPOD_CHEZMOI_CONFIG update"
+  else
+    printf '%s\n' "Delegating repository update to: chezmoi update"
+  fi
 }
 
 run_update() {
@@ -130,7 +134,11 @@ run_update() {
   fi
 
   show_update_context
-  chezmoi update
+  if [ -n "${TERRAPOD_CHEZMOI_CONFIG:-}" ]; then
+    chezmoi --config "$TERRAPOD_CHEZMOI_CONFIG" update
+  else
+    chezmoi update
+  fi
 }
 
 render_preset_data() {

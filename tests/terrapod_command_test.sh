@@ -369,6 +369,52 @@ fi
 
 pass "Terrapod update does not call brew, apt, sudo, mise, or npm upgrade flows"
 
+override_config="$tmp_dir/override-chezmoi.toml"
+
+cat >"$override_config" <<'TOML'
+[data]
+enableEditorStack = false
+enableAiCliTools = true
+enableDevelopmentWorkspace = false
+enableMacosDesktopApps = false
+TOML
+
+rm -f "$CHEZMOI_CALL_FILE" "$CHEZMOI_INVOKED_FILE"
+
+if ! HOME="$update_home" XDG_CONFIG_HOME="$update_xdg" TERRAPOD_CHEZMOI_CONFIG="$override_config" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$terrapod" update >"$tmp_dir/update-override.out" 2>"$tmp_dir/update-override.err"; then
+  printf '%s\n' "override update stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/update-override.out" >&2
+  printf '%s\n' "override update stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/update-override.err" >&2
+  fail "Terrapod update runs successfully with an explicit config override"
+fi
+
+override_update_output="$(cat "$tmp_dir/update-override.out")"
+
+assert_call_args \
+  "$CHEZMOI_CALL_FILE" \
+  "Terrapod update passes explicit config overrides to chezmoi update" \
+  --config "$override_config" update
+
+assert_contains \
+  "$override_update_output" \
+  "Config: $override_config (present)" \
+  "Terrapod update prints explicit config override context"
+
+assert_contains \
+  "$override_update_output" \
+  "Delegating repository update to: chezmoi --config $override_config update" \
+  "Terrapod update explains delegated explicit config command"
+
+if [ -e "$BROAD_UPGRADE_CALL_FILE" ]; then
+  printf '%s\n' "unexpected broad upgrade command calls with explicit config override:" >&2
+  sed 's/^/  /' "$BROAD_UPGRADE_CALL_FILE" >&2
+  fail "Terrapod update with explicit config override does not call broad upgrade flows"
+fi
+
+pass "Terrapod update with explicit config override does not call broad upgrade flows"
+
 rm -f "$CHEZMOI_CALL_FILE" "$CHEZMOI_INVOKED_FILE"
 
 if HOME="$update_home" XDG_CONFIG_HOME="$update_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
