@@ -1393,6 +1393,10 @@ run_configure() {
   fi
 
   preset="$1"
+  if [ -z "$preset" ]; then
+    fail_usage "Preset is required"
+  fi
+
   profile="$(current_profile)"
   config_file="$(chezmoi_config_file)"
 

@@ -919,6 +919,43 @@ pass "dangling symlink target remains missing after failed update"
 
 assert_no_terrapod_artifacts_near_path "$dangling_config" "dangling symlink config path leaves no Terrapod artifacts"
 
+empty_preset_home="$tmp_dir/empty-preset-home"
+empty_preset_xdg="$tmp_dir/empty-preset-xdg"
+empty_preset_config="$empty_preset_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$empty_preset_home" "$(dirname "$empty_preset_config")"
+
+cat >"$empty_preset_config" <<'TOML'
+[data]
+enableEditorStack = false
+keepMe = "yes"
+TOML
+cp "$empty_preset_config" "$tmp_dir/empty-preset-before.toml"
+
+if HOME="$empty_preset_home" XDG_CONFIG_HOME="$empty_preset_xdg" sh "$terrapod" configure "" >"$tmp_dir/empty-preset.out" 2>"$tmp_dir/empty-preset.err" </dev/null; then
+  fail "empty Preset fails before prompting"
+else
+  empty_preset_status="$?"
+fi
+
+if [ "$empty_preset_status" -ne 64 ]; then
+  fail "empty Preset exits with usage status 64; got $empty_preset_status"
+fi
+pass "empty Preset exits with usage status 64"
+
+assert_contains "$tmp_dir/empty-preset.err" "Preset is required" "empty Preset reports required Preset"
+assert_not_contains "$tmp_dir/empty-preset.err" "unknown Preset" "empty Preset does not report unknown Preset"
+assert_not_contains "$tmp_dir/empty-preset.err" "Update Terrapod-managed data keys" "empty Preset does not prompt before failing"
+assert_not_contains "$tmp_dir/empty-preset.out" "Update Terrapod-managed data keys" "empty Preset does not prompt on stdout before failing"
+assert_not_contains "$tmp_dir/empty-preset.out" "Configured Terrapod Preset" "empty Preset does not report success"
+
+if ! cmp -s "$empty_preset_config" "$tmp_dir/empty-preset-before.toml"; then
+  fail "empty Preset leaves existing config unchanged"
+fi
+pass "empty Preset leaves existing config unchanged"
+
+assert_backup_count "$empty_preset_config" 0 "empty Preset does not create a backup"
+assert_no_terrapod_temp_files "$empty_preset_config" "empty Preset leaves no Terrapod temp files"
+
 invalid_home="$tmp_dir/invalid-home"
 invalid_xdg="$tmp_dir/invalid-xdg"
 invalid_config="$invalid_xdg/chezmoi/chezmoi.toml"
