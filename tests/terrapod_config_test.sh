@@ -616,6 +616,74 @@ pass "multiline string rejection leaves existing config unchanged"
 assert_backup_count "$multiline_string_config" 0 "multiline string rejection does not create a backup"
 assert_no_terrapod_temp_files "$multiline_string_config" "multiline string rejection leaves no Terrapod temp files"
 
+dotted_multiline_home="$tmp_dir/dotted-multiline-home"
+dotted_multiline_xdg="$tmp_dir/dotted-multiline-xdg"
+dotted_multiline_config="$dotted_multiline_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$dotted_multiline_home" "$(dirname "$dotted_multiline_config")"
+
+cat >"$dotted_multiline_config" <<'TOML'
+data.email = "minu@example.com"
+data.enableEditorStack = false
+notes = '''
+[profile]
+keep this line in the string
+'''
+TOML
+cp "$dotted_multiline_config" "$tmp_dir/dotted-multiline-before.toml"
+
+if printf '%s\n' "y" |
+  HOME="$dotted_multiline_home" XDG_CONFIG_HOME="$dotted_multiline_xdg" sh "$terrapod" configure development >"$tmp_dir/dotted-multiline.out" 2>"$tmp_dir/dotted-multiline.err"; then
+  fail "dotted data update rejects multiline strings before injecting managed keys"
+fi
+pass "dotted data update rejects multiline strings before injecting managed keys"
+
+assert_contains "$tmp_dir/dotted-multiline.err" "unsupported multiline string" "dotted multiline rejection explains unsupported format"
+assert_not_contains "$tmp_dir/dotted-multiline.err" "Update Terrapod-managed data keys" "dotted multiline rejection does not prompt before failing"
+assert_not_contains "$tmp_dir/dotted-multiline.out" "Configured Terrapod Preset" "dotted multiline rejection does not report success"
+
+if ! cmp -s "$dotted_multiline_config" "$tmp_dir/dotted-multiline-before.toml"; then
+  fail "dotted multiline rejection leaves existing config unchanged"
+fi
+pass "dotted multiline rejection leaves existing config unchanged"
+
+assert_backup_count "$dotted_multiline_config" 0 "dotted multiline rejection does not create a backup"
+assert_no_terrapod_temp_files "$dotted_multiline_config" "dotted multiline rejection leaves no Terrapod temp files"
+
+dotted_array_multiline_home="$tmp_dir/dotted-array-multiline-home"
+dotted_array_multiline_xdg="$tmp_dir/dotted-array-multiline-xdg"
+dotted_array_multiline_config="$dotted_array_multiline_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$dotted_array_multiline_home" "$(dirname "$dotted_array_multiline_config")"
+
+cat >"$dotted_array_multiline_config" <<'TOML'
+data.email = "minu@example.com"
+data.enableEditorStack = false
+notes = [
+'''
+[profile]
+keep this line in the string
+'''
+]
+TOML
+cp "$dotted_array_multiline_config" "$tmp_dir/dotted-array-multiline-before.toml"
+
+if printf '%s\n' "y" |
+  HOME="$dotted_array_multiline_home" XDG_CONFIG_HOME="$dotted_array_multiline_xdg" sh "$terrapod" configure development >"$tmp_dir/dotted-array-multiline.out" 2>"$tmp_dir/dotted-array-multiline.err"; then
+  fail "dotted data update rejects multiline strings in arrays before injecting managed keys"
+fi
+pass "dotted data update rejects multiline strings in arrays before injecting managed keys"
+
+assert_contains "$tmp_dir/dotted-array-multiline.err" "unsupported multiline string" "dotted array multiline rejection explains unsupported format"
+assert_not_contains "$tmp_dir/dotted-array-multiline.err" "Update Terrapod-managed data keys" "dotted array multiline rejection does not prompt before failing"
+assert_not_contains "$tmp_dir/dotted-array-multiline.out" "Configured Terrapod Preset" "dotted array multiline rejection does not report success"
+
+if ! cmp -s "$dotted_array_multiline_config" "$tmp_dir/dotted-array-multiline-before.toml"; then
+  fail "dotted array multiline rejection leaves existing config unchanged"
+fi
+pass "dotted array multiline rejection leaves existing config unchanged"
+
+assert_backup_count "$dotted_array_multiline_config" 0 "dotted array multiline rejection does not create a backup"
+assert_no_terrapod_temp_files "$dotted_array_multiline_config" "dotted array multiline rejection leaves no Terrapod temp files"
+
 decline_home="$tmp_dir/decline-home"
 decline_xdg="$tmp_dir/decline-xdg"
 decline_config="$decline_xdg/chezmoi/chezmoi.toml"
