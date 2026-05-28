@@ -131,6 +131,34 @@ install_chezmoi_if_needed() {
   printf '%s\n' "$chezmoi_path"
 }
 
+ensure_source_repo_prerequisites() {
+  profile="$1"
+
+  if [ "$profile" != "vps-shell" ]; then
+    return 0
+  fi
+
+  if command -v git >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [ "$(id -u)" -eq 0 ]; then
+    sudo_cmd=""
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo_cmd="sudo"
+  else
+    fatal "git is required before chezmoi can initialize the source repository. Install git, or install sudo so Terrapod can install git with apt-get."
+  fi
+
+  if ! $sudo_cmd apt-get update -y; then
+    fatal "failed to update APT metadata before installing git"
+  fi
+
+  if ! $sudo_cmd apt-get install -y ca-certificates git; then
+    fatal "failed to install git before initializing the source repository"
+  fi
+}
+
 choose_preset() {
   profile="$1"
 
@@ -200,6 +228,7 @@ main() {
   reject_existing_source_dir "$source_dir"
   chezmoi_bin="$(install_chezmoi_if_needed "$local_bin_dir")"
   preset="$(choose_preset "$profile")"
+  ensure_source_repo_prerequisites "$profile"
   run_initial_apply "$chezmoi_bin" "$profile" "$source_dir" "$preset"
 
   printf '%s\n' "Terrapod first-run apply complete."

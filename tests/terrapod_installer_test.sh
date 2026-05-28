@@ -218,6 +218,50 @@ write_command_call_stubs() {
   done
 }
 
+write_ubuntu_package_stubs() {
+  case_dir="$1"
+
+  cat >"$case_dir/bin/id" <<'EOF'
+#!/bin/sh
+set -eu
+
+case "${1-}" in
+  -u)
+    printf '%s\n' 1000
+    ;;
+  *)
+    exit 64
+    ;;
+esac
+EOF
+  chmod +x "$case_dir/bin/id"
+
+  cat >"$case_dir/bin/sudo" <<'EOF'
+#!/bin/sh
+set -eu
+
+printf '%s\n' "sudo args:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"
+exec "$@"
+EOF
+  chmod +x "$case_dir/bin/sudo"
+
+  cat >"$case_dir/bin/apt-get" <<'EOF'
+#!/bin/sh
+set -eu
+
+printf '%s\n' "apt-get args:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"
+case "${1-}" in
+  update|install)
+    exit 0
+    ;;
+  *)
+    exit 64
+    ;;
+esac
+EOF
+  chmod +x "$case_dir/bin/apt-get"
+}
+
 write_chezmoi_flow_stub() {
   stub="$1"
 
@@ -403,6 +447,30 @@ unset TERRAPOD_STUB_CALL_LOG
 assert_status "$installer_status" 0 "Ubuntu 24.04 profile is supported"
 ubuntu_stdout="$(cat "$ubuntu_case/stdout")"
 assert_contains "$ubuntu_stdout" "Profile: VPS Shell Profile" "Ubuntu 24.04 profile label is printed"
+
+ubuntu_missing_git_case="$(make_case_dir ubuntu-missing-git)"
+write_uname_stub "$ubuntu_missing_git_case" "Linux"
+ubuntu_missing_git_os_release="$(write_os_release "$ubuntu_missing_git_case" "ID=ubuntu" 'VERSION_ID="24.04"')"
+write_command_call_stubs "$ubuntu_missing_git_case" "curl" "wget" "git" "sh"
+rm -f "$ubuntu_missing_git_case/bin/git"
+write_ubuntu_package_stubs "$ubuntu_missing_git_case"
+mkdir -p "$ubuntu_missing_git_case/home/.local/bin"
+write_chezmoi_flow_stub "$ubuntu_missing_git_case/home/.local/bin/chezmoi"
+ubuntu_missing_git_log="$ubuntu_missing_git_case/command-calls"
+TERRAPOD_OS_RELEASE_FILE="$ubuntu_missing_git_os_release"
+TERRAPOD_STUB_CALL_LOG="$ubuntu_missing_git_log"
+export TERRAPOD_OS_RELEASE_FILE
+export TERRAPOD_STUB_CALL_LOG
+ubuntu_missing_git_input='development
+'
+run_installer_case "$ubuntu_missing_git_case" "$ubuntu_missing_git_input"
+unset TERRAPOD_OS_RELEASE_FILE
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "Ubuntu installer installs source prerequisites when git is missing"
+ubuntu_missing_git_log_text="$(cat "$ubuntu_missing_git_log")"
+assert_contains "$ubuntu_missing_git_log_text" "apt-get args:update -y" "Ubuntu missing git case updates package metadata"
+assert_contains "$ubuntu_missing_git_log_text" "apt-get args:install -y ca-certificates git" "Ubuntu missing git case installs git before init"
+assert_first_occurrence_before "$ubuntu_missing_git_log_text" "apt-get args:install -y ca-certificates git" "chezmoi args:init https://github.com/juty9026/dotfiles.git" "Ubuntu missing git case installs git before chezmoi init"
 
 first_run_case="$(make_case_dir first-run-macos)"
 write_uname_stub "$first_run_case" "Darwin"
