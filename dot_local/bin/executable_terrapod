@@ -163,7 +163,7 @@ write_managed_config() {
 
     awk -v managed_data_file="$managed_data_file" '
       function is_data_section(line) {
-        return line ~ "^[[:space:]]*(\\[data\\]|\\[\"data\"\\]|\\[\047data\047\\])[[:space:]]*($|#)"
+        return line ~ "^[[:space:]]*\\[[[:space:]]*(data|\"data\"|\047data\047)[[:space:]]*\\][[:space:]]*($|#)"
       }
 
       function is_section(line) {

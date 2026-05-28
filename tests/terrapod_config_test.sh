@@ -51,7 +51,7 @@ extract_data_section() {
 
   awk '
     function is_data_section(line) {
-      return line ~ "^[[:space:]]*(\\[data\\]|\\[\"data\"\\]|\\[\047data\047\\])[[:space:]]*($|#)"
+      return line ~ "^[[:space:]]*\\[[[:space:]]*(data|\"data\"|\047data\047)[[:space:]]*\\][[:space:]]*($|#)"
     }
 
     function is_section(line) {
@@ -369,6 +369,33 @@ assert_data_key_once_with_value "$quoted_table_config" "enableAiCliTools" "true"
 assert_data_key_once_with_value "$quoted_table_config" "enableDevelopmentWorkspace" "true" "quoted data table update writes Development Workspace in data"
 assert_data_key_once_with_value "$quoted_table_config" "enableMacosDesktopApps" "false" "quoted data table update writes macOS desktop-app boundary in data"
 assert_not_contains "$quoted_table_config" "terrapodPreset" "quoted data table update removes stale dynamic Preset key"
+
+spaced_table_home="$tmp_dir/spaced-table-home"
+spaced_table_xdg="$tmp_dir/spaced-table-xdg"
+spaced_table_config="$spaced_table_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$spaced_table_home" "$(dirname "$spaced_table_config")"
+
+cat >"$spaced_table_config" <<'TOML'
+[ data ]
+keepSpacedTable = "preserve"
+enableEditorStack = false
+terrapodPreset = "minimal"
+
+[sourceState]
+branch = "main"
+TOML
+
+run_terrapod_configure development "y" "$spaced_table_home" "$spaced_table_xdg"
+
+assert_contains "$spaced_table_config" "[ data ]" "spaced data table header is preserved"
+assert_not_contains "$spaced_table_config" "[data]" "spaced data table update does not append a duplicate bare data table"
+assert_contains "$spaced_table_config" "keepSpacedTable = \"preserve\"" "spaced data table update preserves unrelated data values"
+assert_contains "$spaced_table_config" "branch = \"main\"" "spaced data table update preserves later sections"
+assert_data_key_once_with_value "$spaced_table_config" "enableEditorStack" "true" "spaced data table update writes Editor Stack in data"
+assert_data_key_once_with_value "$spaced_table_config" "enableAiCliTools" "true" "spaced data table update writes AI Tool Stack in data"
+assert_data_key_once_with_value "$spaced_table_config" "enableDevelopmentWorkspace" "true" "spaced data table update writes Development Workspace in data"
+assert_data_key_once_with_value "$spaced_table_config" "enableMacosDesktopApps" "false" "spaced data table update writes macOS desktop-app boundary in data"
+assert_not_contains "$spaced_table_config" "terrapodPreset" "spaced data table update removes stale dynamic Preset key"
 
 dotted_home="$tmp_dir/dotted-home"
 dotted_xdg="$tmp_dir/dotted-xdg"
