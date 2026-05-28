@@ -15,10 +15,20 @@ Run the Terrapod first-run installer on a supported machine.
 sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/install.sh)"
 ```
 
-The installer installs `chezmoi` into `~/.local/bin` when needed, asks for a
-Preset, writes Terrapod-managed machine-local config values, initializes
-`https://github.com/juty9026/terrapod.git`, and runs the initial
-declared-state apply.
+The installer installs `chezmoi` into `~/.local/bin` when needed, initializes
+`https://github.com/juty9026/terrapod.git`, launches Terrapod Setup from the
+checked-out source repository, and runs the initial declared-state apply only
+after setup succeeds.
+
+Terrapod Setup is the first-run review step. It asks you to choose a Preset,
+shows the concrete Terrapod-managed machine-local settings that Preset would
+write, lets you customize those settings, and asks for confirmation before it
+writes them. If setup is cancelled or fails, the installer stops before the
+initial apply and prints a resume command for the checked-out source
+repository.
+
+Terrapod Setup is an interactive first-run prompt. Routine Terrapod command
+output remains operational and scan-friendly after bootstrap.
 
 You do not need to install `chezmoi` manually before running this installer.
 
@@ -39,7 +49,9 @@ terrapod update
 
 ## Choose a Preset
 
-A Preset is the shape Terrapod unfolds on a machine during first-run setup.
+A Preset is a starting point for Terrapod Setup. It proposes concrete
+machine-local settings for a machine, and setup lets you review and customize
+those settings before the initial apply.
 
 | Preset | Best for | Shape |
 | --- | --- | --- |
@@ -47,8 +59,9 @@ A Preset is the shape Terrapod unfolds on a machine during first-run setup.
 | `development` | Machines used for active coding | Optional Editor Stack, Optional AI Tool Stack, and Optional Development Workspace |
 | `workstation` | Personal macOS workstations | Development setup plus every macOS App Group |
 
-Presets write concrete machine-local settings. They are not a permanent mode,
-so future Preset changes do not silently reshape an already configured machine.
+Setup writes the concrete machine-local settings after you confirm them. A
+Preset is not a permanent mode, so future Preset changes do not silently reshape
+an already configured machine.
 
 The `workstation` Preset is available only for the macOS Terminal Profile.
 
