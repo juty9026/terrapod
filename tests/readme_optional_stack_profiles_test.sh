@@ -53,7 +53,7 @@ assert_ubuntu_setup_contains() {
 
   if ! awk '
     /^### Ubuntu 24.04 VPS$/ { in_ubuntu = 1; next }
-    /^## Updates$/ { in_ubuntu = 0 }
+    /^### Intentional Upgrades$/ { in_ubuntu = 0 }
     in_ubuntu { print }
   ' "$readme" | grep -F "$needle" >/dev/null; then
     fail "$message"
@@ -68,7 +68,7 @@ assert_raycast_restore_contains() {
 
   if ! awk '
     /^### Raycast$/ { in_raycast = 1; next }
-    /^## Local overrides$/ { in_raycast = 0 }
+    /^## Local Overrides$/ { in_raycast = 0 }
     in_raycast { print }
   ' "$readme" | grep -F "$needle" >/dev/null; then
     fail "$message"
@@ -124,6 +124,22 @@ assert_key_row_contains '`enableMacosAppGroupMonitoring`' 'iStat Menus' \
 
 assert_contains 'Optional stack profiles and macOS App Group settings are disabled by default.' \
   "README states optional stack profiles and App Groups are disabled by default"
+assert_contains 'Terrapod is a small landing pod for your machines' \
+  "README opens with the Terrapod product promise"
+assert_contains 'Under the hood, Terrapod uses chezmoi as the apply engine' \
+  "README keeps chezmoi visible as underlying machinery"
+assert_contains '## Quick Start' \
+  "README leads with a Quick Start section"
+assert_contains '## What Terrapod Carries' \
+  "README summarizes Terrapod's carried domain concepts"
+assert_contains '## Choose a Preset' \
+  "README uses the canonical Preset section title"
+assert_contains '## What Terrapod Leaves Alone' \
+  "README documents product boundaries near the top"
+assert_contains '## Daily Commands' \
+  "README uses a product-friendly daily command section"
+assert_contains '## Platform Details' \
+  "README moves platform inventory into platform details"
 assert_ubuntu_setup_contains 'GitHub CLI (`gh`)' \
   "README documents gh as part of the Ubuntu Core Shell Stack"
 assert_contains 'When `enableDevelopmentWorkspace` is `true`' \
@@ -136,9 +152,9 @@ assert_contains 'separate from `enableDevelopmentWorkspace`' \
   "README documents macOS Desktop App Stack separation from enableDevelopmentWorkspace"
 assert_contains 'casks can affect shared applications' \
   "README documents why macOS Desktop App Stack remains separate"
-assert_contains '`terrapod update` refreshes this dotfiles source and delegates to `chezmoi update --exclude scripts`.' \
-  "README documents Terrapod update as dotfiles-source maintenance"
-assert_contains 'Terrapod does not run broad Bootstrap Package Manager or Modern CLI Provider upgrades.' \
+assert_contains '`terrapod update` refreshes the Terrapod Source Repository through `chezmoi update --exclude scripts`.' \
+  "README documents Terrapod update as source maintenance"
+assert_contains 'Terrapod does not run broad Homebrew, APT, or mise upgrades.' \
   "README states Terrapod does not run broad package or tool upgrades"
 assert_contains 'Homebrew and APT are Bootstrap Package Managers here: they prepare a machine for the declared shell state.' \
   "README preserves Bootstrap Package Manager boundary"

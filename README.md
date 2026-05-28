@@ -1,17 +1,91 @@
 # Terrapod
 
-Personal dotfiles managed with Terrapod, a chezmoi-backed dotfiles management tool.
+Terrapod is a small landing pod for your machines: it brings your familiar
+shell, editor, runtime, and desktop habits to a fresh Mac or Ubuntu 24.04 VPS.
 
-## Setup
+Under the hood, Terrapod uses chezmoi as the apply engine and keeps package-manager upgrades outside its scope.
 
-The Terrapod first-run installer is the primary entry point for a new machine.
-It installs `chezmoi` into `~/.local/bin`, asks for a Preset, writes
-Terrapod-managed config values, initializes
-`https://github.com/juty9026/terrapod.git`, and runs the initial apply.
+## Quick Start
+
+Run the Terrapod first-run installer on a supported machine.
+
+```sh
+sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/install.sh)"
+```
+
+The installer installs `chezmoi` into `~/.local/bin` when needed, asks for a
+Preset, writes Terrapod-managed machine-local config values, initializes
+`https://github.com/juty9026/terrapod.git`, and runs the initial
+declared-state apply.
 
 You do not need to install `chezmoi` manually before running this installer.
-The installer installs its own user-local `chezmoi` binary when needed, then
-uses Terrapod to configure the machine before the first apply.
+
+After bootstrap, use Terrapod for normal checks and source updates.
+
+```sh
+terrapod status
+terrapod doctor
+terrapod update
+```
+
+## What Terrapod Carries
+
+- Machine profiles for a macOS terminal workstation and an Ubuntu 24.04 VPS.
+- Presets that unfold into concrete machine-local settings.
+- Optional stacks for rich editor configuration, AI CLI tools, and development workspace surfaces.
+- macOS App Groups for selected desktop tools.
+
+## Choose a Preset
+
+A Preset is the shape Terrapod unfolds on a machine during first-run setup.
+
+| Preset | Best for | Shape |
+| --- | --- | --- |
+| `minimal` | Small VPSs, clean shells, and recovery installs | Core shell and runtime baseline only |
+| `development` | Machines used for active coding | Optional Editor Stack, Optional AI Tool Stack, and Optional Development Workspace |
+| `workstation` | Personal macOS workstations | Development setup plus every macOS App Group |
+
+Presets write concrete machine-local settings. They are not a permanent mode,
+so future Preset changes do not silently reshape an already configured machine.
+
+The `workstation` Preset is available only for the macOS Terminal Profile.
+
+## What Terrapod Leaves Alone
+
+Terrapod applies this repository's declared dotfiles state. It does not own the whole operating system.
+
+- Broad Homebrew or APT upgrades
+- mise-managed tool and runtime upgrades
+- Machine-local secrets
+- Untracked personal overrides
+
+Terrapod does not run broad Homebrew, APT, or mise upgrades.
+
+## Daily Commands
+
+Use `terrapod` as the primary management command after bootstrap.
+`tpod` is the short alias for the same command.
+
+```sh
+terrapod status
+terrapod doctor
+terrapod diff
+terrapod apply
+terrapod update
+tpod status
+```
+
+`terrapod update` refreshes the Terrapod Source Repository through `chezmoi update --exclude scripts`.
+It does not run Homebrew, APT, or mise upgrades.
+
+Direct chezmoi use remains an advanced escape hatch.
+
+```sh
+terrapod chezmoi -- cd
+terrapod chezmoi -- status
+```
+
+## Platform Details
 
 ### macOS
 
@@ -21,8 +95,7 @@ Run the installer on macOS.
 sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/install.sh)"
 ```
 
-On macOS, the initial apply also runs setup scripts under `.chezmoiscripts` for
-the initial terminal environment:
+On macOS, the initial apply also runs setup scripts under `.chezmoiscripts` for the initial terminal environment:
 
 - Homebrew bootstrap and the macOS `Brewfile` bundle
 - mise
@@ -74,8 +147,7 @@ Only configure GitHub authentication on a VPS if write access is needed later.
 If the first mise install hits GitHub API rate limits while resolving aqua
 tools, export a temporary `GITHUB_TOKEN` and rerun `chezmoi apply`.
 
-If the login shell could not be changed automatically, switch it after the
-first apply and reconnect.
+If the login shell could not be changed automatically, switch it after the first apply and reconnect.
 
 ```sh
 chsh -s "$(command -v zsh)"
@@ -86,33 +158,8 @@ path, install `chezmoi` manually and initialize
 `https://github.com/juty9026/terrapod.git` directly, then review and apply the
 result.
 
-## Management
+### Intentional Upgrades
 
-Use `terrapod` as the primary management command after bootstrap.
-`tpod` is the short alias for the same command.
-
-```sh
-terrapod status
-terrapod doctor
-terrapod diff
-terrapod apply
-terrapod update
-tpod status
-```
-
-`terrapod update` refreshes this dotfiles source and delegates to `chezmoi update --exclude scripts`.
-It does not update OS packages or mise-managed tools.
-
-Direct chezmoi use remains an advanced escape hatch.
-
-```sh
-terrapod chezmoi -- cd
-terrapod chezmoi -- status
-```
-
-## Updates
-
-Terrapod does not run broad Bootstrap Package Manager or Modern CLI Provider upgrades.
 Homebrew and APT are Bootstrap Package Managers here: they prepare a machine for the declared shell state.
 mise is the Modern CLI Provider for shared command-line tools and development runtimes.
 
@@ -143,7 +190,7 @@ mise outdated --bump
 mise upgrade --bump
 ```
 
-## Manual restore
+## Manual Restore
 
 ### Raycast
 
@@ -156,13 +203,12 @@ repo.
 3. Download the latest `.rayconfig` file.
 4. Run `Import Settings & Data` in Raycast.
 5. Enter the Raycast export passphrase from the same 1Password item.
-6. Select the categories to import, usually Store extensions, settings,
-   aliases, hotkeys, quicklinks, and snippets.
+6. Select the categories to import, usually Store extensions, settings, aliases, hotkeys, quicklinks, and snippets.
 
 When Raycast changes need to be shared across workstations, export a fresh
 `.rayconfig` from the primary workstation and update the 1Password item.
 
-## Local overrides
+## Local Overrides
 
 Machine-local options are configured outside this repo with
 `chezmoi edit-config`. Keep only the option names, defaults, and examples here;
@@ -181,9 +227,11 @@ Optional stack profiles and macOS App Group settings are disabled by default.
 | `enableMacosAppGroupMonitoring` | `false` | Installs the monitoring macOS App Group: iStat Menus. |
 | `gitAllowedSigners` | `[]` | Adds workstation-specific SSH signing identities to `~/.ssh/allowed_signers`. |
 
-When `enableDevelopmentWorkspace` is `true`, it enables both the Optional Editor Stack and Optional AI Tool Stack even if `enableEditorStack` or `enableAiCliTools` are false or omitted.
+When `enableDevelopmentWorkspace` is `true`, it enables both the Optional Editor Stack and Optional AI Tool Stack
+even if `enableEditorStack` or `enableAiCliTools` are false or omitted.
 
-macOS Desktop App Stack installation remains separate from `enableDevelopmentWorkspace` because desktop casks can affect shared applications outside one user's home directory.
+macOS Desktop App Stack installation remains separate from `enableDevelopmentWorkspace`
+because desktop casks can affect shared applications outside one user's home directory.
 
 Opting out of an optional stack excludes its files from chezmoi management; it does not remove files already present on a machine.
 
@@ -233,7 +281,7 @@ Then apply the dotfiles.
 terrapod apply
 ```
 
-## Conventions
+## Repository Conventions
 
 - `dot_`: dotfiles in the home directory
 - `private_`: files that need private permissions
