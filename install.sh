@@ -137,7 +137,7 @@ vps_sudo_cmd() {
   elif command -v sudo >/dev/null 2>&1; then
     printf '%s\n' "sudo"
   else
-    fatal "git and gum are required before Terrapod Setup. Install git and gum manually, or install sudo so Terrapod can prepare them with apt-get."
+    fatal "Ubuntu bootstrap prerequisites are required before Terrapod Setup. Install sudo so Terrapod can prepare git and gum with apt-get, or install git and gum manually before rerunning the installer."
   fi
 }
 
@@ -148,9 +148,20 @@ ensure_charm_apt_repository() {
     fatal "failed to create the APT keyring directory for the Charm repository. Check sudo permissions and rerun the Terrapod installer before Terrapod Setup."
   fi
 
-  if ! curl -fsSL https://repo.charm.sh/apt/gpg.key | $sudo_cmd gpg --dearmor --yes -o /etc/apt/keyrings/charm.gpg; then
-    fatal "failed to install the Charm APT signing key for gum. Check network access to https://repo.charm.sh/apt/gpg.key and rerun the Terrapod installer before Terrapod Setup."
+  if ! charm_key_file="$(mktemp "${TMPDIR:-/tmp}/terrapod-charm-key.XXXXXX")"; then
+    fatal "failed to create a temporary file for the Charm APT signing key. Check temporary directory permissions and rerun the Terrapod installer before Terrapod Setup."
   fi
+
+  if ! curl -fsSL https://repo.charm.sh/apt/gpg.key -o "$charm_key_file"; then
+    rm -f "$charm_key_file"
+    fatal "failed to fetch the Charm APT signing key for gum. Check network access to https://repo.charm.sh/apt/gpg.key and rerun the Terrapod installer before Terrapod Setup."
+  fi
+
+  if ! $sudo_cmd gpg --dearmor --yes -o /etc/apt/keyrings/charm.gpg "$charm_key_file"; then
+    rm -f "$charm_key_file"
+    fatal "failed to install the Charm APT signing key for gum. Check APT keyring permissions and rerun the Terrapod installer before Terrapod Setup."
+  fi
+  rm -f "$charm_key_file"
 
   if ! printf '%s\n' "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | $sudo_cmd tee /etc/apt/sources.list.d/charm.list >/dev/null; then
     fatal "failed to write the Charm APT repository for gum. Check sudo permissions and rerun the Terrapod installer before Terrapod Setup."
