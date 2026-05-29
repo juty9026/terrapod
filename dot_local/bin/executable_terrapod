@@ -255,7 +255,7 @@ prompt_for_setup_preset() {
   fi
 
   if [ "$status" -eq 130 ]; then
-    fatal "no Terrapod Preset selected"
+    fatal "setup cancelled"
   fi
 
   if [ "$status" -ne 0 ]; then

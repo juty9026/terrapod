@@ -592,6 +592,31 @@ pass "VPS rejected setup does not write config"
 
 assert_no_terrapod_artifacts_under "$vps_setup_xdg" "VPS rejected setup leaves no Terrapod artifacts"
 
+preset_cancel_home="$tmp_dir/preset-cancel-home"
+preset_cancel_xdg="$tmp_dir/preset-cancel-xdg"
+preset_cancel_output="$tmp_dir/preset-cancel.out"
+preset_cancel_responses="$tmp_dir/preset-cancel.responses"
+preset_cancel_gum_log="$tmp_dir/preset-cancel-gum.log"
+preset_cancel_config="$preset_cancel_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$preset_cancel_home"
+write_gum_responses "$preset_cancel_responses" __CANCEL__
+
+if run_terrapod_setup_command macos-terminal "$preset_cancel_responses" "$preset_cancel_home" "$preset_cancel_xdg" "$preset_cancel_output" "$preset_cancel_gum_log"; then
+  fail "Preset selection cancellation exits non-zero"
+fi
+pass "Preset selection cancellation exits non-zero"
+
+preset_cancel_output_text="$(cat "$preset_cancel_output")"
+assert_contains "$preset_cancel_output_text" "setup cancelled" "Preset selection cancellation preserves setup cancellation guidance"
+assert_not_contains "$preset_cancel_output_text" "no Terrapod Preset selected" "Preset selection cancellation is not reported as missing selection"
+
+if [ -e "$preset_cancel_config" ]; then
+  fail "Preset selection cancellation does not write config"
+fi
+pass "Preset selection cancellation does not write config"
+
+assert_no_terrapod_artifacts_under "$preset_cancel_xdg" "Preset selection cancellation leaves no Terrapod artifacts"
+
 gum_error_home="$tmp_dir/gum-error-home"
 gum_error_xdg="$tmp_dir/gum-error-xdg"
 gum_error_output="$tmp_dir/gum-error.out"
