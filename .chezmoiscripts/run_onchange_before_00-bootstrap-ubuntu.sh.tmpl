@@ -46,9 +46,12 @@ $sudo_cmd apt-get install -y \
 $sudo_cmd install -dm 755 /etc/apt/keyrings
 curl -fSs https://mise.en.dev/gpg-key.pub | $sudo_cmd tee /etc/apt/keyrings/mise-archive-keyring.asc >/dev/null
 printf '%s\n' "deb [signed-by=/etc/apt/keyrings/mise-archive-keyring.asc] https://mise.en.dev/deb stable main" | $sudo_cmd tee /etc/apt/sources.list.d/mise.list >/dev/null
+curl -fsSL https://repo.charm.sh/apt/gpg.key | $sudo_cmd gpg --dearmor --yes -o /etc/apt/keyrings/charm.gpg
+printf '%s\n' "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | $sudo_cmd tee /etc/apt/sources.list.d/charm.list >/dev/null
 
 $sudo_cmd apt-get update -y
 $sudo_cmd apt-get install -y mise
+$sudo_cmd apt-get install -y gum
 
 target_user="$(id -un)"
 zsh_path="/usr/bin/zsh"
