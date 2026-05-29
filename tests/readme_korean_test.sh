@@ -107,6 +107,18 @@ assert_contains "$korean_readme" '🌐 언어: [English](README.md) | **한국�
   "README.ko.md has the agreed language switcher"
 assert_not_contains "$korean_readme" '번역본' \
   "README.ko.md does not label itself as a translation"
+assert_contains "$korean_readme" '`terrapod configure <Preset>`는 script-friendly Preset configuration' \
+  "README.ko.md documents script-friendly Preset configuration"
+assert_contains "$korean_readme" '지원되는 Preset 정확히 하나의 concrete settings를 쓰고,' \
+  "README.ko.md documents configure writes concrete settings for one Preset"
+assert_contains "$korean_readme" '`gum`이 필요 없으며, interactive customization은 제공하지 않습니다.' \
+  "README.ko.md documents configure as no-gum and non-interactive"
+assert_contains "$korean_readme" '`terrapod configure <Preset>`는 Terrapod Setup의 plain fallback이 아닙니다.' \
+  "README.ko.md states configure is not a Setup fallback"
+assert_contains "$korean_readme" 'Terrapod Setup이 `gum` 또는 interactive terminal 부재로 실행되지 않으면' \
+  "README.ko.md documents missing-gum Setup recovery start"
+assert_contains "$korean_readme" '`gum` 또는 terminal environment를 고친 뒤 `terrapod setup`을 다시 실행합니다.' \
+  "README.ko.md documents missing-gum Setup recovery"
 
 extract_headings "$readme" >"$tmp_dir/readme.headings"
 extract_headings "$korean_readme" >"$tmp_dir/readme-ko.headings"

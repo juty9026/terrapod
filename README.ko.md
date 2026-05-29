@@ -64,6 +64,13 @@ machine이 조용히 다시 바뀌지는 않습니다.
 
 `workstation` Preset은 macOS Terminal Profile에서만 사용할 수 있습니다.
 
+`terrapod configure <Preset>`는 script-friendly Preset configuration
+command입니다. 지원되는 Preset 정확히 하나의 concrete settings를 쓰고,
+`gum`이 필요 없으며, interactive customization은 제공하지 않습니다.
+`terrapod configure <Preset>`는 Terrapod Setup의 plain fallback이 아닙니다.
+Terrapod Setup이 `gum` 또는 interactive terminal 부재로 실행되지 않으면
+`gum` 또는 terminal environment를 고친 뒤 `terrapod setup`을 다시 실행합니다.
+
 ## What Terrapod Leaves Alone
 
 Terrapod은 이 저장소의 declared dotfiles state를 적용합니다. 전체 운영체제를 소유하지는 않습니다.
