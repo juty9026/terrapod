@@ -228,7 +228,10 @@ require_gum_setup() {
 
   if ! gum choose --help 2>/dev/null | grep -F -- "--label-delimiter" >/dev/null; then
     printf '%s\n' "terrapod: gum is too old for Terrapod Setup" >&2
-    printf '%s\n' "Upgrade gum, then rerun Terrapod Setup. If you are bootstrapping Terrapod, rerun the installer before apply/setup." >&2
+    printf '%s\n' "Upgrade gum, then rerun Terrapod Setup." >&2
+    printf '%s\n' "Homebrew: HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade gum || HOMEBREW_NO_AUTO_UPDATE=1 brew install gum" >&2
+    printf '%s\n' "APT: sudo apt-get update && sudo apt-get install --only-upgrade gum" >&2
+    printf '%s\n' "If gum was installed manually, replace the older gum earlier on PATH." >&2
     exit 1
   fi
 
