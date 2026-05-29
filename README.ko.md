@@ -29,6 +29,11 @@ Terrapod Setup은 interactive first-run prompt에 한정됩니다. bootstrap 이
 routine Terrapod command output은 operational하고 scan-friendly한 형태를
 유지합니다.
 
+Terrapod Setup은 `gum`(Bootstrap UI Dependency)을 사용하며, gum이 지원하는
+interactive terminal을 요구합니다. `gum` 누락, gum bootstrap 실패, non-TTY,
+`dumb` terminal, 지원되지 않는 interactive terminal 환경에서는 setup이 apply 전에
+중단되며, 안내 메시지를 출력합니다. Plain text fallback은 없습니다.
+
 이 installer를 실행하기 전에 `chezmoi`를 직접 설치할 필요는 없습니다.
 
 bootstrap 이후에는 일반 점검과 source update에 Terrapod을 사용합니다.
@@ -68,6 +73,9 @@ machine이 조용히 다시 바뀌지는 않습니다.
 command입니다. 지원되는 Preset 정확히 하나의 concrete settings를 쓰고,
 `gum`이 필요 없으며, interactive customization은 제공하지 않습니다.
 `terrapod configure <Preset>`는 Terrapod Setup의 plain fallback이 아닙니다.
+`terrapod configure <Preset>`는 setup UI 없이 설정을 쓰는
+script-friendly 경로입니다. 이 경로는 Terrapod Setup과 의도적으로 분리되어
+있습니다.
 Terrapod Setup이 `gum` 또는 interactive terminal 부재로 실행되지 않으면
 `gum` 또는 terminal environment를 고친 뒤 `terrapod setup`을 다시 실행합니다.
 
@@ -114,6 +122,10 @@ macOS에서 installer를 실행합니다.
 sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/install.sh)"
 ```
 
+Terrapod Setup 실행 전, first-run installer는 `gum` 누락 시 Homebrew로 `gum`을
+설치하여 Bootstrap UI Dependency를 준비합니다. 이 Bootstrap UI bootstrap은
+`gum` 설치에만 해당되며 broad Homebrew upgrade는 실행하지 않습니다.
+
 macOS에서는 initial apply가 초기 terminal environment를 위해 `.chezmoiscripts` 아래 setup script도 실행합니다.
 
 - Homebrew bootstrap과 macOS `Brewfile` bundle
@@ -143,6 +155,10 @@ sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/ins
 ```
 
 installer는 bootstrap process 동안 `~/.local/bin`을 `PATH`에 추가합니다. first apply 이후에는 managed zsh session이 `~/.local/bin`을 `PATH`에 유지하므로, reconnect 후에도 `chezmoi` 같은 user-local binary를 사용할 수 있습니다.
+
+Terrapod Setup 실행 전, first-run installer는 `gum` 누락 시 Charm APT
+repository를 등록하고 APT로 `gum`을 설치해 Bootstrap UI Dependency를
+준비합니다. 이 Bootstrap UI bootstrap은 `gum` 설치에만 해당되며 broad APT upgrade는 실행하지 않습니다.
 
 Ubuntu에서는 initial apply가 VPS shell profile을 위한 setup script를 실행합니다.
 
