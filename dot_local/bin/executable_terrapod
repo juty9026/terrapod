@@ -205,16 +205,6 @@ available_preset_args() {
   printf '%s\n' "$preset_args"
 }
 
-available_presets_for_profile() {
-  profile="$1"
-
-  for preset in $(known_presets); do
-    if is_preset_available_for_profile "$preset" "$profile"; then
-      printf '%s\n' "$preset"
-    fi
-  done
-}
-
 profile_context_label() {
   case "$(current_profile)" in
     macos-terminal)
@@ -236,6 +226,15 @@ require_gum_setup() {
     exit 1
   fi
 
+  if ! gum choose --help 2>/dev/null | grep -F -- "--label-delimiter" >/dev/null; then
+    printf '%s\n' "terrapod: gum is too old for Terrapod Setup" >&2
+    printf '%s\n' "Upgrade gum, then rerun Terrapod Setup." >&2
+    printf '%s\n' "Homebrew: HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade gum || HOMEBREW_NO_AUTO_UPDATE=1 brew install gum" >&2
+    printf '%s\n' "APT: sudo apt-get update && sudo apt-get install --only-upgrade gum" >&2
+    printf '%s\n' "If gum was installed manually, replace the older gum earlier on PATH." >&2
+    exit 1
+  fi
+
   if [ ! -t 0 ] || [ ! -t 2 ] || [ -z "${TERM:-}" ] || [ "${TERM:-}" = "dumb" ] || [ -n "${CI:-}" ]; then
     printf '%s\n' "terrapod: Terrapod Setup requires an interactive terminal supported by gum" >&2
     printf '%s\n' "Run 'terrapod setup' from a real terminal with TERM set, stdin/stderr attached to a TTY, and CI unset." >&2
@@ -247,11 +246,70 @@ fatal_gum_setup_failure() {
   fatal "gum failed during Terrapod Setup; fix gum and rerun 'terrapod setup'"
 }
 
+setup_style() {
+  if ! gum style "$@"; then
+    fatal_gum_setup_failure
+  fi
+}
+
+setup_config_context() {
+  config_file="$1"
+
+  if [ -f "$config_file" ]; then
+    printf '%s\n' "$config_file (present)"
+  else
+    printf '%s\n' "$config_file (missing; chezmoi defaults apply)"
+  fi
+}
+
+show_setup_intro() {
+  config_file="$1"
+
+  setup_style --foreground=36 --bold "🌱 Terrapod Setup"
+  printf '%s\n' ""
+  printf '%-8s %s\n' "Profile" "$(profile_context_label)"
+  printf '%-8s %s\n' "Config" "$(setup_config_context "$config_file")"
+  printf '%s\n' ""
+}
+
+show_setup_section() {
+  title="$1"
+
+  setup_style --foreground=99 --bold "$title"
+}
+
+preset_choice_item() {
+  case "$1" in
+    minimal)
+      printf '%s\n' "minimal      Core shell/runtime baseline:minimal"
+      ;;
+    development)
+      printf '%s\n' "development  Coding machine with editor, AI CLI, workspace:development"
+      ;;
+    workstation)
+      printf '%s\n' "workstation  macOS workstation with development setup and app groups:workstation"
+      ;;
+    *)
+      fatal "unknown Preset: $1"
+      ;;
+  esac
+}
+
+available_preset_choice_items() {
+  profile="$1"
+
+  for preset in $(known_presets); do
+    if is_preset_available_for_profile "$preset" "$profile"; then
+      preset_choice_item "$preset"
+    fi
+  done
+}
+
 prompt_for_setup_preset() {
   profile="$1"
 
-  set -- $(available_presets_for_profile "$profile")
-  if preset="$(gum choose --header "Choose Terrapod Preset" "$@")"; then
+  show_setup_section "Choose a Preset" >&2
+  if preset="$(available_preset_choice_items "$profile" | gum choose --label-delimiter ":" --header "Preset" --height=6)"; then
     status=0
   else
     status="$?"
@@ -273,38 +331,10 @@ prompt_for_setup_preset() {
   printf '%s\n' "$preset"
 }
 
-show_setup_preset_guide() {
-  profile="$1"
-
-  printf '%s\n' "Preset guide:"
-  printf '%s\n' "  minimal: Core shell and runtime baseline only."
-  printf '%s\n' "  development: Adds rich editor config, AI CLI tools, and development workspace surfaces."
-  if is_preset_available_for_profile workstation "$profile"; then
-    printf '%s\n' "  workstation: macOS only. Development setup plus every macOS App Group."
-  fi
-}
-
-show_setup_option_guide() {
-  profile="$1"
-
-  printf '%s\n' "Option guide:"
-  printf '%s\n' "  Optional Development Workspace: Dev Zellij layouts; also includes Editor and AI tool stacks."
-  printf '%s\n' "  Optional Editor Stack: Rich Neovim configuration."
-  printf '%s\n' "  Optional AI Tool Stack: Gemini CLI, Claude Code, and Codex."
-
-  if [ "$profile" = "macos-terminal" ]; then
-    printf '%s\n' "  terminal-apps macOS App Group: Ghostty and cmux."
-    printf '%s\n' "  automation macOS App Group: Hammerspoon and Karabiner-Elements."
-    printf '%s\n' "  launcher macOS App Group: Raycast and 1Password CLI."
-    printf '%s\n' "  monitoring macOS App Group: iStat Menus."
-  else
-    printf '%s\n' "  macOS App Groups: not applicable for $(profile_context_label)."
-  fi
-}
-
 show_setup_settings_summary() {
   settings_data="$1"
 
+  show_setup_section "Review Settings"
   printf '%s\n' "Settings to write:"
   printf '%s\n' "$settings_data" | sed 's/^/  /'
 }
@@ -330,10 +360,46 @@ confirm_setup_write() {
   fatal_gum_setup_failure
 }
 
+setup_option_description() {
+  case "$1" in
+    "Optional Development Workspace")
+      printf '%s\n' "Optional Development Workspace: Dev Zellij layouts; also includes Editor and AI tool stacks."
+      ;;
+    "Optional Editor Stack")
+      printf '%s\n' "Optional Editor Stack: Rich Neovim configuration."
+      ;;
+    "Optional AI Tool Stack")
+      printf '%s\n' "Optional AI Tool Stack: Gemini CLI, Claude Code, and Codex."
+      ;;
+    "terminal-apps macOS App Group")
+      printf '%s\n' "terminal-apps macOS App Group: Ghostty and cmux."
+      ;;
+    "automation macOS App Group")
+      printf '%s\n' "automation macOS App Group: Hammerspoon and Karabiner-Elements."
+      ;;
+    "launcher macOS App Group")
+      printf '%s\n' "launcher macOS App Group: Raycast and 1Password CLI."
+      ;;
+    "monitoring macOS App Group")
+      printf '%s\n' "monitoring macOS App Group: iStat Menus."
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+show_setup_option_description() {
+  label="$1"
+
+  setup_option_description "$label" || return 0
+}
+
 prompt_setup_bool() {
   label="$1"
   current="$2"
 
+  show_setup_option_description "$label" >&2
   if gum confirm "$label" --default="$current"; then
     printf '%s\n' "true"
     return
@@ -360,14 +426,15 @@ prompt_for_setup_settings() {
   load_setup_defaults "$preset"
 
   printf '%s\n' "Customize Terrapod settings." >&2
-  show_setup_option_guide "$profile" >&2
 
   setup_enableDevelopmentWorkspace="$(prompt_setup_bool "Optional Development Workspace" "$setup_enableDevelopmentWorkspace")"
 
   if is_enabled "$setup_enableDevelopmentWorkspace"; then
     setup_enableEditorStack=true
     setup_enableAiCliTools=true
+    show_setup_option_description "Optional Editor Stack" >&2
     printf '%s\n' "Optional Editor Stack: included by Optional Development Workspace" >&2
+    show_setup_option_description "Optional AI Tool Stack" >&2
     printf '%s\n' "Optional AI Tool Stack: included by Optional Development Workspace" >&2
   else
     setup_enableEditorStack="$(prompt_setup_bool "Optional Editor Stack" "$setup_enableEditorStack")"
@@ -1622,11 +1689,8 @@ run_setup() {
 
   require_gum_setup
 
-  printf '%s\n' "Terrapod setup"
-  printf '%s\n' "Profile: $(profile_context_label)"
-  show_config_context "$config_file"
+  show_setup_intro "$config_file"
 
-  show_setup_preset_guide "$profile" >&2
   preset="$(prompt_for_setup_preset "$profile")"
   setup_settings_data="$(prompt_for_setup_settings "$preset" "$profile")"
   show_setup_settings_summary "$setup_settings_data"

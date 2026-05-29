@@ -108,8 +108,8 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - The first **Bootstrap UI Dependency** is gum, installed through the platform **Bootstrap Package Manager** before **Terrapod Setup**.
 - Failure to install a **Bootstrap UI Dependency** fails first-run installation before **Terrapod Setup** rather than falling back to a separate plain text interaction model.
 - **Terrapod Setup** uses gum for Preset selection, setting customization, and final confirmation instead of maintaining parallel rich and plain interaction models.
-- **Terrapod Setup** should explain Preset choices with a concise guide before the gum choice prompt instead of embedding long descriptions inside each selectable Preset label.
-- **Terrapod Setup** should explain optional stack and **macOS App Group** choices with a concise guide before sequential gum confirmation prompts instead of making each prompt label verbose.
+- **Terrapod Setup** should place concise Preset explanations beside or near each selectable Preset instead of printing a separate Preset guide before the gum choice prompt.
+- **Terrapod Setup** should print concise optional stack and **macOS App Group** explanations immediately before the related gum confirmation prompt instead of making the confirm prompt verbose or printing a separate option guide before sequential confirmations.
 - gum-backed setting customization uses sequential questions rather than a stateful toggle menu.
 - gum belongs to the declared machine state as well as the first-run bootstrap path, so **Terrapod** restores it through the macOS `Brewfile` and Ubuntu bootstrap scripts after initial apply.
 - Cancelling gum-backed **Terrapod Setup** preserves the existing setup cancellation contract: no config write, non-zero exit, and `terrapod: setup cancelled` guidance.
@@ -203,7 +203,8 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - `terrapod apply` should stay focused on declared-state apply context, preflight, delegation, and post-apply validation; it should not expand into a rich installed-tool report in the current scope.
 - The first-run **Terrapod** installer uses a gum-backed terminal presentation for initial setup prompts such as **Preset** selection.
 - The gum-backed first-run installer presentation is a required interactive path; non-TTY, dumb terminal, scripted, and missing-gum environments fail with guidance until non-interactive setup options are designed.
-- Rich first-run installer presentation does not imply emoji or terminal color behavior for routine **Terrapod** command output.
+- Rich **Terrapod Setup** presentation may use setup-only emoji, color, spacing, and aligned prompt layout when it improves first-run review clarity.
+- Rich **Terrapod Setup** presentation does not imply emoji or terminal color behavior for routine **Terrapod** command output.
 - Error output avoids product metaphor and states the failed condition plus the next useful action.
 
 ## Example Dialogue
