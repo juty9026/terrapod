@@ -134,6 +134,18 @@ assert_contains '## What Terrapod Carries' \
   "README summarizes Terrapod's carried domain concepts"
 assert_contains '## Choose a Preset' \
   "README uses the canonical Preset section title"
+assert_contains '`terrapod configure <Preset>` is the script-friendly Preset configuration' \
+  "README documents script-friendly Preset configuration"
+assert_contains 'It writes concrete settings for exactly one supported Preset' \
+  "README documents configure writes concrete settings for one Preset"
+assert_contains 'require `gum`, and has no interactive customization.' \
+  "README documents configure as no-gum and non-interactive"
+assert_contains '<Preset>` is not a plain fallback for Terrapod Setup.' \
+  "README states configure is not a Setup fallback"
+assert_contains 'If Terrapod Setup cannot' \
+  "README documents missing-gum Setup recovery start"
+assert_contains 'terminal environment and rerun `terrapod setup`.' \
+  "README documents missing-gum Setup recovery"
 assert_contains '## What Terrapod Leaves Alone' \
   "README documents product boundaries near the top"
 assert_contains '## Daily Commands' \

@@ -486,7 +486,7 @@ assert_not_contains \
   "workstation" \
   "VPS Shell Profile help does not mention workstation anywhere"
 
-if TERRAPOD_PROFILE=vps-shell HOME="$tmp_dir/home" XDG_CONFIG_HOME="$tmp_dir/xdg" sh "$terrapod" configure workstation >"$tmp_dir/vps-workstation.out" 2>"$tmp_dir/vps-workstation.err"; then
+if PATH="/usr/bin:/bin" TERRAPOD_PROFILE=vps-shell TERRAPOD_CHEZMOI_CONFIG= HOME="$tmp_dir/home" XDG_CONFIG_HOME="$tmp_dir/xdg" sh "$terrapod" configure workstation >"$tmp_dir/vps-workstation.out" 2>"$tmp_dir/vps-workstation.err"; then
   fail "VPS Shell Profile rejects workstation Preset"
 fi
 pass "VPS Shell Profile rejects workstation Preset"
@@ -506,6 +506,11 @@ assert_contains \
   "$vps_workstation_error" \
   "workstation Preset is only available for the macOS Terminal Profile" \
   "VPS Shell Profile explains workstation Preset rejection"
+
+assert_not_contains \
+  "$vps_workstation_error" \
+  "gum is required" \
+  "VPS Shell Profile no-gum workstation rejection does not require gum"
 
 setup_home="$tmp_dir/setup-home"
 setup_xdg="$tmp_dir/setup-xdg"
@@ -648,7 +653,8 @@ missing_gum_xdg="$tmp_dir/missing-gum-xdg"
 missing_gum_output="$tmp_dir/missing-gum.out"
 mkdir -p "$missing_gum_home"
 
-if PATH="/usr/bin:/bin" TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG= HOME="$missing_gum_home" XDG_CONFIG_HOME="$missing_gum_xdg" sh "$terrapod" setup >"$missing_gum_output" 2>&1; then
+if printf '%s\n' "workstation" |
+  PATH="/usr/bin:/bin" TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG= HOME="$missing_gum_home" XDG_CONFIG_HOME="$missing_gum_xdg" sh "$terrapod" setup >"$missing_gum_output" 2>&1; then
   fail "setup fails when gum is missing"
 fi
 pass "setup fails when gum is missing"
@@ -656,6 +662,14 @@ pass "setup fails when gum is missing"
 missing_gum_output_text="$(cat "$missing_gum_output")"
 assert_contains "$missing_gum_output_text" "gum is required before Terrapod Setup can run" "missing gum setup explains gum requirement"
 assert_contains "$missing_gum_output_text" "Install gum, then rerun Terrapod Setup" "missing gum setup gives rerun guidance"
+assert_not_contains "$missing_gum_output_text" "Configured Terrapod Preset" "missing gum setup does not fall back to configure success"
+
+if [ -e "$missing_gum_xdg/chezmoi/chezmoi.toml" ]; then
+  fail "missing gum setup does not write config"
+fi
+pass "missing gum setup does not write config"
+
+assert_no_terrapod_artifacts_under "$missing_gum_xdg" "missing gum setup leaves no Terrapod artifacts"
 
 noninteractive_setup_home="$tmp_dir/noninteractive-setup-home"
 noninteractive_setup_xdg="$tmp_dir/noninteractive-setup-xdg"

@@ -364,6 +364,17 @@ run_terrapod_configure() {
   fi
 }
 
+run_terrapod_configure_without_gum() {
+  profile="$1"
+  preset="$2"
+  home_dir="$3"
+  xdg_config_home="$4"
+
+  PATH="/usr/bin:/bin" TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= \
+    HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" \
+    sh "$terrapod" configure "$preset" </dev/null
+}
+
 run_terrapod_setup() {
   profile="$1"
   input="$2"
@@ -452,6 +463,89 @@ assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupMonito
 assert_not_contains "$workstation_config" "enableMacosDesktopApps" "workstation Preset does not write the legacy all-in desktop app toggle"
 assert_not_contains "$workstation_config" "terrapodPreset" "workstation Preset stores concrete values instead of a dynamic Preset"
 assert_backup_count "$workstation_config" 0 "workstation config creation does not create a backup"
+
+nogum_minimal_home="$tmp_dir/nogum-minimal-home"
+nogum_minimal_xdg="$tmp_dir/nogum-minimal-xdg"
+nogum_minimal_config="$nogum_minimal_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$nogum_minimal_home"
+
+run_terrapod_configure_without_gum vps-shell minimal "$nogum_minimal_home" "$nogum_minimal_xdg"
+
+if [ ! -f "$nogum_minimal_config" ]; then
+  fail "no-gum minimal Preset creates a chezmoi config file"
+fi
+pass "no-gum minimal Preset creates a chezmoi config file"
+
+assert_data_key_once_with_value "$nogum_minimal_config" "enableEditorStack" "false" "no-gum minimal writes concrete Editor Stack setting"
+assert_data_key_once_with_value "$nogum_minimal_config" "enableDevelopmentWorkspace" "false" "no-gum minimal writes concrete Development Workspace setting"
+assert_not_contains "$nogum_minimal_config" "terrapodPreset" "no-gum minimal stores concrete values instead of a dynamic Preset"
+
+nogum_development_home="$tmp_dir/nogum-development-home"
+nogum_development_xdg="$tmp_dir/nogum-development-xdg"
+nogum_development_config="$nogum_development_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$nogum_development_home"
+
+run_terrapod_configure_without_gum vps-shell development "$nogum_development_home" "$nogum_development_xdg"
+
+if [ ! -f "$nogum_development_config" ]; then
+  fail "no-gum development Preset creates a chezmoi config file"
+fi
+pass "no-gum development Preset creates a chezmoi config file"
+
+assert_data_key_once_with_value "$nogum_development_config" "enableEditorStack" "true" "no-gum development writes concrete Editor Stack setting"
+assert_data_key_once_with_value "$nogum_development_config" "enableDevelopmentWorkspace" "true" "no-gum development writes concrete Development Workspace setting"
+assert_data_key_once_with_value "$nogum_development_config" "enableMacosAppGroupTerminalApps" "false" "no-gum development writes concrete macOS App Group setting"
+assert_not_contains "$nogum_development_config" "terrapodPreset" "no-gum development stores concrete values instead of a dynamic Preset"
+
+nogum_macos_minimal_home="$tmp_dir/nogum-macos-minimal-home"
+nogum_macos_minimal_xdg="$tmp_dir/nogum-macos-minimal-xdg"
+nogum_macos_minimal_config="$nogum_macos_minimal_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$nogum_macos_minimal_home"
+
+run_terrapod_configure_without_gum macos-terminal minimal "$nogum_macos_minimal_home" "$nogum_macos_minimal_xdg"
+
+if [ ! -f "$nogum_macos_minimal_config" ]; then
+  fail "no-gum macOS minimal Preset creates a chezmoi config file"
+fi
+pass "no-gum macOS minimal Preset creates a chezmoi config file"
+
+assert_data_key_once_with_value "$nogum_macos_minimal_config" "enableEditorStack" "false" "no-gum macOS minimal writes concrete Editor Stack setting"
+assert_data_key_once_with_value "$nogum_macos_minimal_config" "enableDevelopmentWorkspace" "false" "no-gum macOS minimal writes concrete Development Workspace setting"
+assert_not_contains "$nogum_macos_minimal_config" "terrapodPreset" "no-gum macOS minimal stores concrete values instead of a dynamic Preset"
+
+nogum_macos_development_home="$tmp_dir/nogum-macos-development-home"
+nogum_macos_development_xdg="$tmp_dir/nogum-macos-development-xdg"
+nogum_macos_development_config="$nogum_macos_development_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$nogum_macos_development_home"
+
+run_terrapod_configure_without_gum macos-terminal development "$nogum_macos_development_home" "$nogum_macos_development_xdg"
+
+if [ ! -f "$nogum_macos_development_config" ]; then
+  fail "no-gum macOS development Preset creates a chezmoi config file"
+fi
+pass "no-gum macOS development Preset creates a chezmoi config file"
+
+assert_data_key_once_with_value "$nogum_macos_development_config" "enableEditorStack" "true" "no-gum macOS development writes concrete Editor Stack setting"
+assert_data_key_once_with_value "$nogum_macos_development_config" "enableDevelopmentWorkspace" "true" "no-gum macOS development writes concrete Development Workspace setting"
+assert_data_key_once_with_value "$nogum_macos_development_config" "enableMacosAppGroupTerminalApps" "false" "no-gum macOS development writes concrete macOS App Group setting"
+assert_not_contains "$nogum_macos_development_config" "terrapodPreset" "no-gum macOS development stores concrete values instead of a dynamic Preset"
+
+nogum_workstation_home="$tmp_dir/nogum-workstation-home"
+nogum_workstation_xdg="$tmp_dir/nogum-workstation-xdg"
+nogum_workstation_config="$nogum_workstation_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$nogum_workstation_home"
+
+run_terrapod_configure_without_gum macos-terminal workstation "$nogum_workstation_home" "$nogum_workstation_xdg"
+
+if [ ! -f "$nogum_workstation_config" ]; then
+  fail "no-gum workstation Preset creates a chezmoi config file"
+fi
+pass "no-gum workstation Preset creates a chezmoi config file"
+
+assert_data_key_once_with_value "$nogum_workstation_config" "enableEditorStack" "true" "no-gum workstation writes concrete Editor Stack setting"
+assert_data_key_once_with_value "$nogum_workstation_config" "enableDevelopmentWorkspace" "true" "no-gum workstation writes concrete Development Workspace setting"
+assert_data_key_once_with_value "$nogum_workstation_config" "enableMacosAppGroupMonitoring" "true" "no-gum workstation writes concrete macOS App Group setting"
+assert_not_contains "$nogum_workstation_config" "terrapodPreset" "no-gum workstation stores concrete values instead of a dynamic Preset"
 
 setup_workstation_home="$tmp_dir/setup-workstation-home"
 setup_workstation_xdg="$tmp_dir/setup-workstation-xdg"
