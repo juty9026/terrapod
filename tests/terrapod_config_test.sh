@@ -18,6 +18,117 @@ pass() {
   printf '%s\n' "ok - $1"
 }
 
+write_gum_stub() {
+  path="$1"
+
+  cat >"$path" <<'SH'
+#!/bin/sh
+set -eu
+
+log_file="${TERRAPOD_GUM_LOG:?}"
+responses_file="${TERRAPOD_GUM_RESPONSES:?}"
+
+printf '%s' "gum args:" >>"$log_file"
+for arg do
+  printf '%s' " $arg" >>"$log_file"
+done
+printf '\n' >>"$log_file"
+
+if [ "${1:-}" = "--version" ]; then
+  printf '%s\n' "gum test stub"
+  exit 0
+fi
+
+next_response() {
+  response="$(sed -n '1p' "$responses_file")"
+  sed '1d' "$responses_file" >"$responses_file.tmp"
+  mv "$responses_file.tmp" "$responses_file"
+  printf '%s\n' "$response"
+}
+
+confirm_default_status() {
+  for arg do
+    case "$arg" in
+      --default=true)
+        return 0
+        ;;
+      --default=false)
+        return 1
+        ;;
+    esac
+  done
+
+  return 1
+}
+
+case "${1:-}" in
+  choose)
+    response="$(next_response)"
+    if [ -z "$response" ] || [ "$response" = "__CANCEL__" ]; then
+      exit 130
+    fi
+    if [ "$response" = "__ERROR__" ]; then
+      printf '%s\n' "simulated gum operational failure" >&2
+      exit 2
+    fi
+    printf '%s\n' "$response"
+    ;;
+  confirm)
+    response="$(next_response)"
+    case "$response" in
+      "")
+        shift
+        confirm_default_status "$@"
+        ;;
+      yes|y|true|enabled)
+        exit 0
+        ;;
+      no|n|false|disabled)
+        exit 1
+        ;;
+      __CANCEL__)
+        exit 130
+        ;;
+      __ERROR__)
+        printf '%s\n' "simulated gum operational failure" >&2
+        exit 2
+        ;;
+      *)
+        printf '%s\n' "unexpected gum confirm response: $response" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  *)
+    printf '%s\n' "unexpected gum command: ${1:-}" >&2
+    exit 2
+    ;;
+esac
+SH
+
+  chmod +x "$path"
+}
+
+shell_quote() {
+  printf "'"
+  printf '%s' "$1" | sed "s/'/'\\\\''/g"
+  printf "'"
+}
+
+run_setup_in_pty() {
+  profile="$1"
+  term="$2"
+  home_dir="$3"
+  xdg_config_home="$4"
+
+  if script --version >/dev/null 2>&1; then
+    command_text="env TERM=$(shell_quote "$term") TERRAPOD_PROFILE=$(shell_quote "$profile") TERRAPOD_CHEZMOI_CONFIG= HOME=$(shell_quote "$home_dir") XDG_CONFIG_HOME=$(shell_quote "$xdg_config_home") sh $(shell_quote "$terrapod") setup"
+    script -q -e -c "$command_text" /dev/null
+  else
+    script -q /dev/null env TERM="$term" TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" setup
+  fi
+}
+
 assert_contains() {
   file="$1"
   needle="$2"
@@ -258,22 +369,19 @@ run_terrapod_setup() {
   input="$2"
   home_dir="$3"
   xdg_config_home="$4"
+  responses_file="$(mktemp "$tmp_dir/setup-responses.XXXXXX")"
+  gum_log="$(mktemp "$tmp_dir/setup-gum-log.XXXXXX")"
 
-  printf '%s' "$input" |
-    TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" setup
-}
+  printf '%s' "$input" >"$responses_file"
 
-run_terrapod_setup_rich() {
-  profile="$1"
-  input="$2"
-  home_dir="$3"
-  xdg_config_home="$4"
-
-  printf '%s' "$input" |
-    TERRAPOD_SETUP_PRESENTATION=rich TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" setup
+  TERRAPOD_GUM_RESPONSES="$responses_file" TERRAPOD_GUM_LOG="$gum_log" \
+    PATH="$tmp_dir/bin:/usr/bin:/bin:$PATH" \
+    run_setup_in_pty "$profile" xterm "$home_dir" "$xdg_config_home"
 }
 
 terrapod="$repo_root/dot_local/bin/executable_terrapod"
+mkdir -p "$tmp_dir/bin"
+write_gum_stub "$tmp_dir/bin/gum"
 
 new_home="$tmp_dir/new-home"
 new_xdg="$tmp_dir/new-xdg"
@@ -403,8 +511,8 @@ y
 fi
 pass "macOS setup prompts for customization before final confirmation and customizes Optional Development Workspace and App Groups"
 
-assert_contains "$tmp_dir/setup-custom-workspace.err" "Optional Editor Stack: included by Optional Development Workspace" "workspace-enabled setup presents Optional Editor Stack as included"
-assert_contains "$tmp_dir/setup-custom-workspace.err" "Optional AI Tool Stack: included by Optional Development Workspace" "workspace-enabled setup presents Optional AI Tool Stack as included"
+assert_contains "$tmp_dir/setup-custom-workspace.out" "Optional Editor Stack: included by Optional Development Workspace" "workspace-enabled setup presents Optional Editor Stack as included"
+assert_contains "$tmp_dir/setup-custom-workspace.out" "Optional AI Tool Stack: included by Optional Development Workspace" "workspace-enabled setup presents Optional AI Tool Stack as included"
 assert_contains "$tmp_dir/setup-custom-workspace.out" "enableEditorStack = true" "workspace-enabled setup summary reflects included Optional Editor Stack"
 assert_contains "$tmp_dir/setup-custom-workspace.out" "enableAiCliTools = true" "workspace-enabled setup summary reflects included Optional AI Tool Stack"
 assert_contains "$tmp_dir/setup-custom-workspace.out" "enableDevelopmentWorkspace = true" "workspace-enabled setup summary reflects enabled Optional Development Workspace"
@@ -426,110 +534,103 @@ assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosApp
 assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosAppGroupLauncher" "false" "workspace-enabled setup writes customized launcher App Group"
 assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosAppGroupMonitoring" "true" "workspace-enabled setup writes customized monitoring App Group"
 
-rich_equivalent_home="$tmp_dir/rich-equivalent-home"
-rich_equivalent_xdg="$tmp_dir/rich-equivalent-xdg"
-rich_equivalent_config="$rich_equivalent_xdg/chezmoi/chezmoi.toml"
-mkdir -p "$rich_equivalent_home"
+gum_equivalent_home="$tmp_dir/gum-equivalent-home"
+gum_equivalent_xdg="$tmp_dir/gum-equivalent-xdg"
+gum_equivalent_config="$gum_equivalent_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$gum_equivalent_home"
 
-if ! run_terrapod_setup_rich macos-terminal '1
-t
-j
+if ! run_terrapod_setup macos-terminal 'minimal
+y
 n
-j
 y
-j
 n
-j
 y
-
 y
-' "$rich_equivalent_home" "$rich_equivalent_xdg" >"$tmp_dir/rich-equivalent.out" 2>"$tmp_dir/rich-equivalent.err"; then
-  printf '%s\n' "rich setup stdout:" >&2
-  sed 's/^/  /' "$tmp_dir/rich-equivalent.out" >&2
-  printf '%s\n' "rich setup stderr:" >&2
-  sed 's/^/  /' "$tmp_dir/rich-equivalent.err" >&2
-  fail "rich setup customizes concrete settings and completes"
+' "$gum_equivalent_home" "$gum_equivalent_xdg" >"$tmp_dir/gum-equivalent.out" 2>"$tmp_dir/gum-equivalent.err"; then
+  printf '%s\n' "gum setup stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/gum-equivalent.out" >&2
+  printf '%s\n' "gum setup stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/gum-equivalent.err" >&2
+  fail "gum setup customizes concrete settings and completes"
 fi
-pass "rich setup customizes concrete settings and completes"
+pass "gum setup customizes concrete settings and completes"
 
-assert_contains "$tmp_dir/rich-equivalent.err" "Terrapod Setup" "rich setup prints setup-only rich heading"
-assert_data_key_once_with_value "$rich_equivalent_config" "enableEditorStack" "true" "rich setup writes included Optional Editor Stack"
-assert_data_key_once_with_value "$rich_equivalent_config" "enableAiCliTools" "true" "rich setup writes included Optional AI Tool Stack"
-assert_data_key_once_with_value "$rich_equivalent_config" "enableDevelopmentWorkspace" "true" "rich setup writes enabled Optional Development Workspace"
-assert_data_key_once_with_value "$rich_equivalent_config" "enableMacosAppGroupTerminalApps" "false" "rich setup writes customized terminal-apps App Group"
-assert_data_key_once_with_value "$rich_equivalent_config" "enableMacosAppGroupAutomation" "true" "rich setup writes customized automation App Group"
-assert_data_key_once_with_value "$rich_equivalent_config" "enableMacosAppGroupLauncher" "false" "rich setup writes customized launcher App Group"
-assert_data_key_once_with_value "$rich_equivalent_config" "enableMacosAppGroupMonitoring" "true" "rich setup writes customized monitoring App Group"
+assert_data_key_once_with_value "$gum_equivalent_config" "enableEditorStack" "true" "gum setup writes included Optional Editor Stack"
+assert_data_key_once_with_value "$gum_equivalent_config" "enableAiCliTools" "true" "gum setup writes included Optional AI Tool Stack"
+assert_data_key_once_with_value "$gum_equivalent_config" "enableDevelopmentWorkspace" "true" "gum setup writes enabled Optional Development Workspace"
+assert_data_key_once_with_value "$gum_equivalent_config" "enableMacosAppGroupTerminalApps" "false" "gum setup writes customized terminal-apps App Group"
+assert_data_key_once_with_value "$gum_equivalent_config" "enableMacosAppGroupAutomation" "true" "gum setup writes customized automation App Group"
+assert_data_key_once_with_value "$gum_equivalent_config" "enableMacosAppGroupLauncher" "false" "gum setup writes customized launcher App Group"
+assert_data_key_once_with_value "$gum_equivalent_config" "enableMacosAppGroupMonitoring" "true" "gum setup writes customized monitoring App Group"
 
-if ! cmp -s "$setup_custom_workspace_config" "$rich_equivalent_config"; then
-  printf '%s\n' "plain setup config:" >&2
+if ! cmp -s "$setup_custom_workspace_config" "$gum_equivalent_config"; then
+  printf '%s\n' "first gum setup config:" >&2
   sed 's/^/  /' "$setup_custom_workspace_config" >&2
-  printf '%s\n' "rich setup config:" >&2
-  sed 's/^/  /' "$rich_equivalent_config" >&2
-  fail "rich setup writes the same concrete settings as equivalent plain setup choices"
+  printf '%s\n' "second gum setup config:" >&2
+  sed 's/^/  /' "$gum_equivalent_config" >&2
+  fail "gum setup writes the same concrete settings for equivalent choices"
 fi
-pass "rich setup writes the same concrete settings as equivalent plain setup choices"
+pass "gum setup writes the same concrete settings for equivalent choices"
 
-rich_navigation_home="$tmp_dir/rich-navigation-home"
-rich_navigation_xdg="$tmp_dir/rich-navigation-xdg"
-rich_navigation_config="$rich_navigation_xdg/chezmoi/chezmoi.toml"
-mkdir -p "$rich_navigation_home"
+gum_development_home="$tmp_dir/gum-development-home"
+gum_development_xdg="$tmp_dir/gum-development-xdg"
+gum_development_config="$gum_development_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$gum_development_home"
 
-if ! run_terrapod_setup_rich macos-terminal 'j
-j
-k
+if ! run_terrapod_setup macos-terminal 'development
+
+
+
 
 
 y
-' "$rich_navigation_home" "$rich_navigation_xdg" >"$tmp_dir/rich-navigation.out" 2>"$tmp_dir/rich-navigation.err"; then
-  printf '%s\n' "rich navigation stdout:" >&2
-  sed 's/^/  /' "$tmp_dir/rich-navigation.out" >&2
-  printf '%s\n' "rich navigation stderr:" >&2
-  sed 's/^/  /' "$tmp_dir/rich-navigation.err" >&2
-  fail "rich Preset navigation selects development and completes"
+' "$gum_development_home" "$gum_development_xdg" >"$tmp_dir/gum-development.out" 2>"$tmp_dir/gum-development.err"; then
+  printf '%s\n' "gum development stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/gum-development.out" >&2
+  printf '%s\n' "gum development stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/gum-development.err" >&2
+  fail "gum Preset selection selects development and completes"
 fi
-pass "rich Preset navigation selects development and completes"
+pass "gum Preset selection selects development and completes"
 
-assert_contains "$tmp_dir/rich-navigation.out" "Configured Terrapod Preset 'development'" "rich Preset navigation selects development"
-assert_data_key_once_with_value "$rich_navigation_config" "enableEditorStack" "true" "rich navigation writes development Editor Stack setting"
-assert_data_key_once_with_value "$rich_navigation_config" "enableAiCliTools" "true" "rich navigation writes development AI Tool Stack setting"
-assert_data_key_once_with_value "$rich_navigation_config" "enableDevelopmentWorkspace" "true" "rich navigation writes development workspace setting"
-assert_data_key_once_with_value "$rich_navigation_config" "enableMacosAppGroupTerminalApps" "false" "rich navigation keeps terminal-apps disabled for development"
+assert_contains "$tmp_dir/gum-development.out" "Configured Terrapod Preset 'development'" "gum Preset selection selects development"
+assert_data_key_once_with_value "$gum_development_config" "enableEditorStack" "true" "gum development writes development Editor Stack setting"
+assert_data_key_once_with_value "$gum_development_config" "enableAiCliTools" "true" "gum development writes development AI Tool Stack setting"
+assert_data_key_once_with_value "$gum_development_config" "enableDevelopmentWorkspace" "true" "gum development writes development workspace setting"
+assert_data_key_once_with_value "$gum_development_config" "enableMacosAppGroupTerminalApps" "false" "gum development keeps terminal-apps disabled for development"
 
-rich_vps_home="$tmp_dir/rich-vps-home"
-rich_vps_xdg="$tmp_dir/rich-vps-xdg"
-rich_vps_config="$rich_vps_xdg/chezmoi/chezmoi.toml"
-mkdir -p "$rich_vps_home"
+gum_vps_home="$tmp_dir/gum-vps-home"
+gum_vps_xdg="$tmp_dir/gum-vps-xdg"
+gum_vps_config="$gum_vps_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$gum_vps_home"
 
-if ! run_terrapod_setup_rich vps-shell 'minimal
-j
-y
-j
+if ! run_terrapod_setup vps-shell 'minimal
 n
-
 y
-' "$rich_vps_home" "$rich_vps_xdg" >"$tmp_dir/rich-vps.out" 2>"$tmp_dir/rich-vps.err"; then
-  printf '%s\n' "rich VPS stdout:" >&2
-  sed 's/^/  /' "$tmp_dir/rich-vps.out" >&2
-  printf '%s\n' "rich VPS stderr:" >&2
-  sed 's/^/  /' "$tmp_dir/rich-vps.err" >&2
-  fail "rich VPS setup customizes optional stacks without macOS App Groups"
+n
+y
+' "$gum_vps_home" "$gum_vps_xdg" >"$tmp_dir/gum-vps.out" 2>"$tmp_dir/gum-vps.err"; then
+  printf '%s\n' "gum VPS stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/gum-vps.out" >&2
+  printf '%s\n' "gum VPS stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/gum-vps.err" >&2
+  fail "gum VPS setup customizes optional stacks without macOS App Groups"
 fi
-pass "rich VPS setup customizes optional stacks without macOS App Groups"
+pass "gum VPS setup customizes optional stacks without macOS App Groups"
 
-rich_vps_combined="$(cat "$tmp_dir/rich-vps.out" "$tmp_dir/rich-vps.err")"
-if printf '%s\n' "$rich_vps_combined" | grep -F "terminal-apps macOS App Group" >/dev/null; then
-  fail "rich VPS setup does not show macOS App Group items"
+gum_vps_combined="$(cat "$tmp_dir/gum-vps.out" "$tmp_dir/gum-vps.err")"
+if printf '%s\n' "$gum_vps_combined" | grep -F "terminal-apps macOS App Group" >/dev/null; then
+  fail "gum VPS setup does not show macOS App Group items"
 fi
-pass "rich VPS setup does not show macOS App Group items"
+pass "gum VPS setup does not show macOS App Group items"
 
-assert_data_key_once_with_value "$rich_vps_config" "enableEditorStack" "true" "rich VPS setup writes customized Optional Editor Stack"
-assert_data_key_once_with_value "$rich_vps_config" "enableAiCliTools" "false" "rich VPS setup writes customized Optional AI Tool Stack"
-assert_data_key_once_with_value "$rich_vps_config" "enableDevelopmentWorkspace" "false" "rich VPS setup writes disabled Optional Development Workspace"
-assert_data_key_once_with_value "$rich_vps_config" "enableMacosAppGroupTerminalApps" "false" "rich VPS setup writes terminal-apps App Group disabled"
-assert_data_key_once_with_value "$rich_vps_config" "enableMacosAppGroupAutomation" "false" "rich VPS setup writes automation App Group disabled"
-assert_data_key_once_with_value "$rich_vps_config" "enableMacosAppGroupLauncher" "false" "rich VPS setup writes launcher App Group disabled"
-assert_data_key_once_with_value "$rich_vps_config" "enableMacosAppGroupMonitoring" "false" "rich VPS setup writes monitoring App Group disabled"
+assert_data_key_once_with_value "$gum_vps_config" "enableEditorStack" "true" "gum VPS setup writes customized Optional Editor Stack"
+assert_data_key_once_with_value "$gum_vps_config" "enableAiCliTools" "false" "gum VPS setup writes customized Optional AI Tool Stack"
+assert_data_key_once_with_value "$gum_vps_config" "enableDevelopmentWorkspace" "false" "gum VPS setup writes disabled Optional Development Workspace"
+assert_data_key_once_with_value "$gum_vps_config" "enableMacosAppGroupTerminalApps" "false" "gum VPS setup writes terminal-apps App Group disabled"
+assert_data_key_once_with_value "$gum_vps_config" "enableMacosAppGroupAutomation" "false" "gum VPS setup writes automation App Group disabled"
+assert_data_key_once_with_value "$gum_vps_config" "enableMacosAppGroupLauncher" "false" "gum VPS setup writes launcher App Group disabled"
+assert_data_key_once_with_value "$gum_vps_config" "enableMacosAppGroupMonitoring" "false" "gum VPS setup writes monitoring App Group disabled"
 
 setup_leaf_home="$tmp_dir/setup-leaf-home"
 setup_leaf_xdg="$tmp_dir/setup-leaf-xdg"
@@ -596,7 +697,7 @@ if printf '%s\n' "$setup_vps_custom_output" | grep -F "terminal-apps macOS App G
 fi
 pass "VPS setup does not prompt for terminal-apps macOS App Group"
 
-assert_contains "$tmp_dir/setup-vps-custom.err" "macOS App Groups: not applicable for VPS Shell Profile" "VPS setup explains macOS App Groups are not applicable"
+assert_contains "$tmp_dir/setup-vps-custom.out" "macOS App Groups: not applicable for VPS Shell Profile" "VPS setup explains macOS App Groups are not applicable"
 assert_contains "$tmp_dir/setup-vps-custom.out" "enableEditorStack = true" "VPS setup summary reflects customized Optional Editor Stack"
 assert_contains "$tmp_dir/setup-vps-custom.out" "enableAiCliTools = false" "VPS setup summary reflects customized Optional AI Tool Stack"
 assert_contains "$tmp_dir/setup-vps-custom.out" "enableDevelopmentWorkspace = false" "VPS setup summary reflects disabled Optional Development Workspace"
@@ -626,8 +727,8 @@ y
 fi
 pass "VPS setup workstation rejection exits non-zero"
 
-assert_contains "$tmp_dir/setup-vps-workstation-error.err" "workstation Preset is only available for the macOS Terminal Profile" "VPS setup workstation rejection writes the error to stderr"
-assert_not_contains "$tmp_dir/setup-vps-workstation-error.out" "workstation Preset is only available for the macOS Terminal Profile" "VPS setup workstation rejection does not write the error to stdout"
+assert_contains "$tmp_dir/setup-vps-workstation-error.out" "workstation Preset is only available for the macOS Terminal Profile" "VPS setup workstation rejection writes the error"
+assert_not_contains "$tmp_dir/setup-vps-workstation-error.err" "workstation Preset is only available for the macOS Terminal Profile" "VPS setup workstation rejection does not write outside the PTY transcript"
 
 if [ -e "$setup_vps_workstation_error_config" ]; then
   fail "VPS setup workstation rejection does not create a config"
@@ -636,27 +737,27 @@ pass "VPS setup workstation rejection does not create a config"
 
 assert_no_terrapod_artifacts_near_path "$setup_vps_workstation_error_config" "VPS setup workstation rejection leaves no Terrapod artifacts"
 
-setup_invalid_bool_home="$tmp_dir/setup-invalid-bool-home"
-setup_invalid_bool_xdg="$tmp_dir/setup-invalid-bool-xdg"
-setup_invalid_bool_config="$setup_invalid_bool_xdg/chezmoi/chezmoi.toml"
-mkdir -p "$setup_invalid_bool_home"
+setup_setting_cancel_home="$tmp_dir/setup-setting-cancel-home"
+setup_setting_cancel_xdg="$tmp_dir/setup-setting-cancel-xdg"
+setup_setting_cancel_config="$setup_setting_cancel_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$setup_setting_cancel_home"
 
 if run_terrapod_setup macos-terminal 'minimal
-maybe
-' "$setup_invalid_bool_home" "$setup_invalid_bool_xdg" >"$tmp_dir/setup-invalid-bool.out" 2>"$tmp_dir/setup-invalid-bool.err"; then
-  fail "setup invalid boolean answer exits non-zero"
+__CANCEL__
+' "$setup_setting_cancel_home" "$setup_setting_cancel_xdg" >"$tmp_dir/setup-setting-cancel.out" 2>"$tmp_dir/setup-setting-cancel.err"; then
+  fail "setup setting cancellation exits non-zero"
 fi
-pass "setup invalid boolean answer exits non-zero"
+pass "setup setting cancellation exits non-zero"
 
-assert_contains "$tmp_dir/setup-invalid-bool.err" "invalid answer for Optional Development Workspace; enter y or n" "setup invalid boolean answer writes the error to stderr"
-assert_not_contains "$tmp_dir/setup-invalid-bool.out" "invalid answer for Optional Development Workspace; enter y or n" "setup invalid boolean answer does not write the error to stdout"
+assert_contains "$tmp_dir/setup-setting-cancel.out" "setup cancelled" "setup setting cancellation writes the error"
+assert_not_contains "$tmp_dir/setup-setting-cancel.err" "setup cancelled" "setup setting cancellation does not write outside the PTY transcript"
 
-if [ -e "$setup_invalid_bool_config" ]; then
-  fail "setup invalid boolean answer does not create a config"
+if [ -e "$setup_setting_cancel_config" ]; then
+  fail "setup setting cancellation does not create a config"
 fi
-pass "setup invalid boolean answer does not create a config"
+pass "setup setting cancellation does not create a config"
 
-assert_no_terrapod_artifacts_near_path "$setup_invalid_bool_config" "setup invalid boolean answer leaves no Terrapod artifacts"
+assert_no_terrapod_artifacts_near_path "$setup_setting_cancel_config" "setup setting cancellation leaves no Terrapod artifacts"
 
 setup_cancel_home="$tmp_dir/setup-cancel-home"
 setup_cancel_xdg="$tmp_dir/setup-cancel-xdg"
@@ -675,7 +776,7 @@ n
 fi
 pass "cancelled setup exits non-zero"
 
-assert_contains "$tmp_dir/setup-cancel.err" "setup cancelled" "cancelled setup explains cancellation"
+assert_contains "$tmp_dir/setup-cancel.out" "setup cancelled" "cancelled setup explains cancellation"
 
 if [ -e "$setup_cancel_config" ]; then
   fail "cancelled setup does not create a new config"
@@ -709,7 +810,7 @@ if run_terrapod_setup macos-terminal 'development
 fi
 pass "empty final confirmation cancels setup"
 
-assert_contains "$tmp_dir/setup-existing-cancel.err" "setup cancelled" "empty final confirmation explains cancellation"
+assert_contains "$tmp_dir/setup-existing-cancel.out" "setup cancelled" "empty final confirmation explains cancellation"
 
 if ! cmp -s "$setup_existing_cancel_config" "$tmp_dir/setup-existing-cancel-before.toml"; then
   fail "cancelled setup leaves existing config unchanged"
