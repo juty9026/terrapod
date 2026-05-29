@@ -93,6 +93,8 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - The **Dotfiles Management Tool** is the user-facing entry point for first install, configuration changes, and routine dotfiles maintenance.
 - **Terrapod** is the primary command and brand name for the **Dotfiles Management Tool**.
 - **tpod** is a compatibility and convenience alias for **Terrapod**, not a separate interface.
+- User-facing quick-start and routine command examples should introduce `tpod` as the preferred day-to-day short command while preserving `terrapod` as the full command and brand.
+- Installation, bootstrap recovery, and explicit setup/configuration examples may continue to use `terrapod` when the full command name improves clarity.
 - The **Terrapod Source Repository** uses `juty9026/terrapod` as its canonical GitHub slug.
 - Public first-run installation references use the HTTPS **Terrapod Source Repository** URL `https://github.com/juty9026/terrapod.git`.
 - Maintainer remotes may use the SSH **Terrapod Source Repository** URL `git@github.com:juty9026/terrapod.git`.
@@ -106,6 +108,8 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - The first **Bootstrap UI Dependency** is gum, installed through the platform **Bootstrap Package Manager** before **Terrapod Setup**.
 - Failure to install a **Bootstrap UI Dependency** fails first-run installation before **Terrapod Setup** rather than falling back to a separate plain text interaction model.
 - **Terrapod Setup** uses gum for Preset selection, setting customization, and final confirmation instead of maintaining parallel rich and plain interaction models.
+- **Terrapod Setup** should explain Preset choices with a concise guide before the gum choice prompt instead of embedding long descriptions inside each selectable Preset label.
+- **Terrapod Setup** should explain optional stack and **macOS App Group** choices with a concise guide before sequential gum confirmation prompts instead of making each prompt label verbose.
 - gum-backed setting customization uses sequential questions rather than a stateful toggle menu.
 - gum belongs to the declared machine state as well as the first-run bootstrap path, so **Terrapod** restores it through the macOS `Brewfile` and Ubuntu bootstrap scripts after initial apply.
 - Cancelling gum-backed **Terrapod Setup** preserves the existing setup cancellation contract: no config write, non-zero exit, and `terrapod: setup cancelled` guidance.
@@ -157,6 +161,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - `terrapod update` delegates repository update semantics to `chezmoi update` and adds Terrapod-specific context and validation around it.
 - README and command output describe `terrapod update` as a source update so it is not confused with Homebrew, APT, or mise upgrades.
 - README and command output describe `terrapod diff` and `terrapod apply` as declared-state operations delegated to chezmoi.
+- After successful first-run apply, the installer should surface `tpod help` so users discover the day-to-day short command immediately.
 - The **macOS Desktop App Stack** is opt-in because Homebrew casks can install shared applications and desktop support assets outside a single user's home directory.
 - The **macOS Desktop App Stack** excludes Homebrew itself, shared CLI formulae such as mise and btop, and terminal font casks.
 - Terminal font casks belong to the macOS Terminal Profile core bootstrap because the managed terminal configuration depends on them and they are not desktop applications.
@@ -195,6 +200,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Routine command output uses stable labels such as Profile, Config, Preflight, Delegating, Post-apply validation, and Guidance instead of brand metaphors.
 - Routine command stage labels may be lightly polished when the result stays concise, stable, and clear in copied logs.
 - The current command-output pass stays simple and does not add emoji or terminal color behavior.
+- `terrapod apply` should stay focused on declared-state apply context, preflight, delegation, and post-apply validation; it should not expand into a rich installed-tool report in the current scope.
 - The first-run **Terrapod** installer uses a gum-backed terminal presentation for initial setup prompts such as **Preset** selection.
 - The gum-backed first-run installer presentation is a required interactive path; non-TTY, dumb terminal, scripted, and missing-gum environments fail with guidance until non-interactive setup options are designed.
 - Rich first-run installer presentation does not imply emoji or terminal color behavior for routine **Terrapod** command output.

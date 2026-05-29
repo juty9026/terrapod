@@ -366,6 +366,18 @@ run_initial_apply() {
   "$chezmoi_bin" apply || fatal "chezmoi apply failed"
 }
 
+show_first_run_help() {
+  profile="$1"
+  local_bin_dir="$2"
+  tpod_bin="$local_bin_dir/tpod"
+
+  if [ ! -x "$tpod_bin" ]; then
+    fatal "tpod was not installed at $tpod_bin after initial apply"
+  fi
+
+  TERRAPOD_PROFILE="$profile" "$tpod_bin" help || fatal "tpod help failed after initial apply"
+}
+
 main() {
   profile="$(detect_profile)"
   label="$(profile_label "$profile")"
@@ -384,6 +396,7 @@ main() {
   prepare_setup_ui_dependency "$profile" "$source_dir" "$chezmoi_bin"
   run_terrapod_setup "$profile" "$source_dir"
   run_initial_apply "$chezmoi_bin"
+  show_first_run_help "$profile" "$local_bin_dir"
 
   printf '%s\n' "Terrapod first-run apply complete."
 }

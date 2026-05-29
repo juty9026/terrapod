@@ -34,12 +34,15 @@ Commands:
 Examples:
   terrapod setup
   terrapod configure development
-  terrapod status
-  terrapod doctor
-  terrapod diff
-  terrapod apply
-  terrapod update
+  tpod status
+  tpod doctor
+  tpod diff
+  tpod apply
+  tpod update
   terrapod chezmoi -- status
+
+Alias:
+  tpod is the short day-to-day alias for terrapod.
 EOF
 }
 
@@ -270,6 +273,35 @@ prompt_for_setup_preset() {
   printf '%s\n' "$preset"
 }
 
+show_setup_preset_guide() {
+  profile="$1"
+
+  printf '%s\n' "Preset guide:"
+  printf '%s\n' "  minimal: Core shell and runtime baseline only."
+  printf '%s\n' "  development: Adds rich editor config, AI CLI tools, and development workspace surfaces."
+  if is_preset_available_for_profile workstation "$profile"; then
+    printf '%s\n' "  workstation: macOS only. Development setup plus every macOS App Group."
+  fi
+}
+
+show_setup_option_guide() {
+  profile="$1"
+
+  printf '%s\n' "Option guide:"
+  printf '%s\n' "  Optional Development Workspace: Dev Zellij layouts; also includes Editor and AI tool stacks."
+  printf '%s\n' "  Optional Editor Stack: Rich Neovim configuration."
+  printf '%s\n' "  Optional AI Tool Stack: Gemini CLI, Claude Code, and Codex."
+
+  if [ "$profile" = "macos-terminal" ]; then
+    printf '%s\n' "  terminal-apps macOS App Group: Ghostty and cmux."
+    printf '%s\n' "  automation macOS App Group: Hammerspoon and Karabiner-Elements."
+    printf '%s\n' "  launcher macOS App Group: Raycast and 1Password CLI."
+    printf '%s\n' "  monitoring macOS App Group: iStat Menus."
+  else
+    printf '%s\n' "  macOS App Groups: not applicable for $(profile_context_label)."
+  fi
+}
+
 show_setup_settings_summary() {
   settings_data="$1"
 
@@ -328,6 +360,7 @@ prompt_for_setup_settings() {
   load_setup_defaults "$preset"
 
   printf '%s\n' "Customize Terrapod settings." >&2
+  show_setup_option_guide "$profile" >&2
 
   setup_enableDevelopmentWorkspace="$(prompt_setup_bool "Optional Development Workspace" "$setup_enableDevelopmentWorkspace")"
 
@@ -1593,6 +1626,7 @@ run_setup() {
   printf '%s\n' "Profile: $(profile_context_label)"
   show_config_context "$config_file"
 
+  show_setup_preset_guide "$profile" >&2
   preset="$(prompt_for_setup_preset "$profile")"
   setup_settings_data="$(prompt_for_setup_settings "$preset" "$profile")"
   show_setup_settings_summary "$setup_settings_data"
