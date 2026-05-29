@@ -63,6 +63,10 @@ next_response() {
 
 case "${1:-}" in
   choose)
+    while IFS= read -r option; do
+      printf '%s\n' "gum stdin: $option" >>"$log_file"
+    done
+
     response="$(next_response)"
     if [ "$response" = "__CANCEL__" ]; then
       exit 130
@@ -94,6 +98,18 @@ case "${1:-}" in
         exit 2
         ;;
     esac
+    ;;
+  style)
+    shift
+    for arg do
+      case "$arg" in
+        --*)
+          ;;
+        *)
+          printf '%s\n' "$arg"
+          ;;
+      esac
+    done
     ;;
   *)
     printf '%s\n' "unexpected gum command: ${1:-}" >&2
@@ -561,15 +577,13 @@ pass "macOS Terminal Profile setup uses gum prompts before final confirmation an
 
 setup_output_text="$(cat "$setup_output")"
 setup_gum_log_text="$(cat "$setup_gum_log")"
-assert_contains "$setup_output_text" "Terrapod setup" "gum setup prints a command heading"
-assert_contains "$setup_output_text" "Profile: macOS Terminal Profile" "gum setup shows detected macOS profile"
-assert_contains "$setup_output_text" "Preset guide:" "gum setup explains Preset choices before selection"
-assert_contains "$setup_output_text" "minimal: Core shell and runtime baseline only." "gum setup explains the minimal Preset"
-assert_contains "$setup_output_text" "development: Adds rich editor config, AI CLI tools, and development workspace surfaces." "gum setup explains the development Preset"
-assert_contains "$setup_output_text" "workstation: macOS only. Development setup plus every macOS App Group." "gum setup explains the workstation Preset"
+assert_contains "$setup_output_text" "🌱 Terrapod Setup" "gum setup prints a rich setup heading"
+assert_contains "$setup_output_text" "Profile  macOS Terminal Profile" "gum setup shows detected macOS profile in aligned setup context"
+assert_contains "$setup_output_text" "Choose a Preset" "gum setup labels the Preset choice section"
+assert_not_contains "$setup_output_text" "Preset guide:" "gum setup does not print a separate Preset guide"
 assert_contains "$setup_output_text" "Settings to write:" "gum setup shows concrete settings summary"
 assert_contains "$setup_output_text" "Customize Terrapod settings." "gum setup offers sequential setting customization"
-assert_contains "$setup_output_text" "Option guide:" "gum setup explains option choices before confirmations"
+assert_not_contains "$setup_output_text" "Option guide:" "gum setup does not print a separate option guide"
 assert_contains "$setup_output_text" "Optional Development Workspace: Dev Zellij layouts; also includes Editor and AI tool stacks." "gum setup explains Optional Development Workspace"
 assert_contains "$setup_output_text" "Optional AI Tool Stack: Gemini CLI, Claude Code, and Codex." "gum setup explains Optional AI Tool Stack"
 assert_contains "$setup_output_text" "terminal-apps macOS App Group: Ghostty and cmux." "gum setup explains terminal-apps macOS App Group"
@@ -577,16 +591,17 @@ assert_contains "$setup_output_text" "Optional Editor Stack: included by Optiona
 assert_contains "$setup_output_text" "enableEditorStack = true" "gum setup summary includes concrete Editor Stack setting"
 assert_contains "$setup_output_text" "enableMacosAppGroupMonitoring = true" "gum setup summary includes concrete macOS App Group setting"
 assert_contains "$setup_output_text" "Configured Terrapod Preset 'workstation'" "gum setup reports successful configuration"
+assert_contains "$setup_gum_log_text" "gum args: style" "gum setup uses gum style for setup-only presentation"
 assert_contains "$setup_gum_log_text" "gum args: choose" "gum setup uses gum choose for Preset selection"
-assert_contains "$setup_gum_log_text" "minimal" "gum setup offers minimal Preset"
-assert_contains "$setup_gum_log_text" "development" "gum setup offers development Preset"
-assert_contains "$setup_gum_log_text" "workstation" "gum setup offers workstation Preset"
+assert_contains "$setup_gum_log_text" "gum stdin: minimal      Core shell/runtime baseline:minimal" "gum setup offers minimal Preset with nearby explanation"
+assert_contains "$setup_gum_log_text" "gum stdin: development  Coding machine with editor, AI CLI, workspace:development" "gum setup offers development Preset with nearby explanation"
+assert_contains "$setup_gum_log_text" "gum stdin: workstation  macOS workstation with development setup and app groups:workstation" "gum setup offers workstation Preset with nearby explanation"
 assert_contains "$setup_gum_log_text" "gum args: confirm Optional Development Workspace" "gum setup asks Optional Development Workspace with gum confirm"
 assert_contains "$setup_gum_log_text" "gum args: confirm terminal-apps macOS App Group" "gum setup asks terminal-apps macOS App Group with gum confirm"
 assert_contains "$setup_gum_log_text" "gum args: confirm Write these Terrapod settings" "gum setup asks final confirmation with gum confirm"
-assert_first_occurrence_before "$setup_output_text" "Profile: macOS Terminal Profile" "Customize Terrapod settings." "gum setup shows profile before settings customization"
-assert_first_occurrence_before "$setup_output_text" "Preset guide:" "Customize Terrapod settings." "gum setup explains Presets before customization"
-assert_first_occurrence_before "$setup_output_text" "Option guide:" "Optional Editor Stack: included by Optional Development Workspace" "gum setup explains options before included stack output"
+assert_first_occurrence_before "$setup_output_text" "Profile  macOS Terminal Profile" "Customize Terrapod settings." "gum setup shows profile before settings customization"
+assert_first_occurrence_before "$setup_output_text" "Choose a Preset" "Customize Terrapod settings." "gum setup presents Preset selection before customization"
+assert_first_occurrence_before "$setup_output_text" "Optional Development Workspace: Dev Zellij layouts; also includes Editor and AI tool stacks." "Optional Editor Stack: included by Optional Development Workspace" "gum setup explains an option immediately before related output"
 assert_first_occurrence_before "$setup_output_text" "Customize Terrapod settings." "Settings to write:" "gum setup shows customized settings before summary"
 
 if [ ! -f "$setup_config" ]; then
@@ -624,12 +639,12 @@ fi
 pass "VPS Shell Profile setup rejects workstation Preset"
 
 vps_setup_output_text="$(cat "$vps_setup_output")"
-assert_contains "$vps_setup_output_text" "Profile: VPS Shell Profile" "VPS setup shows detected profile before rejection"
+assert_contains "$vps_setup_output_text" "Profile  VPS Shell Profile" "VPS setup shows detected profile before rejection"
 assert_contains "$vps_setup_output_text" "workstation Preset is only available for the macOS Terminal Profile" "VPS setup explains workstation rejection"
 vps_setup_gum_log_text="$(cat "$vps_setup_gum_log")"
 assert_contains "$vps_setup_gum_log_text" "gum args: choose" "VPS setup uses gum choose for Preset selection"
-assert_contains "$vps_setup_gum_log_text" "minimal" "VPS setup offers minimal Preset"
-assert_contains "$vps_setup_gum_log_text" "development" "VPS setup offers development Preset"
+assert_contains "$vps_setup_gum_log_text" "gum stdin: minimal      Core shell/runtime baseline:minimal" "VPS setup offers minimal Preset with nearby explanation"
+assert_contains "$vps_setup_gum_log_text" "gum stdin: development  Coding machine with editor, AI CLI, workspace:development" "VPS setup offers development Preset with nearby explanation"
 assert_not_contains "$vps_setup_gum_log_text" "workstation" "VPS setup does not offer workstation Preset"
 
 if [ -e "$vps_setup_xdg/chezmoi/chezmoi.toml" ]; then

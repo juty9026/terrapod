@@ -63,6 +63,10 @@ confirm_default_status() {
 
 case "${1:-}" in
   choose)
+    while IFS= read -r option; do
+      printf '%s\n' "gum stdin: $option" >>"$log_file"
+    done
+
     response="$(next_response)"
     if [ -z "$response" ] || [ "$response" = "__CANCEL__" ]; then
       exit 130
@@ -98,6 +102,18 @@ case "${1:-}" in
         exit 2
         ;;
     esac
+    ;;
+  style)
+    shift
+    for arg do
+      case "$arg" in
+        --*)
+          ;;
+        *)
+          printf '%s\n' "$arg"
+          ;;
+      esac
+    done
     ;;
   *)
     printf '%s\n' "unexpected gum command: ${1:-}" >&2
@@ -629,8 +645,10 @@ pass "macOS setup prompts for customization before final confirmation and custom
 
 assert_contains "$tmp_dir/setup-custom-workspace.out" "Optional Editor Stack: included by Optional Development Workspace" "workspace-enabled setup presents Optional Editor Stack as included"
 assert_contains "$tmp_dir/setup-custom-workspace.out" "Optional AI Tool Stack: included by Optional Development Workspace" "workspace-enabled setup presents Optional AI Tool Stack as included"
-assert_contains "$tmp_dir/setup-custom-workspace.out" "Preset guide:" "setup presents Preset guidance before selection"
-assert_contains "$tmp_dir/setup-custom-workspace.out" "Option guide:" "setup presents option guidance before sequential confirmations"
+assert_contains "$tmp_dir/setup-custom-workspace.out" "🌱 Terrapod Setup" "setup presents a rich setup heading"
+assert_contains "$tmp_dir/setup-custom-workspace.out" "Choose a Preset" "setup presents a Preset choice section"
+assert_not_contains "$tmp_dir/setup-custom-workspace.out" "Preset guide:" "setup does not print a separate Preset guide"
+assert_not_contains "$tmp_dir/setup-custom-workspace.out" "Option guide:" "setup does not print a separate option guide"
 assert_contains "$tmp_dir/setup-custom-workspace.out" "enableEditorStack = true" "workspace-enabled setup summary reflects included Optional Editor Stack"
 assert_contains "$tmp_dir/setup-custom-workspace.out" "enableAiCliTools = true" "workspace-enabled setup summary reflects included Optional AI Tool Stack"
 assert_contains "$tmp_dir/setup-custom-workspace.out" "enableDevelopmentWorkspace = true" "workspace-enabled setup summary reflects enabled Optional Development Workspace"
