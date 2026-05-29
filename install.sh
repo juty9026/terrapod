@@ -179,10 +179,122 @@ checked_out_terrapod() {
 print_setup_recovery() {
   profile="$1"
   source_dir="$2"
+  brew_bin=""
+
+  if [ "$profile" = "macos-terminal" ]; then
+    brew_bin="$(find_homebrew || true)"
+  fi
 
   printf '%s\n' "terrapod installer: Terrapod Setup did not complete." >&2
   printf '%s\n' "terrapod installer: Resume Terrapod Setup from the checked-out source repository:" >&2
-  printf '%s\n' "terrapod installer:   cd \"$source_dir\" && TERRAPOD_PROFILE=\"$profile\" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup" >&2
+  if [ -n "$brew_bin" ]; then
+    printf '%s\n' "terrapod installer:   cd \"$source_dir\" && eval \"\$(\"$brew_bin\" shellenv)\" && TERRAPOD_PROFILE=\"$profile\" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup" >&2
+  else
+    printf '%s\n' "terrapod installer:   cd \"$source_dir\" && TERRAPOD_PROFILE=\"$profile\" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup" >&2
+  fi
+}
+
+find_homebrew() {
+  if command -v brew >/dev/null 2>&1; then
+    command -v brew
+    return 0
+  fi
+
+  if [ "${TERRAPOD_HOMEBREW_CANDIDATE_PATHS+x}" ]; then
+    homebrew_candidate_paths="$TERRAPOD_HOMEBREW_CANDIDATE_PATHS"
+  else
+    homebrew_candidate_paths="/opt/homebrew/bin/brew /usr/local/bin/brew"
+  fi
+
+  for brew_path in $homebrew_candidate_paths; do
+    if [ -x "$brew_path" ]; then
+      printf '%s\n' "$brew_path"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+print_setup_ui_dependency_recovery() {
+  profile="$1"
+  source_dir="$2"
+  chezmoi_bin="$3"
+  brew_bin="$4"
+  reason="$5"
+
+  printf '%s\n' "terrapod installer: gum is required before Terrapod Setup can run." >&2
+  printf '%s\n' "terrapod installer: Failed to prepare the macOS setup UI dependency with Homebrew: $reason" >&2
+  if [ -n "$brew_bin" ]; then
+    printf '%s\n' "terrapod installer: Prepare gum with Homebrew:" >&2
+    printf '%s\n' "terrapod installer:   eval \"\$(\"$brew_bin\" shellenv)\" && HOMEBREW_NO_AUTO_UPDATE=1 \"$brew_bin\" install gum" >&2
+  else
+    printf '%s\n' "terrapod installer: Install Homebrew from https://brew.sh, follow its shellenv instructions, then run: HOMEBREW_NO_AUTO_UPDATE=1 brew install gum" >&2
+  fi
+  printf '%s\n' "terrapod installer: The source repository is already checked out. After gum is available, resume Terrapod Setup and continue the initial apply:" >&2
+  if [ -n "$brew_bin" ]; then
+    printf '%s\n' "terrapod installer:   cd \"$source_dir\" && eval \"\$(\"$brew_bin\" shellenv)\" && TERRAPOD_PROFILE=\"$profile\" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup && \"$chezmoi_bin\" apply" >&2
+  else
+    printf '%s\n' "terrapod installer:   cd \"$source_dir\" && TERRAPOD_PROFILE=\"$profile\" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup && \"$chezmoi_bin\" apply" >&2
+  fi
+}
+
+prepare_setup_ui_dependency() {
+  profile="$1"
+  source_dir="$2"
+  chezmoi_bin="$3"
+
+  if [ "$profile" != "macos-terminal" ]; then
+    return 0
+  fi
+
+  if command -v gum >/dev/null 2>&1; then
+    return 0
+  fi
+
+  brew_bin="$(find_homebrew || true)"
+
+  if [ -z "$brew_bin" ]; then
+    printf '%s\n' "Installing Homebrew for Terrapod Setup UI dependency..."
+    if ! homebrew_installer="$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; then
+      print_setup_ui_dependency_recovery "$profile" "$source_dir" "$chezmoi_bin" "" "failed to download the Homebrew installer"
+      return 1
+    fi
+
+    if ! NONINTERACTIVE=1 /bin/bash -c "$homebrew_installer" </dev/null >&2; then
+      print_setup_ui_dependency_recovery "$profile" "$source_dir" "$chezmoi_bin" "" "failed to install Homebrew"
+      return 1
+    fi
+
+    brew_bin="$(find_homebrew || true)"
+  fi
+
+  if [ -z "$brew_bin" ]; then
+    print_setup_ui_dependency_recovery "$profile" "$source_dir" "$chezmoi_bin" "" "Homebrew install finished, but brew was not found"
+    return 1
+  fi
+
+  if ! brew_shellenv="$("$brew_bin" shellenv)"; then
+    print_setup_ui_dependency_recovery "$profile" "$source_dir" "$chezmoi_bin" "$brew_bin" "failed to evaluate brew shellenv"
+    return 1
+  fi
+  eval "$brew_shellenv"
+
+  if command -v gum >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if ! HOMEBREW_NO_AUTO_UPDATE=1 "$brew_bin" install gum; then
+    print_setup_ui_dependency_recovery "$profile" "$source_dir" "$chezmoi_bin" "$brew_bin" "failed to install gum"
+    return 1
+  fi
+
+  if command -v gum >/dev/null 2>&1; then
+    return 0
+  fi
+
+  print_setup_ui_dependency_recovery "$profile" "$source_dir" "$chezmoi_bin" "$brew_bin" "brew install gum finished, but gum was not found"
+  return 1
 }
 
 run_terrapod_setup() {
@@ -219,6 +331,7 @@ main() {
   chezmoi_bin="$(install_chezmoi_if_needed "$local_bin_dir")"
   ensure_source_repo_prerequisites "$profile"
   initialize_source_repository "$chezmoi_bin"
+  prepare_setup_ui_dependency "$profile" "$source_dir" "$chezmoi_bin"
   run_terrapod_setup "$profile" "$source_dir"
   run_initial_apply "$chezmoi_bin"
 

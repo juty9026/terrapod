@@ -389,14 +389,70 @@ set -eu
 printf '%s\n' "curl args:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"
 case "$*" in
   *get.chezmoi.io*)
+    printf '%s\n' "# fake chezmoi installer from get.chezmoi.io"
+    ;;
+  *raw.githubusercontent.com/Homebrew/install/HEAD/install.sh*)
+    homebrew_installer_status="${TERRAPOD_HOMEBREW_INSTALLER_STUB_STATUS:-0}"
+    if [ "$homebrew_installer_status" != "0" ]; then
+      exit "$homebrew_installer_status"
+    fi
+
+    cat <<'HOMEBREW_INSTALLER_STUB'
+#!/bin/sh
+set -eu
+
+log_file="${TERRAPOD_STUB_CALL_LOG:?}"
+brew_stub="${TERRAPOD_HOMEBREW_INSTALL_STUB_BREW:?}"
+brew_stub_dir="${brew_stub%/*}"
+
+printf '%s\n' "homebrew installer ran" >>"$log_file"
+mkdir -p "$brew_stub_dir"
+cat >"$brew_stub" <<'BREW_STUB'
+#!/bin/sh
+set -eu
+
+log_file="${TERRAPOD_STUB_CALL_LOG:?}"
+printf '%s\n' "brew args:$*" >>"$log_file"
+
+case "${1-}" in
+  shellenv)
+    case "$0" in
+      */*) stub_dir="${0%/*}" ;;
+      *) stub_dir=. ;;
+    esac
+    printf '%s\n' "PATH=\"$stub_dir:\$PATH\"; export PATH"
+    exit 0
+    ;;
+  install)
+    printf '%s\n' "brew install HOMEBREW_NO_AUTO_UPDATE:${HOMEBREW_NO_AUTO_UPDATE-unset}" >>"$log_file"
+    if [ "${2-}" != "gum" ]; then
+      printf '%s\n' "unexpected brew install target:${2-}" >>"$log_file"
+      exit 64
+    fi
+    case "$0" in
+      */*) stub_dir="${0%/*}" ;;
+      *) stub_dir=. ;;
+    esac
+    {
+      printf '%s\n' '#!/bin/sh'
+      printf '%s\n' 'exit 0'
+    } >"$stub_dir/gum"
+    chmod +x "$stub_dir/gum"
+    ;;
+  *)
+    printf '%s\n' "unexpected brew command:${1-}" >>"$log_file"
+    exit 64
+    ;;
+esac
+BREW_STUB
+chmod +x "$brew_stub"
+HOMEBREW_INSTALLER_STUB
     ;;
   *)
     printf '%s\n' "unexpected curl args:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"
     exit 64
     ;;
 esac
-
-printf '%s\n' "# fake chezmoi installer from get.chezmoi.io"
 EOF
   chmod +x "$case_dir/bin/curl"
 
@@ -447,6 +503,70 @@ EOF
   chmod +x "$case_dir/bin/sh"
 }
 
+write_gum_command_stub() {
+  case_dir="$1"
+  stub="$case_dir/bin/gum"
+
+  {
+    printf '%s\n' '#!/bin/sh'
+    printf '%s\n' 'exit 0'
+  } >"$stub"
+  chmod +x "$stub"
+}
+
+write_macos_brew_gum_stubs() {
+  case_dir="$1"
+  gum_install_status="${2:-0}"
+  stub="${3:-$case_dir/bin/brew}"
+  shellenv_status="${4:-0}"
+  stub_dir="${stub%/*}"
+  mkdir -p "$stub_dir"
+
+  {
+    printf '%s\n' '#!/bin/sh'
+    printf '%s\n' 'set -eu'
+    printf '%s\n' 'log_file="${TERRAPOD_STUB_CALL_LOG:?}"'
+    printf '%s\n' 'printf "%s\n" "brew args:$*" >>"$log_file"'
+    printf '%s\n' 'case "${1-}" in'
+    printf '%s\n' '  shellenv)'
+    printf '%s\n' '    case "$0" in'
+    printf '%s\n' '      */*) stub_dir="${0%/*}" ;;'
+    printf '%s\n' '      *) stub_dir=. ;;'
+    printf '%s\n' '    esac'
+    printf '%s\n' "    if [ '$shellenv_status' != '0' ]; then"
+    printf '%s\n' "      exit '$shellenv_status'"
+    printf '%s\n' '    fi'
+    printf '%s\n' '    printf "%s\n" "PATH=\"$stub_dir:\$PATH\"; export PATH"'
+    printf '%s\n' '    exit 0'
+    printf '%s\n' '    ;;'
+    printf '%s\n' '  install)'
+    printf '%s\n' '    if [ "${2-}" != "gum" ]; then'
+    printf '%s\n' '      printf "%s\n" "unexpected brew install target:${2-}" >>"$log_file"'
+    printf '%s\n' '      exit 64'
+    printf '%s\n' '    fi'
+    printf '%s\n' '    printf "%s\n" "brew install HOMEBREW_NO_AUTO_UPDATE:${HOMEBREW_NO_AUTO_UPDATE-unset}" >>"$log_file"'
+    printf '%s\n' "    if [ '$gum_install_status' != '0' ]; then"
+    printf '%s\n' "      exit '$gum_install_status'"
+    printf '%s\n' '    fi'
+    printf '%s\n' '    case "$0" in'
+    printf '%s\n' '      */*) stub_dir="${0%/*}" ;;'
+    printf '%s\n' '      *) stub_dir=. ;;'
+    printf '%s\n' '    esac'
+    printf '%s\n' '    {'
+    printf '%s\n' "      printf '%s\n' '#!/bin/sh'"
+    printf '%s\n' "      printf '%s\n' 'exit 0'"
+    printf '%s\n' '    } >"$stub_dir/gum"'
+    printf '%s\n' '    chmod +x "$stub_dir/gum"'
+    printf '%s\n' '    ;;'
+    printf '%s\n' '  *)'
+    printf '%s\n' '    printf "%s\n" "unexpected brew command:${1-}" >>"$log_file"'
+    printf '%s\n' '    exit 64'
+    printf '%s\n' '    ;;'
+    printf '%s\n' 'esac'
+  } >"$stub"
+  chmod +x "$stub"
+}
+
 run_installer_case() {
   case_dir="$1"
   input_text="
@@ -472,6 +592,7 @@ run_installer_case() {
 darwin_case="$(make_case_dir darwin-profile)"
 write_uname_stub "$darwin_case" "Darwin"
 write_command_call_stubs "$darwin_case" "curl" "wget" "git" "sh"
+write_gum_command_stub "$darwin_case"
 mkdir -p "$darwin_case/home/.local/bin"
 write_chezmoi_flow_stub "$darwin_case/home/.local/bin/chezmoi"
 darwin_log="$darwin_case/command-calls"
@@ -537,6 +658,7 @@ write_uname_stub "$first_run_case" "Darwin"
 write_chezmoi_flow_stub "$first_run_case/chezmoi-template"
 write_installer_download_stubs "$first_run_case"
 write_command_call_stubs "$first_run_case" "wget" "git"
+write_macos_brew_gum_stubs "$first_run_case" 0
 first_run_log="$first_run_case/command-calls"
 first_run_stdin_capture="$first_run_case/installer-stdin"
 first_run_script_capture="$first_run_case/installer-script"
@@ -586,21 +708,194 @@ fi
 pass "chezmoi init creates checked-out Terrapod executable"
 assert_contains "$first_run_log_text" "terrapod TERRAPOD_PROFILE:macos-terminal" "setup receives macOS Terrapod profile"
 assert_contains "$first_run_log_text" "terrapod TERRAPOD_CHEZMOI_CONFIG:" "setup receives an empty Terrapod chezmoi config override"
+assert_contains "$first_run_log_text" "brew args:shellenv" "macOS first-run setup UI bootstrap evaluates Homebrew shellenv"
+assert_contains "$first_run_log_text" "brew args:install gum" "macOS first-run setup UI bootstrap installs gum with Homebrew when gum is missing"
+assert_contains "$first_run_log_text" "brew install HOMEBREW_NO_AUTO_UPDATE:1" "macOS first-run setup UI bootstrap disables Homebrew auto-update while installing gum"
 assert_contains "$first_run_log_text" "terrapod args:setup" "checked-out Terrapod Setup runs"
 assert_contains "$first_run_log_text" "terrapod setup stdin 1:workstation" "checked-out Terrapod Setup receives Preset input"
 assert_contains "$first_run_log_text" "terrapod setup stdin 7:y" "checked-out Terrapod Setup receives final confirmation input"
 assert_contains "$first_run_log_text" "terrapod setup stdin lines:7" "checked-out Terrapod Setup receives the full workstation setup input"
 assert_not_contains "$first_run_log_text" "terrapod args:configure" "first-run installer does not bypass setup with configure"
 assert_first_occurrence_before "$first_run_log_text" "chezmoi args:init https://github.com/juty9026/terrapod.git" "terrapod args:setup" "setup runs after source repository initialization"
+assert_first_occurrence_before "$first_run_log_text" "brew args:install gum" "terrapod args:setup" "macOS setup UI gum bootstrap runs before Terrapod Setup"
 assert_first_occurrence_before "$first_run_log_text" "terrapod args:setup" "chezmoi args:apply" "setup runs before chezmoi apply"
+assert_first_occurrence_before "$first_run_log_text" "brew args:install gum" "chezmoi args:apply" "macOS setup UI gum bootstrap runs before initial apply"
 assert_contains "$first_run_log_text" "chezmoi args:apply" "chezmoi apply runs after setup"
 assert_contains "$first_run_log_text" "chezmoi path_has_local_bin:yes" "child command PATH contains user local bin"
+assert_not_contains "$first_run_log_text" "brew args:upgrade" "first-run installer does not run broad Homebrew upgrades"
+assert_not_contains "$first_run_log_text" "brew args:bundle" "first-run installer leaves Brewfile bundle to initial apply"
+
+homebrew_missing_case="$(make_case_dir homebrew-missing-macos)"
+write_uname_stub "$homebrew_missing_case" "Darwin"
+write_chezmoi_flow_stub "$homebrew_missing_case/chezmoi-template"
+write_installer_download_stubs "$homebrew_missing_case"
+write_command_call_stubs "$homebrew_missing_case" "wget" "git"
+homebrew_missing_log="$homebrew_missing_case/command-calls"
+homebrew_missing_stdin_capture="$homebrew_missing_case/installer-stdin"
+homebrew_missing_script_capture="$homebrew_missing_case/installer-script"
+homebrew_missing_brew="$homebrew_missing_case/homebrew/bin/brew"
+TERRAPOD_STUB_CALL_LOG="$homebrew_missing_log"
+TERRAPOD_INSTALLER_STDIN_CAPTURE="$homebrew_missing_stdin_capture"
+TERRAPOD_INSTALLER_SCRIPT_CAPTURE="$homebrew_missing_script_capture"
+TERRAPOD_CHEZMOI_STUB_TEMPLATE="$homebrew_missing_case/chezmoi-template"
+TERRAPOD_HOMEBREW_CANDIDATE_PATHS="$homebrew_missing_brew"
+TERRAPOD_HOMEBREW_INSTALL_STUB_BREW="$homebrew_missing_brew"
+export TERRAPOD_STUB_CALL_LOG
+export TERRAPOD_INSTALLER_STDIN_CAPTURE
+export TERRAPOD_INSTALLER_SCRIPT_CAPTURE
+export TERRAPOD_CHEZMOI_STUB_TEMPLATE
+export TERRAPOD_HOMEBREW_CANDIDATE_PATHS
+export TERRAPOD_HOMEBREW_INSTALL_STUB_BREW
+homebrew_missing_input='minimal
+'
+run_installer_case "$homebrew_missing_case" "$homebrew_missing_input"
+unset TERRAPOD_STUB_CALL_LOG
+unset TERRAPOD_INSTALLER_STDIN_CAPTURE
+unset TERRAPOD_INSTALLER_SCRIPT_CAPTURE
+unset TERRAPOD_CHEZMOI_STUB_TEMPLATE
+unset TERRAPOD_HOMEBREW_CANDIDATE_PATHS
+unset TERRAPOD_HOMEBREW_INSTALL_STUB_BREW
+assert_status "$installer_status" 0 "macOS first-run installs Homebrew when Homebrew is missing"
+homebrew_missing_log_text="$(cat "$homebrew_missing_log")"
+assert_contains "$homebrew_missing_log_text" "curl args:-fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh" "Homebrew missing case downloads the Homebrew installer"
+assert_contains "$homebrew_missing_log_text" "homebrew installer ran" "Homebrew missing case runs the Homebrew installer"
+assert_contains "$homebrew_missing_log_text" "brew args:shellenv" "Homebrew missing case evaluates newly installed Homebrew shellenv"
+assert_contains "$homebrew_missing_log_text" "brew args:install gum" "Homebrew missing case installs gum after Homebrew is available"
+assert_contains "$homebrew_missing_log_text" "brew install HOMEBREW_NO_AUTO_UPDATE:1" "Homebrew missing case disables Homebrew auto-update while installing gum"
+assert_first_occurrence_before "$homebrew_missing_log_text" "homebrew installer ran" "brew args:install gum" "Homebrew missing case installs Homebrew before gum"
+assert_first_occurrence_before "$homebrew_missing_log_text" "brew args:install gum" "terrapod args:setup" "Homebrew missing case prepares gum before Terrapod Setup"
+assert_first_occurrence_before "$homebrew_missing_log_text" "terrapod args:setup" "chezmoi args:apply" "Homebrew missing case applies after setup"
+assert_not_contains "$homebrew_missing_log_text" "brew args:upgrade" "Homebrew missing case does not run broad Homebrew upgrades"
+assert_not_contains "$homebrew_missing_log_text" "brew args:bundle" "Homebrew missing case leaves Brewfile bundle to initial apply"
+
+homebrew_download_failure_case="$(make_case_dir homebrew-download-failure)"
+write_uname_stub "$homebrew_download_failure_case" "Darwin"
+write_chezmoi_flow_stub "$homebrew_download_failure_case/chezmoi-template"
+write_installer_download_stubs "$homebrew_download_failure_case"
+write_command_call_stubs "$homebrew_download_failure_case" "wget" "git"
+homebrew_download_failure_log="$homebrew_download_failure_case/command-calls"
+homebrew_download_failure_stdin_capture="$homebrew_download_failure_case/installer-stdin"
+homebrew_download_failure_script_capture="$homebrew_download_failure_case/installer-script"
+homebrew_download_failure_brew="$homebrew_download_failure_case/homebrew/bin/brew"
+TERRAPOD_STUB_CALL_LOG="$homebrew_download_failure_log"
+TERRAPOD_INSTALLER_STDIN_CAPTURE="$homebrew_download_failure_stdin_capture"
+TERRAPOD_INSTALLER_SCRIPT_CAPTURE="$homebrew_download_failure_script_capture"
+TERRAPOD_CHEZMOI_STUB_TEMPLATE="$homebrew_download_failure_case/chezmoi-template"
+TERRAPOD_HOMEBREW_CANDIDATE_PATHS="$homebrew_download_failure_brew"
+TERRAPOD_HOMEBREW_INSTALL_STUB_BREW="$homebrew_download_failure_brew"
+TERRAPOD_HOMEBREW_INSTALLER_STUB_STATUS=29
+export TERRAPOD_STUB_CALL_LOG
+export TERRAPOD_INSTALLER_STDIN_CAPTURE
+export TERRAPOD_INSTALLER_SCRIPT_CAPTURE
+export TERRAPOD_CHEZMOI_STUB_TEMPLATE
+export TERRAPOD_HOMEBREW_CANDIDATE_PATHS
+export TERRAPOD_HOMEBREW_INSTALL_STUB_BREW
+export TERRAPOD_HOMEBREW_INSTALLER_STUB_STATUS
+homebrew_download_failure_input='minimal
+'
+run_installer_case "$homebrew_download_failure_case" "$homebrew_download_failure_input"
+unset TERRAPOD_STUB_CALL_LOG
+unset TERRAPOD_INSTALLER_STDIN_CAPTURE
+unset TERRAPOD_INSTALLER_SCRIPT_CAPTURE
+unset TERRAPOD_CHEZMOI_STUB_TEMPLATE
+unset TERRAPOD_HOMEBREW_CANDIDATE_PATHS
+unset TERRAPOD_HOMEBREW_INSTALL_STUB_BREW
+unset TERRAPOD_HOMEBREW_INSTALLER_STUB_STATUS
+assert_failure "$installer_status" "Homebrew download failure makes installer exit unsuccessfully"
+homebrew_download_failure_stderr="$(cat "$homebrew_download_failure_case/stderr")"
+homebrew_download_failure_log_text="$(cat "$homebrew_download_failure_log")"
+assert_contains "$homebrew_download_failure_log_text" "curl args:-fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh" "Homebrew download failure attempts to download Homebrew installer"
+assert_not_contains "$homebrew_download_failure_log_text" "terrapod args:setup" "Homebrew download failure stops before Terrapod Setup"
+assert_not_contains "$homebrew_download_failure_log_text" "chezmoi args:apply" "Homebrew download failure stops before initial apply"
+assert_contains "$homebrew_download_failure_stderr" "Install Homebrew from https://brew.sh, follow its shellenv instructions, then run: HOMEBREW_NO_AUTO_UPDATE=1 brew install gum" "Homebrew download failure guidance mentions shellenv before installing gum"
+assert_contains "$homebrew_download_failure_stderr" "cd \"$homebrew_download_failure_case/xdg-data/chezmoi\" && TERRAPOD_PROFILE=\"macos-terminal\" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup && \"$homebrew_download_failure_case/home/.local/bin/chezmoi\" apply" "Homebrew download failure prints setup and initial apply recovery command"
+assert_not_contains "$homebrew_download_failure_stderr" "Rerun the installer" "Homebrew download failure does not suggest rerunning the source-guarded installer"
+
+homebrew_shellenv_failure_case="$(make_case_dir homebrew-shellenv-failure)"
+write_uname_stub "$homebrew_shellenv_failure_case" "Darwin"
+write_chezmoi_flow_stub "$homebrew_shellenv_failure_case/chezmoi-template"
+write_installer_download_stubs "$homebrew_shellenv_failure_case"
+write_command_call_stubs "$homebrew_shellenv_failure_case" "wget" "git"
+write_macos_brew_gum_stubs "$homebrew_shellenv_failure_case" 0 "$homebrew_shellenv_failure_case/bin/brew" 31
+homebrew_shellenv_failure_log="$homebrew_shellenv_failure_case/command-calls"
+homebrew_shellenv_failure_stdin_capture="$homebrew_shellenv_failure_case/installer-stdin"
+homebrew_shellenv_failure_script_capture="$homebrew_shellenv_failure_case/installer-script"
+TERRAPOD_STUB_CALL_LOG="$homebrew_shellenv_failure_log"
+TERRAPOD_INSTALLER_STDIN_CAPTURE="$homebrew_shellenv_failure_stdin_capture"
+TERRAPOD_INSTALLER_SCRIPT_CAPTURE="$homebrew_shellenv_failure_script_capture"
+TERRAPOD_CHEZMOI_STUB_TEMPLATE="$homebrew_shellenv_failure_case/chezmoi-template"
+export TERRAPOD_STUB_CALL_LOG
+export TERRAPOD_INSTALLER_STDIN_CAPTURE
+export TERRAPOD_INSTALLER_SCRIPT_CAPTURE
+export TERRAPOD_CHEZMOI_STUB_TEMPLATE
+homebrew_shellenv_failure_input='minimal
+'
+run_installer_case "$homebrew_shellenv_failure_case" "$homebrew_shellenv_failure_input"
+unset TERRAPOD_STUB_CALL_LOG
+unset TERRAPOD_INSTALLER_STDIN_CAPTURE
+unset TERRAPOD_INSTALLER_SCRIPT_CAPTURE
+unset TERRAPOD_CHEZMOI_STUB_TEMPLATE
+assert_failure "$installer_status" "Homebrew shellenv failure makes installer exit unsuccessfully"
+homebrew_shellenv_failure_stderr="$(cat "$homebrew_shellenv_failure_case/stderr")"
+homebrew_shellenv_failure_log_text="$(cat "$homebrew_shellenv_failure_log")"
+assert_contains "$homebrew_shellenv_failure_log_text" "brew args:shellenv" "Homebrew shellenv failure attempts to evaluate Homebrew shellenv"
+assert_not_contains "$homebrew_shellenv_failure_log_text" "brew args:install gum" "Homebrew shellenv failure stops before gum install"
+assert_not_contains "$homebrew_shellenv_failure_log_text" "terrapod args:setup" "Homebrew shellenv failure stops before Terrapod Setup"
+assert_not_contains "$homebrew_shellenv_failure_log_text" "chezmoi args:apply" "Homebrew shellenv failure stops before initial apply"
+assert_contains "$homebrew_shellenv_failure_stderr" "failed to evaluate brew shellenv" "Homebrew shellenv failure explains the failed step"
+homebrew_shellenv_failure_prepare_command='eval "$("'"$homebrew_shellenv_failure_case"'/bin/brew" shellenv)" && HOMEBREW_NO_AUTO_UPDATE=1 "'"$homebrew_shellenv_failure_case"'/bin/brew" install gum'
+assert_contains "$homebrew_shellenv_failure_stderr" "$homebrew_shellenv_failure_prepare_command" "Homebrew shellenv failure guidance includes known Homebrew shellenv and gum install command"
+homebrew_shellenv_failure_resume_command='cd "'"$homebrew_shellenv_failure_case"'/xdg-data/chezmoi" && eval "$("'"$homebrew_shellenv_failure_case"'/bin/brew" shellenv)" && TERRAPOD_PROFILE="macos-terminal" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup && "'"$homebrew_shellenv_failure_case"'/home/.local/bin/chezmoi" apply'
+assert_contains "$homebrew_shellenv_failure_stderr" "$homebrew_shellenv_failure_resume_command" "Homebrew shellenv failure resume command keeps Homebrew shellenv active through setup and apply"
+assert_not_contains "$homebrew_shellenv_failure_stderr" "Rerun the installer" "Homebrew shellenv failure does not suggest rerunning the source-guarded installer"
+
+gum_bootstrap_failure_case="$(make_case_dir gum-bootstrap-failure)"
+write_uname_stub "$gum_bootstrap_failure_case" "Darwin"
+write_chezmoi_flow_stub "$gum_bootstrap_failure_case/chezmoi-template"
+write_installer_download_stubs "$gum_bootstrap_failure_case"
+write_command_call_stubs "$gum_bootstrap_failure_case" "wget" "git"
+write_macos_brew_gum_stubs "$gum_bootstrap_failure_case" 23
+gum_bootstrap_failure_log="$gum_bootstrap_failure_case/command-calls"
+gum_bootstrap_failure_stdin_capture="$gum_bootstrap_failure_case/installer-stdin"
+gum_bootstrap_failure_script_capture="$gum_bootstrap_failure_case/installer-script"
+TERRAPOD_STUB_CALL_LOG="$gum_bootstrap_failure_log"
+TERRAPOD_INSTALLER_STDIN_CAPTURE="$gum_bootstrap_failure_stdin_capture"
+TERRAPOD_INSTALLER_SCRIPT_CAPTURE="$gum_bootstrap_failure_script_capture"
+TERRAPOD_CHEZMOI_STUB_TEMPLATE="$gum_bootstrap_failure_case/chezmoi-template"
+export TERRAPOD_STUB_CALL_LOG
+export TERRAPOD_INSTALLER_STDIN_CAPTURE
+export TERRAPOD_INSTALLER_SCRIPT_CAPTURE
+export TERRAPOD_CHEZMOI_STUB_TEMPLATE
+gum_bootstrap_failure_input='minimal
+'
+run_installer_case "$gum_bootstrap_failure_case" "$gum_bootstrap_failure_input"
+unset TERRAPOD_STUB_CALL_LOG
+unset TERRAPOD_INSTALLER_STDIN_CAPTURE
+unset TERRAPOD_INSTALLER_SCRIPT_CAPTURE
+unset TERRAPOD_CHEZMOI_STUB_TEMPLATE
+assert_failure "$installer_status" "gum bootstrap failure makes installer exit unsuccessfully"
+gum_bootstrap_failure_stderr="$(cat "$gum_bootstrap_failure_case/stderr")"
+gum_bootstrap_failure_log_text="$(cat "$gum_bootstrap_failure_log")"
+assert_contains "$gum_bootstrap_failure_log_text" "brew args:shellenv" "gum bootstrap failure evaluates Homebrew shellenv"
+assert_contains "$gum_bootstrap_failure_log_text" "brew args:install gum" "gum bootstrap failure attempts to install gum"
+assert_contains "$gum_bootstrap_failure_log_text" "brew install HOMEBREW_NO_AUTO_UPDATE:1" "gum bootstrap failure attempts gum install with Homebrew auto-update disabled"
+assert_first_occurrence_before "$gum_bootstrap_failure_log_text" "chezmoi args:init https://github.com/juty9026/terrapod.git" "brew args:install gum" "gum bootstrap failure initializes source before setup UI dependency bootstrap"
+assert_not_contains "$gum_bootstrap_failure_log_text" "terrapod args:setup" "gum bootstrap failure stops before Terrapod Setup"
+assert_not_contains "$gum_bootstrap_failure_log_text" "chezmoi args:apply" "gum bootstrap failure stops before initial apply"
+assert_contains "$gum_bootstrap_failure_stderr" "gum is required before Terrapod Setup can run" "gum bootstrap failure explains the setup UI dependency"
+assert_contains "$gum_bootstrap_failure_stderr" "Prepare gum with Homebrew:" "gum bootstrap failure gives actionable Homebrew guidance"
+gum_bootstrap_failure_prepare_command='eval "$("'"$gum_bootstrap_failure_case"'/bin/brew" shellenv)" && HOMEBREW_NO_AUTO_UPDATE=1 "'"$gum_bootstrap_failure_case"'/bin/brew" install gum'
+assert_contains "$gum_bootstrap_failure_stderr" "$gum_bootstrap_failure_prepare_command" "gum bootstrap failure guidance includes known Homebrew shellenv and gum install command"
+assert_not_contains "$gum_bootstrap_failure_stderr" "Rerun the installer" "gum bootstrap failure does not suggest rerunning the source-guarded installer"
+gum_bootstrap_failure_resume_command='cd "'"$gum_bootstrap_failure_case"'/xdg-data/chezmoi" && eval "$("'"$gum_bootstrap_failure_case"'/bin/brew" shellenv)" && TERRAPOD_PROFILE="macos-terminal" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup && "'"$gum_bootstrap_failure_case"'/home/.local/bin/chezmoi" apply'
+assert_contains "$gum_bootstrap_failure_stderr" "$gum_bootstrap_failure_resume_command" "gum bootstrap failure resume command keeps Homebrew shellenv active through setup and apply"
 
 setup_failure_case="$(make_case_dir setup-failure)"
 write_uname_stub "$setup_failure_case" "Darwin"
 write_chezmoi_flow_stub "$setup_failure_case/chezmoi-template"
 write_installer_download_stubs "$setup_failure_case"
 write_command_call_stubs "$setup_failure_case" "wget" "git"
+write_macos_brew_gum_stubs "$setup_failure_case" 0
 setup_failure_log="$setup_failure_case/command-calls"
 setup_failure_stdin_capture="$setup_failure_case/installer-stdin"
 setup_failure_script_capture="$setup_failure_case/installer-script"
@@ -637,6 +932,8 @@ assert_failure "$installer_status" "setup failure makes installer exit unsuccess
 setup_failure_stdout="$(cat "$setup_failure_case/stdout")"
 setup_failure_stderr="$(cat "$setup_failure_case/stderr")"
 setup_failure_log_text="$(cat "$setup_failure_log")"
+assert_contains "$setup_failure_log_text" "brew args:install gum" "setup failure case bootstraps gum with Homebrew before setup"
+assert_first_occurrence_before "$setup_failure_log_text" "brew args:install gum" "terrapod args:setup" "setup failure case prepares gum before Terrapod Setup"
 assert_contains "$setup_failure_log_text" "terrapod args:setup" "setup failure case runs checked-out Terrapod Setup"
 assert_contains "$setup_failure_log_text" "terrapod setup stdin 1:minimal" "setup failure case forwards Preset input to Terrapod Setup"
 assert_contains "$setup_failure_log_text" "terrapod setup stdin lines:9" "setup failure case forwards full minimal setup input to Terrapod Setup"
@@ -646,13 +943,15 @@ assert_not_contains "$setup_failure_stdout" "Terrapod first-run apply complete."
 assert_contains "$setup_failure_stderr" "simulated Terrapod Setup failure" "setup failure case preserves setup error output"
 assert_contains "$setup_failure_stderr" "Terrapod Setup did not complete." "setup failure case explains setup did not complete"
 assert_contains "$setup_failure_stderr" "Resume Terrapod Setup from the checked-out source repository:" "setup failure case prints recovery heading"
-assert_contains "$setup_failure_stderr" "cd \"$setup_failure_case/xdg-data/chezmoi\" && TERRAPOD_PROFILE=\"macos-terminal\" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup" "setup failure case prints resume command"
+setup_failure_resume_command='cd "'"$setup_failure_case"'/xdg-data/chezmoi" && eval "$("'"$setup_failure_case"'/bin/brew" shellenv)" && TERRAPOD_PROFILE="macos-terminal" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup'
+assert_contains "$setup_failure_stderr" "$setup_failure_resume_command" "setup failure case resume command keeps Homebrew shellenv active through setup"
 
 setup_cancel_case="$(make_case_dir setup-cancel)"
 write_uname_stub "$setup_cancel_case" "Darwin"
 write_chezmoi_flow_stub "$setup_cancel_case/chezmoi-template"
 write_installer_download_stubs "$setup_cancel_case"
 write_command_call_stubs "$setup_cancel_case" "wget" "git"
+write_macos_brew_gum_stubs "$setup_cancel_case" 0
 setup_cancel_log="$setup_cancel_case/command-calls"
 setup_cancel_stdin_capture="$setup_cancel_case/installer-stdin"
 setup_cancel_script_capture="$setup_cancel_case/installer-script"
@@ -687,6 +986,8 @@ assert_failure "$installer_status" "setup cancellation makes installer exit unsu
 setup_cancel_stdout="$(cat "$setup_cancel_case/stdout")"
 setup_cancel_stderr="$(cat "$setup_cancel_case/stderr")"
 setup_cancel_log_text="$(cat "$setup_cancel_log")"
+assert_contains "$setup_cancel_log_text" "brew args:install gum" "setup cancellation case bootstraps gum with Homebrew before setup"
+assert_first_occurrence_before "$setup_cancel_log_text" "brew args:install gum" "terrapod args:setup" "setup cancellation case prepares gum before Terrapod Setup"
 assert_contains "$setup_cancel_log_text" "terrapod args:setup" "setup cancellation case runs checked-out Terrapod Setup"
 assert_contains "$setup_cancel_log_text" "terrapod setup stdin 1:development" "setup cancellation case forwards Preset input to Terrapod Setup"
 assert_contains "$setup_cancel_log_text" "terrapod setup stdin 7:n" "setup cancellation case forwards final cancellation input to Terrapod Setup"
@@ -695,11 +996,13 @@ assert_not_contains "$setup_cancel_log_text" "chezmoi args:apply" "setup cancell
 assert_not_contains "$setup_cancel_stdout" "Terrapod first-run apply complete." "setup cancellation case does not print first-run completion"
 assert_contains "$setup_cancel_stderr" "terrapod: setup cancelled" "setup cancellation case preserves setup cancellation output"
 assert_contains "$setup_cancel_stderr" "Terrapod Setup did not complete." "setup cancellation case explains setup did not complete"
-assert_contains "$setup_cancel_stderr" "cd \"$setup_cancel_case/xdg-data/chezmoi\" && TERRAPOD_PROFILE=\"macos-terminal\" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup" "setup cancellation case prints resume command"
+setup_cancel_resume_command='cd "'"$setup_cancel_case"'/xdg-data/chezmoi" && eval "$("'"$setup_cancel_case"'/bin/brew" shellenv)" && TERRAPOD_PROFILE="macos-terminal" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup'
+assert_contains "$setup_cancel_stderr" "$setup_cancel_resume_command" "setup cancellation case resume command keeps Homebrew shellenv active through setup"
 
 system_chezmoi_case="$(make_case_dir system-chezmoi)"
 write_uname_stub "$system_chezmoi_case" "Darwin"
 write_command_call_stubs "$system_chezmoi_case" "chezmoi" "wget" "git"
+write_gum_command_stub "$system_chezmoi_case"
 write_chezmoi_flow_stub "$system_chezmoi_case/chezmoi-template"
 write_installer_download_stubs "$system_chezmoi_case"
 system_chezmoi_log="$system_chezmoi_case/command-calls"
