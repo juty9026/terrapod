@@ -63,6 +63,12 @@ next_response() {
 
 case "${1:-}" in
   choose)
+    if [ "${2:-}" = "--help" ]; then
+      printf '%s\n' "Usage: gum choose [<options> ...] [flags]"
+      printf '%s\n' "      --label-delimiter=\"\""
+      exit 0
+    fi
+
     while IFS= read -r option; do
       printf '%s\n' "gum stdin: $option" >>"$log_file"
     done
@@ -129,6 +135,59 @@ write_gum_responses() {
   for response do
     printf '%s\n' "$response" >>"$responses_file"
   done
+}
+
+write_old_gum_stub() {
+  path="$1"
+
+  cat >"$path" <<'SH'
+#!/bin/sh
+set -eu
+
+log_file="${TERRAPOD_GUM_LOG:?}"
+
+printf '%s' "gum args:" >>"$log_file"
+for arg do
+  printf '%s' " $arg" >>"$log_file"
+done
+printf '\n' >>"$log_file"
+
+if [ "${1:-}" = "--version" ]; then
+  printf '%s\n' "gum version 0.14.0"
+  exit 0
+fi
+
+if [ "${1:-}" = "choose" ] && [ "${2:-}" = "--help" ]; then
+  printf '%s\n' "Usage: gum choose [<options> ...] [flags]"
+  printf '%s\n' "      --header=\"Choose:\""
+  exit 0
+fi
+
+case "${1:-}" in
+  choose)
+    printf '%s\n' "unknown flag: --label-delimiter" >&2
+    exit 2
+    ;;
+  style)
+    shift
+    for arg do
+      case "$arg" in
+        --*)
+          ;;
+        *)
+          printf '%s\n' "$arg"
+          ;;
+      esac
+    done
+    ;;
+  *)
+    printf '%s\n' "unexpected old gum command: ${1:-}" >&2
+    exit 2
+    ;;
+esac
+SH
+
+  chmod +x "$path"
 }
 
 write_no_gum_path() {
@@ -727,6 +786,36 @@ fi
 pass "missing gum setup does not write config"
 
 assert_no_terrapod_artifacts_under "$missing_gum_xdg" "missing gum setup leaves no Terrapod artifacts"
+
+old_gum_home="$tmp_dir/old-gum-home"
+old_gum_xdg="$tmp_dir/old-gum-xdg"
+old_gum_output="$tmp_dir/old-gum.out"
+old_gum_log="$tmp_dir/old-gum.log"
+old_gum_path="$tmp_dir/old-gum-bin"
+mkdir -p "$old_gum_home" "$old_gum_path"
+write_old_gum_stub "$old_gum_path/gum"
+
+if TERRAPOD_GUM_RESPONSES="$tmp_dir/old-gum.responses" TERRAPOD_GUM_LOG="$old_gum_log" \
+  PATH="$old_gum_path:/usr/bin:/bin" \
+  run_setup_in_pty macos-terminal xterm "$old_gum_home" "$old_gum_xdg" >"$old_gum_output" 2>&1; then
+  sed 's/^/  /' "$old_gum_output" >&2
+  fail "setup rejects gum without choose label support"
+fi
+pass "setup rejects gum without choose label support"
+
+old_gum_output_text="$(cat "$old_gum_output")"
+old_gum_log_text="$(cat "$old_gum_log")"
+assert_contains "$old_gum_output_text" "gum is too old for Terrapod Setup" "old gum setup explains the unsupported gum capability"
+assert_contains "$old_gum_output_text" "Upgrade gum, then rerun Terrapod Setup" "old gum setup gives upgrade guidance"
+assert_contains "$old_gum_log_text" "gum args: choose --help" "old gum setup checks choose label support"
+assert_not_contains "$old_gum_log_text" "gum args: choose --label-delimiter" "old gum setup fails before using label-delimiter"
+
+if [ -e "$old_gum_xdg/chezmoi/chezmoi.toml" ]; then
+  fail "old gum setup does not write config"
+fi
+pass "old gum setup does not write config"
+
+assert_no_terrapod_artifacts_under "$old_gum_xdg" "old gum setup leaves no Terrapod artifacts"
 
 noninteractive_setup_home="$tmp_dir/noninteractive-setup-home"
 noninteractive_setup_xdg="$tmp_dir/noninteractive-setup-xdg"

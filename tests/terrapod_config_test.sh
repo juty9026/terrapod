@@ -63,6 +63,12 @@ confirm_default_status() {
 
 case "${1:-}" in
   choose)
+    if [ "${2:-}" = "--help" ]; then
+      printf '%s\n' "Usage: gum choose [<options> ...] [flags]"
+      printf '%s\n' "      --label-delimiter=\"\""
+      exit 0
+    fi
+
     while IFS= read -r option; do
       printf '%s\n' "gum stdin: $option" >>"$log_file"
     done
