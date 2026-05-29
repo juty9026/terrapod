@@ -67,6 +67,10 @@ case "${1:-}" in
     if [ -z "$response" ] || [ "$response" = "__CANCEL__" ]; then
       exit 130
     fi
+    if [ "$response" = "__ERROR__" ]; then
+      printf '%s\n' "simulated gum operational failure" >&2
+      exit 2
+    fi
     printf '%s\n' "$response"
     ;;
   confirm)
@@ -85,6 +89,10 @@ case "${1:-}" in
       __CANCEL__)
         exit 130
         ;;
+      __ERROR__)
+        printf '%s\n' "simulated gum operational failure" >&2
+        exit 2
+        ;;
       *)
         printf '%s\n' "unexpected gum confirm response: $response" >&2
         exit 2
@@ -99,6 +107,26 @@ esac
 SH
 
   chmod +x "$path"
+}
+
+shell_quote() {
+  printf "'"
+  printf '%s' "$1" | sed "s/'/'\\\\''/g"
+  printf "'"
+}
+
+run_setup_in_pty() {
+  profile="$1"
+  term="$2"
+  home_dir="$3"
+  xdg_config_home="$4"
+
+  if script --version >/dev/null 2>&1; then
+    command_text="env TERM=$(shell_quote "$term") TERRAPOD_PROFILE=$(shell_quote "$profile") TERRAPOD_CHEZMOI_CONFIG= HOME=$(shell_quote "$home_dir") XDG_CONFIG_HOME=$(shell_quote "$xdg_config_home") sh $(shell_quote "$terrapod") setup"
+    script -q -e -c "$command_text" /dev/null
+  else
+    script -q /dev/null env TERM="$term" TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" setup
+  fi
 }
 
 assert_contains() {
@@ -348,7 +376,7 @@ run_terrapod_setup() {
 
   TERRAPOD_GUM_RESPONSES="$responses_file" TERRAPOD_GUM_LOG="$gum_log" \
     PATH="$tmp_dir/bin:/usr/bin:/bin:$PATH" \
-    script -q /dev/null env TERM=xterm TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" setup
+    run_setup_in_pty "$profile" xterm "$home_dir" "$xdg_config_home"
 }
 
 terrapod="$repo_root/dot_local/bin/executable_terrapod"

@@ -67,6 +67,10 @@ case "${1:-}" in
     if [ "$response" = "__CANCEL__" ]; then
       exit 130
     fi
+    if [ "$response" = "__ERROR__" ]; then
+      printf '%s\n' "simulated gum operational failure" >&2
+      exit 2
+    fi
     printf '%s\n' "$response"
     ;;
   confirm)
@@ -80,6 +84,10 @@ case "${1:-}" in
         ;;
       __CANCEL__)
         exit 130
+        ;;
+      __ERROR__)
+        printf '%s\n' "simulated gum operational failure" >&2
+        exit 2
         ;;
       *)
         printf '%s\n' "unexpected gum confirm response: $response" >&2
@@ -105,6 +113,26 @@ write_gum_responses() {
   for response do
     printf '%s\n' "$response" >>"$responses_file"
   done
+}
+
+shell_quote() {
+  printf "'"
+  printf '%s' "$1" | sed "s/'/'\\\\''/g"
+  printf "'"
+}
+
+run_setup_in_pty() {
+  profile="$1"
+  term="$2"
+  home_dir="$3"
+  xdg_config_home="$4"
+
+  if script --version >/dev/null 2>&1; then
+    command_text="env TERM=$(shell_quote "$term") TERRAPOD_PROFILE=$(shell_quote "$profile") TERRAPOD_CHEZMOI_CONFIG= HOME=$(shell_quote "$home_dir") XDG_CONFIG_HOME=$(shell_quote "$xdg_config_home") sh $(shell_quote "$terrapod") setup"
+    script -q -e -c "$command_text" /dev/null
+  else
+    script -q /dev/null env TERM="$term" TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" setup
+  fi
 }
 
 assert_contains() {
@@ -198,7 +226,7 @@ run_terrapod_setup_command() {
 
   TERRAPOD_GUM_RESPONSES="$responses_file" TERRAPOD_GUM_LOG="$gum_log" \
     PATH="$tmp_dir/bin:/usr/bin:/bin" \
-    script -q /dev/null env TERM=xterm TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" setup >"$output_file" 2>&1
+    run_setup_in_pty "$profile" xterm "$home_dir" "$xdg_config_home" >"$output_file" 2>&1
 }
 
 assert_call_args() {
@@ -526,7 +554,7 @@ mkdir -p "$dumb_setup_home"
 
 if TERRAPOD_GUM_RESPONSES="$tmp_dir/dumb.responses" TERRAPOD_GUM_LOG="$tmp_dir/dumb-gum.log" \
   PATH="$tmp_dir/bin:/usr/bin:/bin" \
-  script -q /dev/null env TERM=dumb TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG= HOME="$dumb_setup_home" XDG_CONFIG_HOME="$dumb_setup_xdg" sh "$terrapod" setup >"$dumb_setup_output" 2>&1; then
+  run_setup_in_pty macos-terminal dumb "$dumb_setup_home" "$dumb_setup_xdg" >"$dumb_setup_output" 2>&1; then
   sed 's/^/  /' "$dumb_setup_output" >&2
   fail "TERM=dumb setup fails instead of falling back to plain prompts"
 fi
@@ -563,6 +591,32 @@ fi
 pass "VPS rejected setup does not write config"
 
 assert_no_terrapod_artifacts_under "$vps_setup_xdg" "VPS rejected setup leaves no Terrapod artifacts"
+
+gum_error_home="$tmp_dir/gum-error-home"
+gum_error_xdg="$tmp_dir/gum-error-xdg"
+gum_error_output="$tmp_dir/gum-error.out"
+gum_error_responses="$tmp_dir/gum-error.responses"
+gum_error_gum_log="$tmp_dir/gum-error-gum.log"
+gum_error_config="$gum_error_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$gum_error_home"
+write_gum_responses "$gum_error_responses" minimal __ERROR__
+
+if run_terrapod_setup_command macos-terminal "$gum_error_responses" "$gum_error_home" "$gum_error_xdg" "$gum_error_output" "$gum_error_gum_log"; then
+  fail "setup fails when gum returns an operational error"
+fi
+pass "setup fails when gum returns an operational error"
+
+gum_error_output_text="$(cat "$gum_error_output")"
+assert_contains "$gum_error_output_text" "gum failed during Terrapod Setup" "gum operational error explains gum failure"
+assert_contains "$gum_error_output_text" "rerun 'terrapod setup'" "gum operational error gives rerun guidance"
+assert_not_contains "$gum_error_output_text" "setup cancelled" "gum operational error is not reported as cancellation"
+
+if [ -e "$gum_error_config" ]; then
+  fail "gum operational error does not write config"
+fi
+pass "gum operational error does not write config"
+
+assert_no_terrapod_artifacts_under "$gum_error_xdg" "gum operational error leaves no Terrapod artifacts"
 
 missing_gum_home="$tmp_dir/missing-gum-home"
 missing_gum_xdg="$tmp_dir/missing-gum-xdg"

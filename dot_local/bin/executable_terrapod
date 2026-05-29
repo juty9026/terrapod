@@ -240,12 +240,26 @@ require_gum_setup() {
   fi
 }
 
+fatal_gum_setup_failure() {
+  fatal "gum failed during Terrapod Setup; fix gum and rerun 'terrapod setup'"
+}
+
 prompt_for_setup_preset() {
   profile="$1"
 
   set -- $(available_presets_for_profile "$profile")
-  if ! preset="$(gum choose --header "Choose Terrapod Preset" "$@")"; then
+  if preset="$(gum choose --header "Choose Terrapod Preset" "$@")"; then
+    status=0
+  else
+    status="$?"
+  fi
+
+  if [ "$status" -eq 130 ]; then
     fatal "no Terrapod Preset selected"
+  fi
+
+  if [ "$status" -ne 0 ]; then
+    fatal_gum_setup_failure
   fi
 
   if [ -z "$preset" ]; then
@@ -267,11 +281,21 @@ confirm_setup_write() {
   config_file="$1"
 
   if gum confirm "Write these Terrapod settings to $config_file?" --default=false; then
+    status=0
+  else
+    status="$?"
+  fi
+
+  if [ "$status" -eq 0 ]; then
     return 0
   fi
 
-  printf '%s\n' "terrapod: setup cancelled" >&2
-  return 1
+  if [ "$status" -eq 1 ] || [ "$status" -eq 130 ]; then
+    printf '%s\n' "terrapod: setup cancelled" >&2
+    return 1
+  fi
+
+  fatal_gum_setup_failure
 }
 
 prompt_setup_bool() {
@@ -290,7 +314,11 @@ prompt_setup_bool() {
     return
   fi
 
-  fatal "setup cancelled"
+  if [ "$status" -eq 130 ]; then
+    fatal "setup cancelled"
+  fi
+
+  fatal_gum_setup_failure
 }
 
 prompt_for_setup_settings() {
