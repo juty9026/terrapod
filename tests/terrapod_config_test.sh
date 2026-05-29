@@ -109,6 +109,26 @@ SH
   chmod +x "$path"
 }
 
+write_no_gum_path() {
+  path="$1"
+  shift
+
+  mkdir -p "$path"
+
+  for command_name do
+    command_path="$(command -v "$command_name" 2>/dev/null || true)"
+    if [ -z "$command_path" ]; then
+      fail "no-gum PATH setup requires $command_name"
+    fi
+
+    ln -s "$command_path" "$path/$command_name"
+  done
+
+  if PATH="$path" command -v gum >/dev/null 2>&1; then
+    fail "no-gum PATH setup should hide gum"
+  fi
+}
+
 shell_quote() {
   printf "'"
   printf '%s' "$1" | sed "s/'/'\\\\''/g"
@@ -370,7 +390,7 @@ run_terrapod_configure_without_gum() {
   home_dir="$3"
   xdg_config_home="$4"
 
-  PATH="/usr/bin:/bin" TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= \
+  PATH="$no_gum_path" TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= \
     HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" \
     sh "$terrapod" configure "$preset" </dev/null
 }
@@ -393,6 +413,8 @@ run_terrapod_setup() {
 terrapod="$repo_root/dot_local/bin/executable_terrapod"
 mkdir -p "$tmp_dir/bin"
 write_gum_stub "$tmp_dir/bin/gum"
+no_gum_path="$tmp_dir/no-gum-bin"
+write_no_gum_path "$no_gum_path" sh dirname mkdir mktemp awk sed mv rm cat chmod stat cp date
 
 new_home="$tmp_dir/new-home"
 new_xdg="$tmp_dir/new-xdg"
