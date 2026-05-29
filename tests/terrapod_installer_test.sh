@@ -128,8 +128,10 @@ assert_contains "$readme_text" 'sh -c "$(curl -fsLS https://raw.githubuserconten
 assert_contains "$readme_text" "https://github.com/juty9026/terrapod.git" "README documents the HTTPS source repository"
 assert_not_contains "$readme_text" "juty9026/dotfiles" "README does not document the unsupported legacy repository slug"
 assert_contains "$readme_text" "You do not need to install \`chezmoi\` manually before running this installer." "README states chezmoi is not a first-run prerequisite"
-assert_contains "$readme_text" "Use \`terrapod\` as the primary management command after bootstrap." "README documents Terrapod as the primary management command"
-assert_contains "$readme_text" "\`tpod\` is the short alias for the same command." "README documents tpod as the short Terrapod alias"
+assert_contains "$readme_text" "After the initial apply completes, the installer prints" "README documents post-apply help output"
+assert_contains "$readme_text" "\`tpod help\` so the short day-to-day command is immediately visible." "README documents tpod help after first-run apply"
+assert_contains "$readme_text" "Use \`tpod\` as the day-to-day management command after bootstrap." "README documents tpod as the day-to-day management command"
+assert_contains "$readme_text" "\`terrapod\` remains the full command and brand name." "README keeps Terrapod as the full command and brand"
 assert_contains "$readme_text" "terrapod chezmoi -- status" "README documents raw chezmoi access through Terrapod"
 assert_contains "$readme_text" "Direct chezmoi use remains an advanced escape hatch." "README keeps direct chezmoi as an advanced escape hatch"
 assert_not_contains "$readme_text" "--non-interactive" "README keeps non-interactive installer options out of scope"
@@ -442,6 +444,33 @@ TERRAPOD_STUB
     chmod +x "$source_dir/dot_local/bin/executable_terrapod"
     ;;
   apply)
+    mkdir -p "$HOME/.local/bin"
+    cat >"$HOME/.local/bin/tpod" <<'TPOD_STUB'
+#!/bin/sh
+set -eu
+
+printf '%s\n' "tpod path:$0" >>"${TERRAPOD_STUB_CALL_LOG:?}"
+printf '%s\n' "tpod args:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"
+case ":${PATH:-}:" in
+  *":$HOME/.local/bin:"*)
+    printf '%s\n' "tpod path_has_local_bin:yes" >>"${TERRAPOD_STUB_CALL_LOG:?}"
+    ;;
+  *)
+    printf '%s\n' "tpod path_has_local_bin:no" >>"${TERRAPOD_STUB_CALL_LOG:?}"
+    ;;
+esac
+
+case "${1-}" in
+  help|--help|-h)
+    printf '%s\n' "tpod help output"
+    ;;
+  *)
+    printf '%s\n' "unexpected tpod command:${1-}" >>"${TERRAPOD_STUB_CALL_LOG:?}"
+    exit 64
+    ;;
+esac
+TPOD_STUB
+    chmod +x "$HOME/.local/bin/tpod"
     ;;
   *)
     printf '%s\n' "unexpected chezmoi command:${1-}" >>"$log_file"
@@ -887,6 +916,10 @@ assert_first_occurrence_before "$first_run_log_text" "brew args:install gum" "te
 assert_first_occurrence_before "$first_run_log_text" "terrapod args:setup" "chezmoi args:apply" "setup runs before chezmoi apply"
 assert_first_occurrence_before "$first_run_log_text" "brew args:install gum" "chezmoi args:apply" "macOS setup UI gum bootstrap runs before initial apply"
 assert_contains "$first_run_log_text" "chezmoi args:apply" "chezmoi apply runs after setup"
+assert_first_occurrence_before "$first_run_log_text" "chezmoi args:apply" "tpod args:help" "first-run installer shows tpod help after initial apply"
+assert_contains "$first_run_log_text" "tpod path:$first_run_case/home/.local/bin/tpod" "first-run installer invokes installed tpod from user local bin"
+assert_contains "$first_run_log_text" "tpod path_has_local_bin:yes" "tpod help receives PATH containing user local bin"
+assert_contains "$first_run_stdout" "tpod help output" "first-run installer prints tpod help after initial apply"
 assert_contains "$first_run_log_text" "chezmoi path_has_local_bin:yes" "child command PATH contains user local bin"
 assert_not_contains "$first_run_log_text" "brew args:upgrade" "first-run installer does not run broad Homebrew upgrades"
 assert_not_contains "$first_run_log_text" "brew args:bundle" "first-run installer leaves Brewfile bundle to initial apply"

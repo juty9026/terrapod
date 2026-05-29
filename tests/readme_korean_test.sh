@@ -117,6 +117,10 @@ assert_contains "$korean_readme" '`gum`이 필요 없으며, interactive customi
   "README.ko.md documents configure as no-gum and non-interactive"
 assert_contains "$korean_readme" 'Plain text fallback은 없습니다.' \
   "README.ko.md documents no plain text fallback behavior"
+assert_contains "$korean_readme" 'initial apply가 끝나면 installer는 `tpod help`를' \
+  "README.ko.md documents tpod help after first-run apply"
+assert_contains "$korean_readme" 'bootstrap 이후의 day-to-day 관리 명령은 `tpod`입니다.' \
+  "README.ko.md presents tpod as the day-to-day command"
 assert_contains "$korean_readme" '`terrapod configure <Preset>`는 Terrapod Setup의 plain fallback이 아닙니다.' \
   "README.ko.md states configure is not a Setup fallback"
 assert_contains "$korean_readme" '`terrapod configure <Preset>`는 setup UI 없이 설정을 쓰는' \
