@@ -134,18 +134,36 @@ assert_contains '## What Terrapod Carries' \
   "README summarizes Terrapod's carried domain concepts"
 assert_contains '## Choose a Preset' \
   "README uses the canonical Preset section title"
+assert_contains 'Terrapod Setup requires `gum` (the Bootstrap UI Dependency)' \
+  "README documents Bootstrap UI Dependency requirement for setup"
 assert_contains '`terrapod configure <Preset>` is the script-friendly Preset configuration' \
   "README documents script-friendly Preset configuration"
 assert_contains 'It writes concrete settings for exactly one supported Preset' \
   "README documents configure writes concrete settings for one Preset"
 assert_contains 'require `gum`, and has no interactive customization.' \
   "README documents configure as no-gum and non-interactive"
+assert_contains 'There is no plain text fallback.' \
+  "README documents plain text fallback is intentionally disabled"
+assert_contains '`terrapod configure <Preset>` are intentionally separate.' \
+  "README documents setup and configure are intentionally separate"
+assert_contains '`terrapod configure <Preset>` are intentionally separate. The latter writes' \
+  "README documents setup and configure are intentionally separate"
+assert_contains 'settings without the setup UI. If Terrapod Setup cannot run because `gum` or an' \
+  "README documents configure is script-friendly and setup UI is intentionally separate"
 assert_contains '<Preset>` is not a plain fallback for Terrapod Setup.' \
   "README states configure is not a Setup fallback"
-assert_contains 'If Terrapod Setup cannot' \
-  "README documents missing-gum Setup recovery start"
 assert_contains 'terminal environment and rerun `terrapod setup`.' \
-  "README documents missing-gum Setup recovery"
+  "README documents missing-gum Setup recovery guidance"
+assert_contains 'Before Terrapod Setup, the first-run installer prepares `gum` as the required' \
+  "README documents first-run gum bootstrap before setup on macOS"
+assert_contains 'Bootstrap UI Dependency with Homebrew when `gum` is missing.' \
+  "README documents macOS bootstrap UI dependency preparation path"
+assert_contains 'bootstrap is limited to `gum`; it does not run broad Homebrew upgrades.' \
+  "README documents macOS bootstrap UI dependency scope excludes broad Homebrew upgrades"
+assert_contains 'Bootstrap UI Dependency from APT with the Charm APT repository when `gum` is' \
+  "README documents Ubuntu bootstrap UI dependency preparation path"
+assert_contains 'That setup UI bootstrap is limited to `gum`; it does not run broad APT' \
+  "README documents Ubuntu bootstrap UI dependency scope excludes broad APT upgrades"
 assert_contains '## What Terrapod Leaves Alone' \
   "README documents product boundaries near the top"
 assert_contains '## Daily Commands' \

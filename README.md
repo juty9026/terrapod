@@ -30,6 +30,11 @@ repository.
 Terrapod Setup is an interactive first-run prompt. Routine Terrapod command
 output remains operational and scan-friendly after bootstrap.
 
+Terrapod Setup requires `gum` (the Bootstrap UI Dependency) and an interactive
+terminal supported by gum. Missing `gum`, failed gum bootstrap, non-TTY
+sessions, `dumb` terminals, and unsupported interactive terminals stop setup
+before apply with guidance text. There is no plain text fallback.
+
 You do not need to install `chezmoi` manually before running this installer.
 
 After bootstrap, use Terrapod for normal checks and source updates.
@@ -68,8 +73,10 @@ The `workstation` Preset is available only for the macOS Terminal Profile.
 `terrapod configure <Preset>` is the script-friendly Preset configuration
 command. It writes concrete settings for exactly one supported Preset, does not
 require `gum`, and has no interactive customization. `terrapod configure
-<Preset>` is not a plain fallback for Terrapod Setup. If Terrapod Setup cannot
-run because `gum` or an interactive terminal is unavailable, fix the `gum` or
+<Preset>` is not a plain fallback for Terrapod Setup. Terrapod Setup and
+`terrapod configure <Preset>` are intentionally separate. The latter writes
+settings without the setup UI. If Terrapod Setup cannot run because `gum` or an
+interactive terminal is unavailable, fix the `gum` or
 terminal environment and rerun `terrapod setup`.
 
 ## What Terrapod Leaves Alone
@@ -117,6 +124,10 @@ Run the installer on macOS.
 sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/install.sh)"
 ```
 
+Before Terrapod Setup, the first-run installer prepares `gum` as the required
+Bootstrap UI Dependency with Homebrew when `gum` is missing. That setup UI
+bootstrap is limited to `gum`; it does not run broad Homebrew upgrades.
+
 On macOS, the initial apply also runs setup scripts under `.chezmoiscripts` for the initial terminal environment:
 
 - Homebrew bootstrap and the macOS `Brewfile` bundle
@@ -153,6 +164,11 @@ sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/ins
 The installer adds `~/.local/bin` to `PATH` for the bootstrap process. After
 the first apply, managed zsh sessions keep `~/.local/bin` on `PATH` so
 user-local binaries such as `chezmoi` remain available after reconnecting.
+
+Before Terrapod Setup, the first-run installer prepares `gum` as the required
+Bootstrap UI Dependency from APT with the Charm APT repository when `gum` is
+missing. That setup UI bootstrap is limited to `gum`; it does not run broad APT
+upgrades.
 
 On Ubuntu, the initial apply runs setup scripts for the VPS shell profile:
 
