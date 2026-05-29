@@ -115,6 +115,26 @@ write_gum_responses() {
   done
 }
 
+write_no_gum_path() {
+  path="$1"
+  shift
+
+  mkdir -p "$path"
+
+  for command_name do
+    command_path="$(command -v "$command_name" 2>/dev/null || true)"
+    if [ -z "$command_path" ]; then
+      fail "no-gum PATH setup requires $command_name"
+    fi
+
+    ln -s "$command_path" "$path/$command_name"
+  done
+
+  if PATH="$path" command -v gum >/dev/null 2>&1; then
+    fail "no-gum PATH setup should hide gum"
+  fi
+}
+
 shell_quote() {
   printf "'"
   printf '%s' "$1" | sed "s/'/'\\\\''/g"
@@ -328,6 +348,8 @@ assert_no_terrapod_artifacts_under() {
 
 mkdir -p "$tmp_dir/bin" "$tmp_dir/home"
 write_gum_stub "$tmp_dir/bin/gum"
+no_gum_path="$tmp_dir/no-gum-bin"
+write_no_gum_path "$no_gum_path" sh
 
 terrapod="$repo_root/dot_local/bin/executable_terrapod"
 tpod_source="$repo_root/dot_local/bin/symlink_tpod"
@@ -654,7 +676,7 @@ missing_gum_output="$tmp_dir/missing-gum.out"
 mkdir -p "$missing_gum_home"
 
 if printf '%s\n' "workstation" |
-  PATH="/usr/bin:/bin" TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG= HOME="$missing_gum_home" XDG_CONFIG_HOME="$missing_gum_xdg" sh "$terrapod" setup >"$missing_gum_output" 2>&1; then
+  PATH="$no_gum_path" TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG= HOME="$missing_gum_home" XDG_CONFIG_HOME="$missing_gum_xdg" sh "$terrapod" setup >"$missing_gum_output" 2>&1; then
   fail "setup fails when gum is missing"
 fi
 pass "setup fails when gum is missing"
