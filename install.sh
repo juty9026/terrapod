@@ -131,6 +131,47 @@ install_chezmoi_if_needed() {
   printf '%s\n' "$chezmoi_path"
 }
 
+vps_sudo_cmd() {
+  if [ "$(id -u)" -eq 0 ]; then
+    printf '%s\n' ""
+  elif command -v sudo >/dev/null 2>&1; then
+    printf '%s\n' "sudo"
+  else
+    fatal "Ubuntu bootstrap prerequisites are required before Terrapod Setup. Install sudo so Terrapod can prepare git and gum with apt-get, or install git and gum manually before rerunning the installer."
+  fi
+}
+
+ensure_charm_apt_repository() {
+  sudo_cmd="$1"
+
+  if ! $sudo_cmd install -dm 755 /etc/apt/keyrings; then
+    fatal "failed to create the APT keyring directory for the Charm repository. Check sudo permissions and rerun the Terrapod installer before Terrapod Setup."
+  fi
+
+  if ! charm_key_file="$(mktemp "${TMPDIR:-/tmp}/terrapod-charm-key.XXXXXX")"; then
+    fatal "failed to create a temporary file for the Charm APT signing key. Check temporary directory permissions and rerun the Terrapod installer before Terrapod Setup."
+  fi
+
+  if ! curl -fsSL https://repo.charm.sh/apt/gpg.key -o "$charm_key_file"; then
+    rm -f "$charm_key_file"
+    fatal "failed to fetch the Charm APT signing key for gum. Check network access to https://repo.charm.sh/apt/gpg.key and rerun the Terrapod installer before Terrapod Setup."
+  fi
+
+  if ! $sudo_cmd gpg --dearmor --yes -o /etc/apt/keyrings/charm.gpg "$charm_key_file"; then
+    rm -f "$charm_key_file"
+    fatal "failed to install the Charm APT signing key for gum. Check APT keyring permissions and rerun the Terrapod installer before Terrapod Setup."
+  fi
+  rm -f "$charm_key_file"
+
+  if ! printf '%s\n' "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | $sudo_cmd tee /etc/apt/sources.list.d/charm.list >/dev/null; then
+    fatal "failed to write the Charm APT repository for gum. Check sudo permissions and rerun the Terrapod installer before Terrapod Setup."
+  fi
+
+  if ! $sudo_cmd apt-get update -y; then
+    fatal "failed to update APT metadata after adding the Charm APT repository for gum. Check APT connectivity and rerun the Terrapod installer before Terrapod Setup."
+  fi
+}
+
 ensure_source_repo_prerequisites() {
   profile="$1"
 
@@ -138,24 +179,33 @@ ensure_source_repo_prerequisites() {
     return 0
   fi
 
-  if command -v git >/dev/null 2>&1; then
+  if command -v git >/dev/null 2>&1 && command -v gum >/dev/null 2>&1; then
     return 0
   fi
 
-  if [ "$(id -u)" -eq 0 ]; then
-    sudo_cmd=""
-  elif command -v sudo >/dev/null 2>&1; then
-    sudo_cmd="sudo"
-  else
-    fatal "git is required before chezmoi can initialize the source repository. Install git, or install sudo so Terrapod can install git with apt-get."
+  sudo_cmd="$(vps_sudo_cmd)"
+  bootstrap_packages="ca-certificates curl"
+  if ! command -v git >/dev/null 2>&1; then
+    bootstrap_packages="$bootstrap_packages git"
   fi
+  bootstrap_packages="$bootstrap_packages gpg"
 
   if ! $sudo_cmd apt-get update -y; then
-    fatal "failed to update APT metadata before installing git"
+    fatal "failed to update APT metadata before installing Ubuntu bootstrap prerequisites"
   fi
 
-  if ! $sudo_cmd apt-get install -y ca-certificates git; then
-    fatal "failed to install git before initializing the source repository"
+  if ! $sudo_cmd apt-get install -y $bootstrap_packages; then
+    fatal "failed to install Ubuntu bootstrap prerequisites before Terrapod Setup. Install ca-certificates, curl, git, and gpg, then rerun the Terrapod installer."
+  fi
+
+  if command -v gum >/dev/null 2>&1; then
+    return 0
+  fi
+
+  ensure_charm_apt_repository "$sudo_cmd"
+
+  if ! $sudo_cmd apt-get install -y gum; then
+    fatal "failed to install gum from the Charm APT repository. Check APT output, fix repository/package access, and rerun the Terrapod installer before Terrapod Setup."
   fi
 }
 

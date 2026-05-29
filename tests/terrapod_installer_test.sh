@@ -20,7 +20,7 @@ pass() {
 }
 
 mkdir -p "$safe_path_dir"
-for command_name in cat chmod cp mkdir; do
+for command_name in cat chmod cp mkdir mktemp rm; do
   command_path="$(command -v "$command_name")"
   ln -s "$command_path" "$safe_path_dir/$command_name"
 done
@@ -293,6 +293,9 @@ set -eu
 printf '%s\n' "apt-get args:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"
 case "${1-}" in
   update|install)
+    if [ "$*" = "install -y gum" ] && [ "${TERRAPOD_APT_FAIL_INSTALL_GUM:-0}" = "1" ]; then
+      exit 17
+    fi
     exit 0
     ;;
   *)
@@ -301,6 +304,76 @@ case "${1-}" in
 esac
 EOF
   chmod +x "$case_dir/bin/apt-get"
+
+  cat >"$case_dir/bin/install" <<'EOF'
+#!/bin/sh
+set -eu
+
+printf '%s\n' "install args:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"
+exit 0
+EOF
+  chmod +x "$case_dir/bin/install"
+
+  cat >"$case_dir/bin/curl" <<'EOF'
+#!/bin/sh
+set -eu
+
+printf '%s\n' "curl args:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"
+case "$*" in
+  *https://repo.charm.sh/apt/gpg.key*)
+    if [ "${TERRAPOD_CHARM_KEY_STUB_STATUS:-0}" != "0" ]; then
+      exit "$TERRAPOD_CHARM_KEY_STUB_STATUS"
+    fi
+    output_file=""
+    want_output_file="no"
+    for arg do
+      if [ "$want_output_file" = "yes" ]; then
+        output_file="$arg"
+        want_output_file="no"
+        continue
+      fi
+      if [ "$arg" = "-o" ]; then
+        want_output_file="yes"
+      fi
+    done
+    if [ -n "$output_file" ]; then
+      printf '%s\n' "fake charm key" >"$output_file"
+    else
+      printf '%s\n' "fake charm key"
+    fi
+    ;;
+  *)
+    printf '%s\n' "unexpected curl args:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"
+    exit 64
+    ;;
+esac
+EOF
+  chmod +x "$case_dir/bin/curl"
+
+  cat >"$case_dir/bin/gpg" <<'EOF'
+#!/bin/sh
+set -eu
+
+printf '%s\n' "gpg args:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"
+cat >/dev/null
+if [ "${TERRAPOD_GPG_STUB_STATUS:-0}" != "0" ]; then
+  exit "$TERRAPOD_GPG_STUB_STATUS"
+fi
+exit 0
+EOF
+  chmod +x "$case_dir/bin/gpg"
+
+  cat >"$case_dir/bin/tee" <<'EOF'
+#!/bin/sh
+set -eu
+
+printf '%s\n' "tee args:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"
+while IFS= read -r line || [ -n "$line" ]; do
+  printf '%s\n' "tee stdin:$line" >>"${TERRAPOD_STUB_CALL_LOG:?}"
+done
+exit 0
+EOF
+  chmod +x "$case_dir/bin/tee"
 }
 
 write_chezmoi_flow_stub() {
@@ -492,7 +565,7 @@ pass "Darwin installer creates user local bin directory"
 ubuntu_case="$(make_case_dir ubuntu-profile)"
 write_uname_stub "$ubuntu_case" "Linux"
 ubuntu_os_release="$(write_os_release "$ubuntu_case" "ID=ubuntu" 'VERSION_ID="24.04"')"
-write_command_call_stubs "$ubuntu_case" "curl" "wget" "git" "sh"
+write_command_call_stubs "$ubuntu_case" "curl" "wget" "git" "gum" "sh"
 mkdir -p "$ubuntu_case/home/.local/bin"
 write_chezmoi_flow_stub "$ubuntu_case/home/.local/bin/chezmoi"
 TERRAPOD_OS_RELEASE_FILE="$ubuntu_os_release"
@@ -529,8 +602,101 @@ unset TERRAPOD_STUB_CALL_LOG
 assert_status "$installer_status" 0 "Ubuntu installer installs source prerequisites when git is missing"
 ubuntu_missing_git_log_text="$(cat "$ubuntu_missing_git_log")"
 assert_contains "$ubuntu_missing_git_log_text" "apt-get args:update -y" "Ubuntu missing git case updates package metadata"
-assert_contains "$ubuntu_missing_git_log_text" "apt-get args:install -y ca-certificates git" "Ubuntu missing git case installs git before init"
-assert_first_occurrence_before "$ubuntu_missing_git_log_text" "apt-get args:install -y ca-certificates git" "chezmoi args:init https://github.com/juty9026/terrapod.git" "Ubuntu missing git case installs git before chezmoi init"
+assert_contains "$ubuntu_missing_git_log_text" "apt-get args:install -y ca-certificates curl git gpg" "Ubuntu missing git case installs source and bootstrap UI dependencies"
+assert_contains "$ubuntu_missing_git_log_text" "install args:-dm 755 /etc/apt/keyrings" "Ubuntu missing git case creates an APT keyring directory"
+assert_contains "$ubuntu_missing_git_log_text" "curl args:-fsSL https://repo.charm.sh/apt/gpg.key -o " "Ubuntu missing git case fetches the Charm APT signing key"
+assert_contains "$ubuntu_missing_git_log_text" "gpg args:--dearmor --yes -o /etc/apt/keyrings/charm.gpg " "Ubuntu missing git case dearmors the Charm APT signing key"
+assert_contains "$ubuntu_missing_git_log_text" "tee args:/etc/apt/sources.list.d/charm.list" "Ubuntu missing git case writes the Charm APT source list"
+assert_contains "$ubuntu_missing_git_log_text" "tee stdin:deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" "Ubuntu missing git case pins the Charm repository to its keyring"
+assert_contains "$ubuntu_missing_git_log_text" "apt-get args:install -y gum" "Ubuntu missing git case installs gum through APT"
+assert_first_occurrence_before "$ubuntu_missing_git_log_text" "apt-get args:install -y ca-certificates curl git gpg" "chezmoi args:init https://github.com/juty9026/terrapod.git" "Ubuntu missing git case installs git before chezmoi init"
+assert_first_occurrence_before "$ubuntu_missing_git_log_text" "tee args:/etc/apt/sources.list.d/charm.list" "apt-get args:install -y gum" "Ubuntu missing git case adds the Charm repository before installing gum"
+assert_first_occurrence_before "$ubuntu_missing_git_log_text" "apt-get args:install -y gum" "terrapod args:setup" "Ubuntu missing git case installs gum before Terrapod Setup"
+assert_first_occurrence_before "$ubuntu_missing_git_log_text" "apt-get args:install -y gum" "chezmoi args:apply" "Ubuntu missing git case installs gum before initial apply"
+
+ubuntu_charm_repo_failure_case="$(make_case_dir ubuntu-charm-repo-failure)"
+write_uname_stub "$ubuntu_charm_repo_failure_case" "Linux"
+ubuntu_charm_repo_failure_os_release="$(write_os_release "$ubuntu_charm_repo_failure_case" "ID=ubuntu" 'VERSION_ID="24.04"')"
+write_command_call_stubs "$ubuntu_charm_repo_failure_case" "wget" "git" "sh"
+write_ubuntu_package_stubs "$ubuntu_charm_repo_failure_case"
+mkdir -p "$ubuntu_charm_repo_failure_case/home/.local/bin"
+write_chezmoi_flow_stub "$ubuntu_charm_repo_failure_case/home/.local/bin/chezmoi"
+ubuntu_charm_repo_failure_log="$ubuntu_charm_repo_failure_case/command-calls"
+TERRAPOD_OS_RELEASE_FILE="$ubuntu_charm_repo_failure_os_release"
+TERRAPOD_STUB_CALL_LOG="$ubuntu_charm_repo_failure_log"
+TERRAPOD_GPG_STUB_STATUS=17
+export TERRAPOD_OS_RELEASE_FILE
+export TERRAPOD_STUB_CALL_LOG
+export TERRAPOD_GPG_STUB_STATUS
+run_installer_case "$ubuntu_charm_repo_failure_case" 'development
+'
+unset TERRAPOD_OS_RELEASE_FILE
+unset TERRAPOD_STUB_CALL_LOG
+unset TERRAPOD_GPG_STUB_STATUS
+assert_failure "$installer_status" "Ubuntu Charm repository failure makes installer exit unsuccessfully"
+ubuntu_charm_repo_failure_stderr="$(cat "$ubuntu_charm_repo_failure_case/stderr")"
+ubuntu_charm_repo_failure_log_text="$(cat "$ubuntu_charm_repo_failure_log")"
+assert_contains "$ubuntu_charm_repo_failure_stderr" "failed to install the Charm APT signing key" "Ubuntu Charm repository failure explains the failed trust boundary"
+assert_contains "$ubuntu_charm_repo_failure_stderr" "rerun the Terrapod installer before Terrapod Setup" "Ubuntu Charm repository failure gives setup recovery guidance"
+assert_not_contains "$ubuntu_charm_repo_failure_log_text" "terrapod args:setup" "Ubuntu Charm repository failure stops before Terrapod Setup"
+assert_not_contains "$ubuntu_charm_repo_failure_log_text" "chezmoi args:apply" "Ubuntu Charm repository failure stops before initial apply"
+
+ubuntu_charm_key_fetch_failure_case="$(make_case_dir ubuntu-charm-key-fetch-failure)"
+write_uname_stub "$ubuntu_charm_key_fetch_failure_case" "Linux"
+ubuntu_charm_key_fetch_failure_os_release="$(write_os_release "$ubuntu_charm_key_fetch_failure_case" "ID=ubuntu" 'VERSION_ID="24.04"')"
+write_command_call_stubs "$ubuntu_charm_key_fetch_failure_case" "wget" "git" "sh"
+write_ubuntu_package_stubs "$ubuntu_charm_key_fetch_failure_case"
+mkdir -p "$ubuntu_charm_key_fetch_failure_case/home/.local/bin"
+write_chezmoi_flow_stub "$ubuntu_charm_key_fetch_failure_case/home/.local/bin/chezmoi"
+ubuntu_charm_key_fetch_failure_log="$ubuntu_charm_key_fetch_failure_case/command-calls"
+TERRAPOD_OS_RELEASE_FILE="$ubuntu_charm_key_fetch_failure_os_release"
+TERRAPOD_STUB_CALL_LOG="$ubuntu_charm_key_fetch_failure_log"
+TERRAPOD_CHARM_KEY_STUB_STATUS=17
+export TERRAPOD_OS_RELEASE_FILE
+export TERRAPOD_STUB_CALL_LOG
+export TERRAPOD_CHARM_KEY_STUB_STATUS
+run_installer_case "$ubuntu_charm_key_fetch_failure_case" 'development
+'
+unset TERRAPOD_OS_RELEASE_FILE
+unset TERRAPOD_STUB_CALL_LOG
+unset TERRAPOD_CHARM_KEY_STUB_STATUS
+assert_failure "$installer_status" "Ubuntu Charm key fetch failure makes installer exit unsuccessfully"
+ubuntu_charm_key_fetch_failure_stderr="$(cat "$ubuntu_charm_key_fetch_failure_case/stderr")"
+ubuntu_charm_key_fetch_failure_log_text="$(cat "$ubuntu_charm_key_fetch_failure_log")"
+assert_contains "$ubuntu_charm_key_fetch_failure_stderr" "failed to fetch the Charm APT signing key" "Ubuntu Charm key fetch failure explains the failed download"
+assert_contains "$ubuntu_charm_key_fetch_failure_stderr" "rerun the Terrapod installer before Terrapod Setup" "Ubuntu Charm key fetch failure gives setup recovery guidance"
+assert_contains "$ubuntu_charm_key_fetch_failure_log_text" "curl args:-fsSL https://repo.charm.sh/apt/gpg.key -o " "Ubuntu Charm key fetch failure attempts to fetch the signing key"
+assert_not_contains "$ubuntu_charm_key_fetch_failure_log_text" "apt-get args:install -y gum" "Ubuntu Charm key fetch failure does not install gum"
+assert_not_contains "$ubuntu_charm_key_fetch_failure_log_text" "terrapod args:setup" "Ubuntu Charm key fetch failure stops before Terrapod Setup"
+assert_not_contains "$ubuntu_charm_key_fetch_failure_log_text" "chezmoi args:apply" "Ubuntu Charm key fetch failure stops before initial apply"
+
+ubuntu_gum_failure_case="$(make_case_dir ubuntu-gum-failure)"
+write_uname_stub "$ubuntu_gum_failure_case" "Linux"
+ubuntu_gum_failure_os_release="$(write_os_release "$ubuntu_gum_failure_case" "ID=ubuntu" 'VERSION_ID="24.04"')"
+write_command_call_stubs "$ubuntu_gum_failure_case" "wget" "git" "sh"
+write_ubuntu_package_stubs "$ubuntu_gum_failure_case"
+mkdir -p "$ubuntu_gum_failure_case/home/.local/bin"
+write_chezmoi_flow_stub "$ubuntu_gum_failure_case/home/.local/bin/chezmoi"
+ubuntu_gum_failure_log="$ubuntu_gum_failure_case/command-calls"
+TERRAPOD_OS_RELEASE_FILE="$ubuntu_gum_failure_os_release"
+TERRAPOD_STUB_CALL_LOG="$ubuntu_gum_failure_log"
+TERRAPOD_APT_FAIL_INSTALL_GUM=1
+export TERRAPOD_OS_RELEASE_FILE
+export TERRAPOD_STUB_CALL_LOG
+export TERRAPOD_APT_FAIL_INSTALL_GUM
+run_installer_case "$ubuntu_gum_failure_case" 'development
+'
+unset TERRAPOD_OS_RELEASE_FILE
+unset TERRAPOD_STUB_CALL_LOG
+unset TERRAPOD_APT_FAIL_INSTALL_GUM
+assert_failure "$installer_status" "Ubuntu gum install failure makes installer exit unsuccessfully"
+ubuntu_gum_failure_stderr="$(cat "$ubuntu_gum_failure_case/stderr")"
+ubuntu_gum_failure_log_text="$(cat "$ubuntu_gum_failure_log")"
+assert_contains "$ubuntu_gum_failure_stderr" "failed to install gum from the Charm APT repository" "Ubuntu gum install failure explains the failed package install"
+assert_contains "$ubuntu_gum_failure_stderr" "rerun the Terrapod installer before Terrapod Setup" "Ubuntu gum install failure gives setup recovery guidance"
+assert_contains "$ubuntu_gum_failure_log_text" "apt-get args:install -y gum" "Ubuntu gum install failure attempts to install gum"
+assert_not_contains "$ubuntu_gum_failure_log_text" "terrapod args:setup" "Ubuntu gum install failure stops before Terrapod Setup"
+assert_not_contains "$ubuntu_gum_failure_log_text" "chezmoi args:apply" "Ubuntu gum install failure stops before initial apply"
 
 first_run_case="$(make_case_dir first-run-macos)"
 write_uname_stub "$first_run_case" "Darwin"
