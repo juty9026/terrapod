@@ -1068,11 +1068,18 @@ show_config_context() {
 
 show_stack_context() {
   config_file="$1"
+  profile="$2"
 
   printf '%s\n' "Optional stacks:"
   printf '%s\n' "Optional Editor Stack: $(effective_optional_stack_state_label "$config_file" enableEditorStack)"
   printf '%s\n' "Optional AI Tool Stack: $(effective_optional_stack_state_label "$config_file" enableAiCliTools)"
   printf '%s\n' "Optional Development Workspace: $(config_bool_state_label "$config_file" enableDevelopmentWorkspace)"
+
+  if [ "$profile" != "macos-terminal" ]; then
+    printf '%s\n' "macOS App Groups: not applicable for $(profile_context_label)"
+    return
+  fi
+
   printf '%s\n' "macOS App Groups:"
   printf '%s\n' "terminal-apps: $(config_bool_state_label "$config_file" enableMacosAppGroupTerminalApps)"
   printf '%s\n' "automation: $(config_bool_state_label "$config_file" enableMacosAppGroupAutomation)"
@@ -1105,11 +1112,12 @@ run_chezmoi_command() {
 
 show_diff_context() {
   config_file="$(chezmoi_config_file)"
+  profile="$(current_profile)"
 
   printf '%s\n' "Terrapod diff"
   printf '%s\n' "Profile: $(profile_context_label)"
   show_config_context "$config_file"
-  show_stack_context "$config_file"
+  show_stack_context "$config_file" "$profile"
   printf '%s\n' "Delegating declared-state diff to: $(render_chezmoi_command diff)"
 }
 
@@ -1184,11 +1192,12 @@ run_post_apply_validation() {
 
 show_apply_context() {
   config_file="$1"
+  profile="$(current_profile)"
 
   printf '%s\n' "Terrapod apply"
   printf '%s\n' "Profile: $(profile_context_label)"
   show_config_context "$config_file"
-  show_stack_context "$config_file"
+  show_stack_context "$config_file" "$profile"
   printf '%s\n' "Delegating declared-state apply to: $(render_chezmoi_command apply)"
 }
 

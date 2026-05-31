@@ -421,6 +421,7 @@ if ! run_terrapod_setup_command macos-terminal 'workstation
 
 
 
+
 y
 ' "$setup_home" "$setup_xdg" "$setup_output"; then
   sed 's/^/  /' "$setup_output" >&2
@@ -439,6 +440,7 @@ assert_contains "$setup_output_text" "Optional Editor Stack: included by Optiona
 assert_contains "$setup_output_text" "terminal-apps macOS App Group [enabled]:" "plain setup prompts for terminal-apps macOS App Group"
 assert_contains "$setup_output_text" "enableEditorStack = true" "plain setup summary includes concrete Editor Stack setting"
 assert_contains "$setup_output_text" "enableMacosAppGroupMonitoring = true" "plain setup summary includes concrete macOS App Group setting"
+assert_contains "$setup_output_text" "enableMacosAppGroupAiApps = true" "plain setup summary includes concrete ai-apps App Group setting"
 assert_contains "$setup_output_text" "Write these Terrapod settings" "plain setup asks for final confirmation"
 assert_contains "$setup_output_text" "Configured Terrapod Preset 'workstation'" "plain setup reports successful configuration"
 assert_first_occurrence_before "$setup_output_text" "Profile: macOS Terminal Profile" "Choose Terrapod Preset" "plain setup shows profile before Preset selection"
@@ -460,6 +462,7 @@ dumb_setup_output="$tmp_dir/dumb-setup.out"
 mkdir -p "$dumb_setup_home"
 
 if ! printf '%s' 'minimal
+n
 n
 n
 n
@@ -620,6 +623,7 @@ enableMacosAppGroupTerminalApps = true
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = true
 enableMacosAppGroupMonitoring = false
+enableMacosAppGroupAiApps = true
 TOML
 
 macos_status_path="$(status_doctor_path macos chezmoi git zsh mise brew nvim gemini claude codex zellij ghostty cmux op)"
@@ -639,6 +643,7 @@ assert_contains "$macos_status_output" "terminal-apps: enabled (Ghostty and cmux
 assert_contains "$macos_status_output" "automation: disabled" "Terrapod status reports disabled automation macOS App Group"
 assert_contains "$macos_status_output" "launcher: enabled (Raycast and 1Password CLI)" "Terrapod status reports enabled launcher macOS App Group"
 assert_contains "$macos_status_output" "monitoring: disabled" "Terrapod status reports disabled monitoring macOS App Group"
+assert_contains "$macos_status_output" "ai-apps: enabled (Claude Desktop, Codex Desktop, Antigravity 2.0, and Antigravity IDE)" "Terrapod status reports enabled ai-apps macOS App Group"
 assert_contains "$macos_status_output" "chezmoi: available" "Terrapod status reports chezmoi availability"
 assert_contains "$macos_status_output" "brew: available" "Terrapod status reports macOS Bootstrap Package Manager availability"
 assert_contains "$macos_status_output" "Warnings: none" "Terrapod status reports no warnings when enabled tools are present"
@@ -1085,6 +1090,7 @@ enableMacosAppGroupTerminalApps = true
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = true
 enableMacosAppGroupMonitoring = false
+enableMacosAppGroupAiApps = true
 TOML
 
 if ! HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
@@ -1165,6 +1171,11 @@ assert_contains \
 
 assert_contains \
   "$diff_output" \
+  "ai-apps: enabled" \
+  "Terrapod diff prints enabled ai-apps macOS App Group state"
+
+assert_contains \
+  "$diff_output" \
   "Delegating declared-state diff to: chezmoi diff" \
   "Terrapod diff explains the delegated command"
 
@@ -1180,6 +1191,27 @@ if [ -e "$BROAD_UPGRADE_CALL_FILE" ]; then
 fi
 
 pass "Terrapod diff does not call brew, apt, sudo, mise, or npm upgrade flows"
+
+if ! TERRAPOD_PROFILE=vps-shell HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$terrapod" diff >"$tmp_dir/vps-diff.out" 2>"$tmp_dir/vps-diff.err"; then
+  printf '%s\n' "VPS diff stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/vps-diff.out" >&2
+  printf '%s\n' "VPS diff stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/vps-diff.err" >&2
+  fail "Terrapod diff runs successfully for VPS Shell Profile"
+fi
+
+vps_diff_output="$(cat "$tmp_dir/vps-diff.out")"
+
+assert_contains \
+  "$vps_diff_output" \
+  "macOS App Groups: not applicable for VPS Shell Profile" \
+  "Terrapod diff reports macOS App Groups as not applicable on VPS"
+
+assert_not_contains \
+  "$vps_diff_output" \
+  "ai-apps:" \
+  "Terrapod diff does not report ai-apps as a VPS setting"
 
 rm -f "$CHEZMOI_CALL_FILE" "$CHEZMOI_INVOKED_FILE"
 
@@ -1341,6 +1373,11 @@ assert_contains \
 
 assert_contains \
   "$apply_output" \
+  "ai-apps: enabled" \
+  "Terrapod apply prints enabled ai-apps macOS App Group state"
+
+assert_contains \
+  "$apply_output" \
   "Preflight: chezmoi is available" \
   "Terrapod apply confirms chezmoi preflight"
 
@@ -1376,6 +1413,27 @@ if [ -e "$BROAD_UPGRADE_CALL_FILE" ]; then
 fi
 
 pass "Terrapod apply does not call brew, apt, sudo, mise, or npm upgrade flows"
+
+if ! TERRAPOD_PROFILE=vps-shell HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$terrapod" apply >"$tmp_dir/vps-apply.out" 2>"$tmp_dir/vps-apply.err"; then
+  printf '%s\n' "VPS apply stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/vps-apply.out" >&2
+  printf '%s\n' "VPS apply stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/vps-apply.err" >&2
+  fail "Terrapod apply runs successfully for VPS Shell Profile"
+fi
+
+vps_apply_output="$(cat "$tmp_dir/vps-apply.out")"
+
+assert_contains \
+  "$vps_apply_output" \
+  "macOS App Groups: not applicable for VPS Shell Profile" \
+  "Terrapod apply reports macOS App Groups as not applicable on VPS"
+
+assert_not_contains \
+  "$vps_apply_output" \
+  "ai-apps:" \
+  "Terrapod apply does not report ai-apps as a VPS setting"
 
 rm -f "$CHEZMOI_APPLY_ARGS_FILE" "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
 
