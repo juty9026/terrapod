@@ -295,6 +295,7 @@ assert_data_key_once_with_value "$new_config" "enableMacosAppGroupTerminalApps" 
 assert_data_key_once_with_value "$new_config" "enableMacosAppGroupAutomation" "false" "minimal Preset disables automation macOS App Group exactly once in data"
 assert_data_key_once_with_value "$new_config" "enableMacosAppGroupLauncher" "false" "minimal Preset disables launcher macOS App Group exactly once in data"
 assert_data_key_once_with_value "$new_config" "enableMacosAppGroupMonitoring" "false" "minimal Preset disables monitoring macOS App Group exactly once in data"
+assert_data_key_once_with_value "$new_config" "enableMacosAppGroupAiApps" "false" "minimal Preset disables ai-apps macOS App Group exactly once in data"
 assert_not_contains "$new_config" "enableMacosDesktopApps" "minimal Preset does not write the legacy all-in desktop app toggle"
 assert_not_contains "$new_config" "terrapodPreset" "minimal Preset stores concrete values instead of a dynamic Preset"
 assert_backup_count "$new_config" 0 "new config creation does not create a backup"
@@ -318,6 +319,7 @@ assert_data_key_once_with_value "$development_config" "enableMacosAppGroupTermin
 assert_data_key_once_with_value "$development_config" "enableMacosAppGroupAutomation" "false" "development Preset disables automation macOS App Group in a new config"
 assert_data_key_once_with_value "$development_config" "enableMacosAppGroupLauncher" "false" "development Preset disables launcher macOS App Group in a new config"
 assert_data_key_once_with_value "$development_config" "enableMacosAppGroupMonitoring" "false" "development Preset disables monitoring macOS App Group in a new config"
+assert_data_key_once_with_value "$development_config" "enableMacosAppGroupAiApps" "false" "development Preset disables ai-apps macOS App Group in a new config"
 assert_not_contains "$development_config" "enableMacosDesktopApps" "development Preset does not write the legacy all-in desktop app toggle"
 assert_not_contains "$development_config" "terrapodPreset" "development Preset stores concrete values instead of a dynamic Preset"
 assert_backup_count "$development_config" 0 "development config creation does not create a backup"
@@ -341,6 +343,7 @@ assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupTermin
 assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupAutomation" "true" "workstation Preset enables automation macOS App Group exactly once in data"
 assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupLauncher" "true" "workstation Preset enables launcher macOS App Group exactly once in data"
 assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupMonitoring" "true" "workstation Preset enables monitoring macOS App Group exactly once in data"
+assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupAiApps" "true" "workstation Preset enables ai-apps macOS App Group exactly once in data"
 assert_not_contains "$workstation_config" "enableMacosDesktopApps" "workstation Preset does not write the legacy all-in desktop app toggle"
 assert_not_contains "$workstation_config" "terrapodPreset" "workstation Preset stores concrete values instead of a dynamic Preset"
 assert_backup_count "$workstation_config" 0 "workstation config creation does not create a backup"
@@ -351,6 +354,7 @@ setup_workstation_config="$setup_workstation_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$setup_workstation_home"
 
 if ! run_terrapod_setup macos-terminal 'workstation
+
 
 
 
@@ -378,6 +382,7 @@ assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroup
 assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroupAutomation" "true" "confirmed setup enables automation macOS App Group exactly once in data"
 assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroupLauncher" "true" "confirmed setup enables launcher macOS App Group exactly once in data"
 assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroupMonitoring" "true" "confirmed setup enables monitoring macOS App Group exactly once in data"
+assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroupAiApps" "true" "confirmed setup enables ai-apps macOS App Group exactly once in data"
 assert_not_contains "$setup_workstation_config" "enableMacosDesktopApps" "confirmed setup does not write the legacy all-in desktop app toggle"
 assert_not_contains "$setup_workstation_config" "terrapodPreset" "confirmed setup stores concrete values instead of a dynamic Preset"
 assert_backup_count "$setup_workstation_config" 0 "confirmed setup new config creation does not create a backup"
@@ -393,6 +398,7 @@ n
 y
 n
 y
+n
 y
 ' "$setup_custom_workspace_home" "$setup_custom_workspace_xdg" >"$tmp_dir/setup-custom-workspace.out" 2>"$tmp_dir/setup-custom-workspace.err"; then
   printf '%s\n' "setup stdout:" >&2
@@ -412,6 +418,7 @@ assert_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupTermin
 assert_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupAutomation = true" "macOS setup summary reflects customized automation App Group"
 assert_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupLauncher = false" "macOS setup summary reflects customized launcher App Group"
 assert_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupMonitoring = true" "macOS setup summary reflects customized monitoring App Group"
+assert_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupAiApps = false" "macOS setup summary reflects customized ai-apps App Group"
 
 if [ ! -f "$setup_custom_workspace_config" ]; then
   fail "macOS customized setup creates a chezmoi config file"
@@ -425,6 +432,7 @@ assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosApp
 assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosAppGroupAutomation" "true" "workspace-enabled setup writes customized automation App Group"
 assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosAppGroupLauncher" "false" "workspace-enabled setup writes customized launcher App Group"
 assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosAppGroupMonitoring" "true" "workspace-enabled setup writes customized monitoring App Group"
+assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosAppGroupAiApps" "false" "workspace-enabled setup writes customized ai-apps App Group"
 
 rich_equivalent_home="$tmp_dir/rich-equivalent-home"
 rich_equivalent_xdg="$tmp_dir/rich-equivalent-xdg"
@@ -441,6 +449,8 @@ j
 n
 j
 y
+j
+n
 
 y
 ' "$rich_equivalent_home" "$rich_equivalent_xdg" >"$tmp_dir/rich-equivalent.out" 2>"$tmp_dir/rich-equivalent.err"; then
@@ -460,6 +470,7 @@ assert_data_key_once_with_value "$rich_equivalent_config" "enableMacosAppGroupTe
 assert_data_key_once_with_value "$rich_equivalent_config" "enableMacosAppGroupAutomation" "true" "rich setup writes customized automation App Group"
 assert_data_key_once_with_value "$rich_equivalent_config" "enableMacosAppGroupLauncher" "false" "rich setup writes customized launcher App Group"
 assert_data_key_once_with_value "$rich_equivalent_config" "enableMacosAppGroupMonitoring" "true" "rich setup writes customized monitoring App Group"
+assert_data_key_once_with_value "$rich_equivalent_config" "enableMacosAppGroupAiApps" "false" "rich setup writes customized ai-apps App Group"
 
 if ! cmp -s "$setup_custom_workspace_config" "$rich_equivalent_config"; then
   printf '%s\n' "plain setup config:" >&2
@@ -495,6 +506,7 @@ assert_data_key_once_with_value "$rich_navigation_config" "enableEditorStack" "t
 assert_data_key_once_with_value "$rich_navigation_config" "enableAiCliTools" "true" "rich navigation writes development AI Tool Stack setting"
 assert_data_key_once_with_value "$rich_navigation_config" "enableDevelopmentWorkspace" "true" "rich navigation writes development workspace setting"
 assert_data_key_once_with_value "$rich_navigation_config" "enableMacosAppGroupTerminalApps" "false" "rich navigation keeps terminal-apps disabled for development"
+assert_data_key_once_with_value "$rich_navigation_config" "enableMacosAppGroupAiApps" "false" "rich navigation keeps ai-apps disabled for development"
 
 rich_vps_home="$tmp_dir/rich-vps-home"
 rich_vps_xdg="$tmp_dir/rich-vps-xdg"
@@ -530,6 +542,7 @@ assert_data_key_once_with_value "$rich_vps_config" "enableMacosAppGroupTerminalA
 assert_data_key_once_with_value "$rich_vps_config" "enableMacosAppGroupAutomation" "false" "rich VPS setup writes automation App Group disabled"
 assert_data_key_once_with_value "$rich_vps_config" "enableMacosAppGroupLauncher" "false" "rich VPS setup writes launcher App Group disabled"
 assert_data_key_once_with_value "$rich_vps_config" "enableMacosAppGroupMonitoring" "false" "rich VPS setup writes monitoring App Group disabled"
+assert_data_key_once_with_value "$rich_vps_config" "enableMacosAppGroupAiApps" "false" "rich VPS setup writes ai-apps App Group disabled"
 
 setup_leaf_home="$tmp_dir/setup-leaf-home"
 setup_leaf_xdg="$tmp_dir/setup-leaf-xdg"
@@ -544,6 +557,7 @@ y
 n
 y
 n
+y
 y
 ' "$setup_leaf_home" "$setup_leaf_xdg" >"$tmp_dir/setup-leaf.out" 2>"$tmp_dir/setup-leaf.err"; then
   printf '%s\n' "setup stdout:" >&2
@@ -570,6 +584,7 @@ assert_data_key_once_with_value "$setup_leaf_config" "enableMacosAppGroupTermina
 assert_data_key_once_with_value "$setup_leaf_config" "enableMacosAppGroupAutomation" "false" "workspace-disabled setup writes customized automation App Group"
 assert_data_key_once_with_value "$setup_leaf_config" "enableMacosAppGroupLauncher" "true" "workspace-disabled setup writes customized launcher App Group"
 assert_data_key_once_with_value "$setup_leaf_config" "enableMacosAppGroupMonitoring" "false" "workspace-disabled setup writes customized monitoring App Group"
+assert_data_key_once_with_value "$setup_leaf_config" "enableMacosAppGroupAiApps" "true" "workspace-disabled setup writes customized ai-apps App Group"
 
 setup_vps_custom_home="$tmp_dir/setup-vps-custom-home"
 setup_vps_custom_xdg="$tmp_dir/setup-vps-custom-xdg"
@@ -600,6 +615,7 @@ assert_contains "$tmp_dir/setup-vps-custom.err" "macOS App Groups: not applicabl
 assert_contains "$tmp_dir/setup-vps-custom.out" "enableEditorStack = true" "VPS setup summary reflects customized Optional Editor Stack"
 assert_contains "$tmp_dir/setup-vps-custom.out" "enableAiCliTools = false" "VPS setup summary reflects customized Optional AI Tool Stack"
 assert_contains "$tmp_dir/setup-vps-custom.out" "enableDevelopmentWorkspace = false" "VPS setup summary reflects disabled Optional Development Workspace"
+assert_contains "$tmp_dir/setup-vps-custom.out" "enableMacosAppGroupAiApps = false" "VPS setup summary reports ai-apps App Group disabled"
 
 if [ ! -f "$setup_vps_custom_config" ]; then
   fail "VPS customized setup creates a chezmoi config file"
@@ -613,6 +629,7 @@ assert_data_key_once_with_value "$setup_vps_custom_config" "enableMacosAppGroupT
 assert_data_key_once_with_value "$setup_vps_custom_config" "enableMacosAppGroupAutomation" "false" "VPS setup writes automation App Group disabled"
 assert_data_key_once_with_value "$setup_vps_custom_config" "enableMacosAppGroupLauncher" "false" "VPS setup writes launcher App Group disabled"
 assert_data_key_once_with_value "$setup_vps_custom_config" "enableMacosAppGroupMonitoring" "false" "VPS setup writes monitoring App Group disabled"
+assert_data_key_once_with_value "$setup_vps_custom_config" "enableMacosAppGroupAiApps" "false" "VPS setup writes ai-apps App Group disabled"
 
 setup_vps_workstation_error_home="$tmp_dir/setup-vps-workstation-error-home"
 setup_vps_workstation_error_xdg="$tmp_dir/setup-vps-workstation-error-xdg"
@@ -773,6 +790,7 @@ assert_data_key_once_with_value "$existing_config" "enableMacosAppGroupTerminalA
 assert_data_key_once_with_value "$existing_config" "enableMacosAppGroupAutomation" "false" "development Preset disables automation macOS App Group exactly once in data"
 assert_data_key_once_with_value "$existing_config" "enableMacosAppGroupLauncher" "false" "development Preset disables launcher macOS App Group exactly once in data"
 assert_data_key_once_with_value "$existing_config" "enableMacosAppGroupMonitoring" "false" "development Preset disables monitoring macOS App Group exactly once in data"
+assert_data_key_once_with_value "$existing_config" "enableMacosAppGroupAiApps" "false" "development Preset disables ai-apps macOS App Group exactly once in data"
 assert_not_contains "$existing_config" "enableMacosDesktopApps" "existing update removes the legacy all-in desktop app toggle"
 assert_not_contains "$existing_config" "terrapodPreset" "existing update removes stale dynamic Preset key"
 assert_single_backup_matches "$existing_config" "$tmp_dir/existing-before.toml" "existing update creates one backup before changing managed keys"
@@ -806,6 +824,7 @@ assert_data_key_once_with_value "$quoted_table_config" "enableMacosAppGroupTermi
 assert_data_key_once_with_value "$quoted_table_config" "enableMacosAppGroupAutomation" "false" "quoted data table update writes automation App Group in data"
 assert_data_key_once_with_value "$quoted_table_config" "enableMacosAppGroupLauncher" "false" "quoted data table update writes launcher App Group in data"
 assert_data_key_once_with_value "$quoted_table_config" "enableMacosAppGroupMonitoring" "false" "quoted data table update writes monitoring App Group in data"
+assert_data_key_once_with_value "$quoted_table_config" "enableMacosAppGroupAiApps" "false" "quoted data table update writes ai-apps App Group in data"
 assert_not_contains "$quoted_table_config" "enableMacosDesktopApps" "quoted data table update removes the legacy all-in desktop app toggle"
 assert_not_contains "$quoted_table_config" "terrapodPreset" "quoted data table update removes stale dynamic Preset key"
 
@@ -838,6 +857,7 @@ assert_data_key_once_with_value "$spaced_table_config" "enableMacosAppGroupTermi
 assert_data_key_once_with_value "$spaced_table_config" "enableMacosAppGroupAutomation" "false" "spaced data table update writes automation App Group in data"
 assert_data_key_once_with_value "$spaced_table_config" "enableMacosAppGroupLauncher" "false" "spaced data table update writes launcher App Group in data"
 assert_data_key_once_with_value "$spaced_table_config" "enableMacosAppGroupMonitoring" "false" "spaced data table update writes monitoring App Group in data"
+assert_data_key_once_with_value "$spaced_table_config" "enableMacosAppGroupAiApps" "false" "spaced data table update writes ai-apps App Group in data"
 assert_not_contains "$spaced_table_config" "enableMacosDesktopApps" "spaced data table update removes the legacy all-in desktop app toggle"
 assert_not_contains "$spaced_table_config" "terrapodPreset" "spaced data table update removes stale dynamic Preset key"
 
@@ -870,6 +890,7 @@ assert_contains "$dotted_config" "data.enableMacosAppGroupTerminalApps = false" 
 assert_contains "$dotted_config" "data.enableMacosAppGroupAutomation = false" "dotted data update writes automation App Group as a dotted data key"
 assert_contains "$dotted_config" "data.enableMacosAppGroupLauncher = false" "dotted data update writes launcher App Group as a dotted data key"
 assert_contains "$dotted_config" "data.enableMacosAppGroupMonitoring = false" "dotted data update writes monitoring App Group as a dotted data key"
+assert_contains "$dotted_config" "data.enableMacosAppGroupAiApps = false" "dotted data update writes ai-apps App Group as a dotted data key"
 assert_not_contains "$dotted_config" "data.enableMacosDesktopApps" "dotted data update removes the legacy all-in desktop app toggle"
 assert_not_contains "$dotted_config" "data.terrapodPreset" "dotted data update removes stale dynamic Preset key"
 
@@ -904,6 +925,7 @@ assert_data_key_once_with_value "$quoted_config" "enableMacosAppGroupTerminalApp
 assert_data_key_once_with_value "$quoted_config" "enableMacosAppGroupAutomation" "false" "quoted managed key update writes one automation App Group value in data"
 assert_data_key_once_with_value "$quoted_config" "enableMacosAppGroupLauncher" "false" "quoted managed key update writes one launcher App Group value in data"
 assert_data_key_once_with_value "$quoted_config" "enableMacosAppGroupMonitoring" "false" "quoted managed key update writes one monitoring App Group value in data"
+assert_data_key_once_with_value "$quoted_config" "enableMacosAppGroupAiApps" "false" "quoted managed key update writes one ai-apps App Group value in data"
 assert_not_contains "$quoted_config" "\"enableEditorStack\"" "quoted managed key update removes quoted Editor Stack key"
 assert_not_contains "$quoted_config" "\"enableAiCliTools\"" "quoted managed key update removes quoted AI Tool Stack key"
 assert_not_contains "$quoted_config" "\"enableDevelopmentWorkspace\"" "quoted managed key update removes quoted Development Workspace key"
@@ -941,6 +963,7 @@ assert_data_key_once_with_value "$array_config" "enableMacosAppGroupTerminalApps
 assert_data_key_once_with_value "$array_config" "enableMacosAppGroupAutomation" "false" "array-table update writes automation App Group only in data"
 assert_data_key_once_with_value "$array_config" "enableMacosAppGroupLauncher" "false" "array-table update writes launcher App Group only in data"
 assert_data_key_once_with_value "$array_config" "enableMacosAppGroupMonitoring" "false" "array-table update writes monitoring App Group only in data"
+assert_data_key_once_with_value "$array_config" "enableMacosAppGroupAiApps" "false" "array-table update writes ai-apps App Group only in data"
 assert_contains "$array_config" "[[merge.command]]" "array-table update preserves TOML array table"
 assert_contains "$array_config" "enableEditorStack = \"do-not-touch\"" "array-table update preserves same-named external key"
 assert_lines_after_header_not_contains "$array_config" "[[merge.command]]" "enableAiCliTools = true" "array-table update does not append AI Tool Stack under array table"
@@ -949,6 +972,7 @@ assert_lines_after_header_not_contains "$array_config" "[[merge.command]]" "enab
 assert_lines_after_header_not_contains "$array_config" "[[merge.command]]" "enableMacosAppGroupAutomation = false" "array-table update does not append automation App Group under array table"
 assert_lines_after_header_not_contains "$array_config" "[[merge.command]]" "enableMacosAppGroupLauncher = false" "array-table update does not append launcher App Group under array table"
 assert_lines_after_header_not_contains "$array_config" "[[merge.command]]" "enableMacosAppGroupMonitoring = false" "array-table update does not append monitoring App Group under array table"
+assert_lines_after_header_not_contains "$array_config" "[[merge.command]]" "enableMacosAppGroupAiApps = false" "array-table update does not append ai-apps App Group under array table"
 
 array_mode="$(file_mode "$array_config")"
 if [ "$array_mode" != "600" ]; then
@@ -986,6 +1010,7 @@ assert_data_key_once_with_value "$signers_config" "enableMacosAppGroupTerminalAp
 assert_data_key_once_with_value "$signers_config" "enableMacosAppGroupAutomation" "false" "documented signer array update writes automation App Group in data"
 assert_data_key_once_with_value "$signers_config" "enableMacosAppGroupLauncher" "false" "documented signer array update writes launcher App Group in data"
 assert_data_key_once_with_value "$signers_config" "enableMacosAppGroupMonitoring" "false" "documented signer array update writes monitoring App Group in data"
+assert_data_key_once_with_value "$signers_config" "enableMacosAppGroupAiApps" "false" "documented signer array update writes ai-apps App Group in data"
 assert_contains "$signers_config" "branch = \"main\"" "documented signer array update preserves later sections"
 
 multiline_array_home="$tmp_dir/multiline-array-home"

@@ -498,11 +498,13 @@ prompt_for_setup_settings_plain() {
     setup_enableMacosAppGroupAutomation="$(prompt_setup_bool "automation macOS App Group" "$setup_enableMacosAppGroupAutomation")"
     setup_enableMacosAppGroupLauncher="$(prompt_setup_bool "launcher macOS App Group" "$setup_enableMacosAppGroupLauncher")"
     setup_enableMacosAppGroupMonitoring="$(prompt_setup_bool "monitoring macOS App Group" "$setup_enableMacosAppGroupMonitoring")"
+    setup_enableMacosAppGroupAiApps="$(prompt_setup_bool "ai-apps macOS App Group" "$setup_enableMacosAppGroupAiApps")"
   else
     setup_enableMacosAppGroupTerminalApps=false
     setup_enableMacosAppGroupAutomation=false
     setup_enableMacosAppGroupLauncher=false
     setup_enableMacosAppGroupMonitoring=false
+    setup_enableMacosAppGroupAiApps=false
     printf '%s\n' "macOS App Groups: not applicable for $(profile_context_label)" >&2
   fi
 
@@ -514,7 +516,7 @@ rich_setup_field_count() {
 
   if is_enabled "$setup_enableDevelopmentWorkspace"; then
     if [ "$profile" = "macos-terminal" ]; then
-      printf '%s\n' 5
+      printf '%s\n' 6
     else
       printf '%s\n' 1
     fi
@@ -522,7 +524,7 @@ rich_setup_field_count() {
   fi
 
   if [ "$profile" = "macos-terminal" ]; then
-    printf '%s\n' 7
+    printf '%s\n' 8
   else
     printf '%s\n' 3
   fi
@@ -539,6 +541,7 @@ rich_setup_field_name() {
       3) printf '%s\n' "enableMacosAppGroupAutomation" ;;
       4) printf '%s\n' "enableMacosAppGroupLauncher" ;;
       5) printf '%s\n' "enableMacosAppGroupMonitoring" ;;
+      6) printf '%s\n' "enableMacosAppGroupAiApps" ;;
       *) return 1 ;;
     esac
     return
@@ -552,6 +555,7 @@ rich_setup_field_name() {
     5) printf '%s\n' "enableMacosAppGroupAutomation" ;;
     6) printf '%s\n' "enableMacosAppGroupLauncher" ;;
     7) printf '%s\n' "enableMacosAppGroupMonitoring" ;;
+    8) printf '%s\n' "enableMacosAppGroupAiApps" ;;
     *) return 1 ;;
   esac
 }
@@ -565,6 +569,7 @@ rich_setup_field_label() {
     enableMacosAppGroupAutomation) printf '%s\n' "automation macOS App Group" ;;
     enableMacosAppGroupLauncher) printf '%s\n' "launcher macOS App Group" ;;
     enableMacosAppGroupMonitoring) printf '%s\n' "monitoring macOS App Group" ;;
+    enableMacosAppGroupAiApps) printf '%s\n' "ai-apps macOS App Group" ;;
     *) return 1 ;;
   esac
 }
@@ -670,6 +675,7 @@ prompt_for_setup_settings_rich() {
     setup_enableMacosAppGroupAutomation=false
     setup_enableMacosAppGroupLauncher=false
     setup_enableMacosAppGroupMonitoring=false
+    setup_enableMacosAppGroupAiApps=false
   fi
 
   render_setup_data
@@ -934,6 +940,11 @@ print_macos_app_group_status() {
   else
     printf '%s\n' "  monitoring: disabled"
   fi
+  if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupAiApps)"; then
+    printf '%s\n' "  ai-apps: enabled (Claude Desktop, Codex Desktop, Antigravity 2.0, and Antigravity IDE)"
+  else
+    printf '%s\n' "  ai-apps: disabled"
+  fi
 }
 
 print_key_tool_status() {
@@ -1067,6 +1078,7 @@ show_stack_context() {
   printf '%s\n' "automation: $(config_bool_state_label "$config_file" enableMacosAppGroupAutomation)"
   printf '%s\n' "launcher: $(config_bool_state_label "$config_file" enableMacosAppGroupLauncher)"
   printf '%s\n' "monitoring: $(config_bool_state_label "$config_file" enableMacosAppGroupMonitoring)"
+  printf '%s\n' "ai-apps: $(config_bool_state_label "$config_file" enableMacosAppGroupAiApps)"
 }
 
 render_chezmoi_command() {
@@ -1347,6 +1359,7 @@ enableMacosAppGroupTerminalApps = $4
 enableMacosAppGroupAutomation = $5
 enableMacosAppGroupLauncher = $6
 enableMacosAppGroupMonitoring = $7
+enableMacosAppGroupAiApps = $8
 EOF
 }
 
@@ -1355,13 +1368,13 @@ render_preset_data() {
 
   case "$preset" in
     minimal)
-      render_settings_data false false false false false false false
+      render_settings_data false false false false false false false false
       ;;
     development)
-      render_settings_data true true true false false false false
+      render_settings_data true true true false false false false false
       ;;
     workstation)
-      render_settings_data true true true true true true true
+      render_settings_data true true true true true true true true
       ;;
     *)
       return 1
@@ -1381,6 +1394,7 @@ load_setup_defaults() {
       setup_enableMacosAppGroupAutomation=false
       setup_enableMacosAppGroupLauncher=false
       setup_enableMacosAppGroupMonitoring=false
+      setup_enableMacosAppGroupAiApps=false
       ;;
     development)
       setup_enableEditorStack=true
@@ -1390,6 +1404,7 @@ load_setup_defaults() {
       setup_enableMacosAppGroupAutomation=false
       setup_enableMacosAppGroupLauncher=false
       setup_enableMacosAppGroupMonitoring=false
+      setup_enableMacosAppGroupAiApps=false
       ;;
     workstation)
       setup_enableEditorStack=true
@@ -1399,6 +1414,7 @@ load_setup_defaults() {
       setup_enableMacosAppGroupAutomation=true
       setup_enableMacosAppGroupLauncher=true
       setup_enableMacosAppGroupMonitoring=true
+      setup_enableMacosAppGroupAiApps=true
       ;;
     *)
       return 1
@@ -1414,7 +1430,8 @@ render_setup_data() {
     "$setup_enableMacosAppGroupTerminalApps" \
     "$setup_enableMacosAppGroupAutomation" \
     "$setup_enableMacosAppGroupLauncher" \
-    "$setup_enableMacosAppGroupMonitoring"
+    "$setup_enableMacosAppGroupMonitoring" \
+    "$setup_enableMacosAppGroupAiApps"
 }
 
 validate_preset() {
@@ -1754,6 +1771,7 @@ write_managed_settings() {
           name == "enableMacosAppGroupAutomation" ||
           name == "enableMacosAppGroupLauncher" ||
           name == "enableMacosAppGroupMonitoring" ||
+          name == "enableMacosAppGroupAiApps" ||
           name == "enableMacosDesktopApps" ||
           name == "terrapodPreset"
       }
