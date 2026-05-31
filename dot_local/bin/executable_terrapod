@@ -915,7 +915,7 @@ print_macos_app_group_status() {
 
   printf '%s\n' "macOS App Groups:"
   if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupTerminalApps)"; then
-    printf '%s\n' "  terminal-apps: enabled (Ghostty and cmux)"
+    printf '%s\n' "  terminal-apps: enabled (Ghostty)"
   else
     printf '%s\n' "  terminal-apps: disabled"
   fi

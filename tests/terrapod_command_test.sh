@@ -622,7 +622,7 @@ enableMacosAppGroupLauncher = true
 enableMacosAppGroupMonitoring = false
 TOML
 
-macos_status_path="$(status_doctor_path macos chezmoi git zsh mise brew nvim gemini claude codex zellij ghostty cmux op)"
+macos_status_path="$(status_doctor_path macos chezmoi git zsh mise brew nvim gemini claude codex zellij ghostty op)"
 
 macos_status_output="$(
   TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$status_config" PATH="$macos_status_path" \
@@ -635,7 +635,7 @@ assert_contains "$macos_status_output" "Config: $status_config (present)" "Terra
 assert_contains "$macos_status_output" "Optional Editor Stack: enabled (rich Neovim configuration)" "Terrapod status reports enabled Optional Editor Stack state"
 assert_contains "$macos_status_output" "Optional AI Tool Stack: enabled (tools available: gemini, claude, codex)" "Terrapod status reports enabled Optional AI Tool Stack tool state"
 assert_contains "$macos_status_output" "Optional Development Workspace: enabled (development Zellij layouts)" "Terrapod status reports enabled Optional Development Workspace state"
-assert_contains "$macos_status_output" "terminal-apps: enabled (Ghostty and cmux)" "Terrapod status reports enabled terminal-apps macOS App Group"
+assert_contains "$macos_status_output" "terminal-apps: enabled (Ghostty)" "Terrapod status reports enabled Ghostty-only terminal-apps macOS App Group"
 assert_contains "$macos_status_output" "automation: disabled" "Terrapod status reports disabled automation macOS App Group"
 assert_contains "$macos_status_output" "launcher: enabled (Raycast and 1Password CLI)" "Terrapod status reports enabled launcher macOS App Group"
 assert_contains "$macos_status_output" "monitoring: disabled" "Terrapod status reports disabled monitoring macOS App Group"
@@ -665,7 +665,7 @@ dotted_status_output="$(
 
 assert_contains "$dotted_status_output" "Optional Editor Stack: enabled (rich Neovim configuration)" "Terrapod status reads root dotted data keys for effective editor stack state"
 assert_contains "$dotted_status_output" "Optional AI Tool Stack: enabled (tools available: gemini, claude, codex)" "Terrapod status reads root dotted data keys for effective AI stack state"
-assert_contains "$dotted_status_output" "terminal-apps: enabled (Ghostty and cmux)" "Terrapod status reads root dotted data keys for macOS App Groups"
+assert_contains "$dotted_status_output" "terminal-apps: enabled (Ghostty)" "Terrapod status reads root dotted data keys for Ghostty-only macOS App Groups"
 assert_contains "$dotted_status_output" "Warnings: none" "Terrapod status has no warnings for root dotted data keys when tools are present"
 
 status_ubuntu_config="$tmp_dir/status-ubuntu.toml"
