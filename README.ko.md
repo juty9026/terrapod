@@ -124,6 +124,7 @@ macOS desktop application은 machine-local data key로 제어되는 opt-in App G
 - `automation`: Hammerspoon과 Karabiner-Elements.
 - `launcher`: Raycast와 1Password CLI.
 - `monitoring`: iStat Menus.
+- `ai-apps`: Claude Desktop, Codex Desktop(`codex-app`), Antigravity 2.0, Antigravity IDE.
 
 Machine-specific Homebrew package는 tracked `Brewfile` 밖에 둬야 합니다.
 
@@ -218,6 +219,7 @@ Optional stack profile과 macOS App Group setting은 기본적으로 disabled입
 | `enableMacosAppGroupAutomation` | `false` | automation macOS App Group인 Hammerspoon과 Karabiner-Elements를 설치합니다. |
 | `enableMacosAppGroupLauncher` | `false` | launcher macOS App Group인 Raycast와 1Password CLI를 설치합니다. |
 | `enableMacosAppGroupMonitoring` | `false` | monitoring macOS App Group인 iStat Menus를 설치합니다. |
+| `enableMacosAppGroupAiApps` | `false` | ai-apps macOS App Group인 Claude Desktop, Codex Desktop(`codex-app`), Antigravity 2.0, Antigravity IDE를 설치합니다. |
 | `gitAllowedSigners` | `[]` | workstation-specific SSH signing identity를 `~/.ssh/allowed_signers`에 추가합니다. |
 
 `enableDevelopmentWorkspace`가 `true`이면 `enableEditorStack`이나 `enableAiCliTools`가 false이거나 생략되어도 Optional Editor Stack과 Optional AI Tool Stack이 함께 활성화됩니다.
