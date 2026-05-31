@@ -369,7 +369,7 @@ setup_option_description() {
       printf '%s\n' "Optional Editor Stack: Rich Neovim configuration."
       ;;
     "Optional AI Tool Stack")
-      printf '%s\n' "Optional AI Tool Stack: Gemini CLI, Claude Code, and Codex."
+      printf '%s\n' "Optional AI Tool Stack: Antigravity CLI, Claude Code, and Codex."
       ;;
     "terminal-apps macOS App Group")
       printf '%s\n' "terminal-apps macOS App Group: Ghostty and cmux."

@@ -168,11 +168,12 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Terminal font casks belong to the macOS Terminal Profile core bootstrap because the managed terminal configuration depends on them and they are not desktop applications.
 - Enabling the **Optional Development Workspace** does not enable the **macOS Desktop App Stack**.
 - **macOS App Groups** are configured during **Terrapod** setup and remain within the **macOS Desktop App Stack** boundary.
-- The first **macOS App Groups** are terminal-apps, automation, launcher, and monitoring.
+- The first **macOS App Groups** are terminal-apps, automation, launcher, monitoring, and ai-apps.
 - The terminal-apps **macOS App Group** contains Ghostty and cmux.
 - The automation **macOS App Group** contains Hammerspoon and Karabiner-Elements.
 - The launcher **macOS App Group** contains Raycast and 1Password CLI.
 - The monitoring **macOS App Group** contains iStat Menus.
+- The ai-apps **macOS App Group** contains Claude Desktop, Codex Desktop, Antigravity 2.0, and Antigravity IDE.
 - Individual macOS app toggles are excluded from the current **Terrapod** setup scope.
 - Repository renaming makes `juty9026/terrapod` the canonical slug for the **Terrapod Source Repository** without adding legacy URL fallback behavior.
 - Non-interactive setup options are deferred outside the current **Terrapod** installer and management command work, so **Terrapod Setup** may require an interactive terminal and the **Bootstrap UI Dependency**.
