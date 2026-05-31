@@ -230,6 +230,39 @@ run_setup_in_pty() {
   fi
 }
 
+run_command_in_pty() {
+  term="$1"
+  no_color_mode="$2"
+  shift 2
+
+  command_text="TERM=$(shell_quote "$term"); export TERM; TERRAPOD_PROFILE=macos-terminal; export TERRAPOD_PROFILE"
+  case "$no_color_mode" in
+    unset)
+      command_text="$command_text; unset NO_COLOR"
+      ;;
+    empty)
+      command_text="$command_text; NO_COLOR=; export NO_COLOR"
+      ;;
+    set)
+      command_text="$command_text; NO_COLOR=1; export NO_COLOR"
+      ;;
+    *)
+      fail "unknown NO_COLOR mode: $no_color_mode"
+      ;;
+  esac
+
+  command_text="$command_text;"
+  for arg do
+    command_text="$command_text $(shell_quote "$arg")"
+  done
+
+  if script --version >/dev/null 2>&1; then
+    script -q -e -c "$command_text" /dev/null
+  else
+    script -q /dev/null sh -c "$command_text"
+  fi
+}
+
 assert_contains() {
   haystack="$1"
   needle="$2"
@@ -266,11 +299,72 @@ assert_no_ansi_escape() {
   pass "$message"
 }
 
+assert_has_ansi_escape() {
+  haystack="$1"
+  message="$2"
+  escape_char="$(printf '\033')"
+
+  if ! printf '%s\n' "$haystack" | grep -F "$escape_char" >/dev/null; then
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
+assert_not_contains_ansi_before() {
+  haystack="$1"
+  text="$2"
+  message="$3"
+  escape_char="$(printf '\033')"
+
+  if printf '%s\n' "$haystack" | grep -F "$escape_char$text" >/dev/null; then
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
+assert_not_contains_ansi_after() {
+  haystack="$1"
+  text="$2"
+  message="$3"
+  escape_char="$(printf '\033')"
+
+  if printf '%s\n' "$haystack" | grep -F "$text$escape_char" >/dev/null; then
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
+assert_not_contains_colored_phrase() {
+  haystack="$1"
+  text="$2"
+  message="$3"
+
+  if printf '%s\n' "$haystack" | grep -F "m$text" >/dev/null; then
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
 assert_no_rich_setup_emoji() {
   haystack="$1"
   message="$2"
 
   if printf '%s\n' "$haystack" | grep -E '🌱|✨|▸' >/dev/null; then
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
+assert_no_routine_emoji() {
+  haystack="$1"
+  message="$2"
+
+  if printf '%s\n' "$haystack" | grep -E '🌱|✨|▸|✅|⚠|❌|🚀|🔴|🟢|🟡' >/dev/null; then
     fail "$message"
   fi
 
@@ -536,28 +630,98 @@ assert_contains \
 
 assert_contains \
   "$help_output" \
-  "terrapod chezmoi -- <args...>" \
+  "tpod [help|--help|-h]" \
+  "Terrapod help documents short help command"
+
+assert_contains \
+  "$help_output" \
+  "tpod setup" \
+  "Terrapod help documents short setup command"
+
+assert_contains \
+  "$help_output" \
+  "tpod configure <minimal|development|workstation>" \
+  "Terrapod help documents short Preset configuration"
+
+assert_contains \
+  "$help_output" \
+  "tpod status" \
+  "Terrapod help documents short status command"
+
+assert_contains \
+  "$help_output" \
+  "tpod doctor" \
+  "Terrapod help documents short doctor command"
+
+assert_contains \
+  "$help_output" \
+  "tpod diff" \
+  "Terrapod help documents short diff command"
+
+assert_contains \
+  "$help_output" \
+  "tpod apply" \
+  "Terrapod help documents short apply command"
+
+assert_contains \
+  "$help_output" \
+  "tpod update" \
+  "Terrapod help documents short update command"
+
+assert_contains \
+  "$help_output" \
+  "tpod chezmoi -- <args...>" \
   "Terrapod help documents the raw chezmoi escape hatch"
 
 assert_contains \
   "$help_output" \
-  "terrapod configure <minimal|development|workstation>" \
-  "Terrapod help documents Preset configuration"
+  "terrapod also works as the full command." \
+  "Terrapod help documents the full command note"
 
-assert_contains \
+assert_not_contains \
   "$help_output" \
   "terrapod setup" \
-  "Terrapod help lists setup"
+  "Terrapod help does not use old setup copyable command"
 
-assert_contains \
+assert_not_contains \
   "$help_output" \
-  "tpod is the short day-to-day alias for terrapod." \
-  "Terrapod help documents tpod as the day-to-day alias"
+  "terrapod configure <minimal|development|workstation>" \
+  "Terrapod help does not use old configure copyable command"
 
 assert_contains \
   "$help_output" \
   "tpod apply" \
   "Terrapod help examples lead with the short apply command"
+
+assert_not_contains \
+  "$help_output" \
+  "terrapod status" \
+  "Terrapod help does not use old status copyable command"
+
+assert_not_contains \
+  "$help_output" \
+  "terrapod doctor" \
+  "Terrapod help does not use old doctor copyable command"
+
+assert_not_contains \
+  "$help_output" \
+  "terrapod diff" \
+  "Terrapod help does not use old diff copyable command"
+
+assert_not_contains \
+  "$help_output" \
+  "terrapod apply" \
+  "Terrapod help does not use old apply copyable command"
+
+assert_not_contains \
+  "$help_output" \
+  "terrapod update" \
+  "Terrapod help does not use old update copyable command"
+
+assert_not_contains \
+  "$help_output" \
+  "terrapod chezmoi -- <args...>" \
+  "Terrapod help does not use old raw chezmoi copyable command"
 
 assert_contains \
   "$help_output" \
@@ -566,26 +730,47 @@ assert_contains \
 
 assert_contains \
   "$help_output" \
-  "terrapod status" \
+  "status" \
   "Terrapod help documents status"
 
 assert_contains \
   "$help_output" \
-  "terrapod doctor" \
+  "doctor" \
   "Terrapod help documents doctor"
+
+assert_no_ansi_escape "$help_output" "captured Terrapod help is plain without ANSI escapes"
+assert_no_routine_emoji "$help_output" "captured Terrapod help has no routine emoji"
+
+tty_help_output="$(run_command_in_pty xterm unset sh "$terrapod" help)"
+assert_has_ansi_escape "$tty_help_output" "TTY Terrapod help uses ANSI visual treatment when supported"
+
+tty_status_output="$(run_command_in_pty xterm unset sh "$terrapod" status)"
+assert_has_ansi_escape "$tty_status_output" "TTY Terrapod status uses ANSI visual treatment when supported"
+assert_not_contains_ansi_before "$tty_status_output" "macOS Terminal Profile" "TTY Terrapod status keeps profile value neutral"
+assert_not_contains_ansi_after "$tty_status_output" "macOS Terminal Profile" "TTY Terrapod status does not color through profile value"
+assert_not_contains_colored_phrase "$tty_status_output" "Profile: macOS Terminal Profile" "TTY Terrapod status does not color profile label and value as one phrase"
+
+no_color_tty_help_output="$(run_command_in_pty xterm set sh "$terrapod" help)"
+assert_no_ansi_escape "$no_color_tty_help_output" "TTY Terrapod help is plain when NO_COLOR is set"
+
+empty_no_color_tty_help_output="$(run_command_in_pty xterm empty sh "$terrapod" help)"
+assert_no_ansi_escape "$empty_no_color_tty_help_output" "TTY Terrapod help is plain when NO_COLOR is set to an empty value"
+
+dumb_help_output="$(TERM=dumb TERRAPOD_PROFILE=macos-terminal sh "$terrapod" help)"
+assert_no_ansi_escape "$dumb_help_output" "TERM=dumb Terrapod help is plain without ANSI escapes"
 
 macos_help_output="$(TERRAPOD_PROFILE=macos-terminal sh "$terrapod" help)"
 
 assert_contains \
   "$macos_help_output" \
-  "terrapod configure <minimal|development|workstation>" \
+  "tpod configure <minimal|development|workstation>" \
   "macOS Terminal Profile help exposes workstation Preset"
 
 vps_help_output="$(TERRAPOD_PROFILE=vps-shell sh "$terrapod" help)"
 
 assert_contains \
   "$vps_help_output" \
-  "terrapod configure <minimal|development>" \
+  "tpod configure <minimal|development>" \
   "VPS Shell Profile help hides workstation Preset"
 
 assert_not_contains \
@@ -768,7 +953,8 @@ pass "setup fails when gum returns an operational error"
 
 gum_error_output_text="$(cat "$gum_error_output")"
 assert_contains "$gum_error_output_text" "gum failed during Terrapod Setup" "gum operational error explains gum failure"
-assert_contains "$gum_error_output_text" "rerun 'terrapod setup'" "gum operational error gives rerun guidance"
+assert_contains "$gum_error_output_text" "rerun 'tpod setup'" "gum operational error gives rerun guidance with tpod"
+assert_not_contains "$gum_error_output_text" "rerun 'terrapod setup'" "gum operational error avoids old rerun command"
 assert_not_contains "$gum_error_output_text" "setup cancelled" "gum operational error is not reported as cancellation"
 
 if [ -e "$gum_error_config" ]; then
@@ -886,7 +1072,7 @@ assert_contains \
 
 assert_contains \
   "$unknown_error" \
-  "Run 'terrapod help' for usage." \
+  "Run 'tpod help' for usage." \
   "unknown Terrapod subcommands point to help"
 
 export CHEZMOI_CALL_FILE="$tmp_dir/chezmoi.args"
@@ -975,6 +1161,17 @@ assert_no_ansi_escape "$help_output" "Terrapod help does not use setup ANSI pres
 assert_no_rich_setup_emoji "$help_output" "Terrapod help does not use setup emoji presentation"
 assert_no_ansi_escape "$macos_status_output" "Terrapod status does not use setup ANSI presentation"
 assert_no_rich_setup_emoji "$macos_status_output" "Terrapod status does not use setup emoji presentation"
+assert_no_routine_emoji "$macos_status_output" "captured Terrapod status has no routine emoji"
+
+tty_macos_status_output="$(
+  run_command_in_pty xterm unset env TERRAPOD_CHEZMOI_CONFIG="$status_config" PATH="$macos_status_path" /bin/sh "$terrapod" status
+)"
+assert_has_ansi_escape "$tty_macos_status_output" "TTY Terrapod status with config uses ANSI visual treatment"
+assert_not_contains_colored_phrase "$tty_macos_status_output" "Profile: macOS Terminal Profile" "TTY Terrapod status keeps profile value out of the section style"
+assert_not_contains_colored_phrase "$tty_macos_status_output" "Config: $status_config" "TTY Terrapod status keeps config path neutral"
+assert_not_contains_colored_phrase "$tty_macos_status_output" "Optional Editor Stack: enabled (rich Neovim configuration)" "TTY Terrapod status does not color optional-stack detail as one phrase"
+assert_not_contains_colored_phrase "$tty_macos_status_output" "Optional AI Tool Stack: enabled (tools available: agy, claude, codex)" "TTY Terrapod status does not color optional-stack tool list as one phrase"
+assert_not_contains_colored_phrase "$tty_macos_status_output" "chezmoi: available" "TTY Terrapod status does not color tool names with state words"
 
 status_dotted_config="$tmp_dir/status-dotted.toml"
 cat >"$status_dotted_config" <<'TOML'
@@ -1129,6 +1326,13 @@ assert_contains "$doctor_ok_output" "ok - Optional Editor Stack is disabled" "Te
 assert_contains "$doctor_ok_output" "ok - Optional AI Tool Stack is disabled" "Terrapod doctor treats disabled Optional AI Tool Stack as valid"
 assert_contains "$doctor_ok_output" "ok - Optional Development Workspace is disabled" "Terrapod doctor treats disabled Optional Development Workspace as valid"
 assert_contains "$doctor_ok_output" "Guidance: none" "Terrapod doctor prints no guidance when checks pass"
+assert_no_ansi_escape "$doctor_ok_output" "captured Terrapod doctor is plain without ANSI escapes"
+assert_no_routine_emoji "$doctor_ok_output" "captured Terrapod doctor has no routine emoji"
+
+tty_doctor_output="$(
+  run_command_in_pty xterm unset env TERRAPOD_PROFILE= TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_ok_path" /bin/sh "$terrapod" doctor
+)"
+assert_has_ansi_escape "$tty_doctor_output" "TTY Terrapod doctor uses ANSI visual treatment"
 
 doctor_missing_key_path="$(status_doctor_path doctor-missing-key git zsh mise nvim zellij apt)"
 write_stub "$doctor_missing_key_path/uname" 'printf "%s\n" "Linux"'
@@ -1179,7 +1383,8 @@ doctor_missing_output="$(cat "$tmp_dir/doctor-missing.out")"
 assert_contains "$doctor_missing_output" "ok - Optional Editor Stack is enabled (rich Neovim configuration)" "Terrapod doctor reports enabled Optional Editor Stack as rich config state"
 assert_contains "$doctor_missing_output" "warn - Optional AI Tool Stack is enabled but missing tools: agy, claude, codex" "Terrapod doctor warns about missing enabled AI tools"
 assert_contains "$doctor_missing_output" "ok - Optional Development Workspace is enabled (development Zellij layouts)" "Terrapod doctor reports enabled Optional Development Workspace as layout state"
-assert_contains "$doctor_missing_output" "Run terrapod chezmoi -- apply after enabling Optional AI Tool Stack, or install/apply the configured tools before relying on them." "Terrapod doctor gives actionable missing optional-stack guidance"
+assert_contains "$doctor_missing_output" "Run tpod chezmoi -- apply after enabling Optional AI Tool Stack, or install/apply the configured tools before relying on them." "Terrapod doctor gives actionable missing optional-stack guidance with tpod"
+assert_not_contains "$doctor_missing_output" "Run terrapod chezmoi -- apply" "Terrapod doctor avoids old optional-stack guidance command"
 
 doctor_unsupported_os_release="$tmp_dir/doctor-unsupported-os-release"
 write_os_release "$doctor_unsupported_os_release" debian 12 "Debian GNU/Linux 12"
@@ -1304,6 +1509,15 @@ assert_contains \
   "$update_output" \
   "Delegating source update to: chezmoi update --exclude scripts" \
   "Terrapod update explains the delegated command"
+
+assert_no_ansi_escape "$update_output" "captured Terrapod update is plain without ANSI escapes"
+assert_no_routine_emoji "$update_output" "captured Terrapod update has no routine emoji"
+
+tty_update_output="$(
+  run_command_in_pty xterm unset env HOME="$update_home" XDG_CONFIG_HOME="$update_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" sh "$terrapod" update
+)"
+assert_has_ansi_escape "$tty_update_output" "TTY Terrapod update uses ANSI visual treatment"
+assert_not_contains_colored_phrase "$tty_update_output" "Delegating source update to: chezmoi update --exclude scripts" "TTY Terrapod update keeps delegated command text neutral"
 
 if [ -e "$BROAD_UPGRADE_CALL_FILE" ]; then
   printf '%s\n' "unexpected broad upgrade command calls:" >&2
@@ -1510,6 +1724,14 @@ assert_contains \
   "stub diff output" \
   "Terrapod diff includes delegated chezmoi diff output"
 
+assert_no_ansi_escape "$diff_output" "captured Terrapod diff is plain without ANSI escapes"
+assert_no_routine_emoji "$diff_output" "captured Terrapod diff has no routine emoji"
+
+tty_diff_output="$(
+  run_command_in_pty xterm unset env HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" sh "$terrapod" diff
+)"
+assert_has_ansi_escape "$tty_diff_output" "TTY Terrapod diff uses ANSI visual treatment"
+
 if [ -e "$BROAD_UPGRADE_CALL_FILE" ]; then
   printf '%s\n' "unexpected broad upgrade command calls during diff:" >&2
   sed 's/^/  /' "$BROAD_UPGRADE_CALL_FILE" >&2
@@ -1711,6 +1933,14 @@ assert_contains \
   "Post-apply validation: tpod alias is managed" \
   "Terrapod apply validates the tpod alias managed target"
 
+assert_no_ansi_escape "$apply_output" "captured Terrapod apply is plain without ANSI escapes"
+assert_no_routine_emoji "$apply_output" "captured Terrapod apply has no routine emoji"
+
+tty_apply_output="$(
+  run_command_in_pty xterm unset env HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" sh "$terrapod" apply
+)"
+assert_has_ansi_escape "$tty_apply_output" "TTY Terrapod apply uses ANSI visual treatment"
+
 if [ -e "$BROAD_UPGRADE_CALL_FILE" ]; then
   printf '%s\n' "unexpected broad upgrade command calls during apply:" >&2
   sed 's/^/  /' "$BROAD_UPGRADE_CALL_FILE" >&2
@@ -1738,6 +1968,74 @@ if [ -e "$CHEZMOI_APPLY_INVOKED_FILE" ]; then
 fi
 
 pass "Terrapod apply rejects extra arguments before calling chezmoi apply"
+
+write_stub "$tmp_dir/bin/chezmoi" \
+  'command_name=' \
+  'for arg do' \
+  '  case "$arg" in' \
+  '    apply|managed)' \
+  '      command_name="$arg"' \
+  '      ;;' \
+  '  esac' \
+  'done' \
+  'case "$command_name" in' \
+  '  apply)' \
+  '    printf "%s\n" invoked >"$CHEZMOI_APPLY_INVOKED_FILE"' \
+  '    printf "%s\n" "simulated apply failure" >&2' \
+  '    exit 91' \
+  '    ;;' \
+  'esac' \
+  'printf "%s\n" "unexpected chezmoi command: $*" >&2' \
+  'exit 92'
+
+if HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$terrapod" apply >"$tmp_dir/apply-failure.out" 2>"$tmp_dir/apply-failure.err"; then
+  fail "Terrapod apply fails when delegated chezmoi apply fails"
+fi
+
+apply_failure_error="$(cat "$tmp_dir/apply-failure.err")"
+
+assert_contains \
+  "$apply_failure_error" \
+  "terrapod: chezmoi apply failed; fix the error above, then rerun 'tpod apply'." \
+  "Terrapod apply failure guidance uses tpod"
+
+assert_not_contains \
+  "$apply_failure_error" \
+  "rerun 'terrapod apply'" \
+  "Terrapod apply failure avoids old rerun command"
+
+write_stub "$tmp_dir/bin/chezmoi" \
+  'command_name=' \
+  'for arg do' \
+  '  case "$arg" in' \
+  '    apply|managed)' \
+  '      command_name="$arg"' \
+  '      ;;' \
+  '  esac' \
+  'done' \
+  'case "$command_name" in' \
+  '  apply)' \
+  '    printf "%s\n" invoked >"$CHEZMOI_APPLY_INVOKED_FILE"' \
+  '    : >"$CHEZMOI_APPLY_ARGS_FILE"' \
+  '    for arg do' \
+  '      printf "%s\n" "$arg" >>"$CHEZMOI_APPLY_ARGS_FILE"' \
+  '    done' \
+  '    printf "%s\n" "stub apply output"' \
+  '    exit 0' \
+  '    ;;' \
+  '  managed)' \
+  '    : >"$CHEZMOI_MANAGED_ARGS_FILE"' \
+  '    for arg do' \
+  '      printf "%s\n" "$arg" >>"$CHEZMOI_MANAGED_ARGS_FILE"' \
+  '    done' \
+  '    printf "%s\n" ".local/bin/terrapod"' \
+  '    printf "%s\n" ".local/bin/tpod"' \
+  '    exit 0' \
+  '    ;;' \
+  'esac' \
+  'printf "%s\n" "unexpected chezmoi command: $*" >&2' \
+  'exit 91'
 
 rm -f "$CHEZMOI_APPLY_ARGS_FILE" "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
 
@@ -1847,8 +2145,13 @@ assert_contains \
 
 assert_contains \
   "$apply_validation_error" \
-  "Run 'terrapod chezmoi -- managed' to inspect managed targets, then rerun 'terrapod apply'." \
-  "Terrapod apply gives actionable post-apply validation guidance"
+  "Run 'tpod chezmoi -- managed' to inspect managed targets, then rerun 'tpod apply'." \
+  "Terrapod apply gives actionable post-apply validation guidance with tpod"
+
+assert_not_contains \
+  "$apply_validation_error" \
+  "Run 'terrapod chezmoi -- managed'" \
+  "Terrapod apply avoids old post-apply validation inspection command"
 
 rm -f "$CHEZMOI_APPLY_ARGS_FILE" "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
 
@@ -1866,5 +2169,10 @@ assert_contains \
 
 assert_contains \
   "$apply_override_validation_error" \
-  "Run 'terrapod chezmoi -- --config $diff_config managed' to inspect managed targets, then rerun 'terrapod apply'." \
-  "Terrapod apply gives config-aware post-apply validation guidance"
+  "Run 'tpod chezmoi -- --config $diff_config managed' to inspect managed targets, then rerun 'tpod apply'." \
+  "Terrapod apply gives config-aware post-apply validation guidance with tpod"
+
+assert_not_contains \
+  "$apply_override_validation_error" \
+  "Run 'terrapod chezmoi -- --config $diff_config managed'" \
+  "Terrapod apply avoids old config-aware post-apply validation command"
