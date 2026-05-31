@@ -69,8 +69,8 @@ The GitHub repository that hosts **Terrapod** and this repository's declared dot
 _Avoid_: dotfiles repository, legacy source URL
 
 **tpod**:
-The short command alias for **Terrapod**.
-_Avoid_: separate tool, primary brand name
+The preferred day-to-day command spelling for **Terrapod**.
+_Avoid_: separate tool, brand name
 
 **Terrapod Setup**:
 The interactive setup workflow that turns a **Preset** into concrete machine-local **Terrapod** settings before the initial apply.
@@ -91,10 +91,10 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 ## Relationships
 
 - The **Dotfiles Management Tool** is the user-facing entry point for first install, configuration changes, and routine dotfiles maintenance.
-- **Terrapod** is the primary command and brand name for the **Dotfiles Management Tool**.
-- **tpod** is a compatibility and convenience alias for **Terrapod**, not a separate interface.
-- User-facing quick-start and routine command examples should introduce `tpod` as the preferred day-to-day short command while preserving `terrapod` as the full command and brand.
-- Installation, bootstrap recovery, and explicit setup/configuration examples may continue to use `terrapod` when the full command name improves clarity.
+- **Terrapod** is the brand name and full command for the **Dotfiles Management Tool**.
+- **tpod** is the preferred day-to-day command spelling for **Terrapod**, not a separate interface.
+- User-facing help, quick-start, routine command examples, and guidance should use `tpod` for copyable commands while preserving `terrapod` as the full executable spelling in a concise alias note.
+- Installation and bootstrap recovery examples may continue to use checked-out executable paths or `terrapod` when the full command name improves clarity before the alias is installed.
 - The **Terrapod Source Repository** uses `juty9026/terrapod` as its canonical GitHub slug.
 - Public first-run installation references use the HTTPS **Terrapod Source Repository** URL `https://github.com/juty9026/terrapod.git`.
 - Maintainer remotes may use the SSH **Terrapod Source Repository** URL `git@github.com:juty9026/terrapod.git`.
@@ -171,9 +171,9 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - mise with its aqua backend is the **Modern CLI Provider**.
 - **Terrapod** applies this repository's declared dotfiles state; it does not act as the package manager for OS packages or mise-managed tool upgrades.
 - **Terrapod** may install declared dependencies needed to reach the target state, but it does not run broad version upgrade commands such as `brew upgrade`, `apt upgrade`, or `mise upgrade`.
-- `terrapod update` delegates repository update semantics to `chezmoi update` and adds Terrapod-specific context and validation around it.
-- README and command output describe `terrapod update` as a source update so it is not confused with Homebrew, APT, or mise upgrades.
-- README and command output describe `terrapod diff` and `terrapod apply` as declared-state operations delegated to chezmoi.
+- `tpod update` delegates repository update semantics to `chezmoi update` and adds Terrapod-specific context and validation around it.
+- README and command output describe `tpod update` as a source update so it is not confused with Homebrew, APT, or mise upgrades.
+- README and command output describe `tpod diff` and `tpod apply` as declared-state operations delegated to chezmoi.
 - After successful first-run apply, the installer should surface `tpod help` so users discover the day-to-day short command immediately.
 - The **macOS Desktop App Stack** is opt-in because Homebrew casks can install shared applications and desktop support assets outside a single user's home directory.
 - The **macOS Desktop App Stack** excludes Homebrew itself, shared CLI formulae such as mise and btop, and terminal font casks.
@@ -213,16 +213,18 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Changes to the **Canonical README** should make heading-structure drift in the **Korean README** visible during maintenance.
 - README drift checks compare corresponding section headings only; they do not enforce paragraph, table, or code block parity.
 - README drift checks compare all Markdown heading lines from `README.md` and `README.ko.md` for exact text and order.
-- `terrapod help` may carry a concise product introduction, but routine command output stays operational and scan-friendly.
-- `terrapod help` introduces **Terrapod** as a small landing pod for dotfiles and immediately states that chezmoi remains underneath while package-manager upgrades stay outside scope.
-- Routine command output uses stable labels such as Profile, Config, Preflight, Delegating, Post-apply validation, and Guidance instead of brand metaphors.
-- Routine command stage labels may be lightly polished when the result stays concise, stable, and clear in copied logs.
-- The current command-output pass stays simple and does not add emoji or terminal color behavior.
-- `terrapod apply` should stay focused on declared-state apply context, preflight, delegation, and post-apply validation; it should not expand into a rich installed-tool report in the current scope.
+- `tpod help` may carry a concise product introduction, but routine command output stays operational and scan-friendly.
+- `tpod help` introduces **Terrapod** as a small landing pod for dotfiles and immediately states that chezmoi remains underneath while package-manager upgrades stay outside scope.
+- Routine command output uses stable labels such as Profile, Config, Preflight, Delegating, Post-apply validation, and Guidance, with visual alignment and terminal color when they improve scanning without obscuring copied logs.
+- Routine command stage labels may be polished when the result stays concise, stable, and clear.
+- Routine command visual treatment applies to `tpod help`, `tpod status`, `tpod doctor`, `tpod diff`, `tpod apply`, and `tpod update`, without emoji or a separate plain-mode environment variable.
+- Routine command color is enabled only for compatible terminal output and disabled for non-TTY output, `TERM=dumb`, or `NO_COLOR`.
+- Routine command color uses cyan or bold for titles and sections, green for successful or enabled states, yellow for warnings and missing/unsupported states, red for failed states, and neutral styling for paths, commands, and values.
+- `tpod apply` should stay focused on declared-state apply context, preflight, delegation, and post-apply validation; it should not expand into a rich installed-tool report in the current scope.
 - The first-run **Terrapod** installer uses a gum-backed terminal presentation for initial setup prompts such as **Preset** selection.
 - The gum-backed first-run installer presentation is a required interactive path; non-TTY, dumb terminal, scripted, and missing-gum environments fail with guidance until non-interactive setup options are designed.
 - Rich **Terrapod Setup** presentation may use setup-only emoji, color, spacing, and aligned prompt layout when it improves first-run review clarity.
-- Rich **Terrapod Setup** presentation does not imply emoji or terminal color behavior for routine **Terrapod** command output.
+- Routine command visual treatment is separate from rich **Terrapod Setup** presentation; Setup remains its own gum-backed UI.
 - Error output avoids product metaphor and states the failed condition plus the next useful action.
 
 ## Example Dialogue
