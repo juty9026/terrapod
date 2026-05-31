@@ -127,7 +127,14 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - A **Preset** shows a summary of the optional stack and app-group settings it will enable before installation.
 - First-run setup allows users to customize the concrete settings produced by a **Preset** before they are saved.
 - **Terrapod Setup** lets users customize **Optional Editor Stack**, **Optional AI Tool Stack**, **Optional Development Workspace**, and applicable **macOS App Group** settings before saving concrete machine-local settings.
-- In **Terrapod Setup**, enabling **Optional Development Workspace** presents **Optional Editor Stack** and **Optional AI Tool Stack** as included by the workspace rather than independently disabled.
+- **Terrapod Setup** customization should feel like reviewing and adjusting concrete settings proposed by the selected **Preset**, not answering standalone yes/no questions about abstract option names.
+- gum-backed **Terrapod Setup** confirmations should use action labels that expose the current **Preset**-proposed value, such as `Keep enabled`/`Disable` or `Enable`/`Keep disabled`, instead of generic `Yes`/`No` labels.
+- gum-backed **Terrapod Setup** setting prompts should show the setting name first, then a concise explanation, then an action-oriented confirmation prompt that repeats the setting name or otherwise makes the target unambiguous.
+- gum-backed **Terrapod Setup** setting confirmation prompts should keep a stable `Enable <setting>?` shape while the confirmation action labels communicate whether the selected **Preset** currently proposes enabling or disabling that setting.
+- Rich **Terrapod Setup** presentation should reserve colored emphasis for section headings; individual setting prompt titles should stay visually quieter so their explanations remain attached to the choice.
+- In **Terrapod Setup**, enabling **Optional Development Workspace** presents **Optional Editor Stack** and **Optional AI Tool Stack** as a grouped inclusion list under the workspace prompt rather than as repeated standalone included-setting messages.
+- In the **macOS App Groups** section of **Terrapod Setup**, each group should use the same setting block structure while leading with the group name, because the section heading already supplies the **macOS App Group** context.
+- The final **Terrapod Setup** settings summary should continue showing the concrete machine-local key/value settings that will be written, even when earlier customization prompts use more human-facing labels.
 - Changing a **Preset** in the future must not silently change machines that already saved concrete optional stack and app-group settings.
 - The first **Preset** choices are minimal, development, and workstation.
 - The minimal **Preset** keeps optional stacks and macOS app groups disabled.

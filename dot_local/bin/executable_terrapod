@@ -360,31 +360,31 @@ confirm_setup_write() {
   fatal_gum_setup_failure
 }
 
-setup_option_description() {
+setup_option_title() {
   case "$1" in
     "Optional Development Workspace")
-      printf '%s\n' "Optional Development Workspace: Dev Zellij layouts; also includes Editor and AI tool stacks."
+      printf '%s\n' "Optional Development Workspace"
       ;;
     "Optional Editor Stack")
-      printf '%s\n' "Optional Editor Stack: Rich Neovim configuration."
+      printf '%s\n' "Optional Editor Stack"
       ;;
     "Optional AI Tool Stack")
-      printf '%s\n' "Optional AI Tool Stack: Antigravity CLI, Claude Code, and Codex."
+      printf '%s\n' "Optional AI Tool Stack"
       ;;
     "terminal-apps macOS App Group (Ghostty)")
-      printf '%s\n' "terminal-apps macOS App Group (Ghostty): Ghostty."
+      printf '%s\n' "terminal-apps"
       ;;
     "automation macOS App Group")
-      printf '%s\n' "automation macOS App Group: Hammerspoon and Karabiner-Elements."
+      printf '%s\n' "automation"
       ;;
     "launcher macOS App Group")
-      printf '%s\n' "launcher macOS App Group: Raycast and 1Password CLI."
+      printf '%s\n' "launcher"
       ;;
     "monitoring macOS App Group")
-      printf '%s\n' "monitoring macOS App Group: iStat Menus."
+      printf '%s\n' "monitoring"
       ;;
     "ai-apps macOS App Group")
-      printf '%s\n' "ai-apps macOS App Group: Claude Desktop, Codex Desktop, Antigravity 2.0, and Antigravity IDE."
+      printf '%s\n' "ai-apps"
       ;;
     *)
       return 1
@@ -392,18 +392,72 @@ setup_option_description() {
   esac
 }
 
-show_setup_option_description() {
+setup_option_prompt_name() {
+  setup_option_title "$1"
+}
+
+show_setup_option_block() {
   label="$1"
 
-  setup_option_description "$label" || return 0
+  title="$(setup_option_title "$label")" || return 0
+  printf '%s\n' "$title"
+
+  case "$label" in
+    "Optional Development Workspace")
+      printf '%s\n' "  Dev Zellij layouts."
+      printf '%s\n' "  Includes:"
+      printf '%s\n' "    - Optional Editor Stack"
+      printf '%s\n' "    - Optional AI Tool Stack"
+      ;;
+    "Optional Editor Stack")
+      printf '%s\n' "  Rich Neovim configuration."
+      ;;
+    "Optional AI Tool Stack")
+      printf '%s\n' "  Antigravity CLI, Claude Code, and Codex."
+      ;;
+    "terminal-apps macOS App Group (Ghostty)")
+      printf '%s\n' "  Installs Ghostty."
+      ;;
+    "automation macOS App Group")
+      printf '%s\n' "  Installs Hammerspoon and Karabiner-Elements."
+      ;;
+    "launcher macOS App Group")
+      printf '%s\n' "  Installs Raycast and 1Password CLI."
+      ;;
+    "monitoring macOS App Group")
+      printf '%s\n' "  Installs iStat Menus."
+      ;;
+    "ai-apps macOS App Group")
+      printf '%s\n' "  Installs Claude Desktop, Codex Desktop, Antigravity 2.0, and Antigravity IDE."
+      ;;
+  esac
+  printf '%s\n' ""
+}
+
+setup_confirm_actions() {
+  current="$1"
+
+  if is_enabled "$current"; then
+    setup_affirmative="Keep enabled"
+    setup_negative="Disable"
+  else
+    setup_affirmative="Enable"
+    setup_negative="Keep disabled"
+  fi
 }
 
 prompt_setup_bool() {
   label="$1"
   current="$2"
 
-  show_setup_option_description "$label" >&2
-  if gum confirm "$label" --default="$current"; then
+  show_setup_option_block "$label" >&2
+  prompt_name="$(setup_option_prompt_name "$label" || printf '%s\n' "$label")"
+  setup_confirm_actions "$current"
+
+  if gum confirm "Enable $prompt_name?" \
+    --default="$current" \
+    --affirmative "$setup_affirmative" \
+    --negative "$setup_negative"; then
     printf '%s\n' "true"
     return
   else
@@ -435,10 +489,6 @@ prompt_for_setup_settings() {
   if is_enabled "$setup_enableDevelopmentWorkspace"; then
     setup_enableEditorStack=true
     setup_enableAiCliTools=true
-    show_setup_option_description "Optional Editor Stack" >&2
-    printf '%s\n' "Optional Editor Stack: included by Optional Development Workspace" >&2
-    show_setup_option_description "Optional AI Tool Stack" >&2
-    printf '%s\n' "Optional AI Tool Stack: included by Optional Development Workspace" >&2
   else
     setup_enableEditorStack="$(prompt_setup_bool "Optional Editor Stack" "$setup_enableEditorStack")"
     setup_enableAiCliTools="$(prompt_setup_bool "Optional AI Tool Stack" "$setup_enableAiCliTools")"
