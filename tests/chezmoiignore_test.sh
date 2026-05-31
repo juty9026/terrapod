@@ -181,6 +181,7 @@ macos_launcher_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTermina
 macos_monitoring_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":false,"enableMacosAppGroupMonitoring":true}'
 macos_ai_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":false,"enableMacosAppGroupMonitoring":false,"enableMacosAppGroupAiApps":true}'
 macos_terminal_apps_managed_targets="$(managed_target_paths "$macos_terminal_apps_data")"
+macos_ai_apps_managed="$(managed_source_paths "$macos_ai_apps_data")"
 macos_ai_cli_tools_data='{"chezmoi":{"os":"darwin"},"enableEditorStack":false,"enableAiCliTools":true,"enableDevelopmentWorkspace":false}'
 macos_ai_cli_tools_managed="$(managed_source_paths "$macos_ai_cli_tools_data")"
 macos_development_workspace_data='{"chezmoi":{"os":"darwin"},"enableEditorStack":false,"enableAiCliTools":false,"enableDevelopmentWorkspace":true}'
@@ -436,6 +437,11 @@ assert_managed_paths_include_prefix \
   "$macos_development_workspace_managed" \
   "dot_config/zsh/path.d/antigravity.zsh.tmpl" \
   "macOS enableDevelopmentWorkspace includes Antigravity PATH snippet"
+
+assert_managed_paths_include_prefix \
+  "$macos_ai_apps_managed" \
+  "dot_config/zsh/path.d/antigravity.zsh.tmpl" \
+  "macOS ai-apps group includes Antigravity PATH snippet"
 
 assert_managed_paths_include_prefix \
   "$editor_stack_managed" \
