@@ -9,6 +9,10 @@ docs/**
 .github/**
 tests/**
 
+# cmux settings are intentionally unmanaged; existing local settings are left untouched.
+.config/cmux
+.config/cmux/**
+
 {{ if not (or (default false (get . "enableEditorStack")) (default false (get . "enableDevelopmentWorkspace"))) }}
 # Optional Editor Stack entries are opt-in for every machine profile.
 .config/nvim

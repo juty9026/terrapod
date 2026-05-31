@@ -40,6 +40,17 @@ managed_target_paths() {
     managed
 }
 
+managed_target_paths_from_source() {
+  data="$1"
+  source="$2"
+
+  chezmoi \
+    --config "$chezmoi_config" \
+    --source "$source" \
+    --override-data "$data" \
+    managed
+}
+
 render_template() {
   data="$1"
   file="$2"
@@ -244,7 +255,7 @@ assert_not_contains_text "$macos_brewfile" 'cask "1password-cli"' "macOS default
 assert_not_contains_text "$macos_brewfile" 'cask "istat-menus"' "macOS default does not render iStat Menus"
 
 assert_contains_text "$terminal_apps_brewfile" 'cask "ghostty"' "terminal-apps group renders Ghostty"
-assert_contains_text "$terminal_apps_brewfile" 'cask "cmux"' "terminal-apps group renders cmux"
+assert_not_contains_text "$terminal_apps_brewfile" 'cask "cmux"' "terminal-apps group does not render cmux"
 assert_not_contains_text "$terminal_apps_brewfile" 'cask "hammerspoon"' "terminal-apps group does not render automation casks"
 
 assert_contains_text "$automation_apps_brewfile" 'cask "hammerspoon"' "automation group renders Hammerspoon"
@@ -314,7 +325,6 @@ pass "core Brewfile casks are terminal font casks only"
 
 for app_config in \
   ".config/ghostty/config" \
-  ".config/cmux/settings.json" \
   ".config/karabiner/karabiner.json" \
   ".hammerspoon/init.lua"
 do
@@ -328,6 +338,34 @@ do
 done
 
 pass "user-scoped macOS app config remains managed regardless of app group selection"
+
+cmux_fixture_source="$tmp_dir/cmux-fixture-source"
+mkdir -p "$cmux_fixture_source/dot_config/cmux"
+cp "$repo_root/.chezmoiignore" "$cmux_fixture_source/.chezmoiignore"
+printf '{}\n' >"$cmux_fixture_source/dot_config/cmux/private_settings.json"
+
+cmux_fixture_macos_managed_targets="$(managed_target_paths_from_source "$macos_data" "$cmux_fixture_source")"
+cmux_fixture_terminal_apps_managed_targets="$(managed_target_paths_from_source "$macos_terminal_apps_data" "$cmux_fixture_source")"
+
+assert_managed_paths_exclude_prefix \
+  "$cmux_fixture_macos_managed_targets" \
+  ".config/cmux" \
+  "macOS default ignore rules exclude future cmux settings sources"
+
+assert_managed_paths_exclude_prefix \
+  "$cmux_fixture_terminal_apps_managed_targets" \
+  ".config/cmux" \
+  "terminal-apps ignore rules exclude future cmux settings sources"
+
+assert_managed_paths_exclude_prefix \
+  "$macos_managed_targets" \
+  ".config/cmux" \
+  "macOS default does not manage cmux settings"
+
+assert_managed_paths_exclude_prefix \
+  "$macos_terminal_apps_managed_targets" \
+  ".config/cmux" \
+  "terminal-apps group does not manage cmux settings"
 
 assert_managed_paths_exclude_prefix \
   "$macos_managed" \
