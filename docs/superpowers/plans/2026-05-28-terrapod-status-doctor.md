@@ -84,7 +84,7 @@ enableMacosAppGroupLauncher = true
 enableMacosAppGroupMonitoring = false
 TOML
 
-for tool in chezmoi git zsh mise brew nvim gemini claude codex zellij ghostty cmux op; do
+for tool in chezmoi git zsh mise brew nvim gemini claude codex zellij ghostty op; do
   write_success_stub "$tool"
 done
 
@@ -99,7 +99,7 @@ assert_contains "$macos_status_output" "Config: $status_config (present)" "Terra
 assert_contains "$macos_status_output" "Optional Editor Stack: enabled (tools available: nvim)" "Terrapod status reports enabled Optional Editor Stack tool state"
 assert_contains "$macos_status_output" "Optional AI Tool Stack: enabled (tools available: gemini, claude, codex)" "Terrapod status reports enabled Optional AI Tool Stack tool state"
 assert_contains "$macos_status_output" "Optional Development Workspace: enabled (tools available: zellij)" "Terrapod status reports enabled Optional Development Workspace tool state"
-assert_contains "$macos_status_output" "terminal-apps: enabled (Ghostty and cmux)" "Terrapod status reports enabled terminal-apps macOS App Group"
+assert_contains "$macos_status_output" "terminal-apps: enabled (Ghostty)" "Terrapod status reports enabled terminal-apps macOS App Group"
 assert_contains "$macos_status_output" "automation: disabled" "Terrapod status reports disabled automation macOS App Group"
 assert_contains "$macos_status_output" "launcher: enabled (Raycast and 1Password CLI)" "Terrapod status reports enabled launcher macOS App Group"
 assert_contains "$macos_status_output" "monitoring: disabled" "Terrapod status reports disabled monitoring macOS App Group"
@@ -473,7 +473,7 @@ print_macos_app_group_status() {
 
   printf '%s\n' "macOS App Groups:"
   if is_enabled "$(config_bool enableMacosAppGroupTerminalApps)"; then
-    printf '%s\n' "  terminal-apps: enabled (Ghostty and cmux)"
+    printf '%s\n' "  terminal-apps: enabled (Ghostty)"
   else
     printf '%s\n' "  terminal-apps: disabled"
   fi

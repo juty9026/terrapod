@@ -40,8 +40,6 @@ tests/**
 .chezmoiscripts/00-bootstrap-homebrew.sh
 .chezmoiscripts/40-remove-legacy-npm-ai-tools.sh
 .chezmoiscripts/50-open-karabiner-if-needed.sh
-.config/cmux
-.config/cmux/**
 .config/ghostty
 .config/ghostty/**
 .config/karabiner
