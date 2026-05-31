@@ -236,7 +236,7 @@ Optional stack profile과 macOS App Group setting은 기본적으로 disabled입
 | 설정 키 | 기본값 | 목적 |
 | --- | --- | --- |
 | `enableEditorStack` | `false` | rich Neovim configuration을 관리하는 Optional Editor Stack을 활성화합니다. Plain Neovim은 어느 쪽이든 Core Shell Stack에 남아 있습니다. |
-| `enableAiCliTools` | `false` | mise-managed Node.js runtime을 통해 npm으로 Gemini CLI, Claude Code, Codex를 설치합니다. |
+| `enableAiCliTools` | `false` | official vendor installer를 통해 Antigravity CLI, Claude Code, Codex를 설치합니다. 기존 npm-installed AI CLI는 unmanaged 상태로 둡니다. |
 | `enableDevelopmentWorkspace` | `false` | Optional Editor Stack, Optional AI Tool Stack, development-specific Zellij workspace surface를 포함하는 Optional Development Workspace preset을 활성화합니다. |
 | `enableMacosAppGroupTerminalApps` | `false` | terminal-apps macOS App Group에 포함된 Ghostty를 설치합니다. |
 | `enableMacosAppGroupAutomation` | `false` | automation macOS App Group인 Hammerspoon과 Karabiner-Elements를 설치합니다. |
@@ -249,6 +249,8 @@ Optional stack profile과 macOS App Group setting은 기본적으로 disabled입
 macOS Desktop App Stack installation은 `enableDevelopmentWorkspace`와 분리되어 있습니다. desktop cask가 한 사용자의 home directory 밖에 있는 shared application에 영향을 줄 수 있기 때문입니다.
 
 optional stack에서 opt out하면 해당 file은 chezmoi management에서 제외됩니다. 이미 machine에 존재하는 file을 제거하지는 않습니다.
+
+기존 npm-installed AI CLI는 unmanaged 상태로 남겨 둡니다. Terrapod은 해당 도구가 machine에 남아 있다는 이유만으로 uninstall하거나 warning을 내지 않습니다.
 
 ### Optional stack profile examples
 

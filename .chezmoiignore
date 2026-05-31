@@ -30,15 +30,9 @@ tests/**
 .chezmoiscripts/60-install-ai-cli-tools.sh
 {{ end }}
 
-{{ if not (and (eq .chezmoi.os "darwin") (or (default false (get . "enableAiCliTools")) (default false (get . "enableDevelopmentWorkspace")))) }}
-# Antigravity PATH snippet is opt-in for macOS AI/development profiles.
-.config/zsh/path.d/antigravity.zsh
-{{ end }}
-
 {{ if ne .chezmoi.os "darwin" }}
 # macOS Terminal Profile entries are not part of the VPS Shell Profile.
 .chezmoiscripts/00-bootstrap-homebrew.sh
-.chezmoiscripts/40-remove-legacy-npm-ai-tools.sh
 .chezmoiscripts/50-open-karabiner-if-needed.sh
 .config/ghostty
 .config/ghostty/**

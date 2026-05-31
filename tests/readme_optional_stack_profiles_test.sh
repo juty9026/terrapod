@@ -81,6 +81,10 @@ assert_contains '| `enableEditorStack` | `false` |' \
   "README documents enableEditorStack default"
 assert_contains '| `enableAiCliTools` | `false` |' \
   "README documents enableAiCliTools default"
+assert_key_row_contains '`enableAiCliTools`' 'Antigravity CLI, Claude Code, and Codex' \
+  "README documents the new Optional AI Tool Stack membership"
+assert_key_row_contains '`enableAiCliTools`' 'official vendor installers' \
+  "README documents official AI CLI installers"
 assert_contains '| `enableDevelopmentWorkspace` | `false` |' \
   "README documents enableDevelopmentWorkspace default"
 assert_not_contains 'enableMacosDesktopApps' \
@@ -198,6 +202,8 @@ assert_raycast_restore_contains '`enableMacosAppGroupLauncher`' \
   "README Raycast restore procedure mentions launcher App Group"
 assert_contains 'Opting out of an optional stack excludes its files from chezmoi management; it does not remove files already present on a machine.' \
   "README documents non-destructive optional stack opt-out"
+assert_contains 'Existing npm-installed AI CLIs are left unmanaged; Terrapod does not uninstall or warn merely because they remain on a machine.' \
+  "README documents non-destructive legacy npm AI CLI migration"
 
 assert_contains 'Minimal VPS' \
   "README includes a minimal VPS example"
