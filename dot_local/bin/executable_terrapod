@@ -1,54 +1,141 @@
 #!/bin/sh
 set -eu
 
+STATE_LABEL_WIDTH=30
+
+supports_color() {
+  [ -t 1 ] &&
+    [ -n "${TERM:-}" ] &&
+    [ "${TERM:-}" != "dumb" ] &&
+    [ -z "${NO_COLOR+x}" ]
+}
+
+print_styled() {
+  style="$1"
+  text="$2"
+
+  if supports_color; then
+    printf '\033[%sm%s\033[0m' "$style" "$text"
+  else
+    printf '%s' "$text"
+  fi
+}
+
+print_styled_line() {
+  print_styled "$1" "$2"
+  printf '\n'
+}
+
+print_title() {
+  print_styled_line "1;36" "$1"
+}
+
+print_section() {
+  print_styled_line "36" "$1"
+}
+
+print_section_value() {
+  print_styled "36" "$1"
+  printf ' %s\n' "$2"
+}
+
+print_state_word() {
+  state_word="$1"
+
+  case "$state_word" in
+    enabled|available|ok|present|managed|readable|supported|none)
+      print_styled "32" "$state_word"
+      ;;
+    warning|missing|unsupported|warn)
+      print_styled "33" "$state_word"
+      ;;
+    failed|fail)
+      print_styled "31" "$state_word"
+      ;;
+    *)
+      printf '%s' "$state_word"
+      ;;
+  esac
+}
+
+print_colon_state_line() {
+  prefix="$1"
+  state="$2"
+  detail="${3:-}"
+
+  printf '%-*s: ' "$STATE_LABEL_WIDTH" "$prefix"
+  print_state_word "$state"
+  if [ -n "$detail" ]; then
+    printf ' %s' "$detail"
+  fi
+  printf '\n'
+}
+
+print_indented_colon_state_line() {
+  prefix="$1"
+  state="$2"
+  detail="${3:-}"
+
+  printf '  '
+  printf '%-*s: ' "$STATE_LABEL_WIDTH" "$prefix"
+  print_state_word "$state"
+  if [ -n "$detail" ]; then
+    printf ' %s' "$detail"
+  fi
+  printf '\n'
+}
+
+print_warning_line() {
+  print_styled "33" "Warning:"
+  printf ' %s\n' "$1"
+}
+
 show_help() {
   preset_args="$(available_preset_args "$(current_profile)")"
 
-  cat <<EOF
-Terrapod - a small landing pod for your dotfiles
-Uses chezmoi underneath; keeps package-manager upgrades outside its scope.
-
-Usage:
-  terrapod [help|--help|-h]
-  terrapod setup
-  terrapod configure <$preset_args>
-  terrapod status
-  terrapod doctor
-  terrapod diff
-  terrapod apply
-  terrapod update
-  terrapod chezmoi -- <args...>
-
-Commands:
-  help                                  Show this help.
-  setup                                 Run interactive Terrapod Setup.
-  configure <$preset_args>
-                                        Expand a Preset into concrete chezmoi data values.
-  status                                Explain this machine's Terrapod profile, config, stack, and tool state.
-  doctor                                Validate Terrapod prerequisites and report actionable guidance.
-  diff                                  Run chezmoi diff with Terrapod profile and stack context.
-  apply                                 Run preflight checks, chezmoi apply, and post-apply validation.
-  update                                Run chezmoi update with Terrapod profile and config context.
-  chezmoi -- <args...>                  Run raw chezmoi for advanced maintenance.
-
-Examples:
-  terrapod setup
-  terrapod configure development
-  tpod status
-  tpod doctor
-  tpod diff
-  tpod apply
-  tpod update
-  terrapod chezmoi -- status
-
-Alias:
-  tpod is the short day-to-day alias for terrapod.
-EOF
+  print_title "Terrapod - a small landing pod for your dotfiles"
+  printf '%s\n' "Uses chezmoi underneath; keeps package-manager upgrades outside its scope."
+  printf '\n'
+  print_section "Usage:"
+  printf '%s\n' "  tpod [help|--help|-h]"
+  printf '%s\n' "  tpod setup"
+  printf '%s\n' "  tpod configure <$preset_args>"
+  printf '%s\n' "  tpod status"
+  printf '%s\n' "  tpod doctor"
+  printf '%s\n' "  tpod diff"
+  printf '%s\n' "  tpod apply"
+  printf '%s\n' "  tpod update"
+  printf '%s\n' "  tpod chezmoi -- <args...>"
+  printf '\n'
+  print_section "Commands:"
+  printf '%s\n' "  help                                  Show this help."
+  printf '%s\n' "  setup                                 Run interactive Terrapod Setup."
+  printf '%s\n' "  configure <$preset_args>"
+  printf '%s\n' "                                        Expand a Preset into concrete chezmoi data values."
+  printf '%s\n' "  status                                Explain this machine's Terrapod profile, config, stack, and tool state."
+  printf '%s\n' "  doctor                                Validate Terrapod prerequisites and report actionable guidance."
+  printf '%s\n' "  diff                                  Run chezmoi diff with Terrapod profile and stack context."
+  printf '%s\n' "  apply                                 Run preflight checks, chezmoi apply, and post-apply validation."
+  printf '%s\n' "  update                                Run chezmoi update with Terrapod profile and config context."
+  printf '%s\n' "  chezmoi -- <args...>                  Run raw chezmoi for advanced maintenance."
+  printf '\n'
+  print_section "Examples:"
+  printf '%s\n' "  tpod setup"
+  printf '%s\n' "  tpod configure development"
+  printf '%s\n' "  tpod status"
+  printf '%s\n' "  tpod doctor"
+  printf '%s\n' "  tpod diff"
+  printf '%s\n' "  tpod apply"
+  printf '%s\n' "  tpod update"
+  printf '%s\n' "  tpod chezmoi -- status"
+  printf '\n'
+  print_section "Note:"
+  printf '%s\n' "  terrapod also works as the full command."
 }
 
 fail_usage() {
   printf '%s\n' "terrapod: $1" >&2
-  printf '%s\n' "Run 'terrapod help' for usage." >&2
+  printf '%s\n' "Run 'tpod help' for usage." >&2
   exit 64
 }
 
@@ -237,13 +324,13 @@ require_gum_setup() {
 
   if [ ! -t 0 ] || [ ! -t 2 ] || [ -z "${TERM:-}" ] || [ "${TERM:-}" = "dumb" ] || [ -n "${CI:-}" ]; then
     printf '%s\n' "terrapod: Terrapod Setup requires an interactive terminal supported by gum" >&2
-    printf '%s\n' "Run 'terrapod setup' from a real terminal with TERM set, stdin/stderr attached to a TTY, and CI unset." >&2
+    printf '%s\n' "Run 'tpod setup' from a real terminal with TERM set, stdin/stderr attached to a TTY, and CI unset." >&2
     exit 1
   fi
 }
 
 fatal_gum_setup_failure() {
-  fatal "gum failed during Terrapod Setup; fix gum and rerun 'terrapod setup'"
+  fatal "gum failed during Terrapod Setup; fix gum and rerun 'tpod setup'"
 }
 
 setup_style() {
@@ -709,24 +796,20 @@ missing_tools() {
   printf '%s\n' "$missing"
 }
 
-tool_phrase() {
-  missing="$(missing_tools "$@")"
-  if [ -n "$missing" ]; then
-    printf '%s\n' "missing tools: $missing"
-  else
-    printf '%s\n' "tools available: $(join_tools "$@")"
-  fi
-}
-
 print_stack_status() {
   label="$1"
   enabled="$2"
   shift 2
 
   if is_enabled "$enabled"; then
-    printf '  %s: enabled (%s)\n' "$label" "$(tool_phrase "$@")"
+    missing="$(missing_tools "$@")"
+    if [ -n "$missing" ]; then
+      print_indented_colon_state_line "$label" "enabled" "(missing tools: $missing)"
+    else
+      print_indented_colon_state_line "$label" "enabled" "(tools available: $(join_tools "$@"))"
+    fi
   else
-    printf '  %s: disabled\n' "$label"
+    print_indented_colon_state_line "$label" "disabled"
   fi
 }
 
@@ -736,9 +819,9 @@ print_optional_setting_status() {
   detail="$3"
 
   if is_enabled "$enabled"; then
-    printf '  %s: enabled (%s)\n' "$label" "$detail"
+    print_indented_colon_state_line "$label" "enabled" "($detail)"
   else
-    printf '  %s: disabled\n' "$label"
+    print_indented_colon_state_line "$label" "disabled"
   fi
 }
 
@@ -751,59 +834,59 @@ print_macos_app_group_status() {
     return
   fi
 
-  printf '%s\n' "macOS App Groups:"
+  print_section "macOS App Groups:"
   if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupTerminalApps)"; then
-    printf '%s\n' "  terminal-apps: enabled (Ghostty)"
+    print_indented_colon_state_line "terminal-apps" "enabled" "(Ghostty)"
   else
-    printf '%s\n' "  terminal-apps: disabled"
+    print_indented_colon_state_line "terminal-apps" "disabled"
   fi
   if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupAutomation)"; then
-    printf '%s\n' "  automation: enabled (Hammerspoon and Karabiner-Elements)"
+    print_indented_colon_state_line "automation" "enabled" "(Hammerspoon and Karabiner-Elements)"
   else
-    printf '%s\n' "  automation: disabled"
+    print_indented_colon_state_line "automation" "disabled"
   fi
   if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupLauncher)"; then
-    printf '%s\n' "  launcher: enabled (Raycast and 1Password CLI)"
+    print_indented_colon_state_line "launcher" "enabled" "(Raycast and 1Password CLI)"
   else
-    printf '%s\n' "  launcher: disabled"
+    print_indented_colon_state_line "launcher" "disabled"
   fi
   if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupMonitoring)"; then
-    printf '%s\n' "  monitoring: enabled (iStat Menus)"
+    print_indented_colon_state_line "monitoring" "enabled" "(iStat Menus)"
   else
-    printf '%s\n' "  monitoring: disabled"
+    print_indented_colon_state_line "monitoring" "disabled"
   fi
   if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupAiApps)"; then
-    printf '%s\n' "  ai-apps: enabled (Claude Desktop, Codex Desktop, Antigravity 2.0, and Antigravity IDE)"
+    print_indented_colon_state_line "ai-apps" "enabled" "(Claude Desktop, Codex Desktop, Antigravity 2.0, and Antigravity IDE)"
   else
-    printf '%s\n' "  ai-apps: disabled"
+    print_indented_colon_state_line "ai-apps" "disabled"
   fi
 }
 
 print_key_tool_status() {
   profile="$1"
 
-  printf '%s\n' "Key tools:"
+  print_section "Key tools:"
   for tool in chezmoi git zsh mise nvim zellij; do
     if command -v "$tool" >/dev/null 2>&1; then
-      printf '  %s: available\n' "$tool"
+      print_indented_colon_state_line "$tool" "available"
     else
-      printf '  %s: missing\n' "$tool"
+      print_indented_colon_state_line "$tool" "missing"
     fi
   done
 
   case "$profile" in
     macos-terminal)
       if command -v brew >/dev/null 2>&1; then
-        printf '%s\n' "  brew: available"
+        print_indented_colon_state_line "brew" "available"
       else
-        printf '%s\n' "  brew: missing"
+        print_indented_colon_state_line "brew" "missing"
       fi
       ;;
     vps-shell)
       if command -v apt >/dev/null 2>&1; then
-        printf '%s\n' "  apt: available"
+        print_indented_colon_state_line "apt" "available"
       else
-        printf '%s\n' "  apt: missing"
+        print_indented_colon_state_line "apt" "missing"
       fi
       ;;
   esac
@@ -834,7 +917,7 @@ status_key_tool_warnings() {
   fi
 
   if [ -n "$missing" ]; then
-    printf '%s\n' "Warning: missing key tools: $missing"
+    print_warning_line "missing key tools: $missing"
     return 0
   fi
 
@@ -847,7 +930,7 @@ print_status_warnings() {
   printed=0
 
   if [ "$profile" = "unsupported" ]; then
-    printf '%s\n' "Warning: $(unsupported_profile_reason)"
+    print_warning_line "$(unsupported_profile_reason)"
     printed=1
   fi
 
@@ -858,13 +941,15 @@ print_status_warnings() {
   if is_enabled "$(effective_ai_cli_tools_enabled "$config_file")"; then
     missing="$(missing_tools agy claude codex)"
     if [ -n "$missing" ]; then
-      printf '%s\n' "Warning: Optional AI Tool Stack is enabled but missing tools: $missing"
+      print_warning_line "Optional AI Tool Stack is enabled but missing tools: $missing"
       printed=1
     fi
   fi
 
   if [ "$printed" -eq 0 ]; then
-    printf '%s\n' "Warnings: none"
+    printf '%s: ' "Warnings"
+    print_state_word "none"
+    printf '\n'
   fi
 }
 
@@ -876,10 +961,10 @@ run_status() {
   config_file="$(chezmoi_config_file)"
   profile="$(current_profile)"
 
-  printf '%s\n' "Terrapod status"
-  printf '%s\n' "Profile: $(profile_context_label)"
+  print_title "Terrapod status"
+  print_section_value "Profile:" "$(profile_context_label)"
   show_config_context "$config_file"
-  printf '%s\n' "Optional stacks:"
+  print_section "Optional stacks:"
   print_optional_setting_status "Optional Editor Stack" "$(effective_editor_stack_enabled "$config_file")" "rich Neovim configuration"
   print_stack_status "Optional AI Tool Stack" "$(effective_ai_cli_tools_enabled "$config_file")" agy claude codex
   print_optional_setting_status "Optional Development Workspace" "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" "development Zellij layouts"
@@ -892,32 +977,53 @@ show_config_context() {
   config_file="$1"
 
   if [ -f "$config_file" ]; then
-    printf '%s\n' "Config: $config_file (present)"
+    print_styled "36" "Config:"
+    printf ' %s (' "$config_file"
+    print_state_word "present"
+    printf ')\n'
   else
-    printf '%s\n' "Config: $config_file (missing; chezmoi defaults apply)"
+    print_styled "36" "Config:"
+    printf ' %s (' "$config_file"
+    print_state_word "missing"
+    printf '; chezmoi defaults apply)\n'
   fi
+}
+
+print_named_state_line() {
+  label="$1"
+  state="$2"
+
+  print_colon_state_line "$label" "$state"
 }
 
 show_stack_context() {
   config_file="$1"
   profile="$2"
 
-  printf '%s\n' "Optional stacks:"
-  printf '%s\n' "Optional Editor Stack: $(effective_optional_stack_state_label "$config_file" enableEditorStack)"
-  printf '%s\n' "Optional AI Tool Stack: $(effective_optional_stack_state_label "$config_file" enableAiCliTools)"
-  printf '%s\n' "Optional Development Workspace: $(config_bool_state_label "$config_file" enableDevelopmentWorkspace)"
+  print_section "Optional stacks:"
+  editor_state="$(effective_optional_stack_state_label "$config_file" enableEditorStack)"
+  ai_state="$(effective_optional_stack_state_label "$config_file" enableAiCliTools)"
+  workspace_state="$(config_bool_state_label "$config_file" enableDevelopmentWorkspace)"
+  print_named_state_line "Optional Editor Stack" "$editor_state"
+  print_named_state_line "Optional AI Tool Stack" "$ai_state"
+  print_named_state_line "Optional Development Workspace" "$workspace_state"
 
   if [ "$profile" != "macos-terminal" ]; then
     printf '%s\n' "macOS App Groups: not applicable for $(profile_context_label)"
     return
   fi
 
-  printf '%s\n' "macOS App Groups:"
-  printf '%s\n' "terminal-apps: $(config_bool_state_label "$config_file" enableMacosAppGroupTerminalApps)"
-  printf '%s\n' "automation: $(config_bool_state_label "$config_file" enableMacosAppGroupAutomation)"
-  printf '%s\n' "launcher: $(config_bool_state_label "$config_file" enableMacosAppGroupLauncher)"
-  printf '%s\n' "monitoring: $(config_bool_state_label "$config_file" enableMacosAppGroupMonitoring)"
-  printf '%s\n' "ai-apps: $(config_bool_state_label "$config_file" enableMacosAppGroupAiApps)"
+  print_section "macOS App Groups:"
+  terminal_apps_state="$(config_bool_state_label "$config_file" enableMacosAppGroupTerminalApps)"
+  automation_state="$(config_bool_state_label "$config_file" enableMacosAppGroupAutomation)"
+  launcher_state="$(config_bool_state_label "$config_file" enableMacosAppGroupLauncher)"
+  monitoring_state="$(config_bool_state_label "$config_file" enableMacosAppGroupMonitoring)"
+  ai_apps_state="$(config_bool_state_label "$config_file" enableMacosAppGroupAiApps)"
+  print_named_state_line "terminal-apps" "$terminal_apps_state"
+  print_named_state_line "automation" "$automation_state"
+  print_named_state_line "launcher" "$launcher_state"
+  print_named_state_line "monitoring" "$monitoring_state"
+  print_named_state_line "ai-apps" "$ai_apps_state"
 }
 
 render_chezmoi_command() {
@@ -946,8 +1052,8 @@ show_diff_context() {
   config_file="$(chezmoi_config_file)"
   profile="$(current_profile)"
 
-  printf '%s\n' "Terrapod diff"
-  printf '%s\n' "Profile: $(profile_context_label)"
+  print_title "Terrapod diff"
+  print_section_value "Profile:" "$(profile_context_label)"
   show_config_context "$config_file"
   show_stack_context "$config_file" "$profile"
   printf '%s\n' "Delegating declared-state diff to: $(render_chezmoi_command diff)"
@@ -966,19 +1072,28 @@ run_apply_preflight() {
   config_file="$1"
 
   if ! command -v chezmoi >/dev/null 2>&1; then
-    fatal "chezmoi is required before apply; install it or run the Terrapod installer, then rerun 'terrapod apply'"
+    fatal "chezmoi is required before apply; install it or run the Terrapod installer, then rerun 'tpod apply'"
   fi
 
-  printf '%s\n' "Preflight: chezmoi is available"
+  print_styled "36" "Preflight:"
+  printf ' chezmoi is '
+  print_state_word "available"
+  printf '\n'
 
   if [ -e "$config_file" ] || [ -L "$config_file" ]; then
     if [ ! -f "$config_file" ] || [ ! -r "$config_file" ]; then
       fatal "config path is not a readable file: $config_file"
     fi
 
-    printf '%s\n' "Preflight: config file is readable"
+    print_styled "36" "Preflight:"
+    printf ' config file is '
+    print_state_word "readable"
+    printf '\n'
   else
-    printf '%s\n' "Preflight: config file is missing; chezmoi defaults will apply"
+    print_styled "36" "Preflight:"
+    printf ' config file is '
+    print_state_word "missing"
+    printf '; chezmoi defaults will apply\n'
   fi
 }
 
@@ -988,7 +1103,10 @@ validate_managed_target() {
   label="$3"
 
   if printf '%s\n' "$managed_output" | grep -Fx "$target" >/dev/null; then
-    printf '%s\n' "Post-apply validation: $label is managed"
+    print_styled "36" "Post-apply validation:"
+    printf ' %s is ' "$label"
+    print_state_word "managed"
+    printf '\n'
     return 0
   fi
 
@@ -999,9 +1117,9 @@ validate_managed_target() {
 
 print_post_apply_validation_guidance() {
   if [ -n "${TERRAPOD_CHEZMOI_CONFIG:-}" ]; then
-    printf '%s\n' "Run 'terrapod chezmoi -- --config $TERRAPOD_CHEZMOI_CONFIG managed' to inspect managed targets, then rerun 'terrapod apply'." >&2
+    printf '%s\n' "Run 'tpod chezmoi -- --config $TERRAPOD_CHEZMOI_CONFIG managed' to inspect managed targets, then rerun 'tpod apply'." >&2
   else
-    printf '%s\n' "Run 'terrapod chezmoi -- managed' to inspect managed targets, then rerun 'terrapod apply'." >&2
+    printf '%s\n' "Run 'tpod chezmoi -- managed' to inspect managed targets, then rerun 'tpod apply'." >&2
   fi
 }
 
@@ -1026,8 +1144,8 @@ show_apply_context() {
   config_file="$1"
   profile="$(current_profile)"
 
-  printf '%s\n' "Terrapod apply"
-  printf '%s\n' "Profile: $(profile_context_label)"
+  print_title "Terrapod apply"
+  print_section_value "Profile:" "$(profile_context_label)"
   show_config_context "$config_file"
   show_stack_context "$config_file" "$profile"
   printf '%s\n' "Delegating declared-state apply to: $(render_chezmoi_command apply)"
@@ -1043,7 +1161,7 @@ run_apply() {
   run_apply_preflight "$config_file"
 
   if ! run_chezmoi_command apply; then
-    printf '%s\n' "terrapod: chezmoi apply failed; fix the error above, then rerun 'terrapod apply'." >&2
+    printf '%s\n' "terrapod: chezmoi apply failed; fix the error above, then rerun 'tpod apply'." >&2
     return 1
   fi
 
@@ -1054,17 +1172,21 @@ doctor_failed=0
 doctor_guidance_printed=0
 
 doctor_ok() {
-  printf '  ok - %s\n' "$1"
+  printf '  '
+  print_state_word "ok"
+  printf ' - %s\n' "$1"
 }
 
 doctor_warn() {
-  printf '  warn - %s\n' "$1"
+  printf '  '
+  print_state_word "warn"
+  printf ' - %s\n' "$1"
   doctor_failed=1
 }
 
 doctor_guidance() {
   if [ "$doctor_guidance_printed" -eq 0 ]; then
-    printf '%s\n' "Guidance:"
+    print_section "Guidance:"
     doctor_guidance_printed=1
   fi
   printf '  - %s\n' "$1"
@@ -1123,14 +1245,14 @@ run_doctor() {
   config_file="$(chezmoi_config_file)"
   profile="$(current_profile)"
 
-  printf '%s\n' "Terrapod doctor"
-  printf '%s\n' "Profile: $(profile_context_label)"
+  print_title "Terrapod doctor"
+  print_section_value "Profile:" "$(profile_context_label)"
   show_config_context "$config_file"
-  printf '%s\n' "Checks:"
+  print_section "Checks:"
 
   if [ "$profile" = "unsupported" ]; then
     doctor_warn "$(unsupported_profile_reason)"
-    doctor_guidance "Run Terrapod on macOS or Ubuntu 24.04, or use 'terrapod chezmoi -- <args>' as an advanced escape hatch on unsupported systems."
+    doctor_guidance "Run Terrapod on macOS or Ubuntu 24.04, or use 'tpod chezmoi -- <args>' as an advanced escape hatch on unsupported systems."
   else
     doctor_ok "Profile is supported: $(profile_context_label)"
   fi
@@ -1156,7 +1278,7 @@ run_doctor() {
   doctor_check_optional_stack \
     "Optional AI Tool Stack" \
     "$(effective_ai_cli_tools_enabled "$config_file")" \
-    "Run terrapod chezmoi -- apply after enabling Optional AI Tool Stack, or install/apply the configured tools before relying on them." \
+    "Run tpod chezmoi -- apply after enabling Optional AI Tool Stack, or install/apply the configured tools before relying on them." \
     agy claude codex
 
   doctor_check_optional_setting \
@@ -1165,7 +1287,10 @@ run_doctor() {
     "development Zellij layouts"
 
   if [ "$doctor_guidance_printed" -eq 0 ]; then
-    printf '%s\n' "Guidance: none"
+    print_styled "36" "Guidance:"
+    printf ' '
+    print_state_word "none"
+    printf '\n'
   fi
 
   if [ "$doctor_failed" -ne 0 ]; then
@@ -1176,8 +1301,8 @@ run_doctor() {
 show_update_context() {
   config_file="$(chezmoi_config_file)"
 
-  printf '%s\n' "Terrapod update"
-  printf '%s\n' "Profile: $(profile_context_label)"
+  print_title "Terrapod update"
+  print_section_value "Profile:" "$(profile_context_label)"
   show_config_context "$config_file"
   printf '%s\n' "Delegating source update to: $(render_chezmoi_command update --exclude scripts)"
 }
