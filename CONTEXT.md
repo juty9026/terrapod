@@ -163,7 +163,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Enabling the **Optional Development Workspace** does not enable the **macOS Desktop App Stack**.
 - **macOS App Groups** are configured during **Terrapod** setup and remain within the **macOS Desktop App Stack** boundary.
 - The first **macOS App Groups** are terminal-apps, automation, launcher, and monitoring.
-- The terminal-apps **macOS App Group** contains Ghostty and cmux.
+- The terminal-apps **macOS App Group** contains Ghostty.
 - The automation **macOS App Group** contains Hammerspoon and Karabiner-Elements.
 - The launcher **macOS App Group** contains Raycast and 1Password CLI.
 - The monitoring **macOS App Group** contains iStat Menus.

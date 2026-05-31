@@ -126,7 +126,7 @@ machine-local data keys. During Homebrew bootstrap, chezmoi renders selected
 groups from `Brewfile.macos-desktop-apps.tmpl` into a temporary Brewfile and
 installs that rendered bundle:
 
-- `terminal-apps`: Ghostty and cmux.
+- `terminal-apps`: Ghostty.
 - `automation`: Hammerspoon and Karabiner-Elements.
 - `launcher`: Raycast and 1Password CLI.
 - `monitoring`: iStat Menus.
@@ -236,7 +236,7 @@ Optional stack profiles and macOS App Group settings are disabled by default.
 | `enableEditorStack` | `false` | Enables the Optional Editor Stack, which manages the rich Neovim configuration. Plain Neovim remains in the Core Shell Stack either way. |
 | `enableAiCliTools` | `false` | Installs Gemini CLI, Claude Code, and Codex with npm through the mise-managed Node.js runtime. |
 | `enableDevelopmentWorkspace` | `false` | Enables the Optional Development Workspace preset, including the Optional Editor Stack, Optional AI Tool Stack, and development-specific Zellij workspace surfaces. |
-| `enableMacosAppGroupTerminalApps` | `false` | Installs the terminal-apps macOS App Group: Ghostty and cmux. |
+| `enableMacosAppGroupTerminalApps` | `false` | Installs the terminal-apps macOS App Group: Ghostty. |
 | `enableMacosAppGroupAutomation` | `false` | Installs the automation macOS App Group: Hammerspoon and Karabiner-Elements. |
 | `enableMacosAppGroupLauncher` | `false` | Installs the launcher macOS App Group: Raycast and 1Password CLI. |
 | `enableMacosAppGroupMonitoring` | `false` | Installs the monitoring macOS App Group: iStat Menus. |
