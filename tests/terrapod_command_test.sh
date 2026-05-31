@@ -1145,16 +1145,16 @@ macos_status_output="$(
 assert_contains "$macos_status_output" "Terrapod status" "Terrapod status prints a command heading"
 assert_contains "$macos_status_output" "Profile: macOS Terminal Profile" "Terrapod status reports macOS Terminal Profile context"
 assert_contains "$macos_status_output" "Config: $status_config (present)" "Terrapod status reports explicit config path"
-assert_contains "$macos_status_output" "Optional Editor Stack: enabled (rich Neovim configuration)" "Terrapod status reports enabled Optional Editor Stack state"
-assert_contains "$macos_status_output" "Optional AI Tool Stack: enabled (tools available: agy, claude, codex)" "Terrapod status reports enabled Optional AI Tool Stack tool state"
+assert_contains "$macos_status_output" "Optional Editor Stack         : enabled (rich Neovim configuration)" "Terrapod status reports enabled Optional Editor Stack state"
+assert_contains "$macos_status_output" "Optional AI Tool Stack        : enabled (tools available: agy, claude, codex)" "Terrapod status reports enabled Optional AI Tool Stack tool state"
 assert_contains "$macos_status_output" "Optional Development Workspace: enabled (development Zellij layouts)" "Terrapod status reports enabled Optional Development Workspace state"
-assert_contains "$macos_status_output" "terminal-apps: enabled (Ghostty)" "Terrapod status reports enabled Ghostty-only terminal-apps macOS App Group"
-assert_contains "$macos_status_output" "automation: disabled" "Terrapod status reports disabled automation macOS App Group"
-assert_contains "$macos_status_output" "launcher: enabled (Raycast and 1Password CLI)" "Terrapod status reports enabled launcher macOS App Group"
-assert_contains "$macos_status_output" "monitoring: disabled" "Terrapod status reports disabled monitoring macOS App Group"
-assert_contains "$macos_status_output" "ai-apps: enabled (Claude Desktop, Codex Desktop, Antigravity 2.0, and Antigravity IDE)" "Terrapod status reports enabled ai-apps macOS App Group"
-assert_contains "$macos_status_output" "chezmoi: available" "Terrapod status reports chezmoi availability"
-assert_contains "$macos_status_output" "brew: available" "Terrapod status reports macOS Bootstrap Package Manager availability"
+assert_contains "$macos_status_output" "terminal-apps                 : enabled (Ghostty)" "Terrapod status reports enabled Ghostty-only terminal-apps macOS App Group"
+assert_contains "$macos_status_output" "automation                    : disabled" "Terrapod status reports disabled automation macOS App Group"
+assert_contains "$macos_status_output" "launcher                      : enabled (Raycast and 1Password CLI)" "Terrapod status reports enabled launcher macOS App Group"
+assert_contains "$macos_status_output" "monitoring                    : disabled" "Terrapod status reports disabled monitoring macOS App Group"
+assert_contains "$macos_status_output" "ai-apps                       : enabled (Claude Desktop, Codex Desktop, Antigravity 2.0, and Antigravity IDE)" "Terrapod status reports enabled ai-apps macOS App Group"
+assert_contains "$macos_status_output" "chezmoi                       : available" "Terrapod status reports chezmoi availability"
+assert_contains "$macos_status_output" "brew                          : available" "Terrapod status reports macOS Bootstrap Package Manager availability"
 assert_contains "$macos_status_output" "Warnings: none" "Terrapod status reports no warnings when enabled tools are present"
 assert_not_contains "$macos_status_output" "Warning:" "Terrapod status emits no warning lines when enabled tools are present"
 assert_no_ansi_escape "$help_output" "Terrapod help does not use setup ANSI presentation"
@@ -1169,9 +1169,9 @@ tty_macos_status_output="$(
 assert_has_ansi_escape "$tty_macos_status_output" "TTY Terrapod status with config uses ANSI visual treatment"
 assert_not_contains_colored_phrase "$tty_macos_status_output" "Profile: macOS Terminal Profile" "TTY Terrapod status keeps profile value out of the section style"
 assert_not_contains_colored_phrase "$tty_macos_status_output" "Config: $status_config" "TTY Terrapod status keeps config path neutral"
-assert_not_contains_colored_phrase "$tty_macos_status_output" "Optional Editor Stack: enabled (rich Neovim configuration)" "TTY Terrapod status does not color optional-stack detail as one phrase"
-assert_not_contains_colored_phrase "$tty_macos_status_output" "Optional AI Tool Stack: enabled (tools available: agy, claude, codex)" "TTY Terrapod status does not color optional-stack tool list as one phrase"
-assert_not_contains_colored_phrase "$tty_macos_status_output" "chezmoi: available" "TTY Terrapod status does not color tool names with state words"
+assert_not_contains_colored_phrase "$tty_macos_status_output" "Optional Editor Stack         : enabled (rich Neovim configuration)" "TTY Terrapod status does not color optional-stack detail as one phrase"
+assert_not_contains_colored_phrase "$tty_macos_status_output" "Optional AI Tool Stack        : enabled (tools available: agy, claude, codex)" "TTY Terrapod status does not color optional-stack tool list as one phrase"
+assert_not_contains_colored_phrase "$tty_macos_status_output" "chezmoi                       : available" "TTY Terrapod status does not color tool names with state words"
 
 status_dotted_config="$tmp_dir/status-dotted.toml"
 cat >"$status_dotted_config" <<'TOML'
@@ -1189,10 +1189,10 @@ dotted_status_output="$(
     /bin/sh "$terrapod" status
 )"
 
-assert_contains "$dotted_status_output" "Optional Editor Stack: enabled (rich Neovim configuration)" "Terrapod status reads root dotted data keys for effective editor stack state"
-assert_contains "$dotted_status_output" "Optional AI Tool Stack: enabled (tools available: agy, claude, codex)" "Terrapod status reads root dotted data keys for effective AI stack state"
-assert_contains "$dotted_status_output" "terminal-apps: enabled (Ghostty)" "Terrapod status reads root dotted data keys for Ghostty-only macOS App Groups"
-assert_contains "$dotted_status_output" "ai-apps: enabled (Claude Desktop, Codex Desktop, Antigravity 2.0, and Antigravity IDE)" "Terrapod status reads root dotted data keys for ai-apps macOS App Group"
+assert_contains "$dotted_status_output" "Optional Editor Stack         : enabled (rich Neovim configuration)" "Terrapod status reads root dotted data keys for effective editor stack state"
+assert_contains "$dotted_status_output" "Optional AI Tool Stack        : enabled (tools available: agy, claude, codex)" "Terrapod status reads root dotted data keys for effective AI stack state"
+assert_contains "$dotted_status_output" "terminal-apps                 : enabled (Ghostty)" "Terrapod status reads root dotted data keys for Ghostty-only macOS App Groups"
+assert_contains "$dotted_status_output" "ai-apps                       : enabled (Claude Desktop, Codex Desktop, Antigravity 2.0, and Antigravity IDE)" "Terrapod status reads root dotted data keys for ai-apps macOS App Group"
 assert_contains "$dotted_status_output" "Warnings: none" "Terrapod status has no warnings for root dotted data keys when tools are present"
 
 status_ubuntu_config="$tmp_dir/status-ubuntu.toml"
@@ -1219,11 +1219,11 @@ ubuntu_status_output="$(
 )"
 
 assert_contains "$ubuntu_status_output" "Profile: VPS Shell Profile" "Terrapod status reports VPS Shell Profile context on Ubuntu 24.04"
-assert_contains "$ubuntu_status_output" "Optional Editor Stack: disabled" "Terrapod status reports disabled Optional Editor Stack without treating nvim as missing"
-assert_contains "$ubuntu_status_output" "Optional AI Tool Stack: disabled" "Terrapod status reports disabled Optional AI Tool Stack without missing-tool warnings"
+assert_contains "$ubuntu_status_output" "Optional Editor Stack         : disabled" "Terrapod status reports disabled Optional Editor Stack without treating nvim as missing"
+assert_contains "$ubuntu_status_output" "Optional AI Tool Stack        : disabled" "Terrapod status reports disabled Optional AI Tool Stack without missing-tool warnings"
 assert_contains "$ubuntu_status_output" "Optional Development Workspace: disabled" "Terrapod status reports disabled Optional Development Workspace without missing-tool warnings"
 assert_contains "$ubuntu_status_output" "macOS App Groups: not applicable for VPS Shell Profile" "Terrapod status omits macOS App Group details on VPS Shell Profile"
-assert_contains "$ubuntu_status_output" "apt: available" "Terrapod status reports Ubuntu Bootstrap Package Manager availability"
+assert_contains "$ubuntu_status_output" "apt                           : available" "Terrapod status reports Ubuntu Bootstrap Package Manager availability"
 assert_contains "$ubuntu_status_output" "Warnings: none" "Terrapod status has no warnings for disabled optional stacks"
 assert_not_contains "$ubuntu_status_output" "Warning:" "Terrapod status emits no warning lines for disabled optional stacks"
 assert_not_contains "$ubuntu_status_output" "missing tools: nvim" "Terrapod status distinguishes disabled Optional Editor Stack from missing tools"
@@ -1237,10 +1237,10 @@ core_missing_status_output="$(
     /bin/sh "$terrapod" status
 )"
 
-assert_contains "$core_missing_status_output" "Optional Editor Stack: disabled" "Terrapod status keeps disabled Optional Editor Stack separate from missing core Neovim"
+assert_contains "$core_missing_status_output" "Optional Editor Stack         : disabled" "Terrapod status keeps disabled Optional Editor Stack separate from missing core Neovim"
 assert_contains "$core_missing_status_output" "Optional Development Workspace: disabled" "Terrapod status keeps disabled Optional Development Workspace separate from missing core Zellij"
-assert_contains "$core_missing_status_output" "nvim: missing" "Terrapod status reports missing plain Neovim as a key tool"
-assert_contains "$core_missing_status_output" "zellij: missing" "Terrapod status reports missing Zellij as a key tool"
+assert_contains "$core_missing_status_output" "nvim                          : missing" "Terrapod status reports missing plain Neovim as a key tool"
+assert_contains "$core_missing_status_output" "zellij                        : missing" "Terrapod status reports missing Zellij as a key tool"
 assert_contains "$core_missing_status_output" "Warning: missing key tools: nvim, zellij" "Terrapod status warns about missing core Neovim and Zellij even when optional stacks are disabled"
 
 status_missing_config="$tmp_dir/status-missing.toml"
@@ -1259,8 +1259,8 @@ missing_status_output="$(
     /bin/sh "$terrapod" status
 )"
 
-assert_contains "$missing_status_output" "Optional Editor Stack: enabled (rich Neovim configuration)" "Terrapod status reports enabled Optional Editor Stack as rich config state"
-assert_contains "$missing_status_output" "Optional AI Tool Stack: enabled (missing tools: agy, claude, codex)" "Terrapod status reports missing tools only for enabled Optional AI Tool Stack"
+assert_contains "$missing_status_output" "Optional Editor Stack         : enabled (rich Neovim configuration)" "Terrapod status reports enabled Optional Editor Stack as rich config state"
+assert_contains "$missing_status_output" "Optional AI Tool Stack        : enabled (missing tools: agy, claude, codex)" "Terrapod status reports missing tools only for enabled Optional AI Tool Stack"
 assert_contains "$missing_status_output" "Optional Development Workspace: enabled (development Zellij layouts)" "Terrapod status reports enabled Optional Development Workspace as layout state"
 assert_contains "$missing_status_output" "Warning: Optional AI Tool Stack is enabled but missing tools: agy, claude, codex" "Terrapod status warns for enabled missing AI tools"
 
@@ -1280,8 +1280,8 @@ workspace_bundle_status_output="$(
     /bin/sh "$terrapod" status
 )"
 
-assert_contains "$workspace_bundle_status_output" "Optional Editor Stack: enabled (rich Neovim configuration)" "Terrapod status treats Optional Development Workspace as enabling Optional Editor Stack"
-assert_contains "$workspace_bundle_status_output" "Optional AI Tool Stack: enabled (missing tools: agy, claude, codex)" "Terrapod status treats Optional Development Workspace as enabling Optional AI Tool Stack"
+assert_contains "$workspace_bundle_status_output" "Optional Editor Stack         : enabled (rich Neovim configuration)" "Terrapod status treats Optional Development Workspace as enabling Optional Editor Stack"
+assert_contains "$workspace_bundle_status_output" "Optional AI Tool Stack        : enabled (missing tools: agy, claude, codex)" "Terrapod status treats Optional Development Workspace as enabling Optional AI Tool Stack"
 assert_contains "$workspace_bundle_status_output" "Optional Development Workspace: enabled (development Zellij layouts)" "Terrapod status reports enabled Optional Development Workspace"
 assert_contains "$workspace_bundle_status_output" "Warning: Optional AI Tool Stack is enabled but missing tools: agy, claude, codex" "Terrapod status warns when workspace-enabled Optional AI Tool Stack tools are missing"
 
@@ -1671,12 +1671,12 @@ assert_contains \
 
 assert_contains \
   "$diff_output" \
-  "Optional Editor Stack: enabled" \
+  "Optional Editor Stack         : enabled" \
   "Terrapod diff prints effective enabled Optional Editor Stack state"
 
 assert_contains \
   "$diff_output" \
-  "Optional AI Tool Stack: enabled" \
+  "Optional AI Tool Stack        : enabled" \
   "Terrapod diff prints effective enabled Optional AI Tool Stack state"
 
 assert_contains \
@@ -1691,27 +1691,27 @@ assert_contains \
 
 assert_contains \
   "$diff_output" \
-  "terminal-apps: enabled" \
+  "terminal-apps                 : enabled" \
   "Terrapod diff prints enabled terminal-apps macOS App Group state"
 
 assert_contains \
   "$diff_output" \
-  "automation: disabled" \
+  "automation                    : disabled" \
   "Terrapod diff prints disabled automation macOS App Group state"
 
 assert_contains \
   "$diff_output" \
-  "launcher: enabled" \
+  "launcher                      : enabled" \
   "Terrapod diff prints enabled launcher macOS App Group state"
 
 assert_contains \
   "$diff_output" \
-  "monitoring: disabled" \
+  "monitoring                    : disabled" \
   "Terrapod diff prints disabled monitoring macOS App Group state"
 
 assert_contains \
   "$diff_output" \
-  "ai-apps: enabled" \
+  "ai-apps                       : enabled" \
   "Terrapod diff prints enabled ai-apps macOS App Group state"
 
 assert_contains \
@@ -1865,12 +1865,12 @@ assert_contains \
 
 assert_contains \
   "$apply_output" \
-  "Optional Editor Stack: enabled" \
+  "Optional Editor Stack         : enabled" \
   "Terrapod apply prints effective enabled Optional Editor Stack state"
 
 assert_contains \
   "$apply_output" \
-  "Optional AI Tool Stack: enabled" \
+  "Optional AI Tool Stack        : enabled" \
   "Terrapod apply prints effective enabled Optional AI Tool Stack state"
 
 assert_contains \
@@ -1880,27 +1880,27 @@ assert_contains \
 
 assert_contains \
   "$apply_output" \
-  "terminal-apps: enabled" \
+  "terminal-apps                 : enabled" \
   "Terrapod apply prints enabled terminal-apps macOS App Group state"
 
 assert_contains \
   "$apply_output" \
-  "automation: disabled" \
+  "automation                    : disabled" \
   "Terrapod apply prints disabled automation macOS App Group state"
 
 assert_contains \
   "$apply_output" \
-  "launcher: enabled" \
+  "launcher                      : enabled" \
   "Terrapod apply prints enabled launcher macOS App Group state"
 
 assert_contains \
   "$apply_output" \
-  "monitoring: disabled" \
+  "monitoring                    : disabled" \
   "Terrapod apply prints disabled monitoring macOS App Group state"
 
 assert_contains \
   "$apply_output" \
-  "ai-apps: enabled" \
+  "ai-apps                       : enabled" \
   "Terrapod apply prints enabled ai-apps macOS App Group state"
 
 assert_contains \

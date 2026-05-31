@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 
+STATE_LABEL_WIDTH=30
+
 supports_color() {
   [ -t 1 ] &&
     [ -n "${TERM:-}" ] &&
@@ -61,7 +63,7 @@ print_colon_state_line() {
   state="$2"
   detail="${3:-}"
 
-  printf '%s: ' "$prefix"
+  printf '%-*s: ' "$STATE_LABEL_WIDTH" "$prefix"
   print_state_word "$state"
   if [ -n "$detail" ]; then
     printf ' %s' "$detail"
@@ -74,7 +76,8 @@ print_indented_colon_state_line() {
   state="$2"
   detail="${3:-}"
 
-  printf '  %s: ' "$prefix"
+  printf '  '
+  printf '%-*s: ' "$STATE_LABEL_WIDTH" "$prefix"
   print_state_word "$state"
   if [ -n "$detail" ]; then
     printf ' %s' "$detail"
@@ -806,7 +809,7 @@ print_stack_status() {
       print_indented_colon_state_line "$label" "enabled" "(tools available: $(join_tools "$@"))"
     fi
   else
-    printf '  %s: disabled\n' "$label"
+    print_indented_colon_state_line "$label" "disabled"
   fi
 }
 
@@ -818,7 +821,7 @@ print_optional_setting_status() {
   if is_enabled "$enabled"; then
     print_indented_colon_state_line "$label" "enabled" "($detail)"
   else
-    printf '  %s: disabled\n' "$label"
+    print_indented_colon_state_line "$label" "disabled"
   fi
 }
 
@@ -835,27 +838,27 @@ print_macos_app_group_status() {
   if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupTerminalApps)"; then
     print_indented_colon_state_line "terminal-apps" "enabled" "(Ghostty)"
   else
-    printf '%s\n' "  terminal-apps: disabled"
+    print_indented_colon_state_line "terminal-apps" "disabled"
   fi
   if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupAutomation)"; then
     print_indented_colon_state_line "automation" "enabled" "(Hammerspoon and Karabiner-Elements)"
   else
-    printf '%s\n' "  automation: disabled"
+    print_indented_colon_state_line "automation" "disabled"
   fi
   if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupLauncher)"; then
     print_indented_colon_state_line "launcher" "enabled" "(Raycast and 1Password CLI)"
   else
-    printf '%s\n' "  launcher: disabled"
+    print_indented_colon_state_line "launcher" "disabled"
   fi
   if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupMonitoring)"; then
     print_indented_colon_state_line "monitoring" "enabled" "(iStat Menus)"
   else
-    printf '%s\n' "  monitoring: disabled"
+    print_indented_colon_state_line "monitoring" "disabled"
   fi
   if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupAiApps)"; then
     print_indented_colon_state_line "ai-apps" "enabled" "(Claude Desktop, Codex Desktop, Antigravity 2.0, and Antigravity IDE)"
   else
-    printf '%s\n' "  ai-apps: disabled"
+    print_indented_colon_state_line "ai-apps" "disabled"
   fi
 }
 
