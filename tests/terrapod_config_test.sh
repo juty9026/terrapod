@@ -660,8 +660,9 @@ y
 fi
 pass "macOS setup prompts for customization before final confirmation and customizes Optional Development Workspace and App Groups"
 
-assert_contains "$tmp_dir/setup-custom-workspace.out" "Optional Editor Stack: included by Optional Development Workspace" "workspace-enabled setup presents Optional Editor Stack as included"
-assert_contains "$tmp_dir/setup-custom-workspace.out" "Optional AI Tool Stack: included by Optional Development Workspace" "workspace-enabled setup presents Optional AI Tool Stack as included"
+assert_contains "$tmp_dir/setup-custom-workspace.out" "  Includes:" "workspace-enabled setup groups included optional stacks"
+assert_contains "$tmp_dir/setup-custom-workspace.out" "    - Optional Editor Stack" "workspace-enabled setup lists Optional Editor Stack under workspace"
+assert_contains "$tmp_dir/setup-custom-workspace.out" "    - Optional AI Tool Stack" "workspace-enabled setup lists Optional AI Tool Stack under workspace"
 assert_contains "$tmp_dir/setup-custom-workspace.out" "🌱 Terrapod Setup" "setup presents a rich setup heading"
 assert_contains "$tmp_dir/setup-custom-workspace.out" "Choose a Preset" "setup presents a Preset choice section"
 assert_not_contains "$tmp_dir/setup-custom-workspace.out" "Preset guide:" "setup does not print a separate Preset guide"
@@ -711,7 +712,8 @@ y
 fi
 pass "gum setup customizes concrete settings and completes"
 
-assert_contains "$tmp_dir/gum-equivalent.out" "terminal-apps macOS App Group (Ghostty): Ghostty." "gum setup labels terminal-apps macOS App Group as Ghostty-only"
+assert_contains "$tmp_dir/gum-equivalent.out" "terminal-apps" "gum setup labels terminal-apps App Group with the group name"
+assert_contains "$tmp_dir/gum-equivalent.out" "  Installs Ghostty." "gum setup describes terminal-apps App Group as Ghostty-only"
 assert_data_key_once_with_value "$gum_equivalent_config" "enableEditorStack" "true" "gum setup writes included Optional Editor Stack"
 assert_data_key_once_with_value "$gum_equivalent_config" "enableAiCliTools" "true" "gum setup writes included Optional AI Tool Stack"
 assert_data_key_once_with_value "$gum_equivalent_config" "enableDevelopmentWorkspace" "true" "gum setup writes enabled Optional Development Workspace"
