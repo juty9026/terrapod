@@ -796,7 +796,7 @@ print_status_warnings() {
   fi
 
   if is_enabled "$(effective_ai_cli_tools_enabled "$config_file")"; then
-    missing="$(missing_tools gemini claude codex)"
+    missing="$(missing_tools agy claude codex)"
     if [ -n "$missing" ]; then
       printf '%s\n' "Warning: Optional AI Tool Stack is enabled but missing tools: $missing"
       printed=1
@@ -821,7 +821,7 @@ run_status() {
   show_config_context "$config_file"
   printf '%s\n' "Optional stacks:"
   print_optional_setting_status "Optional Editor Stack" "$(effective_editor_stack_enabled "$config_file")" "rich Neovim configuration"
-  print_stack_status "Optional AI Tool Stack" "$(effective_ai_cli_tools_enabled "$config_file")" gemini claude codex
+  print_stack_status "Optional AI Tool Stack" "$(effective_ai_cli_tools_enabled "$config_file")" agy claude codex
   print_optional_setting_status "Optional Development Workspace" "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" "development Zellij layouts"
   print_macos_app_group_status "$config_file" "$profile"
   print_key_tool_status "$profile"
@@ -1087,7 +1087,7 @@ run_doctor() {
     "Optional AI Tool Stack" \
     "$(effective_ai_cli_tools_enabled "$config_file")" \
     "Run terrapod chezmoi -- apply after enabling Optional AI Tool Stack, or install/apply the configured tools before relying on them." \
-    gemini claude codex
+    agy claude codex
 
   doctor_check_optional_setting \
     "Optional Development Workspace" \

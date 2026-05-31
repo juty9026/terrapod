@@ -258,7 +258,7 @@ Optional stack profiles and macOS App Group settings are disabled by default.
 | Key | Default | Purpose |
 | --- | --- | --- |
 | `enableEditorStack` | `false` | Enables the Optional Editor Stack, which manages the rich Neovim configuration. Plain Neovim remains in the Core Shell Stack either way. |
-| `enableAiCliTools` | `false` | Installs Gemini CLI, Claude Code, and Codex with npm through the mise-managed Node.js runtime. |
+| `enableAiCliTools` | `false` | Installs Antigravity CLI, Claude Code, and Codex through official vendor installers. Existing npm-installed AI CLIs are left unmanaged. |
 | `enableDevelopmentWorkspace` | `false` | Enables the Optional Development Workspace preset, including the Optional Editor Stack, Optional AI Tool Stack, and development-specific Zellij workspace surfaces. |
 | `enableMacosAppGroupTerminalApps` | `false` | Installs the terminal-apps macOS App Group: Ghostty and cmux. |
 | `enableMacosAppGroupAutomation` | `false` | Installs the automation macOS App Group: Hammerspoon and Karabiner-Elements. |
@@ -273,6 +273,8 @@ macOS Desktop App Stack installation remains separate from `enableDevelopmentWor
 because desktop casks can affect shared applications outside one user's home directory.
 
 Opting out of an optional stack excludes its files from chezmoi management; it does not remove files already present on a machine.
+
+Existing npm-installed AI CLIs are left unmanaged; Terrapod does not uninstall or warn merely because they remain on a machine.
 
 ### Optional stack profile examples
 

@@ -69,7 +69,7 @@ assert_contains_text() {
   needle="$2"
   message="$3"
 
-  if ! printf '%s\n' "$text" | grep -F "$needle" >/dev/null; then
+  if ! printf '%s\n' "$text" | grep -F -- "$needle" >/dev/null; then
     fail "$message"
   fi
 
@@ -81,7 +81,7 @@ assert_not_contains_text() {
   needle="$2"
   message="$3"
 
-  if printf '%s\n' "$text" | grep -F "$needle" >/dev/null; then
+  if printf '%s\n' "$text" | grep -F -- "$needle" >/dev/null; then
     fail "$message"
   fi
 
@@ -336,11 +336,6 @@ done
 pass "user-scoped macOS app config remains managed regardless of app group selection"
 
 assert_managed_paths_exclude_prefix \
-  "$macos_managed" \
-  ".chezmoiscripts/run_onchange_after_40-remove-legacy-npm-ai-tools.sh.tmpl" \
-  "macOS default ignores legacy AI tool uninstall script"
-
-assert_managed_paths_exclude_prefix \
   "$ubuntu_managed" \
   "dot_config/nvim" \
   "Ubuntu VPS ignores Optional Editor Stack entries by default"
@@ -352,7 +347,7 @@ assert_managed_paths_exclude_prefix \
 
 assert_managed_paths_exclude_prefix \
   "$ubuntu_managed" \
-  ".chezmoiscripts/run_onchange_after_60-install-ai-cli-tools.sh.tmpl" \
+  ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
   "Ubuntu VPS ignores Optional AI Tool Stack installer by default"
 
 assert_managed_paths_exclude_prefix \
@@ -360,25 +355,11 @@ assert_managed_paths_exclude_prefix \
   "dot_config/nvim" \
   "macOS ignores Optional Editor Stack entries by default"
 
-assert_managed_paths_exclude_prefix \
-  "$macos_managed" \
-  "dot_config/zsh/path.d/antigravity.zsh.tmpl" \
-  "macOS default ignores Antigravity PATH snippet"
+if [ -e "$repo_root/dot_config/zsh/path.d/antigravity.zsh.tmpl" ]; then
+  fail "legacy Antigravity app-bundle PATH snippet is no longer managed"
+fi
 
-assert_managed_paths_exclude_prefix \
-  "$ai_cli_tools_managed" \
-  "dot_config/zsh/path.d/antigravity.zsh.tmpl" \
-  "Linux enableAiCliTools ignores Antigravity PATH snippet"
-
-assert_managed_paths_include_prefix \
-  "$macos_ai_cli_tools_managed" \
-  "dot_config/zsh/path.d/antigravity.zsh.tmpl" \
-  "macOS enableAiCliTools includes Antigravity PATH snippet"
-
-assert_managed_paths_include_prefix \
-  "$macos_development_workspace_managed" \
-  "dot_config/zsh/path.d/antigravity.zsh.tmpl" \
-  "macOS enableDevelopmentWorkspace includes Antigravity PATH snippet"
+pass "legacy Antigravity app-bundle PATH snippet is no longer managed"
 
 assert_managed_paths_include_prefix \
   "$editor_stack_managed" \
@@ -407,12 +388,12 @@ assert_managed_paths_include_prefix \
 
 assert_managed_paths_include_prefix \
   "$ai_cli_tools_managed" \
-  ".chezmoiscripts/run_onchange_after_60-install-ai-cli-tools.sh.tmpl" \
+  ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
   "enableAiCliTools includes Optional AI Tool Stack installer"
 
 assert_managed_paths_include_prefix \
   "$development_workspace_managed" \
-  ".chezmoiscripts/run_onchange_after_60-install-ai-cli-tools.sh.tmpl" \
+  ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
   "enableDevelopmentWorkspace includes Optional AI Tool Stack installer"
 
 ubuntu_mise_config="$(render_template "$ubuntu_data" "dot_config/mise/config.toml.tmpl")"
@@ -438,29 +419,39 @@ fi
 
 pass "mise tool installer tracks rendered mise config changes"
 
-ai_cli_tools_installer="$(render_template "$ai_cli_tools_data" ".chezmoiscripts/run_onchange_after_60-install-ai-cli-tools.sh.tmpl")"
-development_workspace_ai_installer="$(render_template "$development_workspace_data" ".chezmoiscripts/run_onchange_after_60-install-ai-cli-tools.sh.tmpl")"
+ai_cli_tools_installer="$(render_template "$ai_cli_tools_data" ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl")"
+development_workspace_ai_installer="$(render_template "$development_workspace_data" ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl")"
 
-for package in \
-  "@anthropic-ai/claude-code" \
-  "@google/gemini-cli" \
-  "@openai/codex"
+for installer_url in \
+  "https://antigravity.google/cli/install.sh" \
+  "https://claude.ai/install.sh" \
+  "https://chatgpt.com/codex/install.sh"
 do
-  if ! printf '%s\n' "$ai_cli_tools_installer" | grep -F "$package" >/dev/null; then
-    fail "enableAiCliTools renders Optional AI Tool Stack installer"
-  fi
-
-  if ! printf '%s\n' "$development_workspace_ai_installer" | grep -F "$package" >/dev/null; then
-    fail "enableDevelopmentWorkspace renders Optional AI Tool Stack installer"
-  fi
+  assert_contains_text "$ai_cli_tools_installer" "$installer_url" "enableAiCliTools renders official AI CLI installer URL: $installer_url"
+  assert_contains_text "$development_workspace_ai_installer" "$installer_url" "enableDevelopmentWorkspace renders official AI CLI installer URL: $installer_url"
 done
 
-pass "enableAiCliTools renders Optional AI Tool Stack installer"
-pass "enableDevelopmentWorkspace renders Optional AI Tool Stack installer"
+for legacy_text in \
+  "@anthropic-ai/claude-code" \
+  "@google/gemini-cli" \
+  "@openai/codex" \
+  "npm install -g" \
+  "npm uninstall" \
+  "--skip-path" \
+  "--skip-aliases"
+do
+  assert_not_contains_text "$ai_cli_tools_installer" "$legacy_text" "enableAiCliTools does not render legacy npm AI CLI management: $legacy_text"
+  assert_not_contains_text "$development_workspace_ai_installer" "$legacy_text" "enableDevelopmentWorkspace does not render legacy npm AI CLI management: $legacy_text"
+done
+
+assert_contains_text "$ai_cli_tools_installer" 'CODEX_NON_INTERACTIVE=1 PATH="$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin" "$shell_name" "$installer_path"' \
+  "enableAiCliTools runs Codex installer without seeing legacy PATH-managed codex"
+assert_contains_text "$development_workspace_ai_installer" 'CODEX_NON_INTERACTIVE=1 PATH="$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin" "$shell_name" "$installer_path"' \
+  "enableDevelopmentWorkspace runs Codex installer without seeing legacy PATH-managed codex"
 
 development_workspace_zellij_layout="$(render_managed_file "$development_workspace_data" ".config/zellij/layouts/dev.kdl")"
 
-for pane in CLAUDE CODEX GEMINI; do
+for pane in CLAUDE CODEX ANTIGRAVITY; do
   if ! printf '%s\n' "$development_workspace_zellij_layout" |
     grep -E "pane name=\"${pane}\" .*start_suspended=true" >/dev/null; then
     fail "enableDevelopmentWorkspace starts assistant panes suspended"
@@ -469,10 +460,16 @@ done
 
 pass "enableDevelopmentWorkspace starts assistant panes suspended"
 
-if ! printf '%s\n' "$development_workspace_zellij_layout" |
-  grep -A2 'pane name="GEMINI" command="gemini"' |
-  grep -F 'args "--yolo"' >/dev/null; then
-  fail "enableDevelopmentWorkspace passes yolo mode to the Gemini pane"
+if printf '%s\n' "$development_workspace_zellij_layout" | grep -F 'command="gemini"' >/dev/null; then
+  fail "enableDevelopmentWorkspace no longer launches Gemini CLI"
 fi
 
-pass "enableDevelopmentWorkspace passes yolo mode to the Gemini pane"
+pass "enableDevelopmentWorkspace no longer launches Gemini CLI"
+
+if ! printf '%s\n' "$development_workspace_zellij_layout" |
+  grep -A2 'pane name="ANTIGRAVITY" command="agy"' |
+  grep -F 'args "--dangerously-skip-permissions"' >/dev/null; then
+  fail "enableDevelopmentWorkspace passes supported permission skip mode to the Antigravity pane"
+fi
+
+pass "enableDevelopmentWorkspace passes supported permission skip mode to the Antigravity pane"

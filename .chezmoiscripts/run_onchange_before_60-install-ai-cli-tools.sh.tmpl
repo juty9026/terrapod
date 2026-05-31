@@ -1,0 +1,57 @@
+{{- if and (or (eq .chezmoi.os "darwin") (eq .chezmoi.os "linux")) (or (default false (get . "enableAiCliTools")) (default false (get . "enableDevelopmentWorkspace"))) -}}
+#!/bin/sh
+set -eu
+
+installer_paths=
+
+cleanup_installers() {
+  for installer_path in $installer_paths; do
+    rm -f "$installer_path"
+  done
+}
+
+trap cleanup_installers EXIT HUP INT TERM
+
+require_command() {
+  command_name="$1"
+
+  if ! command -v "$command_name" >/dev/null 2>&1; then
+    echo "$command_name is required to install optional AI CLI tools." >&2
+    exit 1
+  fi
+}
+
+run_installer() {
+  label="$1"
+  shell_name="$2"
+  installer_url="$3"
+  shift 3
+
+  installer_path="$(mktemp "${TMPDIR:-/tmp}/terrapod-ai-installer.XXXXXX")"
+  installer_paths="$installer_paths $installer_path"
+
+  echo "Installing $label through official installer: $installer_url"
+  curl -fsSL "$installer_url" -o "$installer_path"
+  "$shell_name" "$installer_path" "$@"
+}
+
+run_codex_installer() {
+  label="Codex"
+  shell_name="sh"
+  installer_url="https://chatgpt.com/codex/install.sh"
+
+  installer_path="$(mktemp "${TMPDIR:-/tmp}/terrapod-ai-installer.XXXXXX")"
+  installer_paths="$installer_paths $installer_path"
+
+  echo "Installing $label through official installer: $installer_url"
+  curl -fsSL "$installer_url" -o "$installer_path"
+  CODEX_NON_INTERACTIVE=1 PATH="$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin" "$shell_name" "$installer_path"
+}
+
+require_command curl
+require_command bash
+
+run_installer "Antigravity CLI" bash "https://antigravity.google/cli/install.sh"
+run_installer "Claude Code" bash "https://claude.ai/install.sh"
+run_codex_installer
+{{- end }}

@@ -147,7 +147,8 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - The **Development Runtime Stack** includes mise-managed Bun, Node.js, Python, and uv.
 - pnpm belongs to the **Development Runtime Stack** through Node.js Corepack, not as a mise-managed tool.
 - Rich Neovim configuration belongs to the **Optional Editor Stack**, not the **Core Shell Stack**, and is opt-in for every machine profile.
-- Gemini CLI, Claude Code, and Codex belong to the **Optional AI Tool Stack**, not the **Core Shell Stack**.
+- Antigravity CLI, Claude Code, and Codex belong to the **Optional AI Tool Stack**, not the **Core Shell Stack**.
+- Existing npm-installed AI CLIs are unmanaged legacy tools; Terrapod does not uninstall or warn merely because they remain on a machine.
 - Enabling only the **Optional AI Tool Stack** does not imply the **Optional Editor Stack** or **Optional Development Workspace**.
 - Development-specific terminal layouts belong to the **Optional Development Workspace**, not the **Core Shell Stack**.
 - Enabling the **Optional Development Workspace** also enables the **Optional Editor Stack** and **Optional AI Tool Stack**.
