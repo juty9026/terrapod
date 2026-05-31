@@ -100,6 +100,22 @@ assert_texts_differ() {
   pass "$message"
 }
 
+assert_text_equals() {
+  actual="$1"
+  expected="$2"
+  message="$3"
+
+  if [ "$actual" != "$expected" ]; then
+    printf '%s\n' "expected:" >&2
+    printf '%s\n' "$expected" | sed 's/^/  /' >&2
+    printf '%s\n' "actual:" >&2
+    printf '%s\n' "$actual" | sed 's/^/  /' >&2
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
 assert_managed_paths_exclude_prefix() {
   managed_paths="$1"
   prefix="$2"
@@ -269,6 +285,18 @@ assert_contains_text "$ai_apps_brewfile" 'cask "codex-app"' "ai-apps group rende
 assert_not_contains_text "$ai_apps_brewfile" 'cask "codex"' "ai-apps group does not render Codex CLI cask"
 assert_contains_text "$ai_apps_brewfile" 'cask "antigravity"' "ai-apps group renders Antigravity 2.0"
 assert_contains_text "$ai_apps_brewfile" 'cask "antigravity-ide"' "ai-apps group renders Antigravity IDE"
+ai_apps_casks="$(
+  printf '%s\n' "$ai_apps_brewfile" |
+    awk '/^[[:space:]]*cask[[:space:]]+"/ { print }'
+)"
+expected_ai_apps_casks='cask "claude"
+cask "codex-app"
+cask "antigravity"
+cask "antigravity-ide"'
+assert_text_equals \
+  "$ai_apps_casks" \
+  "$expected_ai_apps_casks" \
+  "ai-apps group renders exactly the expected casks"
 
 assert_contains_text \
   "$macos_terminal_apps_bootstrap" \
