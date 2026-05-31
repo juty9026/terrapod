@@ -108,8 +108,8 @@ assert_key_row_contains '`enableMacosAppGroupTerminalApps`' 'terminal-apps' \
   "README documents terminal-apps group on its option row"
 assert_key_row_contains '`enableMacosAppGroupTerminalApps`' 'Ghostty' \
   "README documents Ghostty on the terminal-apps option row"
-assert_key_row_contains '`enableMacosAppGroupTerminalApps`' 'cmux' \
-  "README documents cmux on the terminal-apps option row"
+assert_not_contains 'cmux' \
+  "README no longer documents cmux as part of the macOS Desktop App Stack"
 assert_key_row_contains '`enableMacosAppGroupAutomation`' 'automation' \
   "README documents automation group on its option row"
 assert_key_row_contains '`enableMacosAppGroupAutomation`' 'Hammerspoon' \

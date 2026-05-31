@@ -140,7 +140,7 @@ macOS에서는 initial apply가 초기 terminal environment를 위해 `.chezmois
 
 macOS desktop application은 machine-local data key로 제어되는 opt-in App Group으로 나뉩니다. Homebrew bootstrap 중 chezmoi는 선택한 group을 `Brewfile.macos-desktop-apps.tmpl`에서 temporary Brewfile로 render하고, 그 rendered bundle을 설치합니다.
 
-- `terminal-apps`: Ghostty와 cmux.
+- `terminal-apps`: Ghostty.
 - `automation`: Hammerspoon과 Karabiner-Elements.
 - `launcher`: Raycast와 1Password CLI.
 - `monitoring`: iStat Menus.
@@ -239,7 +239,7 @@ Optional stack profile과 macOS App Group setting은 기본적으로 disabled입
 | `enableEditorStack` | `false` | rich Neovim configuration을 관리하는 Optional Editor Stack을 활성화합니다. Plain Neovim은 어느 쪽이든 Core Shell Stack에 남아 있습니다. |
 | `enableAiCliTools` | `false` | official vendor installer를 통해 Antigravity CLI, Claude Code, Codex를 설치합니다. 기존 npm-installed AI CLI는 unmanaged 상태로 둡니다. |
 | `enableDevelopmentWorkspace` | `false` | Optional Editor Stack, Optional AI Tool Stack, development-specific Zellij workspace surface를 포함하는 Optional Development Workspace preset을 활성화합니다. |
-| `enableMacosAppGroupTerminalApps` | `false` | terminal-apps macOS App Group인 Ghostty와 cmux를 설치합니다. |
+| `enableMacosAppGroupTerminalApps` | `false` | terminal-apps macOS App Group에 포함된 Ghostty를 설치합니다. |
 | `enableMacosAppGroupAutomation` | `false` | automation macOS App Group인 Hammerspoon과 Karabiner-Elements를 설치합니다. |
 | `enableMacosAppGroupLauncher` | `false` | launcher macOS App Group인 Raycast와 1Password CLI를 설치합니다. |
 | `enableMacosAppGroupMonitoring` | `false` | monitoring macOS App Group인 iStat Menus를 설치합니다. |

@@ -174,8 +174,8 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Enabling the **Optional Development Workspace** does not enable the **macOS Desktop App Stack**.
 - **macOS App Groups** are configured during **Terrapod** setup and remain within the **macOS Desktop App Stack** boundary.
 - The first implemented **macOS App Groups** are terminal-apps, automation, launcher, monitoring, and ai-apps.
-- The terminal-apps **macOS App Group** currently contains Ghostty and cmux.
-- Removing cmux from the **macOS Desktop App Stack** is a planned change; once removed, existing cmux installs or settings may remain on a machine unmanaged.
+- The terminal-apps **macOS App Group** contains Ghostty.
+- cmux is outside the declared **macOS Desktop App Stack**; existing cmux installs or settings may remain on a machine unmanaged and are not removed by **Terrapod**.
 - The automation **macOS App Group** contains Hammerspoon and Karabiner-Elements.
 - The launcher **macOS App Group** contains Raycast and 1Password CLI.
 - The monitoring **macOS App Group** contains iStat Menus.

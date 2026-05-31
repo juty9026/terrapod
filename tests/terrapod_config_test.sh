@@ -711,6 +711,7 @@ y
 fi
 pass "gum setup customizes concrete settings and completes"
 
+assert_contains "$tmp_dir/gum-equivalent.out" "terminal-apps macOS App Group (Ghostty): Ghostty." "gum setup labels terminal-apps macOS App Group as Ghostty-only"
 assert_data_key_once_with_value "$gum_equivalent_config" "enableEditorStack" "true" "gum setup writes included Optional Editor Stack"
 assert_data_key_once_with_value "$gum_equivalent_config" "enableAiCliTools" "true" "gum setup writes included Optional AI Tool Stack"
 assert_data_key_once_with_value "$gum_equivalent_config" "enableDevelopmentWorkspace" "true" "gum setup writes enabled Optional Development Workspace"

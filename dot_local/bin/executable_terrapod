@@ -371,8 +371,8 @@ setup_option_description() {
     "Optional AI Tool Stack")
       printf '%s\n' "Optional AI Tool Stack: Antigravity CLI, Claude Code, and Codex."
       ;;
-    "terminal-apps macOS App Group")
-      printf '%s\n' "terminal-apps macOS App Group: Ghostty and cmux."
+    "terminal-apps macOS App Group (Ghostty)")
+      printf '%s\n' "terminal-apps macOS App Group (Ghostty): Ghostty."
       ;;
     "automation macOS App Group")
       printf '%s\n' "automation macOS App Group: Hammerspoon and Karabiner-Elements."
@@ -446,7 +446,7 @@ prompt_for_setup_settings() {
 
   if [ "$profile" = "macos-terminal" ]; then
     printf '%s\n' "macOS App Groups:" >&2
-    setup_enableMacosAppGroupTerminalApps="$(prompt_setup_bool "terminal-apps macOS App Group" "$setup_enableMacosAppGroupTerminalApps")"
+    setup_enableMacosAppGroupTerminalApps="$(prompt_setup_bool "terminal-apps macOS App Group (Ghostty)" "$setup_enableMacosAppGroupTerminalApps")"
     setup_enableMacosAppGroupAutomation="$(prompt_setup_bool "automation macOS App Group" "$setup_enableMacosAppGroupAutomation")"
     setup_enableMacosAppGroupLauncher="$(prompt_setup_bool "launcher macOS App Group" "$setup_enableMacosAppGroupLauncher")"
     setup_enableMacosAppGroupMonitoring="$(prompt_setup_bool "monitoring macOS App Group" "$setup_enableMacosAppGroupMonitoring")"
@@ -703,7 +703,7 @@ print_macos_app_group_status() {
 
   printf '%s\n' "macOS App Groups:"
   if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupTerminalApps)"; then
-    printf '%s\n' "  terminal-apps: enabled (Ghostty and cmux)"
+    printf '%s\n' "  terminal-apps: enabled (Ghostty)"
   else
     printf '%s\n' "  terminal-apps: disabled"
   fi
