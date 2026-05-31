@@ -626,7 +626,7 @@ setup_responses="$tmp_dir/setup.responses"
 setup_gum_log="$tmp_dir/setup-gum.log"
 setup_config="$setup_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$setup_home"
-write_gum_responses "$setup_responses" workstation yes yes yes yes yes yes
+write_gum_responses "$setup_responses" workstation yes yes yes yes yes yes yes
 
 if ! run_terrapod_setup_command macos-terminal "$setup_responses" "$setup_home" "$setup_xdg" "$setup_output" "$setup_gum_log"; then
   sed 's/^/  /' "$setup_output" >&2
@@ -646,9 +646,11 @@ assert_not_contains "$setup_output_text" "Option guide:" "gum setup does not pri
 assert_contains "$setup_output_text" "Optional Development Workspace: Dev Zellij layouts; also includes Editor and AI tool stacks." "gum setup explains Optional Development Workspace"
 assert_contains "$setup_output_text" "Optional AI Tool Stack: Antigravity CLI, Claude Code, and Codex." "gum setup explains Optional AI Tool Stack"
 assert_contains "$setup_output_text" "terminal-apps macOS App Group: Ghostty and cmux." "gum setup explains terminal-apps macOS App Group"
+assert_contains "$setup_output_text" "ai-apps macOS App Group: Claude Desktop, Codex Desktop, Antigravity 2.0, and Antigravity IDE." "gum setup explains ai-apps macOS App Group"
 assert_contains "$setup_output_text" "Optional Editor Stack: included by Optional Development Workspace" "gum setup presents workspace-included Optional Editor Stack"
 assert_contains "$setup_output_text" "enableEditorStack = true" "gum setup summary includes concrete Editor Stack setting"
 assert_contains "$setup_output_text" "enableMacosAppGroupMonitoring = true" "gum setup summary includes concrete macOS App Group setting"
+assert_contains "$setup_output_text" "enableMacosAppGroupAiApps = true" "gum setup summary includes concrete ai-apps App Group setting"
 assert_contains "$setup_output_text" "Configured Terrapod Preset 'workstation'" "gum setup reports successful configuration"
 assert_contains "$setup_gum_log_text" "gum args: style" "gum setup uses gum style for setup-only presentation"
 assert_contains "$setup_gum_log_text" "gum args: choose" "gum setup uses gum choose for Preset selection"
@@ -657,6 +659,7 @@ assert_contains "$setup_gum_log_text" "gum stdin: development  Coding machine wi
 assert_contains "$setup_gum_log_text" "gum stdin: workstation  macOS workstation with development setup and app groups:workstation" "gum setup offers workstation Preset with nearby explanation"
 assert_contains "$setup_gum_log_text" "gum args: confirm Optional Development Workspace" "gum setup asks Optional Development Workspace with gum confirm"
 assert_contains "$setup_gum_log_text" "gum args: confirm terminal-apps macOS App Group" "gum setup asks terminal-apps macOS App Group with gum confirm"
+assert_contains "$setup_gum_log_text" "gum args: confirm ai-apps macOS App Group" "gum setup asks ai-apps macOS App Group with gum confirm"
 assert_contains "$setup_gum_log_text" "gum args: confirm Write these Terrapod settings" "gum setup asks final confirmation with gum confirm"
 assert_first_occurrence_before "$setup_output_text" "Profile  macOS Terminal Profile" "Customize Terrapod settings." "gum setup shows profile before settings customization"
 assert_first_occurrence_before "$setup_output_text" "Choose a Preset" "Customize Terrapod settings." "gum setup presents Preset selection before customization"
@@ -932,6 +935,7 @@ enableMacosAppGroupTerminalApps = true
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = true
 enableMacosAppGroupMonitoring = false
+enableMacosAppGroupAiApps = true
 TOML
 
 macos_status_path="$(status_doctor_path macos chezmoi git zsh mise brew nvim agy claude codex zellij ghostty cmux op)"
@@ -951,6 +955,7 @@ assert_contains "$macos_status_output" "terminal-apps: enabled (Ghostty and cmux
 assert_contains "$macos_status_output" "automation: disabled" "Terrapod status reports disabled automation macOS App Group"
 assert_contains "$macos_status_output" "launcher: enabled (Raycast and 1Password CLI)" "Terrapod status reports enabled launcher macOS App Group"
 assert_contains "$macos_status_output" "monitoring: disabled" "Terrapod status reports disabled monitoring macOS App Group"
+assert_contains "$macos_status_output" "ai-apps: enabled (Claude Desktop, Codex Desktop, Antigravity 2.0, and Antigravity IDE)" "Terrapod status reports enabled ai-apps macOS App Group"
 assert_contains "$macos_status_output" "chezmoi: available" "Terrapod status reports chezmoi availability"
 assert_contains "$macos_status_output" "brew: available" "Terrapod status reports macOS Bootstrap Package Manager availability"
 assert_contains "$macos_status_output" "Warnings: none" "Terrapod status reports no warnings when enabled tools are present"
@@ -966,6 +971,7 @@ data.enableEditorStack = false
 data.enableAiCliTools = false
 data.enableDevelopmentWorkspace = true
 data.enableMacosAppGroupTerminalApps = true
+data.enableMacosAppGroupAiApps = true
 TOML
 
 dotted_status_path="$(status_doctor_path dotted chezmoi git zsh mise brew nvim agy claude codex zellij)"
@@ -978,6 +984,7 @@ dotted_status_output="$(
 assert_contains "$dotted_status_output" "Optional Editor Stack: enabled (rich Neovim configuration)" "Terrapod status reads root dotted data keys for effective editor stack state"
 assert_contains "$dotted_status_output" "Optional AI Tool Stack: enabled (tools available: agy, claude, codex)" "Terrapod status reads root dotted data keys for effective AI stack state"
 assert_contains "$dotted_status_output" "terminal-apps: enabled (Ghostty and cmux)" "Terrapod status reads root dotted data keys for macOS App Groups"
+assert_contains "$dotted_status_output" "ai-apps: enabled (Claude Desktop, Codex Desktop, Antigravity 2.0, and Antigravity IDE)" "Terrapod status reads root dotted data keys for ai-apps macOS App Group"
 assert_contains "$dotted_status_output" "Warnings: none" "Terrapod status has no warnings for root dotted data keys when tools are present"
 
 status_ubuntu_config="$tmp_dir/status-ubuntu.toml"
@@ -991,6 +998,7 @@ enableMacosAppGroupTerminalApps = false
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
+enableMacosAppGroupAiApps = false
 TOML
 write_os_release "$status_ubuntu_os_release" ubuntu 24.04 "Ubuntu 24.04 LTS"
 
@@ -1397,6 +1405,7 @@ enableMacosAppGroupTerminalApps = true
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = true
 enableMacosAppGroupMonitoring = false
+enableMacosAppGroupAiApps = true
 TOML
 
 if ! HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
@@ -1474,6 +1483,11 @@ assert_contains \
   "$diff_output" \
   "monitoring: disabled" \
   "Terrapod diff prints disabled monitoring macOS App Group state"
+
+assert_contains \
+  "$diff_output" \
+  "ai-apps: enabled" \
+  "Terrapod diff prints enabled ai-apps macOS App Group state"
 
 assert_contains \
   "$diff_output" \
@@ -1650,6 +1664,11 @@ assert_contains \
   "$apply_output" \
   "monitoring: disabled" \
   "Terrapod apply prints disabled monitoring macOS App Group state"
+
+assert_contains \
+  "$apply_output" \
+  "ai-apps: enabled" \
+  "Terrapod apply prints enabled ai-apps macOS App Group state"
 
 assert_contains \
   "$apply_output" \

@@ -149,7 +149,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Rich Neovim configuration belongs to the **Optional Editor Stack**, not the **Core Shell Stack**, and is opt-in for every machine profile.
 - Antigravity CLI, Claude Code, and Codex belong to the **Optional AI Tool Stack**, not the **Core Shell Stack**.
 - Antigravity CLI is installed through its official native installer, while Terrapod remains responsible for the managed shell PATH.
-- Legacy Antigravity Desktop and Antigravity IDE app-bundle shell-command paths are not part of the **Optional AI Tool Stack** or the planned ai-apps **macOS App Group**.
+- Legacy Antigravity Desktop and Antigravity IDE app-bundle shell-command paths are not part of the **Optional AI Tool Stack** or the ai-apps **macOS App Group**.
 - Claude Code is installed through its official native installer rather than the npm package.
 - Codex is installed through its official standalone installer rather than the npm package or Homebrew cask.
 - **Optional AI Tool Stack** installers run before the final chezmoi-managed shell files are applied, so vendor installer shell-profile edits do not define the final declared shell state.
@@ -173,14 +173,14 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Terminal font casks belong to the macOS Terminal Profile core bootstrap because the managed terminal configuration depends on them and they are not desktop applications.
 - Enabling the **Optional Development Workspace** does not enable the **macOS Desktop App Stack**.
 - **macOS App Groups** are configured during **Terrapod** setup and remain within the **macOS Desktop App Stack** boundary.
-- The first implemented **macOS App Groups** are terminal-apps, automation, launcher, and monitoring.
+- The first implemented **macOS App Groups** are terminal-apps, automation, launcher, monitoring, and ai-apps.
 - The terminal-apps **macOS App Group** currently contains Ghostty and cmux.
 - Removing cmux from the **macOS Desktop App Stack** is a planned change; once removed, existing cmux installs or settings may remain on a machine unmanaged.
 - The automation **macOS App Group** contains Hammerspoon and Karabiner-Elements.
 - The launcher **macOS App Group** contains Raycast and 1Password CLI.
 - The monitoring **macOS App Group** contains iStat Menus.
-- The planned ai-apps **macOS App Group** contains Claude Desktop, Codex Desktop, Antigravity 2.0, and Antigravity IDE.
-- The planned ai-apps **macOS App Group** installs these desktop apps through Homebrew casks `claude`, `codex-app`, `antigravity`, and `antigravity-ide`.
+- The ai-apps **macOS App Group** contains Claude Desktop, Codex Desktop, Antigravity 2.0, and Antigravity IDE.
+- The ai-apps **macOS App Group** installs these desktop apps through Homebrew casks `claude`, `codex-app`, `antigravity`, and `antigravity-ide`.
 - The planned Hammerspoon app launcher change maps Codex Desktop to `1`, Claude Desktop to `2`, Antigravity 2.0 to `3`, and Antigravity IDE to `i`.
 - Removing ChatGPT Atlas from the Hammerspoon app launcher is part of the planned launcher change.
 - Individual macOS app toggles are excluded from the current **Terrapod** setup scope.

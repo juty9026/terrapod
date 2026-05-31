@@ -458,6 +458,7 @@ assert_data_key_once_with_value "$new_config" "enableMacosAppGroupTerminalApps" 
 assert_data_key_once_with_value "$new_config" "enableMacosAppGroupAutomation" "false" "minimal Preset disables automation macOS App Group exactly once in data"
 assert_data_key_once_with_value "$new_config" "enableMacosAppGroupLauncher" "false" "minimal Preset disables launcher macOS App Group exactly once in data"
 assert_data_key_once_with_value "$new_config" "enableMacosAppGroupMonitoring" "false" "minimal Preset disables monitoring macOS App Group exactly once in data"
+assert_data_key_once_with_value "$new_config" "enableMacosAppGroupAiApps" "false" "minimal Preset disables ai-apps macOS App Group exactly once in data"
 assert_not_contains "$new_config" "enableMacosDesktopApps" "minimal Preset does not write the legacy all-in desktop app toggle"
 assert_not_contains "$new_config" "terrapodPreset" "minimal Preset stores concrete values instead of a dynamic Preset"
 assert_backup_count "$new_config" 0 "new config creation does not create a backup"
@@ -481,6 +482,7 @@ assert_data_key_once_with_value "$development_config" "enableMacosAppGroupTermin
 assert_data_key_once_with_value "$development_config" "enableMacosAppGroupAutomation" "false" "development Preset disables automation macOS App Group in a new config"
 assert_data_key_once_with_value "$development_config" "enableMacosAppGroupLauncher" "false" "development Preset disables launcher macOS App Group in a new config"
 assert_data_key_once_with_value "$development_config" "enableMacosAppGroupMonitoring" "false" "development Preset disables monitoring macOS App Group in a new config"
+assert_data_key_once_with_value "$development_config" "enableMacosAppGroupAiApps" "false" "development Preset disables ai-apps macOS App Group in a new config"
 assert_not_contains "$development_config" "enableMacosDesktopApps" "development Preset does not write the legacy all-in desktop app toggle"
 assert_not_contains "$development_config" "terrapodPreset" "development Preset stores concrete values instead of a dynamic Preset"
 assert_backup_count "$development_config" 0 "development config creation does not create a backup"
@@ -504,6 +506,7 @@ assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupTermin
 assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupAutomation" "true" "workstation Preset enables automation macOS App Group exactly once in data"
 assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupLauncher" "true" "workstation Preset enables launcher macOS App Group exactly once in data"
 assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupMonitoring" "true" "workstation Preset enables monitoring macOS App Group exactly once in data"
+assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupAiApps" "true" "workstation Preset enables ai-apps macOS App Group exactly once in data"
 assert_not_contains "$workstation_config" "enableMacosDesktopApps" "workstation Preset does not write the legacy all-in desktop app toggle"
 assert_not_contains "$workstation_config" "terrapodPreset" "workstation Preset stores concrete values instead of a dynamic Preset"
 assert_backup_count "$workstation_config" 0 "workstation config creation does not create a backup"
@@ -522,6 +525,7 @@ pass "no-gum minimal Preset creates a chezmoi config file"
 
 assert_data_key_once_with_value "$nogum_minimal_config" "enableEditorStack" "false" "no-gum minimal writes concrete Editor Stack setting"
 assert_data_key_once_with_value "$nogum_minimal_config" "enableDevelopmentWorkspace" "false" "no-gum minimal writes concrete Development Workspace setting"
+assert_data_key_once_with_value "$nogum_minimal_config" "enableMacosAppGroupAiApps" "false" "no-gum minimal writes concrete ai-apps App Group setting"
 assert_not_contains "$nogum_minimal_config" "terrapodPreset" "no-gum minimal stores concrete values instead of a dynamic Preset"
 
 nogum_development_home="$tmp_dir/nogum-development-home"
@@ -539,6 +543,7 @@ pass "no-gum development Preset creates a chezmoi config file"
 assert_data_key_once_with_value "$nogum_development_config" "enableEditorStack" "true" "no-gum development writes concrete Editor Stack setting"
 assert_data_key_once_with_value "$nogum_development_config" "enableDevelopmentWorkspace" "true" "no-gum development writes concrete Development Workspace setting"
 assert_data_key_once_with_value "$nogum_development_config" "enableMacosAppGroupTerminalApps" "false" "no-gum development writes concrete macOS App Group setting"
+assert_data_key_once_with_value "$nogum_development_config" "enableMacosAppGroupAiApps" "false" "no-gum development writes concrete ai-apps App Group setting"
 assert_not_contains "$nogum_development_config" "terrapodPreset" "no-gum development stores concrete values instead of a dynamic Preset"
 
 nogum_macos_minimal_home="$tmp_dir/nogum-macos-minimal-home"
@@ -555,6 +560,7 @@ pass "no-gum macOS minimal Preset creates a chezmoi config file"
 
 assert_data_key_once_with_value "$nogum_macos_minimal_config" "enableEditorStack" "false" "no-gum macOS minimal writes concrete Editor Stack setting"
 assert_data_key_once_with_value "$nogum_macos_minimal_config" "enableDevelopmentWorkspace" "false" "no-gum macOS minimal writes concrete Development Workspace setting"
+assert_data_key_once_with_value "$nogum_macos_minimal_config" "enableMacosAppGroupAiApps" "false" "no-gum macOS minimal writes concrete ai-apps App Group setting"
 assert_not_contains "$nogum_macos_minimal_config" "terrapodPreset" "no-gum macOS minimal stores concrete values instead of a dynamic Preset"
 
 nogum_macos_development_home="$tmp_dir/nogum-macos-development-home"
@@ -572,6 +578,7 @@ pass "no-gum macOS development Preset creates a chezmoi config file"
 assert_data_key_once_with_value "$nogum_macos_development_config" "enableEditorStack" "true" "no-gum macOS development writes concrete Editor Stack setting"
 assert_data_key_once_with_value "$nogum_macos_development_config" "enableDevelopmentWorkspace" "true" "no-gum macOS development writes concrete Development Workspace setting"
 assert_data_key_once_with_value "$nogum_macos_development_config" "enableMacosAppGroupTerminalApps" "false" "no-gum macOS development writes concrete macOS App Group setting"
+assert_data_key_once_with_value "$nogum_macos_development_config" "enableMacosAppGroupAiApps" "false" "no-gum macOS development writes concrete ai-apps App Group setting"
 assert_not_contains "$nogum_macos_development_config" "terrapodPreset" "no-gum macOS development stores concrete values instead of a dynamic Preset"
 
 nogum_workstation_home="$tmp_dir/nogum-workstation-home"
@@ -589,6 +596,7 @@ pass "no-gum workstation Preset creates a chezmoi config file"
 assert_data_key_once_with_value "$nogum_workstation_config" "enableEditorStack" "true" "no-gum workstation writes concrete Editor Stack setting"
 assert_data_key_once_with_value "$nogum_workstation_config" "enableDevelopmentWorkspace" "true" "no-gum workstation writes concrete Development Workspace setting"
 assert_data_key_once_with_value "$nogum_workstation_config" "enableMacosAppGroupMonitoring" "true" "no-gum workstation writes concrete macOS App Group setting"
+assert_data_key_once_with_value "$nogum_workstation_config" "enableMacosAppGroupAiApps" "true" "no-gum workstation writes concrete ai-apps App Group setting"
 assert_not_contains "$nogum_workstation_config" "terrapodPreset" "no-gum workstation stores concrete values instead of a dynamic Preset"
 
 setup_workstation_home="$tmp_dir/setup-workstation-home"
@@ -597,6 +605,7 @@ setup_workstation_config="$setup_workstation_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$setup_workstation_home"
 
 if ! run_terrapod_setup macos-terminal 'workstation
+
 
 
 
@@ -624,6 +633,7 @@ assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroup
 assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroupAutomation" "true" "confirmed setup enables automation macOS App Group exactly once in data"
 assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroupLauncher" "true" "confirmed setup enables launcher macOS App Group exactly once in data"
 assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroupMonitoring" "true" "confirmed setup enables monitoring macOS App Group exactly once in data"
+assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroupAiApps" "true" "confirmed setup enables ai-apps macOS App Group exactly once in data"
 assert_not_contains "$setup_workstation_config" "enableMacosDesktopApps" "confirmed setup does not write the legacy all-in desktop app toggle"
 assert_not_contains "$setup_workstation_config" "terrapodPreset" "confirmed setup stores concrete values instead of a dynamic Preset"
 assert_backup_count "$setup_workstation_config" 0 "confirmed setup new config creation does not create a backup"
@@ -639,6 +649,7 @@ n
 y
 n
 y
+n
 y
 ' "$setup_custom_workspace_home" "$setup_custom_workspace_xdg" >"$tmp_dir/setup-custom-workspace.out" 2>"$tmp_dir/setup-custom-workspace.err"; then
   printf '%s\n' "setup stdout:" >&2
@@ -662,6 +673,7 @@ assert_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupTermin
 assert_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupAutomation = true" "macOS setup summary reflects customized automation App Group"
 assert_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupLauncher = false" "macOS setup summary reflects customized launcher App Group"
 assert_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupMonitoring = true" "macOS setup summary reflects customized monitoring App Group"
+assert_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupAiApps = false" "macOS setup summary reflects customized ai-apps App Group"
 
 if [ ! -f "$setup_custom_workspace_config" ]; then
   fail "macOS customized setup creates a chezmoi config file"
@@ -675,6 +687,7 @@ assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosApp
 assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosAppGroupAutomation" "true" "workspace-enabled setup writes customized automation App Group"
 assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosAppGroupLauncher" "false" "workspace-enabled setup writes customized launcher App Group"
 assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosAppGroupMonitoring" "true" "workspace-enabled setup writes customized monitoring App Group"
+assert_data_key_once_with_value "$setup_custom_workspace_config" "enableMacosAppGroupAiApps" "false" "workspace-enabled setup writes customized ai-apps App Group"
 
 gum_equivalent_home="$tmp_dir/gum-equivalent-home"
 gum_equivalent_xdg="$tmp_dir/gum-equivalent-xdg"
@@ -687,6 +700,7 @@ n
 y
 n
 y
+n
 y
 ' "$gum_equivalent_home" "$gum_equivalent_xdg" >"$tmp_dir/gum-equivalent.out" 2>"$tmp_dir/gum-equivalent.err"; then
   printf '%s\n' "gum setup stdout:" >&2
@@ -704,6 +718,7 @@ assert_data_key_once_with_value "$gum_equivalent_config" "enableMacosAppGroupTer
 assert_data_key_once_with_value "$gum_equivalent_config" "enableMacosAppGroupAutomation" "true" "gum setup writes customized automation App Group"
 assert_data_key_once_with_value "$gum_equivalent_config" "enableMacosAppGroupLauncher" "false" "gum setup writes customized launcher App Group"
 assert_data_key_once_with_value "$gum_equivalent_config" "enableMacosAppGroupMonitoring" "true" "gum setup writes customized monitoring App Group"
+assert_data_key_once_with_value "$gum_equivalent_config" "enableMacosAppGroupAiApps" "false" "gum setup writes customized ai-apps App Group"
 
 if ! cmp -s "$setup_custom_workspace_config" "$gum_equivalent_config"; then
   printf '%s\n' "first gum setup config:" >&2
@@ -725,6 +740,7 @@ if ! run_terrapod_setup macos-terminal 'development
 
 
 
+
 y
 ' "$gum_development_home" "$gum_development_xdg" >"$tmp_dir/gum-development.out" 2>"$tmp_dir/gum-development.err"; then
   printf '%s\n' "gum development stdout:" >&2
@@ -740,6 +756,7 @@ assert_data_key_once_with_value "$gum_development_config" "enableEditorStack" "t
 assert_data_key_once_with_value "$gum_development_config" "enableAiCliTools" "true" "gum development writes development AI Tool Stack setting"
 assert_data_key_once_with_value "$gum_development_config" "enableDevelopmentWorkspace" "true" "gum development writes development workspace setting"
 assert_data_key_once_with_value "$gum_development_config" "enableMacosAppGroupTerminalApps" "false" "gum development keeps terminal-apps disabled for development"
+assert_data_key_once_with_value "$gum_development_config" "enableMacosAppGroupAiApps" "false" "gum development keeps ai-apps disabled for development"
 
 gum_vps_home="$tmp_dir/gum-vps-home"
 gum_vps_xdg="$tmp_dir/gum-vps-xdg"
@@ -773,6 +790,7 @@ assert_data_key_once_with_value "$gum_vps_config" "enableMacosAppGroupTerminalAp
 assert_data_key_once_with_value "$gum_vps_config" "enableMacosAppGroupAutomation" "false" "gum VPS setup writes automation App Group disabled"
 assert_data_key_once_with_value "$gum_vps_config" "enableMacosAppGroupLauncher" "false" "gum VPS setup writes launcher App Group disabled"
 assert_data_key_once_with_value "$gum_vps_config" "enableMacosAppGroupMonitoring" "false" "gum VPS setup writes monitoring App Group disabled"
+assert_data_key_once_with_value "$gum_vps_config" "enableMacosAppGroupAiApps" "false" "gum VPS setup writes ai-apps App Group disabled"
 
 setup_leaf_home="$tmp_dir/setup-leaf-home"
 setup_leaf_xdg="$tmp_dir/setup-leaf-xdg"
@@ -788,6 +806,7 @@ n
 y
 n
 y
+y
 ' "$setup_leaf_home" "$setup_leaf_xdg" >"$tmp_dir/setup-leaf.out" 2>"$tmp_dir/setup-leaf.err"; then
   printf '%s\n' "setup stdout:" >&2
   sed 's/^/  /' "$tmp_dir/setup-leaf.out" >&2
@@ -800,6 +819,7 @@ pass "workspace-disabled setup prompts for customization before final confirmati
 assert_contains "$tmp_dir/setup-leaf.out" "enableEditorStack = false" "workspace-disabled setup summary reflects customized Optional Editor Stack"
 assert_contains "$tmp_dir/setup-leaf.out" "enableAiCliTools = true" "workspace-disabled setup summary reflects customized Optional AI Tool Stack"
 assert_contains "$tmp_dir/setup-leaf.out" "enableDevelopmentWorkspace = false" "workspace-disabled setup summary reflects disabled Optional Development Workspace"
+assert_contains "$tmp_dir/setup-leaf.out" "enableMacosAppGroupAiApps = true" "workspace-disabled setup summary reflects customized ai-apps App Group"
 
 if [ ! -f "$setup_leaf_config" ]; then
   fail "workspace-disabled customized setup creates a chezmoi config file"
@@ -813,6 +833,7 @@ assert_data_key_once_with_value "$setup_leaf_config" "enableMacosAppGroupTermina
 assert_data_key_once_with_value "$setup_leaf_config" "enableMacosAppGroupAutomation" "false" "workspace-disabled setup writes customized automation App Group"
 assert_data_key_once_with_value "$setup_leaf_config" "enableMacosAppGroupLauncher" "true" "workspace-disabled setup writes customized launcher App Group"
 assert_data_key_once_with_value "$setup_leaf_config" "enableMacosAppGroupMonitoring" "false" "workspace-disabled setup writes customized monitoring App Group"
+assert_data_key_once_with_value "$setup_leaf_config" "enableMacosAppGroupAiApps" "true" "workspace-disabled setup writes customized ai-apps App Group"
 
 setup_vps_custom_home="$tmp_dir/setup-vps-custom-home"
 setup_vps_custom_xdg="$tmp_dir/setup-vps-custom-xdg"
@@ -856,6 +877,7 @@ assert_data_key_once_with_value "$setup_vps_custom_config" "enableMacosAppGroupT
 assert_data_key_once_with_value "$setup_vps_custom_config" "enableMacosAppGroupAutomation" "false" "VPS setup writes automation App Group disabled"
 assert_data_key_once_with_value "$setup_vps_custom_config" "enableMacosAppGroupLauncher" "false" "VPS setup writes launcher App Group disabled"
 assert_data_key_once_with_value "$setup_vps_custom_config" "enableMacosAppGroupMonitoring" "false" "VPS setup writes monitoring App Group disabled"
+assert_data_key_once_with_value "$setup_vps_custom_config" "enableMacosAppGroupAiApps" "false" "VPS setup writes ai-apps App Group disabled"
 
 setup_vps_workstation_error_home="$tmp_dir/setup-vps-workstation-error-home"
 setup_vps_workstation_error_xdg="$tmp_dir/setup-vps-workstation-error-xdg"
@@ -907,6 +929,7 @@ setup_cancel_config="$setup_cancel_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$setup_cancel_home"
 
 if run_terrapod_setup macos-terminal 'development
+
 
 
 

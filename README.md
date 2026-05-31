@@ -149,6 +149,7 @@ installs that rendered bundle:
 - `automation`: Hammerspoon and Karabiner-Elements.
 - `launcher`: Raycast and 1Password CLI.
 - `monitoring`: iStat Menus.
+- `ai-apps`: Claude Desktop, Codex Desktop (`codex-app`), Antigravity 2.0, and Antigravity IDE.
 
 Machine-specific Homebrew packages should live outside the tracked `Brewfile`.
 
@@ -264,6 +265,7 @@ Optional stack profiles and macOS App Group settings are disabled by default.
 | `enableMacosAppGroupAutomation` | `false` | Installs the automation macOS App Group: Hammerspoon and Karabiner-Elements. |
 | `enableMacosAppGroupLauncher` | `false` | Installs the launcher macOS App Group: Raycast and 1Password CLI. |
 | `enableMacosAppGroupMonitoring` | `false` | Installs the monitoring macOS App Group: iStat Menus. |
+| `enableMacosAppGroupAiApps` | `false` | Installs the ai-apps macOS App Group: Claude Desktop, Codex Desktop (`codex-app`), Antigravity 2.0, and Antigravity IDE. |
 | `gitAllowedSigners` | `[]` | Adds workstation-specific SSH signing identities to `~/.ssh/allowed_signers`. |
 
 When `enableDevelopmentWorkspace` is `true`, it enables both the Optional Editor Stack and Optional AI Tool Stack
