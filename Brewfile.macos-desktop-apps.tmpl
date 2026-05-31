@@ -17,3 +17,10 @@ cask "1password-cli"
 # monitoring macOS App Group
 cask "istat-menus"
 {{ end -}}
+{{ if default false (get . "enableMacosAppGroupAiApps") -}}
+# ai-apps macOS App Group
+cask "claude"
+cask "codex-app"
+cask "antigravity"
+cask "antigravity-ide"
+{{ end -}}

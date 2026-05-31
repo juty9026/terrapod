@@ -111,6 +111,22 @@ assert_texts_differ() {
   pass "$message"
 }
 
+assert_text_equals() {
+  actual="$1"
+  expected="$2"
+  message="$3"
+
+  if [ "$actual" != "$expected" ]; then
+    printf '%s\n' "expected:" >&2
+    printf '%s\n' "$expected" | sed 's/^/  /' >&2
+    printf '%s\n' "actual:" >&2
+    printf '%s\n' "$actual" | sed 's/^/  /' >&2
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
 assert_managed_paths_exclude_prefix() {
   managed_paths="$1"
   prefix="$2"
@@ -174,7 +190,9 @@ macos_terminal_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTermina
 macos_automation_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":true,"enableMacosAppGroupLauncher":false,"enableMacosAppGroupMonitoring":false}'
 macos_launcher_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":true,"enableMacosAppGroupMonitoring":false}'
 macos_monitoring_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":false,"enableMacosAppGroupMonitoring":true}'
+macos_ai_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":false,"enableMacosAppGroupMonitoring":false,"enableMacosAppGroupAiApps":true}'
 macos_terminal_apps_managed_targets="$(managed_target_paths "$macos_terminal_apps_data")"
+macos_ai_apps_managed="$(managed_source_paths "$macos_ai_apps_data")"
 macos_ai_cli_tools_data='{"chezmoi":{"os":"darwin"},"enableEditorStack":false,"enableAiCliTools":true,"enableDevelopmentWorkspace":false}'
 macos_ai_cli_tools_managed="$(managed_source_paths "$macos_ai_cli_tools_data")"
 macos_development_workspace_data='{"chezmoi":{"os":"darwin"},"enableEditorStack":false,"enableAiCliTools":false,"enableDevelopmentWorkspace":true}'
@@ -208,12 +226,15 @@ terminal_apps_brewfile="$(render_template "$macos_terminal_apps_data" "Brewfile.
 automation_apps_brewfile="$(render_template "$macos_automation_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 launcher_apps_brewfile="$(render_template "$macos_launcher_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 monitoring_apps_brewfile="$(render_template "$macos_monitoring_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
+ai_apps_brewfile="$(render_template "$macos_ai_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 macos_bootstrap="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
 macos_terminal_apps_bootstrap="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
+macos_ai_apps_bootstrap="$(render_template "$macos_ai_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
 macos_development_workspace_bootstrap="$(render_template "$macos_development_workspace_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
 macos_karabiner_opener="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 macos_terminal_apps_karabiner_opener="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 macos_automation_apps_karabiner_opener="$(render_template "$macos_automation_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
+macos_ai_apps_karabiner_opener="$(render_template "$macos_ai_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 
 assert_contains_text \
   "$macos_bootstrap" \
@@ -252,6 +273,11 @@ assert_not_contains_text "$macos_brewfile" 'cask "karabiner-elements"' "macOS de
 assert_not_contains_text "$macos_brewfile" 'cask "raycast"' "macOS default does not render Raycast"
 assert_not_contains_text "$macos_brewfile" 'cask "1password-cli"' "macOS default does not render 1Password CLI"
 assert_not_contains_text "$macos_brewfile" 'cask "istat-menus"' "macOS default does not render iStat Menus"
+assert_not_contains_text "$macos_brewfile" 'cask "claude"' "macOS default does not render Claude Desktop"
+assert_not_contains_text "$macos_brewfile" 'cask "codex-app"' "macOS default does not render Codex Desktop"
+assert_not_contains_text "$macos_brewfile" 'cask "codex"' "macOS default does not render Codex CLI as a desktop app"
+assert_not_contains_text "$macos_brewfile" 'cask "antigravity"' "macOS default does not render Antigravity 2.0"
+assert_not_contains_text "$macos_brewfile" 'cask "antigravity-ide"' "macOS default does not render Antigravity IDE"
 
 assert_contains_text "$terminal_apps_brewfile" 'cask "ghostty"' "terminal-apps group renders Ghostty"
 assert_not_contains_text "$terminal_apps_brewfile" 'cask "cmux"' "terminal-apps group does not render cmux"
@@ -265,6 +291,24 @@ assert_contains_text "$launcher_apps_brewfile" 'cask "1password-cli"' "launcher 
 
 assert_contains_text "$monitoring_apps_brewfile" 'cask "istat-menus"' "monitoring group renders iStat Menus"
 
+assert_contains_text "$ai_apps_brewfile" 'cask "claude"' "ai-apps group renders Claude Desktop"
+assert_contains_text "$ai_apps_brewfile" 'cask "codex-app"' "ai-apps group renders Codex Desktop cask"
+assert_not_contains_text "$ai_apps_brewfile" 'cask "codex"' "ai-apps group does not render Codex CLI cask"
+assert_contains_text "$ai_apps_brewfile" 'cask "antigravity"' "ai-apps group renders Antigravity 2.0"
+assert_contains_text "$ai_apps_brewfile" 'cask "antigravity-ide"' "ai-apps group renders Antigravity IDE"
+ai_apps_casks="$(
+  printf '%s\n' "$ai_apps_brewfile" |
+    awk '/^[[:space:]]*cask[[:space:]]+"/ { print }'
+)"
+expected_ai_apps_casks='cask "claude"
+cask "codex-app"
+cask "antigravity"
+cask "antigravity-ide"'
+assert_text_equals \
+  "$ai_apps_casks" \
+  "$expected_ai_apps_casks" \
+  "ai-apps group renders exactly the expected casks"
+
 assert_contains_text \
   "$macos_terminal_apps_bootstrap" \
   "terrapod-macos-desktop-apps" \
@@ -274,6 +318,16 @@ assert_contains_text \
   "$macos_terminal_apps_bootstrap" \
   'brew bundle --no-upgrade --file="$desktop_brewfile"' \
   "terminal-apps group runs macOS Desktop App Stack Brewfile"
+
+assert_contains_text \
+  "$macos_ai_apps_bootstrap" \
+  "terrapod-macos-desktop-apps" \
+  "ai-apps group renders macOS Desktop App Stack Brewfile"
+
+assert_contains_text \
+  "$macos_ai_apps_bootstrap" \
+  'brew bundle --no-upgrade --file="$desktop_brewfile"' \
+  "ai-apps group runs macOS Desktop App Stack Brewfile"
 
 assert_not_contains_text \
   "$macos_development_workspace_bootstrap" \
@@ -299,6 +353,16 @@ assert_contains_text \
   "$macos_automation_apps_karabiner_opener" \
   "macOS Desktop App Stack Brewfile checksum" \
   "Karabiner opener tracks macOS Desktop App Stack Brewfile changes"
+
+assert_contains_text \
+  "$macos_ai_apps_karabiner_opener" \
+  "macOS Desktop App Stack enabled: true" \
+  "Karabiner opener tracks enabled ai-apps Desktop App Stack state"
+
+assert_contains_text \
+  "$macos_ai_apps_karabiner_opener" \
+  "macOS Desktop App Stack Brewfile checksum" \
+  "Karabiner opener tracks ai-apps Desktop App Stack Brewfile changes"
 
 assert_texts_differ \
   "$macos_terminal_apps_karabiner_opener" \
@@ -397,6 +461,11 @@ if [ -e "$repo_root/dot_config/zsh/path.d/antigravity.zsh.tmpl" ]; then
 fi
 
 pass "legacy Antigravity app-bundle PATH snippet is no longer managed"
+
+assert_managed_paths_exclude_prefix \
+  "$macos_ai_apps_managed" \
+  "dot_config/zsh/path.d/antigravity.zsh.tmpl" \
+  "macOS ai-apps group does not restore legacy Antigravity PATH snippet"
 
 assert_managed_paths_include_prefix \
   "$editor_stack_managed" \

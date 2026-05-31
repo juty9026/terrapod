@@ -94,7 +94,8 @@ for key in \
   enableMacosAppGroupTerminalApps \
   enableMacosAppGroupAutomation \
   enableMacosAppGroupLauncher \
-  enableMacosAppGroupMonitoring
+  enableMacosAppGroupMonitoring \
+  enableMacosAppGroupAiApps
 do
   assert_contains "\`$key\`" "README documents $key option"
   if ! awk -F '|' -v key="\`$key\`" '$0 ~ key { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); if ($3 == "`false`") found=1 } END { exit found ? 0 : 1 }' "$readme"; then
@@ -125,6 +126,18 @@ assert_key_row_contains '`enableMacosAppGroupMonitoring`' 'monitoring' \
   "README documents monitoring group on its option row"
 assert_key_row_contains '`enableMacosAppGroupMonitoring`' 'iStat Menus' \
   "README documents iStat Menus on the monitoring option row"
+assert_key_row_contains '`enableMacosAppGroupAiApps`' 'ai-apps' \
+  "README documents ai-apps group on its option row"
+assert_key_row_contains '`enableMacosAppGroupAiApps`' 'Claude Desktop' \
+  "README documents Claude Desktop on the ai-apps option row"
+assert_key_row_contains '`enableMacosAppGroupAiApps`' 'Codex Desktop' \
+  "README documents Codex Desktop on the ai-apps option row"
+assert_key_row_contains '`enableMacosAppGroupAiApps`' 'codex-app' \
+  "README documents Codex Desktop cask token on the ai-apps option row"
+assert_key_row_contains '`enableMacosAppGroupAiApps`' 'Antigravity 2.0' \
+  "README documents Antigravity 2.0 on the ai-apps option row"
+assert_key_row_contains '`enableMacosAppGroupAiApps`' 'Antigravity IDE' \
+  "README documents Antigravity IDE on the ai-apps option row"
 
 assert_contains 'Optional stack profiles and macOS App Group settings are disabled by default.' \
   "README states optional stack profiles and App Groups are disabled by default"
