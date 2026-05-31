@@ -644,7 +644,7 @@ assert_contains "$setup_output_text" "Settings to write:" "gum setup shows concr
 assert_contains "$setup_output_text" "Customize Terrapod settings." "gum setup offers sequential setting customization"
 assert_not_contains "$setup_output_text" "Option guide:" "gum setup does not print a separate option guide"
 assert_contains "$setup_output_text" "Optional Development Workspace: Dev Zellij layouts; also includes Editor and AI tool stacks." "gum setup explains Optional Development Workspace"
-assert_contains "$setup_output_text" "Optional AI Tool Stack: Gemini CLI, Claude Code, and Codex." "gum setup explains Optional AI Tool Stack"
+assert_contains "$setup_output_text" "Optional AI Tool Stack: Antigravity CLI, Claude Code, and Codex." "gum setup explains Optional AI Tool Stack"
 assert_contains "$setup_output_text" "terminal-apps macOS App Group: Ghostty and cmux." "gum setup explains terminal-apps macOS App Group"
 assert_contains "$setup_output_text" "Optional Editor Stack: included by Optional Development Workspace" "gum setup presents workspace-included Optional Editor Stack"
 assert_contains "$setup_output_text" "enableEditorStack = true" "gum setup summary includes concrete Editor Stack setting"
