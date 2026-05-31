@@ -28,6 +28,208 @@ write_stub() {
   chmod +x "$path"
 }
 
+write_gum_stub() {
+  path="$1"
+
+  cat >"$path" <<'SH'
+#!/bin/sh
+set -eu
+
+log_file="${TERRAPOD_GUM_LOG:?}"
+responses_file="${TERRAPOD_GUM_RESPONSES:?}"
+
+printf '%s' "gum args:" >>"$log_file"
+for arg do
+  printf '%s' " $arg" >>"$log_file"
+done
+printf '\n' >>"$log_file"
+
+if [ "${1:-}" = "--version" ]; then
+  printf '%s\n' "gum test stub"
+  exit 0
+fi
+
+next_response() {
+  response="$(sed -n '1p' "$responses_file")"
+  sed '1d' "$responses_file" >"$responses_file.tmp"
+  mv "$responses_file.tmp" "$responses_file"
+
+  if [ -z "$response" ]; then
+    exit 130
+  fi
+
+  printf '%s\n' "$response"
+}
+
+case "${1:-}" in
+  choose)
+    if [ "${2:-}" = "--help" ]; then
+      printf '%s\n' "Usage: gum choose [<options> ...] [flags]"
+      printf '%s\n' "      --label-delimiter=\"\""
+      exit 0
+    fi
+
+    while IFS= read -r option; do
+      printf '%s\n' "gum stdin: $option" >>"$log_file"
+    done
+
+    response="$(next_response)"
+    if [ "$response" = "__CANCEL__" ]; then
+      exit 130
+    fi
+    if [ "$response" = "__ERROR__" ]; then
+      printf '%s\n' "simulated gum operational failure" >&2
+      exit 2
+    fi
+    printf '%s\n' "$response"
+    ;;
+  confirm)
+    response="$(next_response)"
+    case "$response" in
+      yes|y|true|enabled)
+        exit 0
+        ;;
+      no|n|false|disabled)
+        exit 1
+        ;;
+      __CANCEL__)
+        exit 130
+        ;;
+      __ERROR__)
+        printf '%s\n' "simulated gum operational failure" >&2
+        exit 2
+        ;;
+      *)
+        printf '%s\n' "unexpected gum confirm response: $response" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  style)
+    shift
+    for arg do
+      case "$arg" in
+        --*)
+          ;;
+        *)
+          printf '%s\n' "$arg"
+          ;;
+      esac
+    done
+    ;;
+  *)
+    printf '%s\n' "unexpected gum command: ${1:-}" >&2
+    exit 2
+    ;;
+esac
+SH
+
+  chmod +x "$path"
+}
+
+write_gum_responses() {
+  responses_file="$1"
+  shift
+
+  : >"$responses_file"
+  for response do
+    printf '%s\n' "$response" >>"$responses_file"
+  done
+}
+
+write_old_gum_stub() {
+  path="$1"
+
+  cat >"$path" <<'SH'
+#!/bin/sh
+set -eu
+
+log_file="${TERRAPOD_GUM_LOG:?}"
+
+printf '%s' "gum args:" >>"$log_file"
+for arg do
+  printf '%s' " $arg" >>"$log_file"
+done
+printf '\n' >>"$log_file"
+
+if [ "${1:-}" = "--version" ]; then
+  printf '%s\n' "gum version 0.14.0"
+  exit 0
+fi
+
+if [ "${1:-}" = "choose" ] && [ "${2:-}" = "--help" ]; then
+  printf '%s\n' "Usage: gum choose [<options> ...] [flags]"
+  printf '%s\n' "      --header=\"Choose:\""
+  exit 0
+fi
+
+case "${1:-}" in
+  choose)
+    printf '%s\n' "unknown flag: --label-delimiter" >&2
+    exit 2
+    ;;
+  style)
+    shift
+    for arg do
+      case "$arg" in
+        --*)
+          ;;
+        *)
+          printf '%s\n' "$arg"
+          ;;
+      esac
+    done
+    ;;
+  *)
+    printf '%s\n' "unexpected old gum command: ${1:-}" >&2
+    exit 2
+    ;;
+esac
+SH
+
+  chmod +x "$path"
+}
+
+write_no_gum_path() {
+  path="$1"
+  shift
+
+  mkdir -p "$path"
+
+  for command_name do
+    command_path="$(command -v "$command_name" 2>/dev/null || true)"
+    if [ -z "$command_path" ]; then
+      fail "no-gum PATH setup requires $command_name"
+    fi
+
+    ln -s "$command_path" "$path/$command_name"
+  done
+
+  if PATH="$path" command -v gum >/dev/null 2>&1; then
+    fail "no-gum PATH setup should hide gum"
+  fi
+}
+
+shell_quote() {
+  printf "'"
+  printf '%s' "$1" | sed "s/'/'\\\\''/g"
+  printf "'"
+}
+
+run_setup_in_pty() {
+  profile="$1"
+  term="$2"
+  home_dir="$3"
+  xdg_config_home="$4"
+
+  if script --version >/dev/null 2>&1; then
+    command_text="env TERM=$(shell_quote "$term") TERRAPOD_PROFILE=$(shell_quote "$profile") TERRAPOD_CHEZMOI_CONFIG= HOME=$(shell_quote "$home_dir") XDG_CONFIG_HOME=$(shell_quote "$xdg_config_home") sh $(shell_quote "$terrapod") setup"
+    script -q -e -c "$command_text" /dev/null
+  else
+    script -q /dev/null env TERM="$term" TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" setup
+  fi
+}
+
 assert_contains() {
   haystack="$1"
   needle="$2"
@@ -111,25 +313,15 @@ assert_first_occurrence_before() {
 
 run_terrapod_setup_command() {
   profile="$1"
-  input="$2"
+  responses_file="$2"
   home_dir="$3"
   xdg_config_home="$4"
   output_file="$5"
+  gum_log="$6"
 
-  printf '%s' "$input" |
-    TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" setup >"$output_file" 2>&1
-}
-
-run_terrapod_setup_command_with_presentation() {
-  presentation="$1"
-  profile="$2"
-  input="$3"
-  home_dir="$4"
-  xdg_config_home="$5"
-  output_file="$6"
-
-  printf '%s' "$input" |
-    TERRAPOD_SETUP_PRESENTATION="$presentation" TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" setup >"$output_file" 2>&1
+  TERRAPOD_GUM_RESPONSES="$responses_file" TERRAPOD_GUM_LOG="$gum_log" \
+    PATH="$tmp_dir/bin:/usr/bin:/bin" \
+    run_setup_in_pty "$profile" xterm "$home_dir" "$xdg_config_home" >"$output_file" 2>&1
 }
 
 assert_call_args() {
@@ -230,6 +422,9 @@ assert_no_terrapod_artifacts_under() {
 }
 
 mkdir -p "$tmp_dir/bin" "$tmp_dir/home"
+write_gum_stub "$tmp_dir/bin/gum"
+no_gum_path="$tmp_dir/no-gum-bin"
+write_no_gum_path "$no_gum_path" sh
 
 terrapod="$repo_root/dot_local/bin/executable_terrapod"
 tpod_source="$repo_root/dot_local/bin/symlink_tpod"
@@ -356,6 +551,16 @@ assert_contains \
 
 assert_contains \
   "$help_output" \
+  "tpod is the short day-to-day alias for terrapod." \
+  "Terrapod help documents tpod as the day-to-day alias"
+
+assert_contains \
+  "$help_output" \
+  "tpod apply" \
+  "Terrapod help examples lead with the short apply command"
+
+assert_contains \
+  "$help_output" \
   "setup" \
   "Terrapod help describes setup"
 
@@ -388,7 +593,7 @@ assert_not_contains \
   "workstation" \
   "VPS Shell Profile help does not mention workstation anywhere"
 
-if TERRAPOD_PROFILE=vps-shell HOME="$tmp_dir/home" XDG_CONFIG_HOME="$tmp_dir/xdg" sh "$terrapod" configure workstation >"$tmp_dir/vps-workstation.out" 2>"$tmp_dir/vps-workstation.err"; then
+if PATH="/usr/bin:/bin" TERRAPOD_PROFILE=vps-shell TERRAPOD_CHEZMOI_CONFIG= HOME="$tmp_dir/home" XDG_CONFIG_HOME="$tmp_dir/xdg" sh "$terrapod" configure workstation >"$tmp_dir/vps-workstation.out" 2>"$tmp_dir/vps-workstation.err"; then
   fail "VPS Shell Profile rejects workstation Preset"
 fi
 pass "VPS Shell Profile rejects workstation Preset"
@@ -409,112 +614,97 @@ assert_contains \
   "workstation Preset is only available for the macOS Terminal Profile" \
   "VPS Shell Profile explains workstation Preset rejection"
 
+assert_not_contains \
+  "$vps_workstation_error" \
+  "gum is required" \
+  "VPS Shell Profile no-gum workstation rejection does not require gum"
+
 setup_home="$tmp_dir/setup-home"
 setup_xdg="$tmp_dir/setup-xdg"
 setup_output="$tmp_dir/setup.out"
+setup_responses="$tmp_dir/setup.responses"
+setup_gum_log="$tmp_dir/setup-gum.log"
 setup_config="$setup_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$setup_home"
+write_gum_responses "$setup_responses" workstation yes yes yes yes yes yes
 
-if ! run_terrapod_setup_command macos-terminal 'workstation
-
-
-
-
-
-y
-' "$setup_home" "$setup_xdg" "$setup_output"; then
+if ! run_terrapod_setup_command macos-terminal "$setup_responses" "$setup_home" "$setup_xdg" "$setup_output" "$setup_gum_log"; then
   sed 's/^/  /' "$setup_output" >&2
-  fail "macOS Terminal Profile setup prompts for customization before final confirmation and completes with workstation"
+  fail "macOS Terminal Profile setup uses gum prompts before final confirmation and completes with workstation"
 fi
-pass "macOS Terminal Profile setup prompts for customization before final confirmation and completes with workstation"
+pass "macOS Terminal Profile setup uses gum prompts before final confirmation and completes with workstation"
 
 setup_output_text="$(cat "$setup_output")"
-assert_contains "$setup_output_text" "Terrapod setup" "plain setup prints a command heading"
-assert_contains "$setup_output_text" "Profile: macOS Terminal Profile" "plain setup shows detected macOS profile"
-assert_contains "$setup_output_text" "Choose Terrapod Preset (minimal|development|workstation):" "plain setup shows macOS Preset choices"
-assert_contains "$setup_output_text" "Settings to write:" "plain setup shows concrete settings summary"
-assert_contains "$setup_output_text" "Customize Terrapod settings." "plain setup offers concrete setting customization"
-assert_contains "$setup_output_text" "Optional Development Workspace [enabled]:" "plain setup prompts for Optional Development Workspace"
-assert_contains "$setup_output_text" "Optional Editor Stack: included by Optional Development Workspace" "plain setup presents workspace-included Optional Editor Stack"
-assert_contains "$setup_output_text" "terminal-apps macOS App Group (Ghostty) [enabled]:" "plain setup prompts for Ghostty-only terminal-apps macOS App Group"
-assert_contains "$setup_output_text" "enableEditorStack = true" "plain setup summary includes concrete Editor Stack setting"
-assert_contains "$setup_output_text" "enableMacosAppGroupMonitoring = true" "plain setup summary includes concrete macOS App Group setting"
-assert_contains "$setup_output_text" "Write these Terrapod settings" "plain setup asks for final confirmation"
-assert_contains "$setup_output_text" "Configured Terrapod Preset 'workstation'" "plain setup reports successful configuration"
-assert_first_occurrence_before "$setup_output_text" "Profile: macOS Terminal Profile" "Choose Terrapod Preset" "plain setup shows profile before Preset selection"
-assert_first_occurrence_before "$setup_output_text" "Choose Terrapod Preset" "Customize Terrapod settings." "plain setup customizes settings after Preset selection"
-assert_first_occurrence_before "$setup_output_text" "Customize Terrapod settings." "Settings to write:" "plain setup shows customized settings before summary"
-assert_first_occurrence_before "$setup_output_text" "Settings to write:" "Write these Terrapod settings" "plain setup shows summary before final confirmation"
+setup_gum_log_text="$(cat "$setup_gum_log")"
+assert_contains "$setup_output_text" "🌱 Terrapod Setup" "gum setup prints a rich setup heading"
+assert_contains "$setup_output_text" "Profile  macOS Terminal Profile" "gum setup shows detected macOS profile in aligned setup context"
+assert_contains "$setup_output_text" "Choose a Preset" "gum setup labels the Preset choice section"
+assert_not_contains "$setup_output_text" "Preset guide:" "gum setup does not print a separate Preset guide"
+assert_contains "$setup_output_text" "Settings to write:" "gum setup shows concrete settings summary"
+assert_contains "$setup_output_text" "Customize Terrapod settings." "gum setup offers sequential setting customization"
+assert_not_contains "$setup_output_text" "Option guide:" "gum setup does not print a separate option guide"
+assert_contains "$setup_output_text" "Optional Development Workspace: Dev Zellij layouts; also includes Editor and AI tool stacks." "gum setup explains Optional Development Workspace"
+assert_contains "$setup_output_text" "Optional AI Tool Stack: Gemini CLI, Claude Code, and Codex." "gum setup explains Optional AI Tool Stack"
+assert_contains "$setup_output_text" "terminal-apps macOS App Group (Ghostty): Ghostty." "gum setup explains Ghostty-only terminal-apps macOS App Group"
+assert_contains "$setup_output_text" "Optional Editor Stack: included by Optional Development Workspace" "gum setup presents workspace-included Optional Editor Stack"
+assert_contains "$setup_output_text" "enableEditorStack = true" "gum setup summary includes concrete Editor Stack setting"
+assert_contains "$setup_output_text" "enableMacosAppGroupMonitoring = true" "gum setup summary includes concrete macOS App Group setting"
+assert_contains "$setup_output_text" "Configured Terrapod Preset 'workstation'" "gum setup reports successful configuration"
+assert_contains "$setup_gum_log_text" "gum args: style" "gum setup uses gum style for setup-only presentation"
+assert_contains "$setup_gum_log_text" "gum args: choose" "gum setup uses gum choose for Preset selection"
+assert_contains "$setup_gum_log_text" "gum stdin: minimal      Core shell/runtime baseline:minimal" "gum setup offers minimal Preset with nearby explanation"
+assert_contains "$setup_gum_log_text" "gum stdin: development  Coding machine with editor, AI CLI, workspace:development" "gum setup offers development Preset with nearby explanation"
+assert_contains "$setup_gum_log_text" "gum stdin: workstation  macOS workstation with development setup and app groups:workstation" "gum setup offers workstation Preset with nearby explanation"
+assert_contains "$setup_gum_log_text" "gum args: confirm Optional Development Workspace" "gum setup asks Optional Development Workspace with gum confirm"
+assert_contains "$setup_gum_log_text" "gum args: confirm terminal-apps macOS App Group (Ghostty)" "gum setup asks Ghostty-only terminal-apps macOS App Group with gum confirm"
+assert_contains "$setup_gum_log_text" "gum args: confirm Write these Terrapod settings" "gum setup asks final confirmation with gum confirm"
+assert_first_occurrence_before "$setup_output_text" "Profile  macOS Terminal Profile" "Customize Terrapod settings." "gum setup shows profile before settings customization"
+assert_first_occurrence_before "$setup_output_text" "Choose a Preset" "Customize Terrapod settings." "gum setup presents Preset selection before customization"
+assert_first_occurrence_before "$setup_output_text" "Optional Development Workspace: Dev Zellij layouts; also includes Editor and AI tool stacks." "Optional Editor Stack: included by Optional Development Workspace" "gum setup explains an option immediately before related output"
+assert_first_occurrence_before "$setup_output_text" "Customize Terrapod settings." "Settings to write:" "gum setup shows customized settings before summary"
 
 if [ ! -f "$setup_config" ]; then
-  fail "plain setup writes config after final confirmation"
+  fail "gum setup writes config after final confirmation"
 fi
-pass "plain setup writes config after final confirmation"
-
-assert_no_ansi_escape "$setup_output_text" "auto setup fallback does not use ANSI color with piped input"
-assert_no_rich_setup_emoji "$setup_output_text" "auto setup fallback does not use rich setup emoji with piped input"
+pass "gum setup writes config after final confirmation"
 
 dumb_setup_home="$tmp_dir/dumb-setup-home"
 dumb_setup_xdg="$tmp_dir/dumb-setup-xdg"
 dumb_setup_output="$tmp_dir/dumb-setup.out"
 mkdir -p "$dumb_setup_home"
 
-if ! printf '%s' 'minimal
-n
-n
-n
-n
-n
-n
-n
-y
-' |
-  TERM=dumb TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG= HOME="$dumb_setup_home" XDG_CONFIG_HOME="$dumb_setup_xdg" sh "$terrapod" setup >"$dumb_setup_output" 2>&1; then
+if TERRAPOD_GUM_RESPONSES="$tmp_dir/dumb.responses" TERRAPOD_GUM_LOG="$tmp_dir/dumb-gum.log" \
+  PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  run_setup_in_pty macos-terminal dumb "$dumb_setup_home" "$dumb_setup_xdg" >"$dumb_setup_output" 2>&1; then
   sed 's/^/  /' "$dumb_setup_output" >&2
-  fail "TERM=dumb setup uses plain fallback"
+  fail "TERM=dumb setup fails instead of falling back to plain prompts"
 fi
-pass "TERM=dumb setup uses plain fallback"
+pass "TERM=dumb setup fails instead of falling back to plain prompts"
 
 dumb_setup_output_text="$(cat "$dumb_setup_output")"
-assert_contains "$dumb_setup_output_text" "Choose Terrapod Preset (minimal|development|workstation):" "TERM=dumb setup keeps plain Preset prompt"
-assert_no_ansi_escape "$dumb_setup_output_text" "TERM=dumb setup does not use ANSI color"
-assert_no_rich_setup_emoji "$dumb_setup_output_text" "TERM=dumb setup does not use rich setup emoji"
-
-rich_setup_home="$tmp_dir/rich-setup-home"
-rich_setup_xdg="$tmp_dir/rich-setup-xdg"
-rich_setup_output="$tmp_dir/rich-setup.out"
-mkdir -p "$rich_setup_home"
-
-if ! run_terrapod_setup_command_with_presentation rich macos-terminal '1
-
-y
-' "$rich_setup_home" "$rich_setup_xdg" "$rich_setup_output"; then
-  sed 's/^/  /' "$rich_setup_output" >&2
-  fail "forced rich setup uses rich prompt path"
-fi
-pass "forced rich setup uses rich prompt path"
-
-rich_setup_output_text="$(cat "$rich_setup_output")"
-assert_contains "$rich_setup_output_text" "Terrapod Setup" "rich setup shows setup-only rich heading"
-assert_contains "$rich_setup_output_text" "Preset [j/k, number/name, Enter]" "rich setup shows keyboard Preset controls"
-assert_contains "$rich_setup_output_text" "Settings [j/k, t, y/n, Enter]" "rich setup shows keyboard setting controls"
+assert_contains "$dumb_setup_output_text" "requires an interactive terminal supported by gum" "TERM=dumb setup explains unsupported terminal environment"
 
 vps_setup_home="$tmp_dir/vps-setup-home"
 vps_setup_xdg="$tmp_dir/vps-setup-xdg"
 vps_setup_output="$tmp_dir/vps-setup.out"
+vps_setup_responses="$tmp_dir/vps-setup.responses"
+vps_setup_gum_log="$tmp_dir/vps-setup-gum.log"
 mkdir -p "$vps_setup_home"
+write_gum_responses "$vps_setup_responses" workstation
 
-if run_terrapod_setup_command vps-shell 'workstation
-y
-' "$vps_setup_home" "$vps_setup_xdg" "$vps_setup_output"; then
+if run_terrapod_setup_command vps-shell "$vps_setup_responses" "$vps_setup_home" "$vps_setup_xdg" "$vps_setup_output" "$vps_setup_gum_log"; then
   fail "VPS Shell Profile setup rejects workstation Preset"
 fi
 pass "VPS Shell Profile setup rejects workstation Preset"
 
 vps_setup_output_text="$(cat "$vps_setup_output")"
-assert_contains "$vps_setup_output_text" "Profile: VPS Shell Profile" "VPS setup shows detected profile before rejection"
-assert_contains "$vps_setup_output_text" "Choose Terrapod Preset (minimal|development):" "VPS setup hides workstation from choices"
+assert_contains "$vps_setup_output_text" "Profile  VPS Shell Profile" "VPS setup shows detected profile before rejection"
 assert_contains "$vps_setup_output_text" "workstation Preset is only available for the macOS Terminal Profile" "VPS setup explains workstation rejection"
+vps_setup_gum_log_text="$(cat "$vps_setup_gum_log")"
+assert_contains "$vps_setup_gum_log_text" "gum args: choose" "VPS setup uses gum choose for Preset selection"
+assert_contains "$vps_setup_gum_log_text" "gum stdin: minimal      Core shell/runtime baseline:minimal" "VPS setup offers minimal Preset with nearby explanation"
+assert_contains "$vps_setup_gum_log_text" "gum stdin: development  Coding machine with editor, AI CLI, workspace:development" "VPS setup offers development Preset with nearby explanation"
+assert_not_contains "$vps_setup_gum_log_text" "workstation" "VPS setup does not offer workstation Preset"
 
 if [ -e "$vps_setup_xdg/chezmoi/chezmoi.toml" ]; then
   fail "VPS rejected setup does not write config"
@@ -522,6 +712,128 @@ fi
 pass "VPS rejected setup does not write config"
 
 assert_no_terrapod_artifacts_under "$vps_setup_xdg" "VPS rejected setup leaves no Terrapod artifacts"
+
+preset_cancel_home="$tmp_dir/preset-cancel-home"
+preset_cancel_xdg="$tmp_dir/preset-cancel-xdg"
+preset_cancel_output="$tmp_dir/preset-cancel.out"
+preset_cancel_responses="$tmp_dir/preset-cancel.responses"
+preset_cancel_gum_log="$tmp_dir/preset-cancel-gum.log"
+preset_cancel_config="$preset_cancel_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$preset_cancel_home"
+write_gum_responses "$preset_cancel_responses" __CANCEL__
+
+if run_terrapod_setup_command macos-terminal "$preset_cancel_responses" "$preset_cancel_home" "$preset_cancel_xdg" "$preset_cancel_output" "$preset_cancel_gum_log"; then
+  fail "Preset selection cancellation exits non-zero"
+fi
+pass "Preset selection cancellation exits non-zero"
+
+preset_cancel_output_text="$(cat "$preset_cancel_output")"
+assert_contains "$preset_cancel_output_text" "setup cancelled" "Preset selection cancellation preserves setup cancellation guidance"
+assert_not_contains "$preset_cancel_output_text" "no Terrapod Preset selected" "Preset selection cancellation is not reported as missing selection"
+
+if [ -e "$preset_cancel_config" ]; then
+  fail "Preset selection cancellation does not write config"
+fi
+pass "Preset selection cancellation does not write config"
+
+assert_no_terrapod_artifacts_under "$preset_cancel_xdg" "Preset selection cancellation leaves no Terrapod artifacts"
+
+gum_error_home="$tmp_dir/gum-error-home"
+gum_error_xdg="$tmp_dir/gum-error-xdg"
+gum_error_output="$tmp_dir/gum-error.out"
+gum_error_responses="$tmp_dir/gum-error.responses"
+gum_error_gum_log="$tmp_dir/gum-error-gum.log"
+gum_error_config="$gum_error_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$gum_error_home"
+write_gum_responses "$gum_error_responses" minimal __ERROR__
+
+if run_terrapod_setup_command macos-terminal "$gum_error_responses" "$gum_error_home" "$gum_error_xdg" "$gum_error_output" "$gum_error_gum_log"; then
+  fail "setup fails when gum returns an operational error"
+fi
+pass "setup fails when gum returns an operational error"
+
+gum_error_output_text="$(cat "$gum_error_output")"
+assert_contains "$gum_error_output_text" "gum failed during Terrapod Setup" "gum operational error explains gum failure"
+assert_contains "$gum_error_output_text" "rerun 'terrapod setup'" "gum operational error gives rerun guidance"
+assert_not_contains "$gum_error_output_text" "setup cancelled" "gum operational error is not reported as cancellation"
+
+if [ -e "$gum_error_config" ]; then
+  fail "gum operational error does not write config"
+fi
+pass "gum operational error does not write config"
+
+assert_no_terrapod_artifacts_under "$gum_error_xdg" "gum operational error leaves no Terrapod artifacts"
+
+missing_gum_home="$tmp_dir/missing-gum-home"
+missing_gum_xdg="$tmp_dir/missing-gum-xdg"
+missing_gum_output="$tmp_dir/missing-gum.out"
+mkdir -p "$missing_gum_home"
+
+if printf '%s\n' "workstation" |
+  PATH="$no_gum_path" TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG= HOME="$missing_gum_home" XDG_CONFIG_HOME="$missing_gum_xdg" sh "$terrapod" setup >"$missing_gum_output" 2>&1; then
+  fail "setup fails when gum is missing"
+fi
+pass "setup fails when gum is missing"
+
+missing_gum_output_text="$(cat "$missing_gum_output")"
+assert_contains "$missing_gum_output_text" "gum is required before Terrapod Setup can run" "missing gum setup explains gum requirement"
+assert_contains "$missing_gum_output_text" "Install gum, then rerun Terrapod Setup" "missing gum setup gives rerun guidance"
+assert_not_contains "$missing_gum_output_text" "Configured Terrapod Preset" "missing gum setup does not fall back to configure success"
+
+if [ -e "$missing_gum_xdg/chezmoi/chezmoi.toml" ]; then
+  fail "missing gum setup does not write config"
+fi
+pass "missing gum setup does not write config"
+
+assert_no_terrapod_artifacts_under "$missing_gum_xdg" "missing gum setup leaves no Terrapod artifacts"
+
+old_gum_home="$tmp_dir/old-gum-home"
+old_gum_xdg="$tmp_dir/old-gum-xdg"
+old_gum_output="$tmp_dir/old-gum.out"
+old_gum_log="$tmp_dir/old-gum.log"
+old_gum_path="$tmp_dir/old-gum-bin"
+mkdir -p "$old_gum_home" "$old_gum_path"
+write_old_gum_stub "$old_gum_path/gum"
+
+if TERRAPOD_GUM_RESPONSES="$tmp_dir/old-gum.responses" TERRAPOD_GUM_LOG="$old_gum_log" \
+  PATH="$old_gum_path:/usr/bin:/bin" \
+  run_setup_in_pty macos-terminal xterm "$old_gum_home" "$old_gum_xdg" >"$old_gum_output" 2>&1; then
+  sed 's/^/  /' "$old_gum_output" >&2
+  fail "setup rejects gum without choose label support"
+fi
+pass "setup rejects gum without choose label support"
+
+old_gum_output_text="$(cat "$old_gum_output")"
+old_gum_log_text="$(cat "$old_gum_log")"
+assert_contains "$old_gum_output_text" "gum is too old for Terrapod Setup" "old gum setup explains the unsupported gum capability"
+assert_contains "$old_gum_output_text" "Upgrade gum, then rerun Terrapod Setup" "old gum setup gives upgrade guidance"
+assert_contains "$old_gum_output_text" "Homebrew: HOMEBREW_NO_AUTO_UPDATE=1 brew upgrade gum || HOMEBREW_NO_AUTO_UPDATE=1 brew install gum" "old gum setup gives explicit Homebrew upgrade guidance"
+assert_contains "$old_gum_output_text" "APT: sudo apt-get update && sudo apt-get install --only-upgrade gum" "old gum setup gives explicit APT upgrade guidance"
+assert_contains "$old_gum_output_text" "replace the older gum earlier on PATH" "old gum setup explains manually installed gum shadowing"
+assert_not_contains "$old_gum_output_text" "rerun the installer" "old gum setup does not suggest rerunning the installer"
+assert_contains "$old_gum_log_text" "gum args: choose --help" "old gum setup checks choose label support"
+assert_not_contains "$old_gum_log_text" "gum args: choose --label-delimiter" "old gum setup fails before using label-delimiter"
+
+if [ -e "$old_gum_xdg/chezmoi/chezmoi.toml" ]; then
+  fail "old gum setup does not write config"
+fi
+pass "old gum setup does not write config"
+
+assert_no_terrapod_artifacts_under "$old_gum_xdg" "old gum setup leaves no Terrapod artifacts"
+
+noninteractive_setup_home="$tmp_dir/noninteractive-setup-home"
+noninteractive_setup_xdg="$tmp_dir/noninteractive-setup-xdg"
+noninteractive_setup_output="$tmp_dir/noninteractive-setup.out"
+mkdir -p "$noninteractive_setup_home"
+
+if TERRAPOD_GUM_RESPONSES="$tmp_dir/noninteractive.responses" TERRAPOD_GUM_LOG="$tmp_dir/noninteractive-gum.log" \
+  PATH="$tmp_dir/bin:/usr/bin:/bin" TERM=xterm TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG= HOME="$noninteractive_setup_home" XDG_CONFIG_HOME="$noninteractive_setup_xdg" sh "$terrapod" setup >"$noninteractive_setup_output" 2>&1 </dev/null; then
+  fail "setup fails when stdin is not interactive"
+fi
+pass "setup fails when stdin is not interactive"
+
+noninteractive_setup_output_text="$(cat "$noninteractive_setup_output")"
+assert_contains "$noninteractive_setup_output_text" "requires an interactive terminal supported by gum" "non-interactive setup explains terminal requirement"
 
 assert_contains \
   "$help_output" \

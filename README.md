@@ -18,7 +18,8 @@ sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/ins
 The installer installs `chezmoi` into `~/.local/bin` when needed, initializes
 `https://github.com/juty9026/terrapod.git`, launches Terrapod Setup from the
 checked-out source repository, and runs the initial declared-state apply only
-after setup succeeds.
+after setup succeeds. After the initial apply completes, the installer prints
+`tpod help` so the short day-to-day command is immediately visible.
 
 Terrapod Setup is the first-run review step. It asks you to choose a Preset,
 shows the concrete Terrapod-managed machine-local settings that Preset would
@@ -30,14 +31,19 @@ repository.
 Terrapod Setup is an interactive first-run prompt. Routine Terrapod command
 output remains operational and scan-friendly after bootstrap.
 
+Terrapod Setup requires `gum` (the Bootstrap UI Dependency) and an interactive
+terminal supported by gum. Missing `gum`, failed gum bootstrap, non-TTY
+sessions, `dumb` terminals, and unsupported interactive terminals stop setup
+before apply with guidance text. There is no plain text fallback.
+
 You do not need to install `chezmoi` manually before running this installer.
 
-After bootstrap, use Terrapod for normal checks and source updates.
+After bootstrap, use `tpod` for normal checks and source updates.
 
 ```sh
-terrapod status
-terrapod doctor
-terrapod update
+tpod status
+tpod doctor
+tpod update
 ```
 
 ## What Terrapod Carries
@@ -65,6 +71,15 @@ an already configured machine.
 
 The `workstation` Preset is available only for the macOS Terminal Profile.
 
+`terrapod configure <Preset>` is the script-friendly Preset configuration
+command. It writes concrete settings for exactly one supported Preset, does not
+require `gum`, and has no interactive customization. `terrapod configure
+<Preset>` is not a plain fallback for Terrapod Setup. Terrapod Setup and
+`terrapod configure <Preset>` are intentionally separate. The latter writes
+settings without the setup UI. If Terrapod Setup cannot run because `gum` or an
+interactive terminal is unavailable, fix the `gum` or
+terminal environment and rerun `terrapod setup`.
+
 ## What Terrapod Leaves Alone
 
 Terrapod applies this repository's declared dotfiles state. It does not own the whole operating system.
@@ -78,16 +93,16 @@ Terrapod does not run broad Homebrew, APT, or mise upgrades.
 
 ## Daily Commands
 
-Use `terrapod` as the primary management command after bootstrap.
-`tpod` is the short alias for the same command.
+Use `tpod` as the day-to-day management command after bootstrap.
+`terrapod` remains the full command and brand name.
 
 ```sh
-terrapod status
-terrapod doctor
-terrapod diff
-terrapod apply
-terrapod update
 tpod status
+tpod doctor
+tpod diff
+tpod apply
+tpod update
+terrapod status
 ```
 
 `terrapod update` refreshes the Terrapod Source Repository through `chezmoi update --exclude scripts`.
@@ -109,6 +124,10 @@ Run the installer on macOS.
 ```sh
 sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/install.sh)"
 ```
+
+Before Terrapod Setup, the first-run installer prepares `gum` as the required
+Bootstrap UI Dependency with Homebrew when `gum` is missing. That setup UI
+bootstrap is limited to `gum`; it does not run broad Homebrew upgrades.
 
 On macOS, the initial apply also runs setup scripts under `.chezmoiscripts` for the initial terminal environment:
 
@@ -146,6 +165,11 @@ sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/ins
 The installer adds `~/.local/bin` to `PATH` for the bootstrap process. After
 the first apply, managed zsh sessions keep `~/.local/bin` on `PATH` so
 user-local binaries such as `chezmoi` remain available after reconnecting.
+
+Before Terrapod Setup, the first-run installer prepares `gum` as the required
+Bootstrap UI Dependency from APT with the Charm APT repository when `gum` is
+missing. That setup UI bootstrap is limited to `gum`; it does not run broad APT
+upgrades.
 
 On Ubuntu, the initial apply runs setup scripts for the VPS shell profile:
 

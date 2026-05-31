@@ -131,6 +131,47 @@ install_chezmoi_if_needed() {
   printf '%s\n' "$chezmoi_path"
 }
 
+vps_sudo_cmd() {
+  if [ "$(id -u)" -eq 0 ]; then
+    printf '%s\n' ""
+  elif command -v sudo >/dev/null 2>&1; then
+    printf '%s\n' "sudo"
+  else
+    fatal "Ubuntu bootstrap prerequisites are required before Terrapod Setup. Install sudo so Terrapod can prepare git and gum with apt-get, or install git and gum manually before rerunning the installer."
+  fi
+}
+
+ensure_charm_apt_repository() {
+  sudo_cmd="$1"
+
+  if ! $sudo_cmd install -dm 755 /etc/apt/keyrings; then
+    fatal "failed to create the APT keyring directory for the Charm repository. Check sudo permissions and rerun the Terrapod installer before Terrapod Setup."
+  fi
+
+  if ! charm_key_file="$(mktemp "${TMPDIR:-/tmp}/terrapod-charm-key.XXXXXX")"; then
+    fatal "failed to create a temporary file for the Charm APT signing key. Check temporary directory permissions and rerun the Terrapod installer before Terrapod Setup."
+  fi
+
+  if ! curl -fsSL https://repo.charm.sh/apt/gpg.key -o "$charm_key_file"; then
+    rm -f "$charm_key_file"
+    fatal "failed to fetch the Charm APT signing key for gum. Check network access to https://repo.charm.sh/apt/gpg.key and rerun the Terrapod installer before Terrapod Setup."
+  fi
+
+  if ! $sudo_cmd gpg --dearmor --yes -o /etc/apt/keyrings/charm.gpg "$charm_key_file"; then
+    rm -f "$charm_key_file"
+    fatal "failed to install the Charm APT signing key for gum. Check APT keyring permissions and rerun the Terrapod installer before Terrapod Setup."
+  fi
+  rm -f "$charm_key_file"
+
+  if ! printf '%s\n' "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | $sudo_cmd tee /etc/apt/sources.list.d/charm.list >/dev/null; then
+    fatal "failed to write the Charm APT repository for gum. Check sudo permissions and rerun the Terrapod installer before Terrapod Setup."
+  fi
+
+  if ! $sudo_cmd apt-get update -y; then
+    fatal "failed to update APT metadata after adding the Charm APT repository for gum. Check APT connectivity and rerun the Terrapod installer before Terrapod Setup."
+  fi
+}
+
 ensure_source_repo_prerequisites() {
   profile="$1"
 
@@ -138,24 +179,33 @@ ensure_source_repo_prerequisites() {
     return 0
   fi
 
-  if command -v git >/dev/null 2>&1; then
+  if command -v git >/dev/null 2>&1 && command -v gum >/dev/null 2>&1; then
     return 0
   fi
 
-  if [ "$(id -u)" -eq 0 ]; then
-    sudo_cmd=""
-  elif command -v sudo >/dev/null 2>&1; then
-    sudo_cmd="sudo"
-  else
-    fatal "git is required before chezmoi can initialize the source repository. Install git, or install sudo so Terrapod can install git with apt-get."
+  sudo_cmd="$(vps_sudo_cmd)"
+  bootstrap_packages="ca-certificates curl"
+  if ! command -v git >/dev/null 2>&1; then
+    bootstrap_packages="$bootstrap_packages git"
   fi
+  bootstrap_packages="$bootstrap_packages gpg"
 
   if ! $sudo_cmd apt-get update -y; then
-    fatal "failed to update APT metadata before installing git"
+    fatal "failed to update APT metadata before installing Ubuntu bootstrap prerequisites"
   fi
 
-  if ! $sudo_cmd apt-get install -y ca-certificates git; then
-    fatal "failed to install git before initializing the source repository"
+  if ! $sudo_cmd apt-get install -y $bootstrap_packages; then
+    fatal "failed to install Ubuntu bootstrap prerequisites before Terrapod Setup. Install ca-certificates, curl, git, and gpg, then rerun the Terrapod installer."
+  fi
+
+  if command -v gum >/dev/null 2>&1; then
+    return 0
+  fi
+
+  ensure_charm_apt_repository "$sudo_cmd"
+
+  if ! $sudo_cmd apt-get install -y gum; then
+    fatal "failed to install gum from the Charm APT repository. Check APT output, fix repository/package access, and rerun the Terrapod installer before Terrapod Setup."
   fi
 }
 
@@ -179,10 +229,122 @@ checked_out_terrapod() {
 print_setup_recovery() {
   profile="$1"
   source_dir="$2"
+  brew_bin=""
+
+  if [ "$profile" = "macos-terminal" ]; then
+    brew_bin="$(find_homebrew || true)"
+  fi
 
   printf '%s\n' "terrapod installer: Terrapod Setup did not complete." >&2
   printf '%s\n' "terrapod installer: Resume Terrapod Setup from the checked-out source repository:" >&2
-  printf '%s\n' "terrapod installer:   cd \"$source_dir\" && TERRAPOD_PROFILE=\"$profile\" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup" >&2
+  if [ -n "$brew_bin" ]; then
+    printf '%s\n' "terrapod installer:   cd \"$source_dir\" && eval \"\$(\"$brew_bin\" shellenv)\" && TERRAPOD_PROFILE=\"$profile\" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup" >&2
+  else
+    printf '%s\n' "terrapod installer:   cd \"$source_dir\" && TERRAPOD_PROFILE=\"$profile\" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup" >&2
+  fi
+}
+
+find_homebrew() {
+  if command -v brew >/dev/null 2>&1; then
+    command -v brew
+    return 0
+  fi
+
+  if [ "${TERRAPOD_HOMEBREW_CANDIDATE_PATHS+x}" ]; then
+    homebrew_candidate_paths="$TERRAPOD_HOMEBREW_CANDIDATE_PATHS"
+  else
+    homebrew_candidate_paths="/opt/homebrew/bin/brew /usr/local/bin/brew"
+  fi
+
+  for brew_path in $homebrew_candidate_paths; do
+    if [ -x "$brew_path" ]; then
+      printf '%s\n' "$brew_path"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+print_setup_ui_dependency_recovery() {
+  profile="$1"
+  source_dir="$2"
+  chezmoi_bin="$3"
+  brew_bin="$4"
+  reason="$5"
+
+  printf '%s\n' "terrapod installer: gum is required before Terrapod Setup can run." >&2
+  printf '%s\n' "terrapod installer: Failed to prepare the macOS setup UI dependency with Homebrew: $reason" >&2
+  if [ -n "$brew_bin" ]; then
+    printf '%s\n' "terrapod installer: Prepare gum with Homebrew:" >&2
+    printf '%s\n' "terrapod installer:   eval \"\$(\"$brew_bin\" shellenv)\" && HOMEBREW_NO_AUTO_UPDATE=1 \"$brew_bin\" install gum" >&2
+  else
+    printf '%s\n' "terrapod installer: Install Homebrew from https://brew.sh, follow its shellenv instructions, then run: HOMEBREW_NO_AUTO_UPDATE=1 brew install gum" >&2
+  fi
+  printf '%s\n' "terrapod installer: The source repository is already checked out. After gum is available, resume Terrapod Setup and continue the initial apply:" >&2
+  if [ -n "$brew_bin" ]; then
+    printf '%s\n' "terrapod installer:   cd \"$source_dir\" && eval \"\$(\"$brew_bin\" shellenv)\" && TERRAPOD_PROFILE=\"$profile\" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup && \"$chezmoi_bin\" apply" >&2
+  else
+    printf '%s\n' "terrapod installer:   cd \"$source_dir\" && TERRAPOD_PROFILE=\"$profile\" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup && \"$chezmoi_bin\" apply" >&2
+  fi
+}
+
+prepare_setup_ui_dependency() {
+  profile="$1"
+  source_dir="$2"
+  chezmoi_bin="$3"
+
+  if [ "$profile" != "macos-terminal" ]; then
+    return 0
+  fi
+
+  if command -v gum >/dev/null 2>&1; then
+    return 0
+  fi
+
+  brew_bin="$(find_homebrew || true)"
+
+  if [ -z "$brew_bin" ]; then
+    printf '%s\n' "Installing Homebrew for Terrapod Setup UI dependency..."
+    if ! homebrew_installer="$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; then
+      print_setup_ui_dependency_recovery "$profile" "$source_dir" "$chezmoi_bin" "" "failed to download the Homebrew installer"
+      return 1
+    fi
+
+    if ! NONINTERACTIVE=1 /bin/bash -c "$homebrew_installer" </dev/null >&2; then
+      print_setup_ui_dependency_recovery "$profile" "$source_dir" "$chezmoi_bin" "" "failed to install Homebrew"
+      return 1
+    fi
+
+    brew_bin="$(find_homebrew || true)"
+  fi
+
+  if [ -z "$brew_bin" ]; then
+    print_setup_ui_dependency_recovery "$profile" "$source_dir" "$chezmoi_bin" "" "Homebrew install finished, but brew was not found"
+    return 1
+  fi
+
+  if ! brew_shellenv="$("$brew_bin" shellenv)"; then
+    print_setup_ui_dependency_recovery "$profile" "$source_dir" "$chezmoi_bin" "$brew_bin" "failed to evaluate brew shellenv"
+    return 1
+  fi
+  eval "$brew_shellenv"
+
+  if command -v gum >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if ! HOMEBREW_NO_AUTO_UPDATE=1 "$brew_bin" install gum; then
+    print_setup_ui_dependency_recovery "$profile" "$source_dir" "$chezmoi_bin" "$brew_bin" "failed to install gum"
+    return 1
+  fi
+
+  if command -v gum >/dev/null 2>&1; then
+    return 0
+  fi
+
+  print_setup_ui_dependency_recovery "$profile" "$source_dir" "$chezmoi_bin" "$brew_bin" "brew install gum finished, but gum was not found"
+  return 1
 }
 
 run_terrapod_setup() {
@@ -204,6 +366,18 @@ run_initial_apply() {
   "$chezmoi_bin" apply || fatal "chezmoi apply failed"
 }
 
+show_first_run_help() {
+  profile="$1"
+  local_bin_dir="$2"
+  tpod_bin="$local_bin_dir/tpod"
+
+  if [ ! -x "$tpod_bin" ]; then
+    fatal "tpod was not installed at $tpod_bin after initial apply"
+  fi
+
+  TERRAPOD_PROFILE="$profile" "$tpod_bin" help || fatal "tpod help failed after initial apply"
+}
+
 main() {
   profile="$(detect_profile)"
   label="$(profile_label "$profile")"
@@ -219,8 +393,10 @@ main() {
   chezmoi_bin="$(install_chezmoi_if_needed "$local_bin_dir")"
   ensure_source_repo_prerequisites "$profile"
   initialize_source_repository "$chezmoi_bin"
+  prepare_setup_ui_dependency "$profile" "$source_dir" "$chezmoi_bin"
   run_terrapod_setup "$profile" "$source_dir"
   run_initial_apply "$chezmoi_bin"
+  show_first_run_help "$profile" "$local_bin_dir"
 
   printf '%s\n' "Terrapod first-run apply complete."
 }

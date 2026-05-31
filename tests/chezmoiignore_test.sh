@@ -316,6 +316,12 @@ done
 
 pass "core Brewfile contains expected terminal font casks"
 
+if ! grep -Fx 'brew "gum"' "$repo_root/Brewfile" >/dev/null; then
+  fail "core Brewfile declares gum as the setup UI dependency"
+fi
+
+pass "core Brewfile declares gum as the setup UI dependency"
+
 if awk '/^[[:space:]]*cask[[:space:]]+"/ && $0 !~ /^[[:space:]]*cask[[:space:]]+"font-(jetbrains-mono-nerd-font|d2coding)"$/ { found=1 } END { exit found ? 0 : 1 }' "$repo_root/Brewfile"; then
   fail "core Brewfile casks are terminal font casks only"
 fi
