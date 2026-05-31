@@ -436,7 +436,7 @@ assert_contains "$setup_output_text" "Settings to write:" "plain setup shows con
 assert_contains "$setup_output_text" "Customize Terrapod settings." "plain setup offers concrete setting customization"
 assert_contains "$setup_output_text" "Optional Development Workspace [enabled]:" "plain setup prompts for Optional Development Workspace"
 assert_contains "$setup_output_text" "Optional Editor Stack: included by Optional Development Workspace" "plain setup presents workspace-included Optional Editor Stack"
-assert_contains "$setup_output_text" "terminal-apps macOS App Group [enabled]:" "plain setup prompts for terminal-apps macOS App Group"
+assert_contains "$setup_output_text" "terminal-apps macOS App Group (Ghostty) [enabled]:" "plain setup prompts for Ghostty-only terminal-apps macOS App Group"
 assert_contains "$setup_output_text" "enableEditorStack = true" "plain setup summary includes concrete Editor Stack setting"
 assert_contains "$setup_output_text" "enableMacosAppGroupMonitoring = true" "plain setup summary includes concrete macOS App Group setting"
 assert_contains "$setup_output_text" "Write these Terrapod settings" "plain setup asks for final confirmation"

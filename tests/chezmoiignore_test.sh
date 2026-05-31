@@ -189,7 +189,6 @@ development_workspace_managed="$(managed_source_paths "$development_workspace_da
 macos_only_entries="
 .chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl
 .chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl
-dot_config/cmux
 dot_config/ghostty
 dot_config/private_karabiner
 dot_hammerspoon

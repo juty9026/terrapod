@@ -494,7 +494,7 @@ prompt_for_setup_settings_plain() {
 
   if [ "$profile" = "macos-terminal" ]; then
     printf '%s\n' "macOS App Groups:" >&2
-    setup_enableMacosAppGroupTerminalApps="$(prompt_setup_bool "terminal-apps macOS App Group" "$setup_enableMacosAppGroupTerminalApps")"
+    setup_enableMacosAppGroupTerminalApps="$(prompt_setup_bool "terminal-apps macOS App Group (Ghostty)" "$setup_enableMacosAppGroupTerminalApps")"
     setup_enableMacosAppGroupAutomation="$(prompt_setup_bool "automation macOS App Group" "$setup_enableMacosAppGroupAutomation")"
     setup_enableMacosAppGroupLauncher="$(prompt_setup_bool "launcher macOS App Group" "$setup_enableMacosAppGroupLauncher")"
     setup_enableMacosAppGroupMonitoring="$(prompt_setup_bool "monitoring macOS App Group" "$setup_enableMacosAppGroupMonitoring")"
@@ -561,7 +561,7 @@ rich_setup_field_label() {
     enableDevelopmentWorkspace) printf '%s\n' "Optional Development Workspace" ;;
     enableEditorStack) printf '%s\n' "Optional Editor Stack" ;;
     enableAiCliTools) printf '%s\n' "Optional AI Tool Stack" ;;
-    enableMacosAppGroupTerminalApps) printf '%s\n' "terminal-apps macOS App Group" ;;
+    enableMacosAppGroupTerminalApps) printf '%s\n' "terminal-apps macOS App Group (Ghostty)" ;;
     enableMacosAppGroupAutomation) printf '%s\n' "automation macOS App Group" ;;
     enableMacosAppGroupLauncher) printf '%s\n' "launcher macOS App Group" ;;
     enableMacosAppGroupMonitoring) printf '%s\n' "monitoring macOS App Group" ;;

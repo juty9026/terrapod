@@ -453,6 +453,7 @@ fi
 pass "rich setup customizes concrete settings and completes"
 
 assert_contains "$tmp_dir/rich-equivalent.err" "Terrapod Setup" "rich setup prints setup-only rich heading"
+assert_contains "$tmp_dir/rich-equivalent.err" "terminal-apps macOS App Group (Ghostty)" "rich setup labels terminal-apps macOS App Group as Ghostty-only"
 assert_data_key_once_with_value "$rich_equivalent_config" "enableEditorStack" "true" "rich setup writes included Optional Editor Stack"
 assert_data_key_once_with_value "$rich_equivalent_config" "enableAiCliTools" "true" "rich setup writes included Optional AI Tool Stack"
 assert_data_key_once_with_value "$rich_equivalent_config" "enableDevelopmentWorkspace" "true" "rich setup writes enabled Optional Development Workspace"
