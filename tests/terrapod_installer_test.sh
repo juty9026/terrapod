@@ -284,6 +284,9 @@ EOF
 set -eu
 
 printf '%s\n' "sudo args:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"
+if [ "${TERRAPOD_SUDO_STUB_STATUS:-0}" != "0" ]; then
+  exit "$TERRAPOD_SUDO_STUB_STATUS"
+fi
 exec "$@"
 EOF
   chmod +x "$case_dir/bin/sudo"
@@ -376,6 +379,25 @@ done
 exit 0
 EOF
   chmod +x "$case_dir/bin/tee"
+}
+
+write_non_root_id_stub() {
+  case_dir="$1"
+
+  cat >"$case_dir/bin/id" <<'EOF'
+#!/bin/sh
+set -eu
+
+case "${1-}" in
+  -u)
+    printf '%s\n' 1000
+    ;;
+  *)
+    exit 64
+    ;;
+esac
+EOF
+  chmod +x "$case_dir/bin/id"
 }
 
 write_chezmoi_flow_stub() {
@@ -751,7 +773,9 @@ unset TERRAPOD_OS_RELEASE_FILE
 unset TERRAPOD_STUB_CALL_LOG
 assert_status "$installer_status" 0 "Ubuntu installer installs source prerequisites when git is missing"
 ubuntu_missing_git_log_text="$(cat "$ubuntu_missing_git_log")"
+assert_contains "$ubuntu_missing_git_log_text" "sudo args:apt-get update -y" "Ubuntu missing git case may use interactive sudo for package metadata"
 assert_contains "$ubuntu_missing_git_log_text" "apt-get args:update -y" "Ubuntu missing git case updates package metadata"
+assert_contains "$ubuntu_missing_git_log_text" "sudo args:apt-get install -y ca-certificates curl git gpg" "Ubuntu missing git case may use interactive sudo for bootstrap packages"
 assert_contains "$ubuntu_missing_git_log_text" "apt-get args:install -y ca-certificates curl git gpg" "Ubuntu missing git case installs source and bootstrap UI dependencies"
 assert_contains "$ubuntu_missing_git_log_text" "install args:-dm 755 /etc/apt/keyrings" "Ubuntu missing git case creates an APT keyring directory"
 assert_contains "$ubuntu_missing_git_log_text" "curl args:-fsSL https://repo.charm.sh/apt/gpg.key -o " "Ubuntu missing git case fetches the Charm APT signing key"
@@ -763,6 +787,62 @@ assert_first_occurrence_before "$ubuntu_missing_git_log_text" "apt-get args:inst
 assert_first_occurrence_before "$ubuntu_missing_git_log_text" "tee args:/etc/apt/sources.list.d/charm.list" "apt-get args:install -y gum" "Ubuntu missing git case adds the Charm repository before installing gum"
 assert_first_occurrence_before "$ubuntu_missing_git_log_text" "apt-get args:install -y gum" "terrapod args:setup" "Ubuntu missing git case installs gum before Terrapod Setup"
 assert_first_occurrence_before "$ubuntu_missing_git_log_text" "apt-get args:install -y gum" "chezmoi args:apply" "Ubuntu missing git case installs gum before initial apply"
+
+ubuntu_missing_sudo_case="$(make_case_dir ubuntu-missing-sudo)"
+write_uname_stub "$ubuntu_missing_sudo_case" "Linux"
+ubuntu_missing_sudo_os_release="$(write_os_release "$ubuntu_missing_sudo_case" "ID=ubuntu" 'VERSION_ID="24.04"')"
+write_command_call_stubs "$ubuntu_missing_sudo_case" "curl" "wget" "sh"
+write_non_root_id_stub "$ubuntu_missing_sudo_case"
+mkdir -p "$ubuntu_missing_sudo_case/home/.local/bin"
+write_chezmoi_flow_stub "$ubuntu_missing_sudo_case/home/.local/bin/chezmoi"
+ubuntu_missing_sudo_log="$ubuntu_missing_sudo_case/command-calls"
+: >"$ubuntu_missing_sudo_log"
+TERRAPOD_OS_RELEASE_FILE="$ubuntu_missing_sudo_os_release"
+TERRAPOD_STUB_CALL_LOG="$ubuntu_missing_sudo_log"
+export TERRAPOD_OS_RELEASE_FILE
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$ubuntu_missing_sudo_case" 'development
+'
+unset TERRAPOD_OS_RELEASE_FILE
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "Ubuntu missing sudo makes installer exit unsuccessfully before Setup"
+ubuntu_missing_sudo_stderr="$(cat "$ubuntu_missing_sudo_case/stderr")"
+ubuntu_missing_sudo_log_text="$(cat "$ubuntu_missing_sudo_log")"
+assert_contains "$ubuntu_missing_sudo_stderr" "Install sudo so Terrapod can prepare git and gum with apt-get" "Ubuntu missing sudo guidance mentions installing sudo"
+assert_contains "$ubuntu_missing_sudo_stderr" "install git and gum manually before rerunning the installer" "Ubuntu missing sudo guidance mentions manual git and gum preparation"
+assert_not_contains "$ubuntu_missing_sudo_log_text" "chezmoi args:init" "Ubuntu missing sudo stops before source repository initialization"
+assert_not_contains "$ubuntu_missing_sudo_log_text" "terrapod args:setup" "Ubuntu missing sudo stops before Terrapod Setup"
+assert_not_contains "$ubuntu_missing_sudo_log_text" "chezmoi args:apply" "Ubuntu missing sudo stops before initial apply"
+
+ubuntu_sudo_failure_case="$(make_case_dir ubuntu-sudo-failure)"
+write_uname_stub "$ubuntu_sudo_failure_case" "Linux"
+ubuntu_sudo_failure_os_release="$(write_os_release "$ubuntu_sudo_failure_case" "ID=ubuntu" 'VERSION_ID="24.04"')"
+write_command_call_stubs "$ubuntu_sudo_failure_case" "curl" "wget" "git" "sh"
+rm -f "$ubuntu_sudo_failure_case/bin/git"
+write_ubuntu_package_stubs "$ubuntu_sudo_failure_case"
+mkdir -p "$ubuntu_sudo_failure_case/home/.local/bin"
+write_chezmoi_flow_stub "$ubuntu_sudo_failure_case/home/.local/bin/chezmoi"
+ubuntu_sudo_failure_log="$ubuntu_sudo_failure_case/command-calls"
+TERRAPOD_OS_RELEASE_FILE="$ubuntu_sudo_failure_os_release"
+TERRAPOD_STUB_CALL_LOG="$ubuntu_sudo_failure_log"
+TERRAPOD_SUDO_STUB_STATUS=17
+export TERRAPOD_OS_RELEASE_FILE
+export TERRAPOD_STUB_CALL_LOG
+export TERRAPOD_SUDO_STUB_STATUS
+run_installer_case "$ubuntu_sudo_failure_case" 'development
+'
+unset TERRAPOD_OS_RELEASE_FILE
+unset TERRAPOD_STUB_CALL_LOG
+unset TERRAPOD_SUDO_STUB_STATUS
+assert_failure "$installer_status" "Ubuntu sudo failure makes installer exit unsuccessfully before Setup"
+ubuntu_sudo_failure_stderr="$(cat "$ubuntu_sudo_failure_case/stderr")"
+ubuntu_sudo_failure_log_text="$(cat "$ubuntu_sudo_failure_log")"
+assert_contains "$ubuntu_sudo_failure_log_text" "sudo args:apt-get update -y" "Ubuntu sudo failure attempts prerequisite preparation with sudo"
+assert_contains "$ubuntu_sudo_failure_stderr" "failed to update APT metadata before installing Ubuntu bootstrap prerequisites" "Ubuntu sudo failure explains prerequisite preparation failure"
+assert_contains "$ubuntu_sudo_failure_stderr" "Check sudo permissions and rerun the Terrapod installer before Terrapod Setup" "Ubuntu sudo failure gives sudo recovery guidance"
+assert_not_contains "$ubuntu_sudo_failure_log_text" "chezmoi args:init" "Ubuntu sudo failure stops before source repository initialization"
+assert_not_contains "$ubuntu_sudo_failure_log_text" "terrapod args:setup" "Ubuntu sudo failure stops before Terrapod Setup"
+assert_not_contains "$ubuntu_sudo_failure_log_text" "chezmoi args:apply" "Ubuntu sudo failure stops before initial apply"
 
 ubuntu_charm_repo_failure_case="$(make_case_dir ubuntu-charm-repo-failure)"
 write_uname_stub "$ubuntu_charm_repo_failure_case" "Linux"
@@ -938,13 +1018,11 @@ TERRAPOD_INSTALLER_STDIN_CAPTURE="$homebrew_missing_stdin_capture"
 TERRAPOD_INSTALLER_SCRIPT_CAPTURE="$homebrew_missing_script_capture"
 TERRAPOD_CHEZMOI_STUB_TEMPLATE="$homebrew_missing_case/chezmoi-template"
 TERRAPOD_HOMEBREW_CANDIDATE_PATHS="$homebrew_missing_brew"
-TERRAPOD_HOMEBREW_INSTALL_STUB_BREW="$homebrew_missing_brew"
 export TERRAPOD_STUB_CALL_LOG
 export TERRAPOD_INSTALLER_STDIN_CAPTURE
 export TERRAPOD_INSTALLER_SCRIPT_CAPTURE
 export TERRAPOD_CHEZMOI_STUB_TEMPLATE
 export TERRAPOD_HOMEBREW_CANDIDATE_PATHS
-export TERRAPOD_HOMEBREW_INSTALL_STUB_BREW
 homebrew_missing_input='minimal
 '
 run_installer_case "$homebrew_missing_case" "$homebrew_missing_input"
@@ -953,62 +1031,19 @@ unset TERRAPOD_INSTALLER_STDIN_CAPTURE
 unset TERRAPOD_INSTALLER_SCRIPT_CAPTURE
 unset TERRAPOD_CHEZMOI_STUB_TEMPLATE
 unset TERRAPOD_HOMEBREW_CANDIDATE_PATHS
-unset TERRAPOD_HOMEBREW_INSTALL_STUB_BREW
-assert_status "$installer_status" 0 "macOS first-run installs Homebrew when Homebrew is missing"
+assert_failure "$installer_status" "macOS first-run fails before Setup when Homebrew is missing"
+homebrew_missing_stderr="$(cat "$homebrew_missing_case/stderr")"
 homebrew_missing_log_text="$(cat "$homebrew_missing_log")"
-assert_contains "$homebrew_missing_log_text" "curl args:-fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh" "Homebrew missing case downloads the Homebrew installer"
-assert_contains "$homebrew_missing_log_text" "homebrew installer ran" "Homebrew missing case runs the Homebrew installer"
-assert_contains "$homebrew_missing_log_text" "brew args:shellenv" "Homebrew missing case evaluates newly installed Homebrew shellenv"
-assert_contains "$homebrew_missing_log_text" "brew args:install gum" "Homebrew missing case installs gum after Homebrew is available"
-assert_contains "$homebrew_missing_log_text" "brew install HOMEBREW_NO_AUTO_UPDATE:1" "Homebrew missing case disables Homebrew auto-update while installing gum"
-assert_first_occurrence_before "$homebrew_missing_log_text" "homebrew installer ran" "brew args:install gum" "Homebrew missing case installs Homebrew before gum"
-assert_first_occurrence_before "$homebrew_missing_log_text" "brew args:install gum" "terrapod args:setup" "Homebrew missing case prepares gum before Terrapod Setup"
-assert_first_occurrence_before "$homebrew_missing_log_text" "terrapod args:setup" "chezmoi args:apply" "Homebrew missing case applies after setup"
-assert_not_contains "$homebrew_missing_log_text" "brew args:upgrade" "Homebrew missing case does not run broad Homebrew upgrades"
-assert_not_contains "$homebrew_missing_log_text" "brew args:bundle" "Homebrew missing case leaves Brewfile bundle to initial apply"
-
-homebrew_download_failure_case="$(make_case_dir homebrew-download-failure)"
-write_uname_stub "$homebrew_download_failure_case" "Darwin"
-write_chezmoi_flow_stub "$homebrew_download_failure_case/chezmoi-template"
-write_installer_download_stubs "$homebrew_download_failure_case"
-write_command_call_stubs "$homebrew_download_failure_case" "wget" "git"
-homebrew_download_failure_log="$homebrew_download_failure_case/command-calls"
-homebrew_download_failure_stdin_capture="$homebrew_download_failure_case/installer-stdin"
-homebrew_download_failure_script_capture="$homebrew_download_failure_case/installer-script"
-homebrew_download_failure_brew="$homebrew_download_failure_case/homebrew/bin/brew"
-TERRAPOD_STUB_CALL_LOG="$homebrew_download_failure_log"
-TERRAPOD_INSTALLER_STDIN_CAPTURE="$homebrew_download_failure_stdin_capture"
-TERRAPOD_INSTALLER_SCRIPT_CAPTURE="$homebrew_download_failure_script_capture"
-TERRAPOD_CHEZMOI_STUB_TEMPLATE="$homebrew_download_failure_case/chezmoi-template"
-TERRAPOD_HOMEBREW_CANDIDATE_PATHS="$homebrew_download_failure_brew"
-TERRAPOD_HOMEBREW_INSTALL_STUB_BREW="$homebrew_download_failure_brew"
-TERRAPOD_HOMEBREW_INSTALLER_STUB_STATUS=29
-export TERRAPOD_STUB_CALL_LOG
-export TERRAPOD_INSTALLER_STDIN_CAPTURE
-export TERRAPOD_INSTALLER_SCRIPT_CAPTURE
-export TERRAPOD_CHEZMOI_STUB_TEMPLATE
-export TERRAPOD_HOMEBREW_CANDIDATE_PATHS
-export TERRAPOD_HOMEBREW_INSTALL_STUB_BREW
-export TERRAPOD_HOMEBREW_INSTALLER_STUB_STATUS
-homebrew_download_failure_input='minimal
-'
-run_installer_case "$homebrew_download_failure_case" "$homebrew_download_failure_input"
-unset TERRAPOD_STUB_CALL_LOG
-unset TERRAPOD_INSTALLER_STDIN_CAPTURE
-unset TERRAPOD_INSTALLER_SCRIPT_CAPTURE
-unset TERRAPOD_CHEZMOI_STUB_TEMPLATE
-unset TERRAPOD_HOMEBREW_CANDIDATE_PATHS
-unset TERRAPOD_HOMEBREW_INSTALL_STUB_BREW
-unset TERRAPOD_HOMEBREW_INSTALLER_STUB_STATUS
-assert_failure "$installer_status" "Homebrew download failure makes installer exit unsuccessfully"
-homebrew_download_failure_stderr="$(cat "$homebrew_download_failure_case/stderr")"
-homebrew_download_failure_log_text="$(cat "$homebrew_download_failure_log")"
-assert_contains "$homebrew_download_failure_log_text" "curl args:-fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh" "Homebrew download failure attempts to download Homebrew installer"
-assert_not_contains "$homebrew_download_failure_log_text" "terrapod args:setup" "Homebrew download failure stops before Terrapod Setup"
-assert_not_contains "$homebrew_download_failure_log_text" "chezmoi args:apply" "Homebrew download failure stops before initial apply"
-assert_contains "$homebrew_download_failure_stderr" "Install Homebrew from https://brew.sh, follow its shellenv instructions, then run: HOMEBREW_NO_AUTO_UPDATE=1 brew install gum" "Homebrew download failure guidance mentions shellenv before installing gum"
-assert_contains "$homebrew_download_failure_stderr" "cd \"$homebrew_download_failure_case/xdg-data/chezmoi\" && TERRAPOD_PROFILE=\"macos-terminal\" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup && \"$homebrew_download_failure_case/home/.local/bin/chezmoi\" apply" "Homebrew download failure prints setup and initial apply recovery command"
-assert_not_contains "$homebrew_download_failure_stderr" "Rerun the installer" "Homebrew download failure does not suggest rerunning the source-guarded installer"
+assert_not_contains "$homebrew_missing_log_text" "curl args:-fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh" "Homebrew missing case does not download the Homebrew installer"
+assert_not_contains "$homebrew_missing_log_text" "homebrew installer ran" "Homebrew missing case does not run the Homebrew installer"
+assert_not_contains "$homebrew_missing_log_text" "brew args:shellenv" "Homebrew missing case cannot evaluate Homebrew shellenv"
+assert_not_contains "$homebrew_missing_log_text" "brew args:install gum" "Homebrew missing case cannot install gum with Homebrew"
+assert_not_contains "$homebrew_missing_log_text" "terrapod args:setup" "Homebrew missing case stops before Terrapod Setup"
+assert_not_contains "$homebrew_missing_log_text" "chezmoi args:apply" "Homebrew missing case stops before initial apply"
+assert_contains "$homebrew_missing_stderr" "Homebrew was not found" "Homebrew missing case explains missing Homebrew"
+assert_contains "$homebrew_missing_stderr" "Install Homebrew from https://brew.sh, follow its shellenv instructions, then run: HOMEBREW_NO_AUTO_UPDATE=1 brew install gum" "Homebrew missing case guidance mentions manual Homebrew and gum preparation"
+assert_contains "$homebrew_missing_stderr" "cd \"$homebrew_missing_case/xdg-data/chezmoi\" && TERRAPOD_PROFILE=\"macos-terminal\" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup && \"$homebrew_missing_case/home/.local/bin/chezmoi\" apply" "Homebrew missing case prints setup and initial apply recovery command"
+assert_not_contains "$homebrew_missing_stderr" "Rerun the installer" "Homebrew missing case does not suggest rerunning the source-guarded installer"
 
 homebrew_shellenv_failure_case="$(make_case_dir homebrew-shellenv-failure)"
 write_uname_stub "$homebrew_shellenv_failure_case" "Darwin"
