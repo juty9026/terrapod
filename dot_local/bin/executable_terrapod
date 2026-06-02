@@ -597,16 +597,28 @@ prompt_for_setup_settings() {
     printf '%s\n' "macOS App Groups: not applicable for $(profile_context_label)" >&2
   fi
 
-  render_setup_data
+  render_setup_data "$profile"
 }
 
-config_data_bool() {
+managed_setup_keys() {
+  printf '%s\n' \
+    profile \
+    enableEditorStack \
+    enableAiCliTools \
+    enableDevelopmentWorkspace \
+    enableMacosAppGroupTerminalApps \
+    enableMacosAppGroupAutomation \
+    enableMacosAppGroupLauncher \
+    enableMacosAppGroupMonitoring \
+    enableMacosAppGroupAiApps
+}
+
+config_data_value() {
   config_file="$1"
   key="$2"
 
   if [ ! -f "$config_file" ]; then
-    printf '%s\n' "false"
-    return
+    return 1
   fi
 
   awk -v wanted_key="$key" '
@@ -675,7 +687,7 @@ config_data_bool() {
 
     BEGIN {
       in_root = 1
-      result = "false"
+      found = 0
     }
 
     {
@@ -686,6 +698,7 @@ config_data_bool() {
       if (in_root && is_root_dotted_data_key($0)) {
         if (dotted_data_key_name($0) == wanted_key) {
           result = assignment_value($0)
+          found = 1
         }
         next
       }
@@ -704,17 +717,107 @@ config_data_bool() {
 
       if (in_data && is_key_assignment($0) && assignment_key_name($0) == wanted_key) {
         result = assignment_value($0)
+        found = 1
       }
     }
 
     END {
-      if (result == "true") {
-        print "true"
-      } else {
-        print "false"
+      if (!found) {
+        exit 1
       }
+
+      print result
     }
   ' "$config_file"
+}
+
+config_data_key_present() {
+  config_data_value "$1" "$2" >/dev/null 2>&1
+}
+
+config_file_state() {
+  config_file="$1"
+
+  if [ -L "$config_file" ] || [ -e "$config_file" ]; then
+    if [ ! -f "$config_file" ]; then
+      printf '%s\n' "non-regular"
+    elif [ ! -r "$config_file" ]; then
+      printf '%s\n' "unreadable"
+    else
+      printf '%s\n' "readable"
+    fi
+  else
+    printf '%s\n' "missing"
+  fi
+}
+
+config_file_is_usable() {
+  [ "$(config_file_state "$1")" = "readable" ]
+}
+
+config_file_problem_message() {
+  printf '%s\n' "config path is not a readable regular file: $1"
+}
+
+config_file_guidance_message() {
+  printf '%s\n' "Fix the config path or permissions so it is a readable regular file."
+}
+
+config_data_bool() {
+  config_file="$1"
+  key="$2"
+
+  if [ "$(config_data_value "$config_file" "$key" 2>/dev/null || printf false)" = "true" ]; then
+    printf '%s\n' "true"
+  else
+    printf '%s\n' "false"
+  fi
+}
+
+managed_setup_missing_keys() {
+  config_file="$1"
+  missing=
+
+  for key in $(managed_setup_keys); do
+    if ! config_data_key_present "$config_file" "$key"; then
+      if [ -z "$missing" ]; then
+        missing="$key"
+      else
+        missing="$missing, $key"
+      fi
+    fi
+  done
+
+  printf '%s\n' "$missing"
+}
+
+managed_setup_guidance_message() {
+  printf '%s\n' "Run 'tpod setup' or 'tpod configure <$(available_preset_args "$(current_profile)")>' to complete the managed setup config."
+}
+
+is_managed_setup_config_complete() {
+  config_file="$1"
+
+  config_file_is_usable "$config_file" &&
+    [ -z "$(managed_setup_missing_keys "$config_file")" ]
+}
+
+print_managed_setup_config_guidance() {
+  config_file="$1"
+  missing_keys="$(managed_setup_missing_keys "$config_file")"
+
+  if [ -z "$missing_keys" ]; then
+    return 0
+  fi
+
+  printf '%s\n' "  Missing managed setup keys: $missing_keys"
+  printf '  '
+  managed_setup_guidance_message
+}
+
+print_config_file_guidance() {
+  printf '  '
+  config_file_guidance_message
 }
 
 bool_state_label() {
@@ -929,6 +1032,15 @@ print_status_warnings() {
   profile="$2"
   printed=0
 
+  if ! config_file_is_usable "$config_file" &&
+    [ "$(config_file_state "$config_file")" != "missing" ]; then
+    print_warning_line "$(config_file_problem_message "$config_file")"
+    printed=1
+  elif ! is_managed_setup_config_complete "$config_file"; then
+    print_warning_line "managed setup config is incomplete (missing keys: $(managed_setup_missing_keys "$config_file"))"
+    printed=1
+  fi
+
   if [ "$profile" = "unsupported" ]; then
     print_warning_line "$(unsupported_profile_reason)"
     printed=1
@@ -975,18 +1087,34 @@ run_status() {
 
 show_config_context() {
   config_file="$1"
+  config_state="$(config_file_state "$config_file")"
 
-  if [ -f "$config_file" ]; then
-    print_styled "36" "Config:"
-    printf ' %s (' "$config_file"
-    print_state_word "present"
-    printf ')\n'
-  else
-    print_styled "36" "Config:"
-    printf ' %s (' "$config_file"
-    print_state_word "missing"
-    printf '; chezmoi defaults apply)\n'
-  fi
+  print_styled "36" "Config:"
+
+  case "$config_state" in
+    readable)
+      if is_managed_setup_config_complete "$config_file"; then
+        printf ' %s (' "$config_file"
+        print_state_word "present"
+        printf ')\n'
+      else
+        printf ' %s (present; incomplete managed setup config)\n' "$config_file"
+        print_managed_setup_config_guidance "$config_file"
+      fi
+      ;;
+    unreadable)
+      printf ' %s (unreadable managed setup config)\n' "$config_file"
+      print_config_file_guidance
+      ;;
+    non-regular)
+      printf ' %s (unusable managed setup config)\n' "$config_file"
+      print_config_file_guidance
+      ;;
+    *)
+      printf ' %s (missing; incomplete managed setup config)\n' "$config_file"
+      print_managed_setup_config_guidance "$config_file"
+      ;;
+  esac
 }
 
 print_named_state_line() {
@@ -1068,6 +1196,14 @@ run_diff() {
   run_chezmoi_command diff
 }
 
+fatal_incomplete_managed_setup_config() {
+  config_file="$1"
+
+  printf '%s\n' "terrapod: managed setup config is incomplete (missing keys: $(managed_setup_missing_keys "$config_file"))" >&2
+  managed_setup_guidance_message >&2
+  exit 1
+}
+
 run_apply_preflight() {
   config_file="$1"
 
@@ -1093,7 +1229,11 @@ run_apply_preflight() {
     print_styled "36" "Preflight:"
     printf ' config file is '
     print_state_word "missing"
-    printf '; chezmoi defaults will apply\n'
+    printf '\n'
+  fi
+
+  if ! is_managed_setup_config_complete "$config_file"; then
+    fatal_incomplete_managed_setup_config "$config_file"
   fi
 }
 
@@ -1257,6 +1397,17 @@ run_doctor() {
     doctor_ok "Profile is supported: $(profile_context_label)"
   fi
 
+  if ! config_file_is_usable "$config_file" &&
+    [ "$(config_file_state "$config_file")" != "missing" ]; then
+    doctor_warn "$(config_file_problem_message "$config_file")"
+    doctor_guidance "$(config_file_guidance_message)"
+  elif is_managed_setup_config_complete "$config_file"; then
+    doctor_ok "Managed setup config is complete"
+  else
+    doctor_warn "managed setup config is incomplete (missing keys: $(managed_setup_missing_keys "$config_file"))"
+    doctor_guidance "$(managed_setup_guidance_message)"
+  fi
+
   for tool in chezmoi git zsh mise nvim zellij; do
     doctor_check_command "$tool"
   done
@@ -1318,29 +1469,31 @@ run_update() {
 
 render_settings_data() {
   cat <<EOF
-enableEditorStack = $1
-enableAiCliTools = $2
-enableDevelopmentWorkspace = $3
-enableMacosAppGroupTerminalApps = $4
-enableMacosAppGroupAutomation = $5
-enableMacosAppGroupLauncher = $6
-enableMacosAppGroupMonitoring = $7
-enableMacosAppGroupAiApps = $8
+profile = "$1"
+enableEditorStack = $2
+enableAiCliTools = $3
+enableDevelopmentWorkspace = $4
+enableMacosAppGroupTerminalApps = $5
+enableMacosAppGroupAutomation = $6
+enableMacosAppGroupLauncher = $7
+enableMacosAppGroupMonitoring = $8
+enableMacosAppGroupAiApps = $9
 EOF
 }
 
 render_preset_data() {
   preset="$1"
+  profile="$2"
 
   case "$preset" in
     minimal)
-      render_settings_data false false false false false false false false
+      render_settings_data "$profile" false false false false false false false false
       ;;
     development)
-      render_settings_data true true true false false false false false
+      render_settings_data "$profile" true true true false false false false false
       ;;
     workstation)
-      render_settings_data true true true true true true true true
+      render_settings_data "$profile" true true true true true true true true
       ;;
     *)
       return 1
@@ -1389,7 +1542,10 @@ load_setup_defaults() {
 }
 
 render_setup_data() {
+  profile="$1"
+
   render_settings_data \
+    "$profile" \
     "$setup_enableEditorStack" \
     "$setup_enableAiCliTools" \
     "$setup_enableDevelopmentWorkspace" \
@@ -1730,7 +1886,8 @@ write_managed_settings() {
       }
 
       function is_managed_name(name) {
-        return name == "enableEditorStack" ||
+        return name == "profile" ||
+          name == "enableEditorStack" ||
           name == "enableAiCliTools" ||
           name == "enableDevelopmentWorkspace" ||
           name == "enableMacosAppGroupTerminalApps" ||
@@ -1858,19 +2015,21 @@ write_managed_settings() {
 write_managed_config() {
   config_file="$1"
   preset="$2"
+  profile="$3"
 
   validate_preset "$preset"
-  write_managed_settings "$config_file" "$(render_preset_data "$preset")"
+  write_managed_settings "$config_file" "$(render_preset_data "$preset" "$profile")"
 }
 
 write_preset_settings() {
   config_file="$1"
   preset="$2"
+  profile="$3"
 
   validate_preset "$preset"
   reject_unsupported_managed_config "$config_file"
   confirm_existing_config_update "$config_file"
-  write_managed_config "$config_file" "$preset"
+  write_managed_config "$config_file" "$preset" "$profile"
 }
 
 write_setup_settings() {
@@ -1902,6 +2061,7 @@ run_setup() {
 
   write_setup_settings "$config_file" "$setup_settings_data"
   printf '%s\n' "Configured Terrapod Preset '$preset' in $config_file"
+  printf '%s\n' "Run 'tpod apply' to apply these changes."
 }
 
 run_configure() {
@@ -1922,8 +2082,9 @@ run_configure() {
   config_file="$(chezmoi_config_file)"
 
   validate_preset_for_profile "$preset" "$profile"
-  write_preset_settings "$config_file" "$preset"
+  write_preset_settings "$config_file" "$preset" "$profile"
   printf '%s\n' "Configured Terrapod Preset '$preset' in $config_file"
+  printf '%s\n' "Run 'tpod apply' to apply these changes."
 }
 
 command_name="${1:-help}"
