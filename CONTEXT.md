@@ -102,7 +102,19 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - **Terrapod** and its first-run installer are implemented as POSIX shell entry points.
 - The first-run **Terrapod** installer delegates chezmoi binary installation to the official `get.chezmoi.io` installer and installs it under `~/.local/bin`.
 - The first-run **Terrapod** installer uses `https://github.com/juty9026/terrapod.git` as the default source repository URL.
-- The first-run **Terrapod** installer stops with guidance when the default chezmoi source directory already exists instead of overwriting an existing checkout.
+- The first-run **Terrapod** installer resumes from an existing default chezmoi source directory when it is a checked-out **Terrapod Source Repository** that has not completed initial apply.
+- A resumable **Terrapod Source Repository** checkout must contain the checked-out **Terrapod** command, expected recovery-core source files, and repository identity for `juty9026/terrapod`; an arbitrary chezmoi source directory is not resumable.
+- An existing **Terrapod Source Repository** checkout with installed `terrapod` and `tpod` commands is treated as an already installed **Terrapod** machine; the first-run installer should guide users to routine `tpod` commands instead of reinstalling.
+- Existing **Terrapod** installation detection requires the installed command surface to pass the same `~/.local/bin/tpod help` validation used for recovery-core validation; broken command files or symlinks are treated as incomplete first-run state.
+- When first-run is rerun on an already installed **Terrapod** machine, it exits without running `tpod apply` automatically and guides users to routine commands such as `~/.local/bin/tpod status` and `~/.local/bin/tpod apply`.
+- An existing **Terrapod Source Repository** checkout without the installed **Terrapod** command surface is treated as an incomplete first-run installation and is eligible for resume.
+- Incomplete first-run resume reuses existing managed **Terrapod Setup** config when it is present and complete; **Terrapod Setup** is rerun only when managed setup config is missing or incomplete.
+- When incomplete first-run resume reruns **Terrapod Setup**, it remains in first-run context and continues into recovery-core apply and full declared-state apply after setup completes.
+- Managed **Terrapod Setup** config is complete only when the profile and all current managed optional stack and **macOS App Group** setting keys are present; missing managed keys cause setup to rerun instead of silently filling Preset defaults.
+- Managed **Terrapod Setup** config completeness is schema-based rather than platform-pruned; unsupported platform options such as **macOS App Group** keys on the **VPS Shell Profile** are still stored as concrete disabled settings.
+- First-run resume may rerun **Terrapod Setup** when managed setup config is incomplete, but routine `tpod apply` must not open interactive setup prompts automatically; routine apply should report missing managed setup keys and guide users to an explicit setup or configure command.
+- Routine `tpod apply` exits non-zero when required managed setup config keys are missing because declared state cannot be computed safely without explicit user configuration.
+- The first-run **Terrapod** installer stops with guidance when the default chezmoi source directory already exists but is not a resumable **Terrapod Source Repository** checkout.
 - The first-run **Terrapod** installer invokes **Terrapod Setup** before the initial apply instead of asking users to run a second setup command manually.
 - A **Bootstrap UI Dependency** is not a temporary setup-only helper; it remains available after first-run so later **Terrapod Setup** runs can use the same interaction model.
 - The first **Bootstrap UI Dependency** is gum, installed through the platform **Bootstrap Package Manager** before **Terrapod Setup**.
@@ -115,14 +127,23 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Cancelling gum-backed **Terrapod Setup** preserves the existing setup cancellation contract: no config write, non-zero exit, and `terrapod: setup cancelled` guidance.
 - The first-run installer explains **Bootstrap UI Dependency** bootstrap failures before **Terrapod Setup**, and `terrapod setup` also explains missing gum when run directly after bootstrap.
 - On the **macOS Terminal Profile**, the first-run installer may run a best-effort Homebrew and gum bootstrap before **Terrapod Setup** for setup UI only; the declared-state Homebrew bootstrap still belongs to the initial apply.
+- On the **macOS Terminal Profile**, pre-Setup **Bootstrap UI Dependency** bootstrap does not install Homebrew itself; if Homebrew or gum cannot be made available for **Terrapod Setup**, first-run fails with manual guidance.
 - On the **VPS Shell Profile**, the first-run installer may add the Charm APT repository and install gum before **Terrapod Setup** for setup UI only; failure stops first-run installation with guidance.
+- On the **VPS Shell Profile**, pre-Setup **Bootstrap UI Dependency** bootstrap may use interactive `sudo` prompts, but non-interactive `sudo` failure prevents **Terrapod Setup** and remains a hard first-run failure.
+- A gum bootstrap failure before **Terrapod Setup** is a hard first-run failure, while a later declared-state package-manager failure involving gum is a machine profile readiness warning after the recovery core is available.
 - chezmoi remains the internal apply engine for the **Dotfiles Management Tool**, not the primary workflow users need to remember.
 - The **Dotfiles Management Tool** exposes first-class maintenance commands when they add profile, preset, installer, or validation context around chezmoi behavior.
 - Direct chezmoi commands remain an escape hatch for advanced maintenance, not the default documented workflow.
 - **Terrapod Setup** belongs to the `terrapod` command surface, while `install.sh` remains the thin first-run bootstrap entry point.
+- **Terrapod Setup** invoked by the first-run installer is followed by initial apply, while explicit routine `tpod setup` writes config only and guides users to run `tpod apply`.
 - `terrapod setup` is the human-facing **Terrapod Setup** wizard, while `terrapod configure <Preset>` remains the script-friendly command for writing concrete settings from one **Preset**.
 - `terrapod configure <Preset>` is not a plain fallback for **Terrapod Setup**; it is a separate script-friendly configuration command without interactive customization.
+- `terrapod configure <Preset>` may overwrite existing managed setup settings non-interactively after the user explicitly invokes it; config backup rules still apply.
+- `terrapod configure <Preset>` writes config only and does not run `tpod apply` automatically; its output should guide users to the next explicit apply step.
+- `terrapod configure <Preset>` does not create shell startup file backups because it does not apply or overwrite shell startup files.
 - **Terrapod Setup** does not expose a setup presentation mode switch; it has one gum-backed interactive presentation.
+- Explicit routine `tpod setup` may review and change existing complete managed setup config; routine `tpod apply` does not open this interactive workflow automatically.
+- Routine `tpod setup` changes managed setup config only and does not create shell startup file backups because it does not apply or overwrite shell startup files.
 - A **Preset** is a starting point for concrete settings, not a permanent dynamic policy.
 - A **Preset** shows a summary of the optional stack and app-group settings it will enable before installation.
 - First-run setup allows users to customize the concrete settings produced by a **Preset** before they are saved.
@@ -159,7 +180,17 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Legacy Antigravity Desktop and Antigravity IDE app-bundle shell-command paths are not part of the **Optional AI Tool Stack** or the ai-apps **macOS App Group**.
 - Claude Code is installed through its official native installer rather than the npm package.
 - Codex is installed through its official standalone installer rather than the npm package or Homebrew cask.
+- Codex's official standalone installer supports unattended installation with `CODEX_NON_INTERACTIVE=1`.
+- Codex installation uses the official standalone installer path without Terrapod patching the installer or injecting GitHub authentication tokens into vendor installer requests.
+- Claude Code and Antigravity CLI use their official native installers in unattended Terrapod apply contexts when their expected commands are missing.
+- Terrapod does not pipe prompt answers, patch vendor installers, or inject authentication tokens to force **Optional AI Tool Stack** installation; if an official installer becomes interactive or fails, Terrapod records an install warning instead.
 - **Optional AI Tool Stack** installers run before the final chezmoi-managed shell files are applied, so vendor installer shell-profile edits do not define the final declared shell state.
+- **Optional AI Tool Stack** installer failures do not block first-run declared-state apply; missing optional AI tools are reported by `tpod status` and `tpod doctor`.
+- **Optional AI Tool Stack** installers skip tools whose expected command is already available on `PATH`; Terrapod apply is not an AI CLI upgrade mechanism.
+- **Optional AI Tool Stack** skip checks use Terrapod's expected command lookup path, including managed user-bin and platform tool locations, so already installed AI CLIs are detected even before the current terminal has reloaded its shell startup files.
+- **Optional AI Tool Stack** skip checks use command availability only, not version or package-manager provenance; npm-installed legacy commands satisfy the skip check and remain unmanaged.
+- Partial **Optional AI Tool Stack** failures leave successful tools installed and skipped on the next apply; subsequent recovery attempts retry only tools whose expected commands are still missing.
+- When the **Optional AI Tool Stack** is disabled, `tpod apply` clears the optional AI CLI tools warning marker because those tools are no longer part of desired machine readiness.
 - Existing npm-installed AI CLIs are unmanaged legacy tools; Terrapod does not uninstall or warn merely because they remain on a machine.
 - Enabling only the **Optional AI Tool Stack** does not imply the **Optional Editor Stack** or **Optional Development Workspace**.
 - Development-specific terminal layouts belong to the **Optional Development Workspace**, not the **Core Shell Stack**.
@@ -171,15 +202,83 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - mise with its aqua backend is the **Modern CLI Provider**.
 - **Terrapod** applies this repository's declared dotfiles state; it does not act as the package manager for OS packages or mise-managed tool upgrades.
 - **Terrapod** may install declared dependencies needed to reach the target state, but it does not run broad version upgrade commands such as `brew upgrade`, `apt upgrade`, or `mise upgrade`.
+- After **Terrapod Setup** writes concrete settings, first-run declared-state apply should prioritize installing the **Terrapod** command surface and managed dotfiles so the machine reaches a recoverable state.
+- First-run completion separates **Terrapod** installation from machine profile readiness: installing the command surface and managed dotfiles can succeed while the **Core Shell Stack** or **Development Runtime Stack** remains incomplete.
+- Ubuntu package bootstrap failures can leave the **VPS Shell Profile** shell experience incomplete while **Terrapod** itself is installed; this is a machine profile readiness warning, not a first-run installer hard failure after **Terrapod Setup** succeeds.
+- The first-run installer should not report a machine profile as ready when declared tool installation failed; it should complete with warning guidance and direct the user to `tpod doctor`.
+- After the recovery core is validated, first-run warning completion exits with status 0 because **Terrapod** installation succeeded even though machine profile readiness remains incomplete.
+- Scripted readiness checks should run `tpod doctor` rather than interpreting first-run warning completion as full machine readiness.
+- Non-blocking first-run installer failures are recorded as Terrapod install warnings so first-run completion and `tpod doctor` can surface incomplete machine profile readiness without relying on brittle command-output parsing.
+- Terrapod install warnings are machine-local recovery state stored outside the **Terrapod Source Repository** and managed dotfiles, under the user's XDG state area such as `${XDG_STATE_HOME:-$HOME/.local/state}/terrapod/install-warnings/<category>`.
+- Terrapod install warnings are category-scoped markers that remain actionable until the same installer category completes successfully; interrupted or failed reruns must not hide the previous recovery signal.
+- A successful rerun of an installer category clears that category's warning marker, while a failed rerun replaces it with the current failure summary and guidance.
+- Mandatory stack warning markers such as Homebrew core, Ubuntu bootstrap, shell integrations, and mise tools are cleared only by successful reruns because their desired state cannot be disabled by optional settings.
+- Optional stack or app-group warning marker content may be cleared or reduced when the corresponding desired optional setting is disabled.
+- Terrapod install warnings are updated by both first-run installation and routine `tpod apply` because routine apply is the recovery path for previously failed installer categories.
+- Terrapod install warning categories include stable filename slugs for Homebrew core bundle (`homebrew-core`), Homebrew desktop app bundle (`homebrew-desktop-apps`), Ubuntu bootstrap (`ubuntu-bootstrap`), shell integrations (`shell-integrations`), mise tools (`mise-tools`), and optional AI CLI tools (`optional-ai-cli-tools`); best-effort UI nudges such as opening Karabiner do not need install warning markers.
+- Terrapod install warning markers use shell-friendly key/value content with stable category, summary, guidance, and `updated_at` fields instead of free-form logs or captured stack traces.
+- Terrapod install warning marker values stay single-line so shell parsing remains predictable; longer human-readable explanations belong in `tpod doctor` output.
+- Terrapod install warning marker `updated_at` values use UTC ISO 8601 timestamps such as `2026-06-02T03:12:45Z`.
+- Terrapod install warning marker writes should be atomic at the category file level, and marker clears remove only the matching category file.
+- Terrapod install warnings do not include a retained installer log; recovery guidance should direct users to rerun the relevant apply path for fresh command output.
+- Terrapod install warning marker path resolution, atomic write, timestamp creation, and clear behavior should be implemented through shared shell helper logic rather than duplicated independently in each installer script.
+- Source-side installer scripts and installed `tpod` commands should share the same Terrapod install warning marker contract even if the helper file placement is decided during implementation.
+- The optional AI CLI tools warning marker keeps one category for the **Optional AI Tool Stack** but includes the failed tool names in its summary or guidance fields.
+- The Homebrew desktop app warning marker keeps one category for the **macOS Desktop App Stack** but includes failed cask names and, when available, their **macOS App Group** names in its summary or guidance fields.
+- The Homebrew core warning marker includes failed formula or cask names only when they can be identified reliably; otherwise it records the core bundle failure summary and points users to the visible installer output and rerun guidance.
+- Terrapod install warning marker detail should reflect reliable observations only; bulk installers may record bulk failure summaries when failed item names cannot be identified without brittle output parsing.
+- `tpod doctor` treats current command availability checks and Terrapod install warning markers as separate signals; unresolved install warning markers remain actionable warnings even when some commands are currently available.
+- `tpod doctor` is read-only for Terrapod install warning markers; it reports marker state but does not clear markers based on current command availability.
+- `tpod doctor` exits non-zero when enabled machine-profile requirements are missing or unresolved Terrapod install warning markers remain.
+- `tpod doctor` exits non-zero when required managed setup config keys are missing.
+- `tpod doctor` does not fail merely because disabled optional stacks have missing tools.
+- `tpod status` remains a human-readable snapshot command and exits successfully even when it reports warnings; automation should use `tpod doctor` for readiness gating.
+- `tpod status` reports incomplete managed setup config in its Config section and points users to `tpod setup` or `tpod configure <Preset>` without failing.
+- `tpod status` summarizes whether Terrapod install warnings are present and points to `tpod doctor`; `tpod doctor` prints category-level warning summary and guidance.
+- `tpod apply` should surface remaining Terrapod install warnings after apply, while `tpod help` stays free of install warning state.
+- `tpod apply` exit status reflects whether the declared-state apply command itself succeeded; unresolved install warning markers after apply are surfaced in output but do not make apply fail.
+- `tpod doctor` recovery guidance points to `tpod apply` as the general retry path; category-specific retry commands are outside the current command surface.
+- `mise-tools` install warning guidance may mention temporary `GITHUB_TOKEN` or GitHub CLI authentication when GitHub API rate limits affect mise aqua resolution.
+- First-run initial apply runs a forced recovery-core apply for managed shell startup files and the **Terrapod** command surface before the full declared-state apply.
+- First-run recovery-core apply failure is a hard installer failure because users do not yet have a reliable `tpod` command surface for recovery.
+- First-run recovery-core validation requires the installed `terrapod` executable, the installed `tpod` alias, and a successful `~/.local/bin/tpod help` invocation; file presence alone is not enough to mark the installer recoverable.
+- First-run recovery-core command surface overwrite is allowed for existing Terrapod-managed or broken Terrapod command files, but non-Terrapod executables at `~/.local/bin/terrapod` or `~/.local/bin/tpod` stop installation with guidance instead of being backed up and overwritten.
+- Terrapod command surface ownership detection is conservative: command files are Terrapod-owned only when they validate as Terrapod help output or clearly point to the **Terrapod Source Repository** command; ambiguous existing command files are treated as non-Terrapod conflicts.
+- Terrapod command surface conflict guidance identifies the conflicting path and asks the user to move or remove it before rerunning the installer; Terrapod does not automatically rename non-Terrapod executables.
+- Shell integration installation is outside the recovery core; shell integration failures may degrade prompt or plugin readiness but must not prevent the installed `tpod` command surface from working.
+- First-run full declared-state apply may use keep-going behavior to write as much managed state as possible after the recovery core is installed.
+- After the recovery core is installed and validated, first-run full apply failures should produce an incomplete-profile warning and still let the installer exit successfully so users can recover with `tpod`.
+- First-run warning completion after full apply is limited to known non-blocking installer categories outside the recovery core; unknown chezmoi, template, or managed-file rendering failures remain hard installer failures.
+- A full apply failure is treated as non-blocking only when the failing installer script explicitly records a Terrapod install warning marker; script names alone do not make failures recoverable.
+- Installer scripts for known non-blocking categories record Terrapod install warning markers and exit successfully so chezmoi apply can continue; recovery-core failures and unknown failures must not use this marker-and-success contract.
+- Installer scripts for known non-blocking categories continue attempting remaining items after an item fails when that is practical, and their warning markers accumulate the failed item names instead of stopping at the first failure.
+- First-run full apply failure output should remain visible in the installer session; Terrapod install warning markers store summary and guidance, not captured command traces.
+- First-run declared-state apply may non-interactively overwrite managed shell startup files such as `.zshenv`, `.zprofile`, and `.zshrc` after the user confirms **Terrapod Setup**, because those files define the managed shell environment.
+- First-run forced shell startup overwrite is limited to the current recovery-core startup files: `.zshenv`, `.zprofile`, and `.zshrc`.
+- Before first-run force-overwriting managed shell startup files that contain different existing user content, Terrapod should save lightweight user-visible backups so local shell customizations can be recovered manually.
+- First-run shell startup file backups are timestamped and retained until the user removes them; Terrapod reports their paths but does not automatically merge or delete them.
+- Routine `tpod apply` keeps the normal interactive chezmoi apply behavior instead of silently overwriting user-modified managed files.
+- Machine-local PATH customizations should live in the managed zsh extension point rather than direct edits to managed shell startup files.
+- Terrapod does not automatically migrate vendor-installer shell startup edits such as Antigravity PATH lines into the managed zsh extension point; first-run guidance should point users to the backup and extension point instead.
+- After first-run completion, the installer should explain how to make `tpod` available in the current terminal because a child installer process cannot update the parent shell's `PATH`.
+- First-run `tpod` availability guidance should include the absolute `~/.local/bin/tpod` command for immediate recovery and a login-shell refresh or new-terminal instruction for normal use.
+- External package manager, runtime manager, shell integration, desktop app, and vendor tool installer failures during first-run declared-state apply should warn without blocking **Terrapod** command installation when the managed dotfiles can still be written.
+- `tpod status` and `tpod doctor` own recovery visibility for missing tools after non-blocking first-run installer failures.
 - `tpod update` delegates repository update semantics to `chezmoi update` and adds Terrapod-specific context and validation around it.
 - README and command output describe `tpod update` as a source update so it is not confused with Homebrew, APT, or mise upgrades.
 - README and command output describe `tpod diff` and `tpod apply` as declared-state operations delegated to chezmoi.
 - After successful first-run apply, the installer should surface `tpod help` so users discover the day-to-day short command immediately.
+- A clean first-run success does not need extra `tpod doctor` guidance beyond the installer's final `tpod help` output.
+- When first-run completes with install warnings, the final installer output shows a separate warning block and the absolute `~/.local/bin/tpod doctor` recovery command in addition to surfacing `tpod help`.
 - The **macOS Desktop App Stack** is opt-in because Homebrew casks can install shared applications and desktop support assets outside a single user's home directory.
 - The **macOS Desktop App Stack** excludes Homebrew itself, shared CLI formulae such as mise and btop, and terminal font casks.
+- On shared Macs with multiple login users, Homebrew prefix ownership and permissions remain outside Terrapod's automatic repair scope because changing them can affect other users and shared applications.
+- Homebrew permission failures for a second macOS login user should warn without blocking **Terrapod** command and managed dotfiles installation, with `tpod doctor` surfacing manual recovery guidance.
+- Homebrew permission guidance should identify the unwritable shared prefix and ask the user to fix Homebrew ownership or administration outside Terrapod before rerunning `tpod apply`; Terrapod should not suggest or run broad `chown` repair commands.
 - Terminal font casks belong to the macOS Terminal Profile core bootstrap because the managed terminal configuration depends on them and they are not desktop applications.
 - Enabling the **Optional Development Workspace** does not enable the **macOS Desktop App Stack**.
 - **macOS App Groups** are configured during **Terrapod** setup and remain within the **macOS Desktop App Stack** boundary.
+- When **macOS App Group** settings change, `tpod apply` keeps Homebrew desktop app warning marker content aligned with currently enabled groups; failures for disabled groups are removed from readiness warnings while enabled group failures remain.
 - The first implemented **macOS App Groups** are terminal-apps, automation, launcher, monitoring, and ai-apps.
 - The terminal-apps **macOS App Group** contains Ghostty.
 - cmux is outside the declared **macOS Desktop App Stack**; existing cmux installs or settings may remain on a machine unmanaged and are not removed by **Terrapod**.
