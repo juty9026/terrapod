@@ -9,6 +9,30 @@
 #!/bin/sh
 set -eu
 
+install_warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
+TERRAPOD_INSTALL_WARNINGS_LOADED=
+if [ -f "$install_warnings_lib" ]; then
+  . "$install_warnings_lib"
+fi
+
+mark_install_warning() {
+  category="$1"
+  summary="$2"
+  guidance="$3"
+
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
+    terrapod_install_warning_write "$category" "$summary" "$guidance" || true
+  fi
+}
+
+clear_install_warning() {
+  category="$1"
+
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
+    terrapod_install_warning_clear "$category" || true
+  fi
+}
+
 find_brew() {
   if command -v brew >/dev/null 2>&1; then
     command -v brew
@@ -38,6 +62,10 @@ fi
 
 if [ -z "$brew_bin" ]; then
   echo "Homebrew install finished, but brew was not found." >&2
+  mark_install_warning \
+    homebrew-core \
+    "Homebrew core install needs attention" \
+    "Install Homebrew from https://brew.sh, then rerun tpod apply."
   exit 1
 fi
 
@@ -48,7 +76,15 @@ core_brewfile="{{ .chezmoi.sourceDir }}/Brewfile"
 
 # Core Brewfile checksum: {{ include "Brewfile" | sha256sum }}
 if [ -f "$core_brewfile" ]; then
-  brew bundle --no-upgrade --file="$core_brewfile"
+  if brew bundle --no-upgrade --file="$core_brewfile"; then
+    clear_install_warning homebrew-core
+  else
+    mark_install_warning \
+      homebrew-core \
+      "Homebrew core install needs attention" \
+      "Review Homebrew bundle output, fix package access, then rerun tpod apply."
+    exit 1
+  fi
 fi
 
 {{ if $enableMacosAppGroups -}}
@@ -64,7 +100,15 @@ cat >"$desktop_brewfile" <<'BREWFILE'
 BREWFILE
 
 if [ -s "$desktop_brewfile" ]; then
-  brew bundle --no-upgrade --file="$desktop_brewfile"
+  if brew bundle --no-upgrade --file="$desktop_brewfile"; then
+    clear_install_warning homebrew-desktop-apps
+  else
+    mark_install_warning \
+      homebrew-desktop-apps \
+      "Homebrew desktop app install needs attention" \
+      "Review Homebrew cask output, fix app installation access, then rerun tpod apply."
+    exit 1
+  fi
 fi
 {{- end }}
 {{- end }}

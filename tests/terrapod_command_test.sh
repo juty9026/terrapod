@@ -522,6 +522,7 @@ write_no_gum_path "$no_gum_path" sh
 
 terrapod="$repo_root/dot_local/bin/executable_terrapod"
 tpod_source="$repo_root/dot_local/bin/symlink_tpod"
+install_warnings_lib="$repo_root/dot_local/lib/terrapod/install-warnings.sh"
 
 managed_targets="$(
   chezmoi \
@@ -539,6 +540,11 @@ assert_line \
   "$managed_targets" \
   ".local/bin/tpod" \
   "chezmoi manages tpod as an alias to Terrapod"
+
+assert_line \
+  "$managed_targets" \
+  ".local/lib/terrapod/install-warnings.sh" \
+  "chezmoi manages the shared install warning marker library"
 
 terrapod_target="$(
   chezmoi \
@@ -594,10 +600,177 @@ fi
 
 pass "tpod alias points to Terrapod"
 
+if [ ! -f "$install_warnings_lib" ]; then
+  fail "shared install warning marker library source exists"
+fi
+
+pass "shared install warning marker library source exists"
+
+sh -n "$install_warnings_lib" || fail "shared install warning marker library is valid POSIX shell"
+pass "shared install warning marker library is valid POSIX shell"
+
 sh -n "$terrapod" || fail "Terrapod command is valid POSIX shell"
 pass "Terrapod command is valid POSIX shell"
 
+marker_home="$tmp_dir/marker-home"
+marker_xdg_state="$tmp_dir/marker-xdg-state"
+marker_dotfiles_probe="$tmp_dir/marker-dotfiles-probe"
+mkdir -p "$marker_home" "$marker_dotfiles_probe"
+
+default_marker_dir="$(
+  HOME="$marker_home" XDG_STATE_HOME= sh -c '. "$1"; terrapod_install_warning_dir' sh "$install_warnings_lib"
+)"
+expected_default_marker_dir="$marker_home/.local/state/terrapod/install-warnings"
+
+if [ "$default_marker_dir" != "$expected_default_marker_dir" ]; then
+  fail "install warning markers default to HOME-local XDG state; expected '$expected_default_marker_dir', got '$default_marker_dir'"
+fi
+pass "install warning markers default to HOME-local XDG state"
+
+xdg_marker_dir="$(
+  HOME="$marker_home" XDG_STATE_HOME="$marker_xdg_state" sh -c '. "$1"; terrapod_install_warning_dir' sh "$install_warnings_lib"
+)"
+expected_xdg_marker_dir="$marker_xdg_state/terrapod/install-warnings"
+
+if [ "$xdg_marker_dir" != "$expected_xdg_marker_dir" ]; then
+  fail "install warning markers honor XDG_STATE_HOME; expected '$expected_xdg_marker_dir', got '$xdg_marker_dir'"
+fi
+pass "install warning markers honor XDG_STATE_HOME"
+
+marker_categories="$(
+  sh -c '. "$1"; terrapod_install_warning_categories' sh "$install_warnings_lib"
+)"
+expected_marker_categories="$(printf '%s\n' homebrew-core homebrew-desktop-apps ubuntu-bootstrap shell-integrations mise-tools ai-cli-tools)"
+
+if [ "$marker_categories" != "$expected_marker_categories" ]; then
+  printf '%s\n' "expected marker categories:" >&2
+  printf '%s\n' "$expected_marker_categories" | sed 's/^/  /' >&2
+  printf '%s\n' "actual marker categories:" >&2
+  printf '%s\n' "$marker_categories" | sed 's/^/  /' >&2
+  fail "install warning marker categories are explicit stable slugs"
+fi
+pass "install warning marker categories are explicit stable slugs"
+
+HOME="$marker_home" XDG_STATE_HOME="$marker_xdg_state" sh -c \
+  '. "$1"; terrapod_install_warning_write homebrew-core "Homebrew core install needs attention" "Run tpod apply after fixing the Homebrew bundle error."' \
+  sh "$install_warnings_lib"
+
+homebrew_core_marker="$marker_xdg_state/terrapod/install-warnings/homebrew-core"
+if [ ! -f "$homebrew_core_marker" ]; then
+  fail "install warning marker write creates the category file under XDG state"
+fi
+pass "install warning marker write creates the category file under XDG state"
+
+assert_not_contains \
+  "$(find "$repo_root" -path '*/install-warnings/*' -print)" \
+  "$repo_root" \
+  "install warning markers are not written under the Terrapod source repository"
+
+assert_not_contains \
+  "$(find "$marker_dotfiles_probe" -path '*/install-warnings/*' -print)" \
+  "$marker_dotfiles_probe" \
+  "install warning markers are not written under managed dotfiles"
+
+homebrew_core_marker_text="$(cat "$homebrew_core_marker")"
+assert_line "$homebrew_core_marker_text" "category='homebrew-core'" "install warning marker schema stores category as shell-friendly key/value data"
+assert_line "$homebrew_core_marker_text" "summary='Homebrew core install needs attention'" "install warning marker schema stores summary as shell-friendly key/value data"
+assert_line "$homebrew_core_marker_text" "guidance='Run tpod apply after fixing the Homebrew bundle error.'" "install warning marker schema stores guidance as shell-friendly key/value data"
+
+updated_at_line="$(
+  printf '%s\n' "$homebrew_core_marker_text" |
+    awk -F= '$1 == "updated_at" { print $2 }'
+)"
+if ! printf '%s\n' "$updated_at_line" | grep -E "^'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z'$" >/dev/null; then
+  fail "install warning marker updated_at is a UTC ISO 8601 timestamp ending in Z"
+fi
+pass "install warning marker updated_at is a UTC ISO 8601 timestamp ending in Z"
+
+HOME="$marker_home" XDG_STATE_HOME="$marker_xdg_state" sh -c \
+  '. "$1"; terrapod_install_warning_write ai-cli-tools "AI CLI tool install needs attention" "Rerun tpod apply after network access is restored."' \
+  sh "$install_warnings_lib"
+
+marker_list="$(
+  HOME="$marker_home" XDG_STATE_HOME="$marker_xdg_state" sh -c '. "$1"; terrapod_install_warning_list' sh "$install_warnings_lib"
+)"
+expected_marker_list="$(printf '%s\n' homebrew-core ai-cli-tools)"
+if [ "$marker_list" != "$expected_marker_list" ]; then
+  printf '%s\n' "expected marker list:" >&2
+  printf '%s\n' "$expected_marker_list" | sed 's/^/  /' >&2
+  printf '%s\n' "actual marker list:" >&2
+  printf '%s\n' "$marker_list" | sed 's/^/  /' >&2
+  fail "install warning marker list returns existing category markers in stable order"
+fi
+pass "install warning marker list returns existing category markers in stable order"
+
+read_summary="$(
+  HOME="$marker_home" XDG_STATE_HOME="$marker_xdg_state" sh -c '. "$1"; terrapod_install_warning_value homebrew-core summary' sh "$install_warnings_lib"
+)"
+if [ "$read_summary" != "Homebrew core install needs attention" ]; then
+  fail "install warning marker value reader parses expected fields without sourcing marker files"
+fi
+pass "install warning marker value reader parses expected fields without sourcing marker files"
+
+printf '%s\n' "category='homebrew-core'" "summary='stale'" "guidance='stale'" "updated_at='2000-01-01T00:00:00Z'" "extra='stale'" >"$homebrew_core_marker"
+HOME="$marker_home" XDG_STATE_HOME="$marker_xdg_state" sh -c \
+  '. "$1"; terrapod_install_warning_write homebrew-core "Homebrew core install recovered with a later warning" "Inspect the latest Homebrew output."' \
+  sh "$install_warnings_lib"
+homebrew_core_marker_text="$(cat "$homebrew_core_marker")"
+assert_contains "$homebrew_core_marker_text" "summary='Homebrew core install recovered with a later warning'" "install warning marker write atomically replaces the category file content"
+assert_not_contains "$homebrew_core_marker_text" "extra='stale'" "install warning marker write does not leave stale content from previous marker files"
+if find "$marker_xdg_state/terrapod/install-warnings" -name '.homebrew-core.*' -print | grep . >/dev/null; then
+  fail "install warning marker write leaves no temporary category files behind"
+fi
+pass "install warning marker write leaves no temporary category files behind"
+
+HOME="$marker_home" XDG_STATE_HOME="$marker_xdg_state" sh -c '. "$1"; terrapod_install_warning_clear homebrew-core' sh "$install_warnings_lib"
+if [ -e "$homebrew_core_marker" ]; then
+  fail "install warning marker clear removes the matching category file"
+fi
+pass "install warning marker clear removes the matching category file"
+
+if [ ! -f "$marker_xdg_state/terrapod/install-warnings/ai-cli-tools" ]; then
+  fail "install warning marker clear does not remove other category files"
+fi
+pass "install warning marker clear does not remove other category files"
+
+if HOME="$marker_home" XDG_STATE_HOME="$marker_xdg_state" sh -c '. "$1"; terrapod_install_warning_write unknown-category "bad" "bad"' sh "$install_warnings_lib" 2>/dev/null; then
+  fail "install warning marker write rejects unknown categories"
+fi
+pass "install warning marker write rejects unknown categories"
+
+fake_warning_bin="$tmp_dir/fake-warning-bin"
+fake_warning_calls="$tmp_dir/fake-warning.calls"
+mkdir -p "$fake_warning_bin"
+write_stub "$fake_warning_bin/terrapod_install_warning_list" \
+  'printf "%s\n" "list" >>"$FAKE_INSTALL_WARNING_CALLS"' \
+  'printf "%s\n" homebrew-core'
+write_stub "$fake_warning_bin/terrapod_install_warning_value" \
+  'printf "%s\n" "value $*" >>"$FAKE_INSTALL_WARNING_CALLS"' \
+  'printf "%s\n" spoofed'
+write_stub "$fake_warning_bin/terrapod_install_warning_write" \
+  'printf "%s\n" "write $*" >>"$FAKE_INSTALL_WARNING_CALLS"'
+
+fake_ai_cli_installer="$tmp_dir/fake-ai-cli-installer.sh"
+chezmoi execute-template \
+  --override-data '{"chezmoi":{"os":"linux","sourceDir":"/missing-terrapod-source"},"enableAiCliTools":true}' \
+  --file "$repo_root/.chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
+  >"$fake_ai_cli_installer"
+
+if FAKE_INSTALL_WARNING_CALLS="$fake_warning_calls" PATH="$fake_warning_bin" /bin/sh "$fake_ai_cli_installer" >"$tmp_dir/fake-ai-cli-installer.out" 2>"$tmp_dir/fake-ai-cli-installer.err"; then
+  fail "rendered installer fixture fails before optional AI CLI tools when curl is unavailable"
+fi
+
+if [ -e "$fake_warning_calls" ]; then
+  fail "installer scripts ignore PATH fake install warning helpers when the shared library is not loaded"
+fi
+pass "installer scripts ignore PATH fake install warning helpers when the shared library is not loaded"
+
 help_output="$(TERRAPOD_PROFILE=macos-terminal sh "$terrapod" help)"
+help_with_marker_output="$(
+  HOME="$marker_home" XDG_STATE_HOME="$marker_xdg_state" TERRAPOD_PROFILE=macos-terminal sh "$terrapod" help
+)"
+assert_not_contains "$help_with_marker_output" "Install warnings" "Terrapod help does not read or summarize install warning markers"
+assert_not_contains "$help_with_marker_output" "Warning:" "Terrapod help remains warning-free when install warning markers exist"
 
 ln -s "$terrapod" "$tmp_dir/bin/tpod"
 tpod_help_output="$(TERRAPOD_PROFILE=macos-terminal PATH="$tmp_dir/bin:/usr/bin:/bin" "$tmp_dir/bin/tpod" help)"
@@ -1163,6 +1336,34 @@ assert_no_ansi_escape "$macos_status_output" "Terrapod status does not use setup
 assert_no_rich_setup_emoji "$macos_status_output" "Terrapod status does not use setup emoji presentation"
 assert_no_routine_emoji "$macos_status_output" "captured Terrapod status has no routine emoji"
 
+status_marker_state="$tmp_dir/status-marker-state"
+HOME="$tmp_dir/status-marker-home" XDG_STATE_HOME="$status_marker_state" sh -c \
+  '. "$1"; terrapod_install_warning_write homebrew-core "Homebrew core install needs attention" "Run tpod apply after fixing the Homebrew bundle error."' \
+  sh "$install_warnings_lib"
+
+if ! status_marker_output="$(
+  TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$status_config" XDG_STATE_HOME="$status_marker_state" PATH="$macos_status_path" \
+    /bin/sh "$terrapod" status
+)"; then
+  fail "Terrapod status exits successfully when install warning markers remain"
+fi
+
+assert_contains "$status_marker_output" "Install warnings              : present (homebrew-core)" "Terrapod status summarizes install warning marker presence"
+assert_not_contains "$status_marker_output" "Run tpod apply after fixing the Homebrew bundle error." "Terrapod status does not expand install warning marker details"
+
+rm -f "$fake_warning_calls"
+if ! status_missing_lib_output="$(
+  FAKE_INSTALL_WARNING_CALLS="$fake_warning_calls" TERRAPOD_INSTALL_WARNINGS_LIB="$tmp_dir/missing-install-warnings-lib" TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$status_config" PATH="$fake_warning_bin:$macos_status_path" \
+    /bin/sh "$terrapod" status
+)"; then
+  fail "Terrapod status exits successfully when the install warning library is unavailable"
+fi
+assert_contains "$status_missing_lib_output" "Install warnings              : none" "Terrapod status ignores PATH fake install warning helpers when the shared library is unavailable"
+if [ -e "$fake_warning_calls" ]; then
+  fail "Terrapod status does not execute PATH fake install warning helpers"
+fi
+pass "Terrapod status does not execute PATH fake install warning helpers"
+
 tty_macos_status_output="$(
   run_command_in_pty xterm unset env TERRAPOD_CHEZMOI_CONFIG="$status_config" PATH="$macos_status_path" /bin/sh "$terrapod" status
 )"
@@ -1399,6 +1600,44 @@ fi
 
 doctor_unsupported_output="$(cat "$tmp_dir/doctor-unsupported.out")"
 assert_contains "$doctor_unsupported_output" "warn - unsupported Linux release: Debian GNU/Linux 12. Terrapod supports Ubuntu 24.04 for the VPS Shell Profile." "Terrapod doctor explains unsupported Linux"
+
+doctor_marker_state="$tmp_dir/doctor-marker-state"
+HOME="$tmp_dir/doctor-marker-home" XDG_STATE_HOME="$doctor_marker_state" sh -c \
+  '. "$1"; terrapod_install_warning_write ubuntu-bootstrap "Ubuntu bootstrap needs attention" "Review APT output, fix package repository access, then rerun tpod apply."' \
+  sh "$install_warnings_lib"
+doctor_marker_file="$doctor_marker_state/terrapod/install-warnings/ubuntu-bootstrap"
+doctor_marker_before="$(cat "$doctor_marker_file")"
+
+if TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_config" XDG_STATE_HOME="$doctor_marker_state" PATH="$doctor_ok_path" \
+  /bin/sh "$terrapod" doctor >"$tmp_dir/doctor-marker.out" 2>"$tmp_dir/doctor-marker.err"; then
+  fail "Terrapod doctor fails when unresolved install warning markers remain"
+fi
+
+doctor_marker_output="$(cat "$tmp_dir/doctor-marker.out")"
+doctor_marker_after="$(cat "$doctor_marker_file")"
+
+assert_contains "$doctor_marker_output" "warn - install warning marker remains: ubuntu-bootstrap" "Terrapod doctor reports install warning marker categories"
+assert_contains "$doctor_marker_output" "Summary: Ubuntu bootstrap needs attention" "Terrapod doctor reports install warning marker summary"
+assert_contains "$doctor_marker_output" "Guidance: Review APT output, fix package repository access, then rerun tpod apply." "Terrapod doctor reports install warning marker guidance"
+assert_contains "$doctor_marker_output" "Updated: " "Terrapod doctor reports install warning marker updated_at"
+if [ "$doctor_marker_after" != "$doctor_marker_before" ]; then
+  fail "Terrapod doctor is read-only for install warning markers"
+fi
+pass "Terrapod doctor is read-only for install warning markers"
+
+rm -f "$fake_warning_calls"
+if ! doctor_missing_lib_output="$(
+  FAKE_INSTALL_WARNING_CALLS="$fake_warning_calls" TERRAPOD_INSTALL_WARNINGS_LIB="$tmp_dir/missing-install-warnings-lib" TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$fake_warning_bin:$doctor_ok_path" \
+    /bin/sh "$terrapod" doctor
+)"; then
+  fail "Terrapod doctor succeeds when the install warning library is unavailable and no other checks fail"
+fi
+assert_contains "$doctor_missing_lib_output" "ok - No install warning marker reader is installed" "Terrapod doctor reports unavailable marker reader without using PATH fake helpers"
+assert_not_contains "$doctor_missing_lib_output" "spoofed" "Terrapod doctor does not trust PATH fake install warning helper output"
+if [ -e "$fake_warning_calls" ]; then
+  fail "Terrapod doctor does not execute PATH fake install warning helpers"
+fi
+pass "Terrapod doctor does not execute PATH fake install warning helpers"
 
 doctor_broad_upgrade_calls="$tmp_dir/doctor-broad-upgrade.calls"
 rm -f "$doctor_broad_upgrade_calls"
@@ -1822,7 +2061,12 @@ write_stub "$tmp_dir/bin/chezmoi" \
 rm -f "$CHEZMOI_APPLY_ARGS_FILE" "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
 rm -f "$BROAD_UPGRADE_CALL_FILE"
 
-if ! HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+apply_marker_state="$tmp_dir/apply-marker-state"
+HOME="$tmp_dir/apply-marker-home" XDG_STATE_HOME="$apply_marker_state" sh -c \
+  '. "$1"; terrapod_install_warning_write mise-tools "mise tool install needs attention" "Run tpod apply after fixing mise tool installation output."' \
+  sh "$install_warnings_lib"
+
+if ! HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" XDG_STATE_HOME="$apply_marker_state" PATH="$tmp_dir/bin:/usr/bin:/bin" \
   sh "$terrapod" apply >"$tmp_dir/apply.out" 2>"$tmp_dir/apply.err"; then
   printf '%s\n' "apply stdout:" >&2
   sed 's/^/  /' "$tmp_dir/apply.out" >&2
@@ -1932,6 +2176,16 @@ assert_contains \
   "$apply_output" \
   "Post-apply validation: tpod alias is managed" \
   "Terrapod apply validates the tpod alias managed target"
+
+assert_contains \
+  "$apply_output" \
+  "Remaining install warnings:" \
+  "Terrapod apply surfaces remaining install warning markers after apply"
+
+assert_contains \
+  "$apply_output" \
+  "mise-tools: mise tool install needs attention" \
+  "Terrapod apply prints remaining install warning marker summaries without failing solely because markers remain"
 
 assert_no_ansi_escape "$apply_output" "captured Terrapod apply is plain without ANSI escapes"
 assert_no_routine_emoji "$apply_output" "captured Terrapod apply has no routine emoji"
@@ -2131,11 +2385,12 @@ write_stub "$tmp_dir/bin/chezmoi" \
 
 rm -f "$CHEZMOI_APPLY_ARGS_FILE" "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
 
-if HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+if HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" XDG_STATE_HOME="$apply_marker_state" PATH="$tmp_dir/bin:/usr/bin:/bin" \
   sh "$terrapod" apply >"$tmp_dir/apply-validation.out" 2>"$tmp_dir/apply-validation.err"; then
   fail "Terrapod apply fails when tpod alias is not managed"
 fi
 
+apply_validation_output="$(cat "$tmp_dir/apply-validation.out")"
 apply_validation_error="$(cat "$tmp_dir/apply-validation.err")"
 
 assert_contains \
@@ -2152,6 +2407,11 @@ assert_not_contains \
   "$apply_validation_error" \
   "Run 'terrapod chezmoi -- managed'" \
   "Terrapod apply avoids old post-apply validation inspection command"
+
+assert_contains \
+  "$apply_validation_output" \
+  "Remaining install warnings:" \
+  "Terrapod apply still surfaces install warning markers when post-apply validation fails"
 
 rm -f "$CHEZMOI_APPLY_ARGS_FILE" "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
 

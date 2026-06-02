@@ -3,6 +3,30 @@
 # mise-config-sha256={{ includeTemplate "dot_config/mise/config.toml.tmpl" . | sha256sum }}
 set -eu
 
+install_warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
+TERRAPOD_INSTALL_WARNINGS_LOADED=
+if [ -f "$install_warnings_lib" ]; then
+  . "$install_warnings_lib"
+fi
+
+mark_install_warning() {
+  category="$1"
+  summary="$2"
+  guidance="$3"
+
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
+    terrapod_install_warning_write "$category" "$summary" "$guidance" || true
+  fi
+}
+
+clear_install_warning() {
+  category="$1"
+
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
+    terrapod_install_warning_clear "$category" || true
+  fi
+}
+
 setup_mise() {
   if command -v mise >/dev/null 2>&1; then
     return
@@ -23,18 +47,40 @@ setup_mise() {
 
   if ! command -v mise >/dev/null 2>&1; then
     echo "mise is required. Run the Homebrew Brewfile bundle first." >&2
+    mark_install_warning \
+      mise-tools \
+      "mise tool install needs attention" \
+      "Run the Homebrew Brewfile bundle or fix mise on PATH, then rerun tpod apply."
     exit 1
   fi
 {{ else }}
   echo "mise is required. The Ubuntu bootstrap script should install mise from the official APT repository." >&2
+  mark_install_warning \
+    mise-tools \
+    "mise tool install needs attention" \
+    "Run the Ubuntu bootstrap script or fix mise on PATH, then rerun tpod apply."
   exit 1
 {{ end }}
 }
 
 setup_mise
-mise install --yes -C "$HOME"
+if ! mise install --yes -C "$HOME"; then
+  mark_install_warning \
+    mise-tools \
+    "mise tool install needs attention" \
+    "Review mise install output, fix tool installation issues, then rerun tpod apply."
+  exit 1
+fi
 
 if mise exec --yes -C "$HOME" -- sh -c 'command -v corepack' >/dev/null 2>&1; then
-  mise exec --yes -C "$HOME" -- corepack enable
+  if ! mise exec --yes -C "$HOME" -- corepack enable; then
+    mark_install_warning \
+      mise-tools \
+      "mise tool install needs attention" \
+      "Review corepack enable output, then rerun tpod apply."
+    exit 1
+  fi
 fi
+
+clear_install_warning mise-tools
 {{- end }}

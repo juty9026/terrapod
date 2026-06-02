@@ -3,6 +3,22 @@ set -eu
 
 STATE_LABEL_WIDTH=30
 
+case "$0" in
+  */*)
+    command_path="$0"
+    ;;
+  *)
+    command_path="$(command -v -- "$0" 2>/dev/null || printf '%s\n' "$0")"
+    ;;
+esac
+command_dir="${command_path%/*}"
+command_dir="$(CDPATH= cd -- "$command_dir" 2>/dev/null && pwd || printf '%s\n' ".")"
+install_warnings_lib="${TERRAPOD_INSTALL_WARNINGS_LIB:-$command_dir/../lib/terrapod/install-warnings.sh}"
+TERRAPOD_INSTALL_WARNINGS_LOADED=
+if [ -f "$install_warnings_lib" ]; then
+  . "$install_warnings_lib"
+fi
+
 supports_color() {
   [ -t 1 ] &&
     [ -n "${TERM:-}" ] &&
@@ -953,6 +969,34 @@ print_status_warnings() {
   fi
 }
 
+install_warning_categories_csv() {
+  categories=
+
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
+    return 0
+  fi
+
+  for category in $(terrapod_install_warning_list 2>/dev/null || true); do
+    if [ -z "$categories" ]; then
+      categories="$category"
+    else
+      categories="$categories, $category"
+    fi
+  done
+
+  printf '%s\n' "$categories"
+}
+
+print_install_warning_status() {
+  categories="$(install_warning_categories_csv)"
+
+  if [ -n "$categories" ]; then
+    print_colon_state_line "Install warnings" "present" "($categories)"
+  else
+    print_colon_state_line "Install warnings" "none"
+  fi
+}
+
 run_status() {
   if [ "$#" -ne 0 ]; then
     fail_usage "status accepts no arguments"
@@ -971,6 +1015,7 @@ run_status() {
   print_macos_app_group_status "$config_file" "$profile"
   print_key_tool_status "$profile"
   print_status_warnings "$config_file" "$profile"
+  print_install_warning_status
 }
 
 show_config_context() {
@@ -1165,7 +1210,10 @@ run_apply() {
     return 1
   fi
 
-  run_post_apply_validation
+  validation_status=0
+  run_post_apply_validation || validation_status="$?"
+  print_remaining_install_warnings
+  return "$validation_status"
 }
 
 doctor_failed=0
@@ -1235,6 +1283,61 @@ doctor_check_optional_setting() {
   fi
 }
 
+install_warning_value_or_unknown() {
+  category="$1"
+  field="$2"
+
+  if value="$(terrapod_install_warning_value "$category" "$field" 2>/dev/null)"; then
+    printf '%s\n' "$value"
+  else
+    printf '%s\n' "unknown"
+  fi
+}
+
+doctor_check_install_warnings() {
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
+    doctor_ok "No install warning marker reader is installed"
+    return
+  fi
+
+  categories="$(terrapod_install_warning_list 2>/dev/null || true)"
+  if [ -z "$categories" ]; then
+    doctor_ok "No install warning markers remain"
+    return
+  fi
+
+  for category in $categories; do
+    summary="$(install_warning_value_or_unknown "$category" summary)"
+    guidance="$(install_warning_value_or_unknown "$category" guidance)"
+    updated_at="$(install_warning_value_or_unknown "$category" updated_at)"
+
+    doctor_warn "install warning marker remains: $category"
+    printf '    Summary: %s\n' "$summary"
+    printf '    Guidance: %s\n' "$guidance"
+    printf '    Updated: %s\n' "$updated_at"
+    doctor_guidance "$guidance"
+  done
+}
+
+print_remaining_install_warnings() {
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
+    return
+  fi
+
+  categories="$(terrapod_install_warning_list 2>/dev/null || true)"
+  if [ -z "$categories" ]; then
+    return
+  fi
+
+  print_section "Remaining install warnings:"
+  for category in $categories; do
+    summary="$(install_warning_value_or_unknown "$category" summary)"
+    guidance="$(install_warning_value_or_unknown "$category" guidance)"
+    printf '  - %s: %s\n' "$category" "$summary"
+    printf '    Guidance: %s\n' "$guidance"
+  done
+}
+
 run_doctor() {
   if [ "$#" -ne 0 ]; then
     fail_usage "doctor accepts no arguments"
@@ -1285,6 +1388,8 @@ run_doctor() {
     "Optional Development Workspace" \
     "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" \
     "development Zellij layouts"
+
+  doctor_check_install_warnings
 
   if [ "$doctor_guidance_printed" -eq 0 ]; then
     print_styled "36" "Guidance:"
