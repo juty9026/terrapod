@@ -87,6 +87,8 @@ assert_key_row_contains '`enableAiCliTools`' 'official vendor installers' \
   "README documents official AI CLI installers"
 assert_contains '| `enableDevelopmentWorkspace` | `false` |' \
   "README documents enableDevelopmentWorkspace default"
+assert_contains '| `profile` |' \
+  "README documents profile as a managed setup config key"
 assert_not_contains 'enableMacosDesktopApps' \
   "README does not document legacy enableMacosDesktopApps option"
 
@@ -141,6 +143,12 @@ assert_key_row_contains '`enableMacosAppGroupAiApps`' 'Antigravity IDE' \
 
 assert_contains 'Optional stack profiles and macOS App Group settings are disabled by default.' \
   "README states optional stack profiles and App Groups are disabled by default"
+assert_contains 'complete managed setup config' \
+  "README explains local overrides must keep a complete managed setup config"
+assert_contains 'not standalone config files' \
+  "README marks optional stack examples as fragments instead of standalone configs"
+assert_not_contains 'false or omitted' \
+  "README no longer suggests omitted managed setup keys are valid routine-command config"
 assert_contains 'Terrapod is a small landing pod for your machines' \
   "README opens with the Terrapod product promise"
 assert_contains 'Under the hood, Terrapod uses chezmoi as the apply engine' \
