@@ -25,11 +25,6 @@ tests/**
 .config/zellij/layouts/**
 {{ end }}
 
-{{ if not (or (default false (get . "enableAiCliTools")) (default false (get . "enableDevelopmentWorkspace"))) }}
-# Optional AI Tool Stack installer is opt-in for every machine profile.
-.chezmoiscripts/60-install-ai-cli-tools.sh
-{{ end }}
-
 {{ if ne .chezmoi.os "darwin" }}
 # macOS Terminal Profile entries are not part of the VPS Shell Profile.
 .chezmoiscripts/00-bootstrap-homebrew.sh

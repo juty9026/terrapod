@@ -1,4 +1,4 @@
-{{- if and (or (eq .chezmoi.os "darwin") (eq .chezmoi.os "linux")) (or (default false (get . "enableAiCliTools")) (default false (get . "enableDevelopmentWorkspace"))) -}}
+{{- if or (eq .chezmoi.os "darwin") (eq .chezmoi.os "linux") -}}
 #!/bin/sh
 set -eu
 
@@ -26,6 +26,10 @@ clear_install_warning() {
   fi
 }
 
+{{ if not (or (default false (get . "enableAiCliTools")) (default false (get . "enableDevelopmentWorkspace"))) }}
+clear_install_warning ai-cli-tools
+exit 0
+{{ else }}
 installer_paths=
 
 cleanup_installers() {
@@ -107,4 +111,5 @@ run_installer "Antigravity CLI" bash "https://antigravity.google/cli/install.sh"
 run_installer "Claude Code" bash "https://claude.ai/install.sh"
 run_codex_installer
 clear_install_warning ai-cli-tools
+{{ end }}
 {{- end }}
