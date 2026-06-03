@@ -52,6 +52,7 @@ else
 fi
 
 export DEBIAN_FRONTEND=noninteractive
+ubuntu_bootstrap_warning=0
 
 if ! $sudo_cmd apt-get update -y; then
   mark_install_warning \
@@ -167,12 +168,15 @@ if [ "$current_shell" != "$zsh_path" ]; then
   echo "Setting login shell for $target_user to $zsh_path"
   if ! $sudo_cmd chsh -s "$zsh_path" "$target_user"; then
     echo "Could not change the login shell automatically. Run this manually after setup: chsh -s \"$zsh_path\"" >&2
+    ubuntu_bootstrap_warning=1
     mark_install_warning \
-      shell-integrations \
-      "Shell integration setup needs attention" \
+      ubuntu-bootstrap \
+      "Ubuntu bootstrap needs attention" \
       "Run chsh -s /usr/bin/zsh after fixing shell permission issues."
   fi
 fi
 
-clear_install_warning ubuntu-bootstrap
+if [ "$ubuntu_bootstrap_warning" -eq 0 ]; then
+  clear_install_warning ubuntu-bootstrap
+fi
 {{- end }}
