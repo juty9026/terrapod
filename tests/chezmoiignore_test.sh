@@ -75,6 +75,16 @@ render_managed_file() {
     cat "$tmp_dir/home/$destination"
 }
 
+write_stub() {
+  path="$1"
+  shift
+  {
+    printf '%s\n' '#!/bin/sh'
+    printf '%s\n' "$@"
+  } >"$path"
+  chmod +x "$path"
+}
+
 assert_contains_text() {
   text="$1"
   needle="$2"
@@ -255,6 +265,45 @@ assert_not_contains_text \
   "$macos_bootstrap" \
   'brew bundle --no-upgrade --file="$desktop_brewfile"' \
   "macOS bootstrap default skips macOS Desktop App Stack bundle"
+
+assert_contains_text \
+  "$macos_bootstrap" \
+  "clear_install_warning homebrew-desktop-apps" \
+  "macOS bootstrap default renders macOS Desktop App Stack warning cleanup"
+
+macos_bootstrap_script="$tmp_dir/macos-bootstrap-default.sh"
+printf '%s\n' "$macos_bootstrap" >"$macos_bootstrap_script"
+sh -n "$macos_bootstrap_script" || fail "macOS bootstrap default cleanup script should be valid sh"
+pass "macOS bootstrap default cleanup script is valid sh"
+
+macos_brew_bin="$tmp_dir/macos-brew-bin"
+macos_brew_log="$tmp_dir/macos-brew.log"
+mkdir -p "$macos_brew_bin"
+write_stub "$macos_brew_bin/brew" \
+  'printf "%s\n" "brew args:$*" >>"$MACOS_BREW_LOG"' \
+  'case "$1" in' \
+  '  shellenv) printf "%s\n" ":" ;;' \
+  '  analytics) exit 0 ;;' \
+  '  bundle) exit 0 ;;' \
+  '  *) exit 64 ;;' \
+  'esac'
+
+macos_marker_state="$tmp_dir/macos-marker-state"
+macos_marker_home="$tmp_dir/macos-marker-home"
+mkdir -p "$macos_marker_home"
+HOME="$macos_marker_home" XDG_STATE_HOME="$macos_marker_state" sh -c \
+  '. "$1"; terrapod_install_warning_write homebrew-desktop-apps "Homebrew desktop app install needs attention" "Rerun tpod apply after disabling macOS App Groups."' \
+  sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
+
+if [ ! -f "$macos_marker_state/terrapod/install-warnings/homebrew-desktop-apps" ]; then
+  fail "test setup should create a homebrew-desktop-apps warning marker"
+fi
+
+HOME="$macos_marker_home" XDG_STATE_HOME="$macos_marker_state" MACOS_BREW_LOG="$macos_brew_log" PATH="$macos_brew_bin:/usr/bin:/bin" sh "$macos_bootstrap_script"
+if [ -e "$macos_marker_state/terrapod/install-warnings/homebrew-desktop-apps" ]; then
+  fail "macOS bootstrap default cleanup should clear stale homebrew-desktop-apps marker"
+fi
+pass "macOS bootstrap default cleanup clears stale homebrew-desktop-apps marker"
 
 assert_managed_paths_exclude_prefix \
   "$macos_managed_targets" \

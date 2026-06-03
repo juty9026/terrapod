@@ -110,5 +110,7 @@ if [ -s "$desktop_brewfile" ]; then
     exit 1
   fi
 fi
+{{ else -}}
+clear_install_warning homebrew-desktop-apps
 {{- end }}
 {{- end }}
