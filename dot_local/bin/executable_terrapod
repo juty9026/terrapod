@@ -1232,6 +1232,8 @@ run_apply_preflight() {
     printf '\n'
   fi
 
+  reject_unsupported_inline_data_table "$config_file"
+
   if ! is_managed_setup_config_complete "$config_file"; then
     fatal_incomplete_managed_setup_config "$config_file"
   fi
@@ -1643,7 +1645,7 @@ reject_unsupported_inline_data_table() {
       exit found ? 0 : 1
     }
   ' "$config_file"; then
-    fatal "unsupported inline data table in config; rewrite data = {...} as a [data] table before running configure: $config_file"
+    fatal "unsupported inline data table in config; rewrite data = {...} as a [data] table before running Terrapod commands: $config_file"
   fi
 }
 

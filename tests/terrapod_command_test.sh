@@ -2009,6 +2009,30 @@ if [ -e "$CHEZMOI_MANAGED_ARGS_FILE" ]; then
   fail "Terrapod apply rejects missing config before post-apply validation"
 fi
 
+apply_inline_config="$tmp_dir/apply-inline-table.toml"
+cat >"$apply_inline_config" <<'TOML'
+data = { profile = "vps-shell", enableEditorStack = false, enableAiCliTools = false, enableDevelopmentWorkspace = false, enableMacosAppGroupTerminalApps = false, enableMacosAppGroupAutomation = false, enableMacosAppGroupLauncher = false, enableMacosAppGroupMonitoring = false, enableMacosAppGroupAiApps = false }
+TOML
+rm -f "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
+
+if TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$apply_inline_config" PATH="$apply_incomplete_path" \
+  /bin/sh "$terrapod" apply >"$tmp_dir/apply-inline-table.out" 2>"$tmp_dir/apply-inline-table.err"; then
+  fail "Terrapod apply rejects inline data table config before chezmoi apply"
+fi
+
+apply_inline_error="$(cat "$tmp_dir/apply-inline-table.err")"
+
+assert_contains "$apply_inline_error" "unsupported inline data table" "Terrapod apply reports unsupported inline data table config"
+assert_not_contains "$apply_inline_error" "managed setup config is incomplete" "Terrapod apply does not misreport inline data table config as missing managed setup keys"
+
+if [ -e "$CHEZMOI_APPLY_INVOKED_FILE" ]; then
+  fail "Terrapod apply rejects inline data table config before calling chezmoi apply"
+fi
+
+if [ -e "$CHEZMOI_MANAGED_ARGS_FILE" ]; then
+  fail "Terrapod apply rejects inline data table config before post-apply validation"
+fi
+
 if ! HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
   sh "$terrapod" apply >"$tmp_dir/apply.out" 2>"$tmp_dir/apply.err"; then
   printf '%s\n' "apply stdout:" >&2
