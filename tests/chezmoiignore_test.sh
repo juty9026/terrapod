@@ -305,6 +305,51 @@ if [ -e "$macos_marker_state/terrapod/install-warnings/homebrew-desktop-apps" ];
 fi
 pass "macOS bootstrap default cleanup clears stale homebrew-desktop-apps marker"
 
+homebrew_installer_failure_script="$tmp_dir/macos-bootstrap-homebrew-installer-failure.sh"
+sed \
+  -e "s#/opt/homebrew/bin/brew#$tmp_dir/missing-opt-homebrew-brew#g" \
+  -e "s#/usr/local/bin/brew#$tmp_dir/missing-usr-local-brew#g" \
+  "$macos_bootstrap_script" >"$homebrew_installer_failure_script"
+sh -n "$homebrew_installer_failure_script" || fail "macOS bootstrap no-Homebrew test script should be valid sh"
+
+homebrew_installer_failure_bin="$tmp_dir/homebrew-installer-failure-bin"
+homebrew_installer_failure_state="$tmp_dir/homebrew-installer-failure-state"
+homebrew_installer_failure_home="$tmp_dir/homebrew-installer-failure-home"
+homebrew_installer_failure_log="$tmp_dir/homebrew-installer-failure.log"
+mkdir -p "$homebrew_installer_failure_bin" "$homebrew_installer_failure_home"
+write_stub "$homebrew_installer_failure_bin/curl" \
+  'printf "%s\n" "curl args:$*" >>"$HOMEBREW_INSTALLER_FAILURE_LOG"' \
+  'output_file=' \
+  'while [ "$#" -gt 0 ]; do' \
+  '  case "$1" in' \
+  '    -o)' \
+  '      shift' \
+  '      output_file="$1"' \
+  '      ;;' \
+  '  esac' \
+  '  shift' \
+  'done' \
+  'if [ -n "$output_file" ]; then' \
+  '  printf "%s\n" "echo simulated Homebrew installer failure >&2" "exit 42" >"$output_file"' \
+  'else' \
+  '  printf "%s\n" "echo simulated Homebrew installer failure >&2" "exit 42"' \
+  'fi'
+
+if HOME="$homebrew_installer_failure_home" XDG_STATE_HOME="$homebrew_installer_failure_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_installer_failure_log" PATH="$homebrew_installer_failure_bin:/usr/bin:/bin" \
+  sh "$homebrew_installer_failure_script" >"$tmp_dir/homebrew-installer-failure.out" 2>"$tmp_dir/homebrew-installer-failure.err"; then
+  fail "macOS bootstrap fails when the Homebrew installer command fails"
+fi
+
+homebrew_installer_failure_marker="$homebrew_installer_failure_state/terrapod/install-warnings/homebrew-core"
+if [ ! -f "$homebrew_installer_failure_marker" ]; then
+  fail "macOS bootstrap records homebrew-core marker when the Homebrew installer command fails"
+fi
+pass "macOS bootstrap records homebrew-core marker when the Homebrew installer command fails"
+
+homebrew_installer_failure_marker_text="$(cat "$homebrew_installer_failure_marker")"
+assert_contains_text "$homebrew_installer_failure_marker_text" "summary='Homebrew core install needs attention'" "macOS bootstrap Homebrew installer failure marker keeps the expected summary"
+assert_contains_text "$homebrew_installer_failure_marker_text" "guidance='Install Homebrew from https://brew.sh, then rerun tpod apply.'" "macOS bootstrap Homebrew installer failure marker keeps recovery guidance"
+
 assert_managed_paths_exclude_prefix \
   "$macos_managed_targets" \
   "Brewfile.macos-desktop-apps" \

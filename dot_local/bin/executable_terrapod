@@ -1365,6 +1365,7 @@ run_apply() {
   run_apply_preflight "$config_file"
 
   if ! run_chezmoi_command apply; then
+    print_remaining_install_warnings
     printf '%s\n' "terrapod: chezmoi apply failed; fix the error above, then rerun 'tpod apply'." >&2
     return 1
   fi

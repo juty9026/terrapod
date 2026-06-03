@@ -56,7 +56,24 @@ brew_bin="$(find_brew || true)"
 
 if [ -z "$brew_bin" ]; then
   echo "Installing Homebrew..."
-  NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  homebrew_installer="$(mktemp "${TMPDIR:-/tmp}/terrapod-homebrew-install.XXXXXX")"
+  if ! curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "$homebrew_installer"; then
+    rm -f "$homebrew_installer"
+    mark_install_warning \
+      homebrew-core \
+      "Homebrew core install needs attention" \
+      "Install Homebrew from https://brew.sh, then rerun tpod apply."
+    exit 1
+  fi
+  if ! NONINTERACTIVE=1 /bin/bash "$homebrew_installer"; then
+    rm -f "$homebrew_installer"
+    mark_install_warning \
+      homebrew-core \
+      "Homebrew core install needs attention" \
+      "Install Homebrew from https://brew.sh, then rerun tpod apply."
+    exit 1
+  fi
+  rm -f "$homebrew_installer"
   brew_bin="$(find_brew || true)"
 fi
 

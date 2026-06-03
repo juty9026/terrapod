@@ -2554,6 +2554,8 @@ write_stub "$tmp_dir/bin/chezmoi" \
   'case "$command_name" in' \
   '  apply)' \
   '    printf "%s\n" invoked >"$CHEZMOI_APPLY_INVOKED_FILE"' \
+  '    . "$TERRAPOD_APPLY_FAILURE_MARKER_LIB"' \
+  '    terrapod_install_warning_write mise-tools "mise tool install needs attention" "Run tpod apply after fixing mise tool installation output."' \
   '    printf "%s\n" "simulated apply failure" >&2' \
   '    exit 91' \
   '    ;;' \
@@ -2561,11 +2563,14 @@ write_stub "$tmp_dir/bin/chezmoi" \
   'printf "%s\n" "unexpected chezmoi command: $*" >&2' \
   'exit 92'
 
-if HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+apply_failure_marker_state="$tmp_dir/apply-failure-marker-state"
+
+if HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" XDG_STATE_HOME="$apply_failure_marker_state" TERRAPOD_APPLY_FAILURE_MARKER_LIB="$install_warnings_lib" PATH="$tmp_dir/bin:/usr/bin:/bin" \
   sh "$terrapod" apply >"$tmp_dir/apply-failure.out" 2>"$tmp_dir/apply-failure.err"; then
   fail "Terrapod apply fails when delegated chezmoi apply fails"
 fi
 
+apply_failure_output="$(cat "$tmp_dir/apply-failure.out")"
 apply_failure_error="$(cat "$tmp_dir/apply-failure.err")"
 
 assert_contains \
@@ -2577,6 +2582,16 @@ assert_not_contains \
   "$apply_failure_error" \
   "rerun 'terrapod apply'" \
   "Terrapod apply failure avoids old rerun command"
+
+assert_contains \
+  "$apply_failure_output" \
+  "Remaining install warnings:" \
+  "Terrapod apply surfaces remaining install warning markers when delegated chezmoi apply fails"
+
+assert_contains \
+  "$apply_failure_output" \
+  "mise-tools: mise tool install needs attention" \
+  "Terrapod apply prints marker summaries when delegated chezmoi apply fails"
 
 write_stub "$tmp_dir/bin/chezmoi" \
   'command_name=' \
