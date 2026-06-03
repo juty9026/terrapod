@@ -26,6 +26,16 @@ clear_install_warning() {
   fi
 }
 
+installer_paths=
+
+cleanup_installers() {
+  for installer_path in $installer_paths; do
+    rm -f "$installer_path"
+  done
+}
+
+trap cleanup_installers EXIT HUP INT TERM
+
 setup_macos_brew() {
   if command -v brew >/dev/null 2>&1; then
     return
@@ -79,7 +89,16 @@ ensure_git
 
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
   echo "Installing Oh My Zsh..."
-  if ! sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended --keep-zshrc; then
+  oh_my_zsh_installer="$(mktemp "${TMPDIR:-/tmp}/terrapod-oh-my-zsh-installer.XXXXXX")"
+  installer_paths="$installer_paths $oh_my_zsh_installer"
+  if ! curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh -o "$oh_my_zsh_installer"; then
+    mark_install_warning \
+      shell-integrations \
+      "Shell integration setup needs attention" \
+      "Check network access to the Oh My Zsh installer, then rerun tpod apply."
+    exit 1
+  fi
+  if ! sh "$oh_my_zsh_installer" --unattended --keep-zshrc; then
     mark_install_warning \
       shell-integrations \
       "Shell integration setup needs attention" \
