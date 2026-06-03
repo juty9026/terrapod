@@ -254,10 +254,18 @@ Machine-local options are configured outside this repo with
 `chezmoi edit-config`. Keep only the option names, defaults, and examples here;
 do not commit workstation-specific values.
 
+Run `tpod setup` or `terrapod configure <Preset>` first so Terrapod writes a
+complete managed setup config. Routine commands treat the setup config as
+complete only when `profile` and every managed optional stack and macOS App
+Group key are present, including disabled keys. When editing manually, change
+values in the existing `[data]` section instead of replacing it with a partial
+snippet.
+
 Optional stack profiles and macOS App Group settings are disabled by default.
 
 | Key | Default | Purpose |
 | --- | --- | --- |
+| `profile` | Detected by setup/configure | Records the active Terrapod machine profile. |
 | `enableEditorStack` | `false` | Enables the Optional Editor Stack, which manages the rich Neovim configuration. Plain Neovim remains in the Core Shell Stack either way. |
 | `enableAiCliTools` | `false` | Installs Antigravity CLI, Claude Code, and Codex through official vendor installers. Existing npm-installed AI CLIs are left unmanaged. |
 | `enableDevelopmentWorkspace` | `false` | Enables the Optional Development Workspace preset, including the Optional Editor Stack, Optional AI Tool Stack, and development-specific Zellij workspace surfaces. |
@@ -269,7 +277,7 @@ Optional stack profiles and macOS App Group settings are disabled by default.
 | `gitAllowedSigners` | `[]` | Adds workstation-specific SSH signing identities to `~/.ssh/allowed_signers`. |
 
 When `enableDevelopmentWorkspace` is `true`, it enables both the Optional Editor Stack and Optional AI Tool Stack
-even if `enableEditorStack` or `enableAiCliTools` are false or omitted.
+even when `enableEditorStack` or `enableAiCliTools` are recorded as false.
 
 macOS Desktop App Stack installation remains separate from `enableDevelopmentWorkspace`
 because desktop casks can affect shared applications outside one user's home directory.
@@ -280,30 +288,38 @@ Existing npm-installed AI CLIs are left unmanaged; Terrapod does not uninstall o
 
 ### Optional stack profile examples
 
+The examples below show values to keep or change inside an existing complete
+`[data]` section. They are not standalone config files.
+
 Minimal VPS:
 
 ```toml
-[data]
+profile = "vps-shell"
+enableEditorStack = false
+enableAiCliTools = false
+enableDevelopmentWorkspace = false
+enableMacosAppGroupTerminalApps = false
+enableMacosAppGroupAutomation = false
+enableMacosAppGroupLauncher = false
+enableMacosAppGroupMonitoring = false
+enableMacosAppGroupAiApps = false
 ```
 
 Editor-only machine:
 
 ```toml
-[data]
 enableEditorStack = true
 ```
 
 AI-only machine:
 
 ```toml
-[data]
 enableAiCliTools = true
 ```
 
 Full development workspace machine:
 
 ```toml
-[data]
 enableEditorStack = false
 enableAiCliTools = false
 enableDevelopmentWorkspace = true
@@ -312,7 +328,6 @@ enableDevelopmentWorkspace = true
 Git signing identities can be configured alongside any profile.
 
 ```toml
-[data]
 gitAllowedSigners = [
   "name@company.com ssh-ed25519 AAAA_COMPANY_PUBLIC_KEY company",
 ]

@@ -392,17 +392,43 @@ assert_no_terrapod_artifacts_near_path() {
   pass "$message"
 }
 
+assert_no_shell_startup_backups_under() {
+  home_dir="$1"
+  message="$2"
+  found_file="$tmp_dir/found-shell-startup-backups"
+
+  : >"$found_file"
+  if [ -d "$home_dir" ]; then
+    find "$home_dir" \
+      \( -name '.zshrc.terrapod-backup-*' \
+      -o -name '.zprofile.terrapod-backup-*' \
+      -o -name '.bashrc.terrapod-backup-*' \
+      -o -name '.bash_profile.terrapod-backup-*' \
+      -o -name '.profile.terrapod-backup-*' \) \
+      -print >"$found_file"
+  fi
+
+  if [ -s "$found_file" ]; then
+    printf '%s\n' "unexpected shell startup backups:" >&2
+    sed 's/^/  /' "$found_file" >&2
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
 run_terrapod_configure() {
   preset="$1"
   input="${2:-}"
   home_dir="$3"
   xdg_config_home="$4"
+  profile="${5:-vps-shell}"
 
   if [ -n "$input" ]; then
     printf '%s\n' "$input" |
-      TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" configure "$preset"
+      TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" configure "$preset"
   else
-    TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" configure "$preset" </dev/null
+    TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" configure "$preset" </dev/null
   fi
 }
 
@@ -443,14 +469,17 @@ new_xdg="$tmp_dir/new-xdg"
 new_config="$new_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$new_home"
 
-run_terrapod_configure minimal "" "$new_home" "$new_xdg"
+run_terrapod_configure minimal "" "$new_home" "$new_xdg" >"$tmp_dir/new-configure.out"
 
 if [ ! -f "$new_config" ]; then
   fail "minimal Preset creates a chezmoi config file"
 fi
 pass "minimal Preset creates a chezmoi config file"
 
+assert_contains "$tmp_dir/new-configure.out" "Configured Terrapod Preset 'minimal' in $new_config" "minimal Preset reports config write target"
+assert_contains "$tmp_dir/new-configure.out" "tpod apply" "minimal Preset guides the user to tpod apply after writing config"
 assert_contains "$new_config" "[data]" "new config contains a data section"
+assert_data_key_once_with_value "$new_config" "profile" "\"vps-shell\"" "minimal Preset writes the detected profile exactly once in data"
 assert_data_key_once_with_value "$new_config" "enableEditorStack" "false" "minimal Preset disables Optional Editor Stack exactly once in data"
 assert_data_key_once_with_value "$new_config" "enableAiCliTools" "false" "minimal Preset disables Optional AI Tool Stack exactly once in data"
 assert_data_key_once_with_value "$new_config" "enableDevelopmentWorkspace" "false" "minimal Preset disables Optional Development Workspace exactly once in data"
@@ -462,6 +491,7 @@ assert_data_key_once_with_value "$new_config" "enableMacosAppGroupAiApps" "false
 assert_not_contains "$new_config" "enableMacosDesktopApps" "minimal Preset does not write the legacy all-in desktop app toggle"
 assert_not_contains "$new_config" "terrapodPreset" "minimal Preset stores concrete values instead of a dynamic Preset"
 assert_backup_count "$new_config" 0 "new config creation does not create a backup"
+assert_no_shell_startup_backups_under "$new_home" "minimal Preset does not create shell startup backups"
 
 development_home="$tmp_dir/development-home"
 development_xdg="$tmp_dir/development-xdg"
@@ -478,6 +508,7 @@ pass "development Preset creates a chezmoi config file"
 assert_data_key_once_with_value "$development_config" "enableEditorStack" "true" "development Preset enables Optional Editor Stack in a new config"
 assert_data_key_once_with_value "$development_config" "enableAiCliTools" "true" "development Preset enables Optional AI Tool Stack in a new config"
 assert_data_key_once_with_value "$development_config" "enableDevelopmentWorkspace" "true" "development Preset enables Optional Development Workspace in a new config"
+assert_data_key_once_with_value "$development_config" "profile" "\"vps-shell\"" "development Preset writes the detected profile in a new config"
 assert_data_key_once_with_value "$development_config" "enableMacosAppGroupTerminalApps" "false" "development Preset disables terminal-apps macOS App Group in a new config"
 assert_data_key_once_with_value "$development_config" "enableMacosAppGroupAutomation" "false" "development Preset disables automation macOS App Group in a new config"
 assert_data_key_once_with_value "$development_config" "enableMacosAppGroupLauncher" "false" "development Preset disables launcher macOS App Group in a new config"
@@ -492,7 +523,7 @@ workstation_xdg="$tmp_dir/workstation-xdg"
 workstation_config="$workstation_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$workstation_home"
 
-TERRAPOD_PROFILE=macos-terminal run_terrapod_configure workstation "" "$workstation_home" "$workstation_xdg"
+run_terrapod_configure workstation "" "$workstation_home" "$workstation_xdg" macos-terminal
 
 if [ ! -f "$workstation_config" ]; then
   fail "workstation Preset creates a chezmoi config file"
@@ -502,6 +533,7 @@ pass "workstation Preset creates a chezmoi config file"
 assert_data_key_once_with_value "$workstation_config" "enableEditorStack" "true" "workstation Preset enables Optional Editor Stack exactly once in data"
 assert_data_key_once_with_value "$workstation_config" "enableAiCliTools" "true" "workstation Preset enables Optional AI Tool Stack exactly once in data"
 assert_data_key_once_with_value "$workstation_config" "enableDevelopmentWorkspace" "true" "workstation Preset enables Optional Development Workspace exactly once in data"
+assert_data_key_once_with_value "$workstation_config" "profile" "\"macos-terminal\"" "workstation Preset writes the detected profile exactly once in data"
 assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupTerminalApps" "true" "workstation Preset enables terminal-apps macOS App Group exactly once in data"
 assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupAutomation" "true" "workstation Preset enables automation macOS App Group exactly once in data"
 assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupLauncher" "true" "workstation Preset enables launcher macOS App Group exactly once in data"
@@ -629,6 +661,7 @@ pass "confirmed setup creates a chezmoi config file"
 assert_data_key_once_with_value "$setup_workstation_config" "enableEditorStack" "true" "confirmed setup enables Optional Editor Stack exactly once in data"
 assert_data_key_once_with_value "$setup_workstation_config" "enableAiCliTools" "true" "confirmed setup enables Optional AI Tool Stack exactly once in data"
 assert_data_key_once_with_value "$setup_workstation_config" "enableDevelopmentWorkspace" "true" "confirmed setup enables Optional Development Workspace exactly once in data"
+assert_data_key_once_with_value "$setup_workstation_config" "profile" "\"macos-terminal\"" "confirmed setup writes the detected profile exactly once in data"
 assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroupTerminalApps" "true" "confirmed setup enables terminal-apps macOS App Group exactly once in data"
 assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroupAutomation" "true" "confirmed setup enables automation macOS App Group exactly once in data"
 assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroupLauncher" "true" "confirmed setup enables launcher macOS App Group exactly once in data"
@@ -637,6 +670,8 @@ assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroup
 assert_not_contains "$setup_workstation_config" "enableMacosDesktopApps" "confirmed setup does not write the legacy all-in desktop app toggle"
 assert_not_contains "$setup_workstation_config" "terrapodPreset" "confirmed setup stores concrete values instead of a dynamic Preset"
 assert_backup_count "$setup_workstation_config" 0 "confirmed setup new config creation does not create a backup"
+assert_contains "$tmp_dir/setup-workstation.out" "tpod apply" "confirmed setup guides the user to tpod apply after writing config"
+assert_no_shell_startup_backups_under "$setup_workstation_home" "confirmed setup does not create shell startup backups"
 
 setup_custom_workspace_home="$tmp_dir/setup-custom-workspace-home"
 setup_custom_workspace_xdg="$tmp_dir/setup-custom-workspace-xdg"
@@ -1035,6 +1070,7 @@ run_terrapod_configure development "y" "$existing_home" "$existing_xdg"
 assert_contains "$existing_config" "branch = \"main\"" "existing update preserves unrelated sourceState values"
 assert_contains "$existing_config" "email = \"minu@example.com\"" "existing update preserves unrelated data values"
 assert_contains "$existing_config" "command = \"nvim\"" "existing update preserves unrelated later sections"
+assert_data_key_once_with_value "$existing_config" "profile" "\"vps-shell\"" "existing update writes the detected profile exactly once in data"
 assert_data_key_once_with_value "$existing_config" "enableEditorStack" "true" "development Preset enables Optional Editor Stack exactly once in data"
 assert_data_key_once_with_value "$existing_config" "enableAiCliTools" "true" "development Preset enables Optional AI Tool Stack exactly once in data"
 assert_data_key_once_with_value "$existing_config" "enableDevelopmentWorkspace" "true" "development Preset enables Optional Development Workspace exactly once in data"
@@ -1045,6 +1081,7 @@ assert_data_key_once_with_value "$existing_config" "enableMacosAppGroupMonitorin
 assert_not_contains "$existing_config" "enableMacosDesktopApps" "existing update removes the legacy all-in desktop app toggle"
 assert_not_contains "$existing_config" "terrapodPreset" "existing update removes stale dynamic Preset key"
 assert_single_backup_matches "$existing_config" "$tmp_dir/existing-before.toml" "existing update creates one backup before changing managed keys"
+assert_no_shell_startup_backups_under "$existing_home" "existing update does not create shell startup backups"
 
 quoted_table_home="$tmp_dir/quoted-table-home"
 quoted_table_xdg="$tmp_dir/quoted-table-xdg"
@@ -1132,6 +1169,7 @@ run_terrapod_configure development "y" "$dotted_home" "$dotted_xdg"
 assert_not_contains "$dotted_config" "[data]" "dotted data update does not append a duplicate data table"
 assert_contains "$dotted_config" "data.email = \"minu@example.com\"" "dotted data update preserves unrelated data values"
 assert_contains "$dotted_config" "branch = \"main\"" "dotted data update preserves later sections"
+assert_contains "$dotted_config" "data.profile = \"vps-shell\"" "dotted data update writes profile as a dotted data key"
 assert_contains "$dotted_config" "data.enableEditorStack = true" "dotted data update writes Editor Stack as a dotted data key"
 assert_contains "$dotted_config" "data.enableAiCliTools = true" "dotted data update writes AI Tool Stack as a dotted data key"
 assert_contains "$dotted_config" "data.enableDevelopmentWorkspace = true" "dotted data update writes Development Workspace as a dotted data key"
