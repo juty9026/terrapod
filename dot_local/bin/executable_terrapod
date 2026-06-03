@@ -795,15 +795,26 @@ managed_setup_guidance_message() {
   printf '%s\n' "Run 'tpod setup' or 'tpod configure <$(available_preset_args "$(current_profile)")>' to complete the managed setup config."
 }
 
+managed_setup_config_is_supported() {
+  ! unsupported_managed_config_problem_message "$1" >/dev/null 2>&1
+}
+
 is_managed_setup_config_complete() {
   config_file="$1"
 
   config_file_is_usable "$config_file" &&
+    managed_setup_config_is_supported "$config_file" &&
     [ -z "$(managed_setup_missing_keys "$config_file")" ]
 }
 
 print_managed_setup_config_guidance() {
   config_file="$1"
+
+  if problem_message="$(unsupported_managed_config_problem_message "$config_file")"; then
+    printf '%s\n' "  $problem_message"
+    return 0
+  fi
+
   missing_keys="$(managed_setup_missing_keys "$config_file")"
 
   if [ -z "$missing_keys" ]; then
@@ -1036,6 +1047,9 @@ print_status_warnings() {
     [ "$(config_file_state "$config_file")" != "missing" ]; then
     print_warning_line "$(config_file_problem_message "$config_file")"
     printed=1
+  elif problem_message="$(unsupported_managed_config_problem_message "$config_file")"; then
+    print_warning_line "$problem_message"
+    printed=1
   elif ! is_managed_setup_config_complete "$config_file"; then
     print_warning_line "managed setup config is incomplete (missing keys: $(managed_setup_missing_keys "$config_file"))"
     printed=1
@@ -1093,7 +1107,10 @@ show_config_context() {
 
   case "$config_state" in
     readable)
-      if is_managed_setup_config_complete "$config_file"; then
+      if ! managed_setup_config_is_supported "$config_file"; then
+        printf ' %s (unsupported managed setup config)\n' "$config_file"
+        print_managed_setup_config_guidance "$config_file"
+      elif is_managed_setup_config_complete "$config_file"; then
         printf ' %s (' "$config_file"
         print_state_word "present"
         printf ')\n'
@@ -1232,7 +1249,7 @@ run_apply_preflight() {
     printf '\n'
   fi
 
-  reject_unsupported_inline_data_table "$config_file"
+  reject_unsupported_managed_config_syntax "$config_file"
 
   if ! is_managed_setup_config_complete "$config_file"; then
     fatal_incomplete_managed_setup_config "$config_file"
@@ -1403,6 +1420,9 @@ run_doctor() {
     [ "$(config_file_state "$config_file")" != "missing" ]; then
     doctor_warn "$(config_file_problem_message "$config_file")"
     doctor_guidance "$(config_file_guidance_message)"
+  elif problem_message="$(unsupported_managed_config_problem_message "$config_file")"; then
+    doctor_warn "$problem_message"
+    doctor_guidance "$(managed_setup_guidance_message)"
   elif is_managed_setup_config_complete "$config_file"; then
     doctor_ok "Managed setup config is complete"
   else
@@ -1471,7 +1491,7 @@ run_update_preflight() {
     fi
   fi
 
-  reject_unsupported_inline_data_table "$config_file"
+  reject_unsupported_managed_config_syntax "$config_file"
 
   if ! is_managed_setup_config_complete "$config_file"; then
     fatal_incomplete_managed_setup_config "$config_file"
@@ -1630,19 +1650,46 @@ reject_unsupported_managed_config() {
   config_file="$1"
 
   reject_unusable_config_path "$config_file"
-  reject_unsupported_multiline_strings "$config_file"
-  reject_section_like_multiline_arrays "$config_file"
-  reject_unsupported_inline_data_table "$config_file"
+  reject_unsupported_managed_config_syntax "$config_file"
 }
 
-reject_unsupported_inline_data_table() {
+reject_unsupported_managed_config_syntax() {
   config_file="$1"
 
-  if [ ! -f "$config_file" ]; then
+  if problem_message="$(unsupported_managed_config_problem_message "$config_file")"; then
+    fatal "$problem_message"
+  fi
+}
+
+unsupported_managed_config_problem_message() {
+  config_file="$1"
+
+  if config_has_unsupported_multiline_strings "$config_file"; then
+    printf '%s\n' "unsupported multiline string in config; rewrite multiline values before running Terrapod commands: $config_file"
     return 0
   fi
 
-  if awk '
+  if config_has_section_like_multiline_arrays "$config_file"; then
+    printf '%s\n' "unsupported multiline array with section-like entries in config; rewrite that array before running Terrapod commands: $config_file"
+    return 0
+  fi
+
+  if config_has_unsupported_inline_data_table "$config_file"; then
+    printf '%s\n' "unsupported inline data table in config; rewrite data = {...} as a [data] table before running Terrapod commands: $config_file"
+    return 0
+  fi
+
+  return 1
+}
+
+config_has_unsupported_inline_data_table() {
+  config_file="$1"
+
+  if [ ! -f "$config_file" ]; then
+    return 1
+  fi
+
+  awk '
     function is_section(line) {
       return line ~ /^[[:space:]]*(\[[^]]+\]|\[\[[^]]+\]\])[[:space:]]*($|#)/
     }
@@ -1664,19 +1711,17 @@ reject_unsupported_inline_data_table() {
     END {
       exit found ? 0 : 1
     }
-  ' "$config_file"; then
-    fatal "unsupported inline data table in config; rewrite data = {...} as a [data] table before running Terrapod commands: $config_file"
-  fi
+  ' "$config_file"
 }
 
-reject_unsupported_multiline_strings() {
+config_has_unsupported_multiline_strings() {
   config_file="$1"
 
   if [ ! -f "$config_file" ]; then
-    return 0
+    return 1
   fi
 
-  if awk '
+  awk '
     BEGIN {
       multiline_literal = sprintf("%c%c%c", 39, 39, 39)
       multiline_basic = "\"\"\""
@@ -1699,19 +1744,17 @@ reject_unsupported_multiline_strings() {
     END {
       exit found ? 0 : 1
     }
-  ' "$config_file"; then
-    fatal "unsupported multiline string in config; rewrite multiline values before running configure: $config_file"
-  fi
+  ' "$config_file"
 }
 
-reject_section_like_multiline_arrays() {
+config_has_section_like_multiline_arrays() {
   config_file="$1"
 
   if [ ! -f "$config_file" ]; then
-    return 0
+    return 1
   fi
 
-  if awk '
+  awk '
     function is_comment(line) {
       return line ~ "^[[:space:]]*#"
     }
@@ -1825,9 +1868,7 @@ reject_section_like_multiline_arrays() {
     END {
       exit found ? 0 : 1
     }
-  ' "$config_file"; then
-    fatal "unsupported multiline array with section-like entries in config; rewrite that array before running configure: $config_file"
-  fi
+  ' "$config_file"
 }
 
 backup_existing_config() {

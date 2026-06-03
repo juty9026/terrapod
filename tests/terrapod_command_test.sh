@@ -1259,6 +1259,33 @@ assert_contains "$status_incomplete_vps_output" "Config: $status_incomplete_vps_
 assert_contains "$status_incomplete_vps_output" "enableMacosAppGroupAiApps" "Terrapod status identifies missing managed setup keys even on VPS"
 assert_contains "$status_incomplete_vps_output" "Run 'tpod setup' or 'tpod configure <minimal|development>' to complete the managed setup config." "Terrapod status guides incomplete config recovery with tpod setup or configure"
 
+status_unsafe_multiline_config="$tmp_dir/status-unsafe-multiline.toml"
+cat >"$status_unsafe_multiline_config" <<'TOML'
+[data]
+notes = """
+profile = "vps-shell"
+enableEditorStack = false
+enableAiCliTools = false
+enableDevelopmentWorkspace = false
+enableMacosAppGroupTerminalApps = false
+enableMacosAppGroupAutomation = false
+enableMacosAppGroupLauncher = false
+enableMacosAppGroupMonitoring = false
+enableMacosAppGroupAiApps = false
+"""
+TOML
+
+if ! status_unsafe_multiline_output="$(
+  TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_unsafe_multiline_config" PATH="$ubuntu_status_path" \
+    /bin/sh "$terrapod" status
+)"; then
+  fail "Terrapod status exits successfully when managed setup config contains unsupported multiline strings"
+fi
+
+assert_contains "$status_unsafe_multiline_output" "Config: $status_unsafe_multiline_config (unsupported managed setup config)" "Terrapod status reports unsupported multiline config in the Config section"
+assert_contains "$status_unsafe_multiline_output" "unsupported multiline string" "Terrapod status explains unsupported multiline config"
+assert_not_contains "$status_unsafe_multiline_output" "Config: $status_unsafe_multiline_config (present)" "Terrapod status does not trust managed keys inside multiline strings"
+
 status_unreadable_config="$tmp_dir/status-unreadable.toml"
 cat >"$status_unreadable_config" <<'TOML'
 [data]
@@ -1422,6 +1449,16 @@ doctor_incomplete_config_output="$(cat "$tmp_dir/doctor-incomplete-config.out")"
 assert_contains "$doctor_incomplete_config_output" "warn - managed setup config is incomplete" "Terrapod doctor marks incomplete managed setup config as a failed check"
 assert_contains "$doctor_incomplete_config_output" "enableMacosAppGroupAiApps" "Terrapod doctor reports missing managed setup keys even on VPS"
 assert_contains "$doctor_incomplete_config_output" "Run 'tpod setup' or 'tpod configure <minimal|development>' to complete the managed setup config." "Terrapod doctor guides incomplete config recovery with tpod setup or configure"
+
+if TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_unsafe_multiline_config" PATH="$doctor_ok_path" \
+  /bin/sh "$terrapod" doctor >"$tmp_dir/doctor-unsafe-multiline.out" 2>"$tmp_dir/doctor-unsafe-multiline.err"; then
+  fail "Terrapod doctor fails when managed setup config contains unsupported multiline strings"
+fi
+
+doctor_unsafe_multiline_output="$(cat "$tmp_dir/doctor-unsafe-multiline.out")"
+
+assert_contains "$doctor_unsafe_multiline_output" "warn - unsupported multiline string" "Terrapod doctor warns for unsupported multiline config"
+assert_not_contains "$doctor_unsafe_multiline_output" "Managed setup config is complete" "Terrapod doctor does not trust managed keys inside multiline strings"
 
 doctor_unreadable_config="$tmp_dir/doctor-unreadable.toml"
 cat >"$doctor_unreadable_config" <<'TOML'
@@ -1658,6 +1695,28 @@ fi
 
 if [ -e "$CHEZMOI_CALL_FILE" ]; then
   fail "Terrapod update rejects incomplete config before recording chezmoi update arguments"
+fi
+
+rm -f "$CHEZMOI_CALL_FILE" "$CHEZMOI_INVOKED_FILE"
+
+if TERRAPOD_PROFILE=vps-shell TERRAPOD_CHEZMOI_CONFIG="$status_unsafe_multiline_config" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$terrapod" update >"$tmp_dir/update-unsafe-multiline.out" 2>"$tmp_dir/update-unsafe-multiline.err"; then
+  fail "Terrapod update fails before chezmoi update when managed setup config contains unsupported multiline strings"
+fi
+
+update_unsafe_multiline_output="$(cat "$tmp_dir/update-unsafe-multiline.out")"
+update_unsafe_multiline_error="$(cat "$tmp_dir/update-unsafe-multiline.err")"
+
+assert_contains "$update_unsafe_multiline_output" "Config: $status_unsafe_multiline_config (unsupported managed setup config)" "Terrapod update reports unsupported multiline config in the Config section"
+assert_not_contains "$update_unsafe_multiline_output" "Delegating source update to:" "Terrapod update does not announce delegation when managed setup config contains unsupported multiline strings"
+assert_contains "$update_unsafe_multiline_error" "unsupported multiline string" "Terrapod update explains unsupported multiline config"
+
+if [ -e "$CHEZMOI_INVOKED_FILE" ]; then
+  fail "Terrapod update rejects unsupported multiline config before calling chezmoi update"
+fi
+
+if [ -e "$CHEZMOI_CALL_FILE" ]; then
+  fail "Terrapod update rejects unsupported multiline config before recording chezmoi update arguments"
 fi
 
 override_config="$tmp_dir/override-chezmoi.toml"
@@ -2055,6 +2114,28 @@ fi
 
 if [ -e "$CHEZMOI_MANAGED_ARGS_FILE" ]; then
   fail "Terrapod apply rejects inline data table config before post-apply validation"
+fi
+
+rm -f "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
+
+if TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_unsafe_multiline_config" PATH="$apply_incomplete_path" \
+  /bin/sh "$terrapod" apply >"$tmp_dir/apply-unsafe-multiline.out" 2>"$tmp_dir/apply-unsafe-multiline.err"; then
+  fail "Terrapod apply rejects unsupported multiline config before chezmoi apply"
+fi
+
+apply_unsafe_multiline_output="$(cat "$tmp_dir/apply-unsafe-multiline.out")"
+apply_unsafe_multiline_error="$(cat "$tmp_dir/apply-unsafe-multiline.err")"
+
+assert_contains "$apply_unsafe_multiline_output" "Config: $status_unsafe_multiline_config (unsupported managed setup config)" "Terrapod apply reports unsupported multiline config in the Config section"
+assert_contains "$apply_unsafe_multiline_error" "unsupported multiline string" "Terrapod apply reports unsupported multiline config"
+assert_not_contains "$apply_unsafe_multiline_error" "managed setup config is incomplete" "Terrapod apply does not misreport unsupported multiline config as missing managed setup keys"
+
+if [ -e "$CHEZMOI_APPLY_INVOKED_FILE" ]; then
+  fail "Terrapod apply rejects unsupported multiline config before calling chezmoi apply"
+fi
+
+if [ -e "$CHEZMOI_MANAGED_ARGS_FILE" ]; then
+  fail "Terrapod apply rejects unsupported multiline config before post-apply validation"
 fi
 
 if ! HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
