@@ -191,7 +191,7 @@ ensure_source_repo_prerequisites() {
   bootstrap_packages="$bootstrap_packages gpg"
 
   if ! $sudo_cmd apt-get update -y; then
-    fatal "failed to update APT metadata before installing Ubuntu bootstrap prerequisites"
+    fatal "failed to update APT metadata before installing Ubuntu bootstrap prerequisites. Check sudo permissions and rerun the Terrapod installer before Terrapod Setup, or install git and gum manually before rerunning the installer."
   fi
 
   if ! $sudo_cmd apt-get install -y $bootstrap_packages; then
@@ -305,22 +305,7 @@ prepare_setup_ui_dependency() {
   brew_bin="$(find_homebrew || true)"
 
   if [ -z "$brew_bin" ]; then
-    printf '%s\n' "Installing Homebrew for Terrapod Setup UI dependency..."
-    if ! homebrew_installer="$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; then
-      print_setup_ui_dependency_recovery "$profile" "$source_dir" "$chezmoi_bin" "" "failed to download the Homebrew installer"
-      return 1
-    fi
-
-    if ! NONINTERACTIVE=1 /bin/bash -c "$homebrew_installer" </dev/null >&2; then
-      print_setup_ui_dependency_recovery "$profile" "$source_dir" "$chezmoi_bin" "" "failed to install Homebrew"
-      return 1
-    fi
-
-    brew_bin="$(find_homebrew || true)"
-  fi
-
-  if [ -z "$brew_bin" ]; then
-    print_setup_ui_dependency_recovery "$profile" "$source_dir" "$chezmoi_bin" "" "Homebrew install finished, but brew was not found"
+    print_setup_ui_dependency_recovery "$profile" "$source_dir" "$chezmoi_bin" "" "Homebrew was not found"
     return 1
   fi
 
