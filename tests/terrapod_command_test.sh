@@ -1636,6 +1636,30 @@ fi
 
 pass "Terrapod update does not call brew, apt, sudo, mise, or npm upgrade flows"
 
+rm -f "$CHEZMOI_CALL_FILE" "$CHEZMOI_INVOKED_FILE"
+
+if TERRAPOD_PROFILE=vps-shell TERRAPOD_CHEZMOI_CONFIG="$status_incomplete_vps_config" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$terrapod" update >"$tmp_dir/update-incomplete.out" 2>"$tmp_dir/update-incomplete.err"; then
+  fail "Terrapod update fails before chezmoi update when managed setup config is incomplete"
+fi
+
+update_incomplete_output="$(cat "$tmp_dir/update-incomplete.out")"
+update_incomplete_error="$(cat "$tmp_dir/update-incomplete.err")"
+
+assert_contains "$update_incomplete_output" "Config: $status_incomplete_vps_config (present; incomplete managed setup config)" "Terrapod update reports incomplete managed setup config in the Config section"
+assert_not_contains "$update_incomplete_output" "Delegating source update to:" "Terrapod update does not announce delegation when managed setup config is incomplete"
+assert_contains "$update_incomplete_error" "managed setup config is incomplete" "Terrapod update explains incomplete managed setup config"
+assert_contains "$update_incomplete_error" "enableMacosAppGroupAiApps" "Terrapod update reports missing managed setup keys even on VPS"
+assert_contains "$update_incomplete_error" "Run 'tpod setup' or 'tpod configure <minimal|development>' to complete the managed setup config." "Terrapod update guides incomplete config recovery with tpod setup or configure"
+
+if [ -e "$CHEZMOI_INVOKED_FILE" ]; then
+  fail "Terrapod update rejects incomplete config before calling chezmoi update"
+fi
+
+if [ -e "$CHEZMOI_CALL_FILE" ]; then
+  fail "Terrapod update rejects incomplete config before recording chezmoi update arguments"
+fi
+
 override_config="$tmp_dir/override-chezmoi.toml"
 
 cat >"$override_config" <<'TOML'

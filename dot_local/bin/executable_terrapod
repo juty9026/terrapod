@@ -1457,7 +1457,25 @@ show_update_context() {
   print_title "Terrapod update"
   print_section_value "Profile:" "$(profile_context_label)"
   show_config_context "$config_file"
-  printf '%s\n' "Delegating source update to: $(render_chezmoi_command update --exclude scripts)"
+  if is_managed_setup_config_complete "$config_file"; then
+    printf '%s\n' "Delegating source update to: $(render_chezmoi_command update --exclude scripts)"
+  fi
+}
+
+run_update_preflight() {
+  config_file="$1"
+
+  if [ -e "$config_file" ] || [ -L "$config_file" ]; then
+    if [ ! -f "$config_file" ] || [ ! -r "$config_file" ]; then
+      fatal "config path is not a readable file: $config_file"
+    fi
+  fi
+
+  reject_unsupported_inline_data_table "$config_file"
+
+  if ! is_managed_setup_config_complete "$config_file"; then
+    fatal_incomplete_managed_setup_config "$config_file"
+  fi
 }
 
 run_update() {
@@ -1465,7 +1483,9 @@ run_update() {
     fail_usage "update accepts no arguments"
   fi
 
+  config_file="$(chezmoi_config_file)"
   show_update_context
+  run_update_preflight "$config_file"
   run_chezmoi_command update --exclude scripts
 }
 
