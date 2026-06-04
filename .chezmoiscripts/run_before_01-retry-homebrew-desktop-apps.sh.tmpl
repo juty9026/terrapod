@@ -15,23 +15,33 @@ if [ -f "$install_warnings_lib" ]; then
   . "$install_warnings_lib"
 fi
 
+if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
+  exit 0
+fi
+
 mark_install_warning() {
   category="$1"
   summary="$2"
   guidance="$3"
 
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
-    terrapod_install_warning_write "$category" "$summary" "$guidance" || true
-  fi
+  terrapod_install_warning_write "$category" "$summary" "$guidance" || true
 }
 
 clear_install_warning() {
   category="$1"
 
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
-    terrapod_install_warning_clear "$category" || true
-  fi
+  terrapod_install_warning_clear "$category" || true
 }
+
+desktop_marker_path="$(terrapod_install_warning_path homebrew-desktop-apps 2>/dev/null || true)"
+if [ -z "$desktop_marker_path" ]; then
+  exit 0
+fi
+
+{{ if $enableMacosAppGroups -}}
+if [ ! -f "$desktop_marker_path" ]; then
+  exit 0
+fi
 
 join_lines_with_commas() {
   awk '
@@ -183,58 +193,24 @@ find_brew() {
 }
 
 brew_bin="$(find_brew || true)"
-
 if [ -z "$brew_bin" ]; then
-  echo "Installing Homebrew..."
-  homebrew_installer="$(mktemp "${TMPDIR:-/tmp}/terrapod-homebrew-install.XXXXXX")"
-  if ! curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "$homebrew_installer"; then
-    rm -f "$homebrew_installer"
-    mark_install_warning \
-      homebrew-core \
-      "Homebrew core install needs attention" \
-      "Install Homebrew from https://brew.sh, then rerun tpod apply."
-    exit 1
-  fi
-  if ! NONINTERACTIVE=1 /bin/bash "$homebrew_installer"; then
-    rm -f "$homebrew_installer"
-    mark_install_warning \
-      homebrew-core \
-      "Homebrew core install needs attention" \
-      "Install Homebrew from https://brew.sh, then rerun tpod apply."
-    exit 1
-  fi
-  rm -f "$homebrew_installer"
-  brew_bin="$(find_brew || true)"
-fi
-
-if [ -z "$brew_bin" ]; then
-  echo "Homebrew install finished, but brew was not found." >&2
   mark_install_warning \
-    homebrew-core \
-    "Homebrew core install needs attention" \
+    homebrew-desktop-apps \
+    "Homebrew desktop app install needs attention" \
     "Install Homebrew from https://brew.sh, then rerun tpod apply."
-  exit 1
+  exit 0
 fi
 
-eval "$("$brew_bin" shellenv)"
+if ! brew_shellenv="$("$brew_bin" shellenv)"; then
+  mark_install_warning \
+    homebrew-desktop-apps \
+    "Homebrew desktop app install needs attention" \
+    "Fix Homebrew shellenv, then rerun tpod apply."
+  exit 0
+fi
+eval "$brew_shellenv"
 brew analytics off >/dev/null 2>&1 || true
 
-core_brewfile="{{ .chezmoi.sourceDir }}/Brewfile"
-
-# Core Brewfile checksum: {{ include "Brewfile" | sha256sum }}
-if [ -f "$core_brewfile" ]; then
-  if brew bundle --no-upgrade --file="$core_brewfile"; then
-    clear_install_warning homebrew-core
-  else
-    mark_install_warning \
-      homebrew-core \
-      "Homebrew core install needs attention" \
-      "Review Homebrew bundle output, fix package access, then rerun tpod apply."
-    exit 1
-  fi
-fi
-
-{{ if $enableMacosAppGroups -}}
 desktop_brewfile="$(mktemp "${TMPDIR:-/tmp}/terrapod-macos-desktop-apps.XXXXXX")"
 cleanup_desktop_brewfile() {
   rm -f "$desktop_brewfile"
@@ -254,8 +230,9 @@ if [ -s "$desktop_brewfile" ]; then
       homebrew-desktop-apps \
       "Homebrew desktop app install needs attention" \
       "$desktop_app_failure_guidance_text"
-    exit 0
   fi
+else
+  clear_install_warning homebrew-desktop-apps
 fi
 {{ else -}}
 clear_install_warning homebrew-desktop-apps

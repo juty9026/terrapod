@@ -199,6 +199,7 @@ macos_managed_targets="$(managed_target_paths "$macos_data")"
 macos_terminal_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":true,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":false,"enableMacosAppGroupMonitoring":false}'
 macos_automation_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":true,"enableMacosAppGroupLauncher":false,"enableMacosAppGroupMonitoring":false}'
 macos_launcher_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":true,"enableMacosAppGroupMonitoring":false}'
+macos_terminal_launcher_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":true,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":true,"enableMacosAppGroupMonitoring":false,"enableMacosAppGroupAiApps":false}'
 macos_monitoring_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":false,"enableMacosAppGroupMonitoring":true}'
 macos_ai_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":false,"enableMacosAppGroupMonitoring":false,"enableMacosAppGroupAiApps":true}'
 macos_terminal_apps_managed_targets="$(managed_target_paths "$macos_terminal_apps_data")"
@@ -215,6 +216,7 @@ development_workspace_data='{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu",
 development_workspace_managed="$(managed_source_paths "$development_workspace_data")"
 
 macos_only_entries="
+.chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl
 .chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl
 .chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl
 dot_config/ghostty
@@ -239,8 +241,11 @@ monitoring_apps_brewfile="$(render_template "$macos_monitoring_apps_data" "Brewf
 ai_apps_brewfile="$(render_template "$macos_ai_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 macos_bootstrap="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
 macos_terminal_apps_bootstrap="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
+macos_terminal_launcher_apps_bootstrap="$(render_template "$macos_terminal_launcher_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
 macos_ai_apps_bootstrap="$(render_template "$macos_ai_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
 macos_development_workspace_bootstrap="$(render_template "$macos_development_workspace_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
+macos_desktop_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl")"
+macos_terminal_apps_desktop_retry="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl")"
 macos_karabiner_opener="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 macos_terminal_apps_karabiner_opener="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 macos_automation_apps_karabiner_opener="$(render_template "$macos_automation_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
@@ -276,6 +281,16 @@ printf '%s\n' "$macos_bootstrap" >"$macos_bootstrap_script"
 sh -n "$macos_bootstrap_script" || fail "macOS bootstrap default cleanup script should be valid sh"
 pass "macOS bootstrap default cleanup script is valid sh"
 
+macos_desktop_retry_script="$tmp_dir/macos-desktop-retry-default.sh"
+printf '%s\n' "$macos_desktop_retry" >"$macos_desktop_retry_script"
+sh -n "$macos_desktop_retry_script" || fail "macOS desktop retry default cleanup script should be valid sh"
+pass "macOS desktop retry default cleanup script is valid sh"
+
+macos_terminal_apps_desktop_retry_script="$tmp_dir/macos-terminal-desktop-retry.sh"
+printf '%s\n' "$macos_terminal_apps_desktop_retry" >"$macos_terminal_apps_desktop_retry_script"
+sh -n "$macos_terminal_apps_desktop_retry_script" || fail "macOS desktop retry App Group script should be valid sh"
+pass "macOS desktop retry App Group script is valid sh"
+
 macos_brew_bin="$tmp_dir/macos-brew-bin"
 macos_brew_log="$tmp_dir/macos-brew.log"
 mkdir -p "$macos_brew_bin"
@@ -287,6 +302,38 @@ write_stub "$macos_brew_bin/brew" \
   '  bundle) exit 0 ;;' \
   '  *) exit 64 ;;' \
   'esac'
+
+write_brew_bundle_stub() {
+  path="$1"
+
+  write_stub "$path" \
+    'printf "%s\n" "brew args:$*" >>"$MACOS_BREW_LOG"' \
+    'bundle_file=' \
+    'for arg do' \
+    '  case "$arg" in' \
+    '    --file=*) bundle_file="${arg#--file=}" ;;' \
+    '  esac' \
+    'done' \
+    'case "$1" in' \
+    '  shellenv) printf "%s\n" ":" ;;' \
+    '  analytics) exit 0 ;;' \
+    '  bundle)' \
+    '    for cask in ${MACOS_BREW_FAIL_CASKS:-}; do' \
+    '      if [ -n "$bundle_file" ] && grep -Fx "cask \"$cask\"" "$bundle_file" >/dev/null 2>&1; then' \
+    '        exit 42' \
+    '      fi' \
+    '    done' \
+    '    if [ "${MACOS_BREW_FAIL_DESKTOP_BULK:-}" = "1" ] && [ -n "$bundle_file" ] && grep -Fx "# Rendered opt-in macOS Desktop App Stack." "$bundle_file" >/dev/null 2>&1; then' \
+    '      exit 42' \
+    '    fi' \
+    '    if [ "${MACOS_BREW_FAIL_BULK:-}" = "1" ] && [ -n "$bundle_file" ] && grep -Fx "tap \"homebrew/cask\"" "$bundle_file" >/dev/null 2>&1; then' \
+    '      exit 42' \
+    '    fi' \
+    '    exit 0' \
+    '    ;;' \
+    '  *) exit 64 ;;' \
+    'esac'
+}
 
 macos_marker_state="$tmp_dir/macos-marker-state"
 macos_marker_home="$tmp_dir/macos-marker-home"
@@ -403,6 +450,144 @@ assert_text_equals \
   "$expected_ai_apps_casks" \
   "ai-apps group renders exactly the expected casks"
 
+terminal_launcher_bootstrap_script="$tmp_dir/macos-terminal-launcher-bootstrap.sh"
+printf '%s\n' "$macos_terminal_launcher_apps_bootstrap" >"$terminal_launcher_bootstrap_script"
+sh -n "$terminal_launcher_bootstrap_script" || fail "terminal and launcher bootstrap script should be valid sh"
+pass "terminal and launcher bootstrap script is valid sh"
+
+terminal_launcher_bin="$tmp_dir/terminal-launcher-bin"
+terminal_launcher_state="$tmp_dir/terminal-launcher-state"
+terminal_launcher_home="$tmp_dir/terminal-launcher-home"
+terminal_launcher_log="$tmp_dir/terminal-launcher-brew.log"
+mkdir -p "$terminal_launcher_bin" "$terminal_launcher_home"
+write_brew_bundle_stub "$terminal_launcher_bin/brew"
+
+if ! HOME="$terminal_launcher_home" XDG_STATE_HOME="$terminal_launcher_state" MACOS_BREW_LOG="$terminal_launcher_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty raycast" PATH="$terminal_launcher_bin:/usr/bin:/bin" \
+  sh "$terminal_launcher_bootstrap_script" >"$tmp_dir/terminal-launcher.out" 2>"$tmp_dir/terminal-launcher.err"; then
+  fail "macOS desktop app bundle failure does not block bootstrap script"
+fi
+
+terminal_launcher_marker="$terminal_launcher_state/terrapod/install-warnings/homebrew-desktop-apps"
+if [ ! -f "$terminal_launcher_marker" ]; then
+  fail "macOS desktop app bundle failure records a homebrew-desktop-apps marker"
+fi
+pass "macOS desktop app bundle failure records a homebrew-desktop-apps marker"
+
+terminal_launcher_marker_text="$(cat "$terminal_launcher_marker")"
+assert_contains_text "$terminal_launcher_marker_text" "category='homebrew-desktop-apps'" "desktop app marker keeps one stable category"
+assert_contains_text "$terminal_launcher_marker_text" "summary='Homebrew desktop app install needs attention'" "desktop app marker keeps stable summary"
+assert_contains_text "$terminal_launcher_marker_text" "failed casks: ghostty, raycast" "desktop app marker guidance includes only casks whose single-cask bundle failed"
+assert_contains_text "$terminal_launcher_marker_text" "App Groups: terminal-apps, launcher" "desktop app marker guidance includes enabled App Groups"
+assert_not_contains_text "$terminal_launcher_marker_text" "1password-cli" "desktop app marker excludes casks whose single-cask bundle succeeded"
+
+bulk_only_bootstrap_script="$tmp_dir/macos-bulk-only-bootstrap.sh"
+printf '%s\n' "$macos_terminal_launcher_apps_bootstrap" >"$bulk_only_bootstrap_script"
+sh -n "$bulk_only_bootstrap_script" || fail "bulk-only desktop bootstrap script should be valid sh"
+pass "bulk-only desktop bootstrap script is valid sh"
+
+bulk_only_bin="$tmp_dir/bulk-only-bin"
+bulk_only_state="$tmp_dir/bulk-only-state"
+bulk_only_home="$tmp_dir/bulk-only-home"
+bulk_only_log="$tmp_dir/bulk-only-brew.log"
+mkdir -p "$bulk_only_bin" "$bulk_only_home"
+write_brew_bundle_stub "$bulk_only_bin/brew"
+
+if ! HOME="$bulk_only_home" XDG_STATE_HOME="$bulk_only_state" MACOS_BREW_LOG="$bulk_only_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 PATH="$bulk_only_bin:/usr/bin:/bin" \
+  sh "$bulk_only_bootstrap_script" >"$tmp_dir/bulk-only.out" 2>"$tmp_dir/bulk-only.err"; then
+  fail "macOS desktop app bulk-only bundle failure does not block bootstrap script"
+fi
+
+bulk_only_marker_text="$(cat "$bulk_only_state/terrapod/install-warnings/homebrew-desktop-apps")"
+assert_contains_text "$bulk_only_marker_text" "Review Homebrew desktop app bundle output" "desktop app marker falls back when bulk fails but single-cask attribution succeeds"
+assert_not_contains_text "$bulk_only_marker_text" "failed casks:" "desktop app bulk-only fallback avoids invented cask detail"
+assert_not_contains_text "$bulk_only_marker_text" "App Groups:" "desktop app bulk-only fallback avoids invented App Group detail"
+
+fallback_bootstrap_script="$tmp_dir/macos-desktop-fallback-bootstrap.sh"
+awk '
+  $0 == "BREWFILE" && in_brewfile == 1 {
+    print "# rendered desktop stack without reliable cask detail"
+    print "tap \"homebrew/cask\""
+    print "BREWFILE"
+    in_brewfile = 0
+    next
+  }
+  in_brewfile == 1 { next }
+  $0 == "cat >\"$desktop_brewfile\" <<'\''BREWFILE'\''" {
+    print
+    in_brewfile = 1
+    next
+  }
+  { print }
+' "$terminal_launcher_bootstrap_script" >"$fallback_bootstrap_script"
+sh -n "$fallback_bootstrap_script" || fail "fallback desktop bootstrap script should be valid sh"
+pass "fallback desktop bootstrap script is valid sh"
+
+fallback_bin="$tmp_dir/fallback-bin"
+fallback_state="$tmp_dir/fallback-state"
+fallback_home="$tmp_dir/fallback-home"
+fallback_log="$tmp_dir/fallback-brew.log"
+mkdir -p "$fallback_bin" "$fallback_home"
+write_brew_bundle_stub "$fallback_bin/brew"
+
+if ! HOME="$fallback_home" XDG_STATE_HOME="$fallback_state" MACOS_BREW_LOG="$fallback_log" MACOS_BREW_FAIL_BULK=1 PATH="$fallback_bin:/usr/bin:/bin" \
+  sh "$fallback_bootstrap_script" >"$tmp_dir/fallback.out" 2>"$tmp_dir/fallback.err"; then
+  fail "macOS desktop app fallback bundle failure does not block bootstrap script"
+fi
+
+fallback_marker_text="$(cat "$fallback_state/terrapod/install-warnings/homebrew-desktop-apps")"
+assert_contains_text "$fallback_marker_text" "Review Homebrew desktop app bundle output" "desktop app marker falls back to bulk bundle guidance when casks are not reliable"
+assert_not_contains_text "$fallback_marker_text" "failed casks:" "desktop app fallback marker avoids invented cask detail"
+assert_not_contains_text "$fallback_marker_text" "App Groups:" "desktop app fallback marker avoids invented App Group detail"
+
+terminal_only_bootstrap_script="$tmp_dir/macos-terminal-only-bootstrap.sh"
+printf '%s\n' "$macos_terminal_apps_bootstrap" >"$terminal_only_bootstrap_script"
+sh -n "$terminal_only_bootstrap_script" || fail "terminal-only bootstrap script should be valid sh"
+pass "terminal-only bootstrap script is valid sh"
+
+terminal_only_bin="$tmp_dir/terminal-only-bin"
+terminal_only_state="$tmp_dir/terminal-only-state"
+terminal_only_home="$tmp_dir/terminal-only-home"
+terminal_only_log="$tmp_dir/terminal-only-brew.log"
+mkdir -p "$terminal_only_bin" "$terminal_only_home"
+write_brew_bundle_stub "$terminal_only_bin/brew"
+
+HOME="$terminal_only_home" XDG_STATE_HOME="$terminal_only_state" sh -c \
+  '. "$1"; terrapod_install_warning_write homebrew-desktop-apps "Homebrew desktop app install needs attention" "Review Homebrew cask output for failed casks: ghostty, raycast, 1password-cli; App Groups: terminal-apps, launcher, then rerun tpod apply."' \
+  sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
+
+if ! HOME="$terminal_only_home" XDG_STATE_HOME="$terminal_only_state" MACOS_BREW_LOG="$terminal_only_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty" PATH="$terminal_only_bin:/usr/bin:/bin" \
+  sh "$terminal_only_bootstrap_script" >"$tmp_dir/terminal-only.out" 2>"$tmp_dir/terminal-only.err"; then
+  fail "terminal-only desktop app bundle failure does not block bootstrap script"
+fi
+
+terminal_only_marker_text="$(cat "$terminal_only_state/terrapod/install-warnings/homebrew-desktop-apps")"
+assert_contains_text "$terminal_only_marker_text" "failed casks: ghostty" "enabled terminal-apps failure remains in desktop app marker"
+assert_contains_text "$terminal_only_marker_text" "App Groups: terminal-apps" "enabled terminal-apps group remains in desktop app marker"
+assert_not_contains_text "$terminal_only_marker_text" "raycast" "disabled launcher cask is removed from desktop app marker"
+assert_not_contains_text "$terminal_only_marker_text" "1password-cli" "disabled launcher CLI cask is removed from desktop app marker"
+assert_not_contains_text "$terminal_only_marker_text" "launcher" "disabled launcher group is removed from desktop app marker"
+
+terminal_success_bin="$tmp_dir/terminal-success-bin"
+terminal_success_state="$tmp_dir/terminal-success-state"
+terminal_success_home="$tmp_dir/terminal-success-home"
+terminal_success_log="$tmp_dir/terminal-success-brew.log"
+mkdir -p "$terminal_success_bin" "$terminal_success_home"
+write_brew_bundle_stub "$terminal_success_bin/brew"
+
+HOME="$terminal_success_home" XDG_STATE_HOME="$terminal_success_state" sh -c \
+  '. "$1"; terrapod_install_warning_write homebrew-desktop-apps "Homebrew desktop app install needs attention" "Review Homebrew cask output for failed casks: ghostty; App Groups: terminal-apps, then rerun tpod apply."' \
+  sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
+
+if ! HOME="$terminal_success_home" XDG_STATE_HOME="$terminal_success_state" MACOS_BREW_LOG="$terminal_success_log" PATH="$terminal_success_bin:/usr/bin:/bin" \
+  sh "$terminal_only_bootstrap_script" >"$tmp_dir/terminal-success.out" 2>"$tmp_dir/terminal-success.err"; then
+  fail "successful terminal-only desktop app rerun succeeds"
+fi
+
+if [ -e "$terminal_success_state/terrapod/install-warnings/homebrew-desktop-apps" ]; then
+  fail "successful desktop app rerun clears homebrew-desktop-apps marker"
+fi
+pass "successful desktop app rerun clears homebrew-desktop-apps marker"
+
 assert_contains_text \
   "$macos_terminal_apps_bootstrap" \
   "terrapod-macos-desktop-apps" \
@@ -410,8 +595,8 @@ assert_contains_text \
 
 assert_contains_text \
   "$macos_terminal_apps_bootstrap" \
-  'brew bundle --no-upgrade --file="$desktop_brewfile"' \
-  "terminal-apps group runs macOS Desktop App Stack Brewfile"
+  'run_desktop_app_bundle "$desktop_brewfile"' \
+  "terminal-apps group runs macOS Desktop App Stack installer"
 
 assert_contains_text \
   "$macos_ai_apps_bootstrap" \
@@ -420,8 +605,8 @@ assert_contains_text \
 
 assert_contains_text \
   "$macos_ai_apps_bootstrap" \
-  'brew bundle --no-upgrade --file="$desktop_brewfile"' \
-  "ai-apps group runs macOS Desktop App Stack Brewfile"
+  'run_desktop_app_bundle "$desktop_brewfile"' \
+  "ai-apps group runs macOS Desktop App Stack installer"
 
 assert_not_contains_text \
   "$macos_development_workspace_bootstrap" \
