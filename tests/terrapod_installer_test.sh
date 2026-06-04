@@ -1759,20 +1759,26 @@ assert_not_contains "$non_regular_config_log_text" "chezmoi args:apply" "unusabl
 
 unreadable_config_case="$(make_case_dir unreadable-config-resume)"
 prepare_resumable_macos_case "$unreadable_config_case"
-write_complete_setup_config "$unreadable_config_case/xdg-config/chezmoi/chezmoi.toml"
-chmod 000 "$unreadable_config_case/xdg-config/chezmoi/chezmoi.toml"
-unreadable_config_log="$unreadable_config_case/command-calls"
-TERRAPOD_STUB_CALL_LOG="$unreadable_config_log"
-export TERRAPOD_STUB_CALL_LOG
-run_installer_case "$unreadable_config_case"
-unset TERRAPOD_STUB_CALL_LOG
-chmod 600 "$unreadable_config_case/xdg-config/chezmoi/chezmoi.toml"
-assert_failure "$installer_status" "resume fails when managed setup config is unreadable"
-unreadable_config_stderr="$(cat "$unreadable_config_case/stderr")"
-unreadable_config_log_text="$(cat "$unreadable_config_log" 2>/dev/null || true)"
-assert_contains "$unreadable_config_stderr" "config path is not readable" "unreadable config path gives config guidance"
-assert_not_contains "$unreadable_config_log_text" "terrapod args:setup" "unreadable config is not treated as missing setup config"
-assert_not_contains "$unreadable_config_log_text" "chezmoi args:apply" "unreadable config does not continue to apply"
+unreadable_config_file="$unreadable_config_case/xdg-config/chezmoi/chezmoi.toml"
+write_complete_setup_config "$unreadable_config_file"
+chmod 000 "$unreadable_config_file"
+if [ -r "$unreadable_config_file" ]; then
+  chmod 600 "$unreadable_config_file"
+  pass "unreadable config case is skipped when chmod 000 remains readable"
+else
+  unreadable_config_log="$unreadable_config_case/command-calls"
+  TERRAPOD_STUB_CALL_LOG="$unreadable_config_log"
+  export TERRAPOD_STUB_CALL_LOG
+  run_installer_case "$unreadable_config_case"
+  unset TERRAPOD_STUB_CALL_LOG
+  chmod 600 "$unreadable_config_file"
+  assert_failure "$installer_status" "resume fails when managed setup config is unreadable"
+  unreadable_config_stderr="$(cat "$unreadable_config_case/stderr")"
+  unreadable_config_log_text="$(cat "$unreadable_config_log" 2>/dev/null || true)"
+  assert_contains "$unreadable_config_stderr" "config path is not readable" "unreadable config path gives config guidance"
+  assert_not_contains "$unreadable_config_log_text" "terrapod args:setup" "unreadable config is not treated as missing setup config"
+  assert_not_contains "$unreadable_config_log_text" "chezmoi args:apply" "unreadable config does not continue to apply"
+fi
 
 already_installed_case="$(make_case_dir already-installed)"
 prepare_resumable_macos_case "$already_installed_case"
