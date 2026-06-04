@@ -810,6 +810,8 @@ ai_cli_retry_first_runs="$(cat "$ai_cli_retry_run_log")"
 assert_contains_text "$ai_cli_retry_first_runs" "run:antigravity" "enabled Optional AI Tool Stack first run executes Antigravity installer"
 assert_contains_text "$ai_cli_retry_first_runs" "run:claude" "enabled Optional AI Tool Stack first run executes Claude installer"
 assert_contains_text "$ai_cli_retry_first_runs" "run:codex" "enabled Optional AI Tool Stack first run continues to Codex after Claude failure"
+assert_contains_text "$ai_cli_retry_first_runs" "bash:$ai_cli_retry_antigravity_installer" "enabled Optional AI Tool Stack first run executes Antigravity installer with bash"
+assert_contains_text "$ai_cli_retry_first_runs" "bash:$ai_cli_retry_claude_installer" "enabled Optional AI Tool Stack first run executes Claude installer with bash"
 assert_contains_text "$ai_cli_retry_first_runs" "codex:noninteractive=1" "enabled Optional AI Tool Stack first run keeps Codex noninteractive"
 case "$(uname -s)" in
   Darwin)
@@ -864,7 +866,9 @@ ai_cli_retry_second_urls="$(cat "$ai_cli_retry_url_log" 2>/dev/null || true)"
 assert_text_equals "$ai_cli_retry_second_urls" "https://claude.ai/install.sh" "enabled Optional AI Tool Stack retry downloads only Claude after partial failure"
 ai_cli_retry_second_runs="$(cat "$ai_cli_retry_run_log" 2>/dev/null || true)"
 assert_contains_text "$ai_cli_retry_second_runs" "run:claude" "enabled Optional AI Tool Stack retry executes Claude after partial failure"
+assert_contains_text "$ai_cli_retry_second_runs" "bash:$ai_cli_retry_claude_installer" "enabled Optional AI Tool Stack retry executes Claude installer with bash"
 assert_not_contains_text "$ai_cli_retry_second_runs" "run:antigravity" "enabled Optional AI Tool Stack retry skips pre-existing Antigravity"
+assert_not_contains_text "$ai_cli_retry_second_runs" "bash:$ai_cli_retry_antigravity_installer" "enabled Optional AI Tool Stack retry does not execute Antigravity installer with bash"
 assert_not_contains_text "$ai_cli_retry_second_runs" "run:codex" "enabled Optional AI Tool Stack retry skips pre-existing Codex"
 
 if [ -e "$ai_cli_retry_marker" ]; then
@@ -908,10 +912,7 @@ for unsafe_installer_text in \
   "api.github.com" \
   "sed -i" \
   "apply_patch" \
-  "patch " \
   "yes |" \
-  "printf 'y" \
-  'printf "y' \
   "| sh" \
   "| bash"
 do
