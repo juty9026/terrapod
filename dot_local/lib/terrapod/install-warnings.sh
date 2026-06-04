@@ -73,6 +73,14 @@ terrapod_install_warning_existing_path() {
   return 1
 }
 
+terrapod_install_warning_path_is_legacy() {
+  category="$1"
+  marker_path="$2"
+
+  legacy_marker_path="$(terrapod_install_warning_legacy_path "$category")" || return 1
+  [ "$marker_path" = "$legacy_marker_path" ]
+}
+
 terrapod_install_warning_quote() {
   printf "'"
   printf '%s' "$1" | sed "s/'/'\\\\''/g"
@@ -151,6 +159,20 @@ terrapod_install_warning_read() {
   category="$1"
 
   marker_path="$(terrapod_install_warning_existing_path "$category")" || return 1
+  if terrapod_install_warning_path_is_legacy "$category" "$marker_path"; then
+    awk -F= -v category="$category" '
+      $1 == "category" {
+        printf "category=\047%s\047\n", category
+        next
+      }
+
+      {
+        print
+      }
+    ' "$marker_path"
+    return
+  fi
+
   cat "$marker_path"
 }
 
@@ -168,6 +190,11 @@ terrapod_install_warning_value() {
       return 1
       ;;
   esac
+
+  if [ "$field" = category ] && terrapod_install_warning_path_is_legacy "$category" "$marker_path"; then
+    printf '%s\n' "$category"
+    return
+  fi
 
   awk -F= -v wanted="$field" '
     $1 == wanted {

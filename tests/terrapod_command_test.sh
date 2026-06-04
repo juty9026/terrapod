@@ -766,7 +766,16 @@ pass "install warning marker list exposes legacy AI CLI markers through the stab
 legacy_marker_read="$(
   HOME="$legacy_marker_home" XDG_STATE_HOME="$legacy_marker_state" sh -c '. "$1"; terrapod_install_warning_read optional-ai-cli-tools' sh "$install_warnings_lib"
 )"
-assert_contains "$legacy_marker_read" "category='ai-cli-tools'" "install warning marker read falls back to legacy AI CLI marker files"
+assert_contains "$legacy_marker_read" "category='optional-ai-cli-tools'" "install warning marker read normalizes legacy AI CLI marker categories"
+assert_not_contains "$legacy_marker_read" "category='ai-cli-tools'" "install warning marker read does not expose legacy AI CLI marker categories"
+
+legacy_marker_category="$(
+  HOME="$legacy_marker_home" XDG_STATE_HOME="$legacy_marker_state" sh -c '. "$1"; terrapod_install_warning_value optional-ai-cli-tools category' sh "$install_warnings_lib"
+)"
+if [ "$legacy_marker_category" != "optional-ai-cli-tools" ]; then
+  fail "install warning marker category value normalizes legacy AI CLI marker files"
+fi
+pass "install warning marker category value normalizes legacy AI CLI marker files"
 
 legacy_marker_summary="$(
   HOME="$legacy_marker_home" XDG_STATE_HOME="$legacy_marker_state" sh -c '. "$1"; terrapod_install_warning_value optional-ai-cli-tools summary' sh "$install_warnings_lib"
