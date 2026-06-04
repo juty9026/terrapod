@@ -848,6 +848,87 @@ if [ -e "$fake_warning_calls" ]; then
 fi
 pass "installer scripts ignore PATH fake install warning helpers when the shared library is not loaded"
 
+fake_ai_cli_failure_home="$tmp_dir/fake-ai-cli-failure-home"
+mkdir -p "$fake_ai_cli_failure_home/.local/bin"
+for command_name in agy codex; do
+  write_stub "$fake_ai_cli_failure_home/.local/bin/$command_name" \
+    'exit 0'
+done
+write_stub "$fake_ai_cli_failure_home/.local/bin/bash" \
+  'exec sh "$@"'
+write_stub "$fake_ai_cli_failure_home/.local/bin/curl" \
+  'output=' \
+  'while [ "$#" -gt 0 ]; do' \
+  '  case "$1" in' \
+  '    -o)' \
+  '      shift' \
+  '      output="${1:-}"' \
+  '      ;;' \
+  '  esac' \
+  '  shift' \
+  'done' \
+  '[ -n "$output" ] || exit 2' \
+  'printf "%s\n" "#!/bin/sh" "exit 42" >"$output"'
+
+fake_ai_cli_failure_installer="$tmp_dir/fake-ai-cli-failure-installer.sh"
+chezmoi execute-template \
+  --override-data '{"chezmoi":{"os":"linux","sourceDir":"/missing-terrapod-source"},"enableAiCliTools":true}' \
+  --file "$repo_root/.chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
+  >"$fake_ai_cli_failure_installer"
+
+fake_ai_cli_failure_status=0
+HOME="$fake_ai_cli_failure_home" PATH="/usr/bin:/bin" /bin/sh "$fake_ai_cli_failure_installer" >"$tmp_dir/fake-ai-cli-failure.out" 2>"$tmp_dir/fake-ai-cli-failure.err" || fake_ai_cli_failure_status=$?
+if [ "$fake_ai_cli_failure_status" -eq 0 ]; then
+  fail "rendered installer fixture fails when optional AI CLI failures cannot be recorded without the shared library"
+fi
+pass "rendered installer fixture fails when optional AI CLI failures cannot be recorded without the shared library"
+
+fake_ai_cli_warning_source="$tmp_dir/fake-ai-cli-warning-source"
+fake_ai_cli_write_failure_home="$tmp_dir/fake-ai-cli-write-failure-home"
+mkdir -p "$fake_ai_cli_warning_source/dot_local/lib/terrapod" "$fake_ai_cli_write_failure_home/.local/bin"
+printf '%s\n' \
+  'TERRAPOD_INSTALL_WARNINGS_LOADED=1' \
+  'terrapod_install_warning_write() {' \
+  '  printf "%s\n" "write failed:$*" >&2' \
+  '  return 1' \
+  '}' \
+  'terrapod_install_warning_clear() {' \
+  '  return 0' \
+  '}' \
+  >"$fake_ai_cli_warning_source/dot_local/lib/terrapod/install-warnings.sh"
+for command_name in agy codex; do
+  write_stub "$fake_ai_cli_write_failure_home/.local/bin/$command_name" \
+    'exit 0'
+done
+write_stub "$fake_ai_cli_write_failure_home/.local/bin/bash" \
+  'exec sh "$@"'
+write_stub "$fake_ai_cli_write_failure_home/.local/bin/curl" \
+  'output=' \
+  'while [ "$#" -gt 0 ]; do' \
+  '  case "$1" in' \
+  '    -o)' \
+  '      shift' \
+  '      output="${1:-}"' \
+  '      ;;' \
+  '  esac' \
+  '  shift' \
+  'done' \
+  '[ -n "$output" ] || exit 2' \
+  'printf "%s\n" "#!/bin/sh" "exit 42" >"$output"'
+
+fake_ai_cli_write_failure_installer="$tmp_dir/fake-ai-cli-write-failure-installer.sh"
+chezmoi execute-template \
+  --override-data "{\"chezmoi\":{\"os\":\"linux\",\"sourceDir\":\"$fake_ai_cli_warning_source\"},\"enableAiCliTools\":true}" \
+  --file "$repo_root/.chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
+  >"$fake_ai_cli_write_failure_installer"
+
+fake_ai_cli_write_failure_status=0
+HOME="$fake_ai_cli_write_failure_home" PATH="/usr/bin:/bin" /bin/sh "$fake_ai_cli_write_failure_installer" >"$tmp_dir/fake-ai-cli-write-failure.out" 2>"$tmp_dir/fake-ai-cli-write-failure.err" || fake_ai_cli_write_failure_status=$?
+if [ "$fake_ai_cli_write_failure_status" -eq 0 ]; then
+  fail "rendered installer fixture fails when optional AI CLI failures cannot be recorded after marker write failure"
+fi
+pass "rendered installer fixture fails when optional AI CLI failures cannot be recorded after marker write failure"
+
 help_output="$(TERRAPOD_PROFILE=macos-terminal sh "$terrapod" help)"
 help_with_marker_output="$(
   HOME="$marker_home" XDG_STATE_HOME="$marker_xdg_state" TERRAPOD_PROFILE=macos-terminal sh "$terrapod" help

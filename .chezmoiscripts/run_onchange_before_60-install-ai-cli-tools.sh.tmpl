@@ -14,9 +14,11 @@ mark_install_warning() {
   summary="$2"
   guidance="$3"
 
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
-    terrapod_install_warning_write "$category" "$summary" "$guidance" || true
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
+    return 1
   fi
+
+  terrapod_install_warning_write "$category" "$summary" "$guidance"
 }
 
 clear_install_warning() {
@@ -61,10 +63,13 @@ append_failed_tool() {
 
 finish_ai_cli_installers() {
   if [ -n "$failed_tools" ]; then
-    mark_install_warning \
+    if ! mark_install_warning \
       "$AI_CLI_WARNING_CATEGORY" \
       "Optional AI CLI tool install needs attention" \
-      "Failed command(s): $failed_tools. Check installer output and network access, then rerun tpod apply."
+      "Failed command(s): $failed_tools. Check installer output and network access, then rerun tpod apply."; then
+      echo "Failed to record Optional AI CLI tool install warning for failed command(s): $failed_tools." >&2
+      return 1
+    fi
   else
     clear_install_warning "$AI_CLI_WARNING_CATEGORY"
   fi
@@ -130,7 +135,9 @@ run_installer() {
 run_installer "Antigravity CLI" agy bash "https://antigravity.google/cli/install.sh"
 run_installer "Claude Code" claude bash "https://claude.ai/install.sh"
 run_installer "Codex" codex sh "https://chatgpt.com/codex/install.sh" codex
-finish_ai_cli_installers
+if ! finish_ai_cli_installers; then
+  exit 1
+fi
 exit 0
 {{ end }}
 {{- end }}
