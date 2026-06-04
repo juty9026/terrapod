@@ -1,7 +1,35 @@
-{{- if and (or (eq .chezmoi.os "darwin") (eq .chezmoi.os "linux")) (or (default false (get . "enableAiCliTools")) (default false (get . "enableDevelopmentWorkspace"))) -}}
+{{- if or (eq .chezmoi.os "darwin") (eq .chezmoi.os "linux") -}}
 #!/bin/sh
 set -eu
 
+install_warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
+TERRAPOD_INSTALL_WARNINGS_LOADED=
+if [ -f "$install_warnings_lib" ]; then
+  . "$install_warnings_lib"
+fi
+
+mark_install_warning() {
+  category="$1"
+  summary="$2"
+  guidance="$3"
+
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
+    terrapod_install_warning_write "$category" "$summary" "$guidance" || true
+  fi
+}
+
+clear_install_warning() {
+  category="$1"
+
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
+    terrapod_install_warning_clear "$category" || true
+  fi
+}
+
+{{ if not (or (default false (get . "enableAiCliTools")) (default false (get . "enableDevelopmentWorkspace"))) }}
+clear_install_warning ai-cli-tools
+exit 0
+{{ else }}
 installer_paths=
 
 cleanup_installers() {
@@ -17,6 +45,10 @@ require_command() {
 
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "$command_name is required to install optional AI CLI tools." >&2
+    mark_install_warning \
+      ai-cli-tools \
+      "Optional AI CLI tool install needs attention" \
+      "Install $command_name or fix it on PATH, then rerun tpod apply."
     exit 1
   fi
 }
@@ -31,8 +63,20 @@ run_installer() {
   installer_paths="$installer_paths $installer_path"
 
   echo "Installing $label through official installer: $installer_url"
-  curl -fsSL "$installer_url" -o "$installer_path"
-  "$shell_name" "$installer_path" "$@"
+  if ! curl -fsSL "$installer_url" -o "$installer_path"; then
+    mark_install_warning \
+      ai-cli-tools \
+      "Optional AI CLI tool install needs attention" \
+      "Check network access to official AI CLI installers, then rerun tpod apply."
+    exit 1
+  fi
+  if ! "$shell_name" "$installer_path" "$@"; then
+    mark_install_warning \
+      ai-cli-tools \
+      "Optional AI CLI tool install needs attention" \
+      "Review $label installer output, then rerun tpod apply."
+    exit 1
+  fi
 }
 
 run_codex_installer() {
@@ -44,8 +88,20 @@ run_codex_installer() {
   installer_paths="$installer_paths $installer_path"
 
   echo "Installing $label through official installer: $installer_url"
-  curl -fsSL "$installer_url" -o "$installer_path"
-  CODEX_NON_INTERACTIVE=1 PATH="$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin" "$shell_name" "$installer_path"
+  if ! curl -fsSL "$installer_url" -o "$installer_path"; then
+    mark_install_warning \
+      ai-cli-tools \
+      "Optional AI CLI tool install needs attention" \
+      "Check network access to the Codex installer, then rerun tpod apply."
+    exit 1
+  fi
+  if ! CODEX_NON_INTERACTIVE=1 PATH="$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin" "$shell_name" "$installer_path"; then
+    mark_install_warning \
+      ai-cli-tools \
+      "Optional AI CLI tool install needs attention" \
+      "Review Codex installer output, then rerun tpod apply."
+    exit 1
+  fi
 }
 
 require_command curl
@@ -54,4 +110,6 @@ require_command bash
 run_installer "Antigravity CLI" bash "https://antigravity.google/cli/install.sh"
 run_installer "Claude Code" bash "https://claude.ai/install.sh"
 run_codex_installer
+clear_install_warning ai-cli-tools
+{{ end }}
 {{- end }}

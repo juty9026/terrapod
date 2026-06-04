@@ -266,12 +266,50 @@ find_homebrew() {
   return 1
 }
 
+mark_install_warning_from_source() {
+  source_dir="$1"
+  category="$2"
+  summary="$3"
+  guidance="$4"
+  install_warnings_lib="$source_dir/dot_local/lib/terrapod/install-warnings.sh"
+  TERRAPOD_INSTALL_WARNINGS_LOADED=
+
+  if [ -f "$install_warnings_lib" ]; then
+    . "$install_warnings_lib"
+  fi
+
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
+    terrapod_install_warning_write "$category" "$summary" "$guidance" || true
+  fi
+}
+
+clear_install_warning_from_source() {
+  source_dir="$1"
+  category="$2"
+  install_warnings_lib="$source_dir/dot_local/lib/terrapod/install-warnings.sh"
+  TERRAPOD_INSTALL_WARNINGS_LOADED=
+
+  if [ -f "$install_warnings_lib" ]; then
+    . "$install_warnings_lib"
+  fi
+
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
+    terrapod_install_warning_clear "$category" || true
+  fi
+}
+
 print_setup_ui_dependency_recovery() {
   profile="$1"
   source_dir="$2"
   chezmoi_bin="$3"
   brew_bin="$4"
   reason="$5"
+
+  mark_install_warning_from_source \
+    "$source_dir" \
+    homebrew-core \
+    "Homebrew core install needs attention" \
+    "Prepare gum with Homebrew, then resume Terrapod Setup and initial apply."
 
   printf '%s\n' "terrapod installer: gum is required before Terrapod Setup can run." >&2
   printf '%s\n' "terrapod installer: Failed to prepare the macOS setup UI dependency with Homebrew: $reason" >&2
@@ -325,6 +363,7 @@ prepare_setup_ui_dependency() {
   fi
 
   if command -v gum >/dev/null 2>&1; then
+    clear_install_warning_from_source "$source_dir" homebrew-core
     return 0
   fi
 

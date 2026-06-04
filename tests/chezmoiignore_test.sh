@@ -75,6 +75,16 @@ render_managed_file() {
     cat "$tmp_dir/home/$destination"
 }
 
+write_stub() {
+  path="$1"
+  shift
+  {
+    printf '%s\n' '#!/bin/sh'
+    printf '%s\n' "$@"
+  } >"$path"
+  chmod +x "$path"
+}
+
 assert_contains_text() {
   text="$1"
   needle="$2"
@@ -255,6 +265,90 @@ assert_not_contains_text \
   "$macos_bootstrap" \
   'brew bundle --no-upgrade --file="$desktop_brewfile"' \
   "macOS bootstrap default skips macOS Desktop App Stack bundle"
+
+assert_contains_text \
+  "$macos_bootstrap" \
+  "clear_install_warning homebrew-desktop-apps" \
+  "macOS bootstrap default renders macOS Desktop App Stack warning cleanup"
+
+macos_bootstrap_script="$tmp_dir/macos-bootstrap-default.sh"
+printf '%s\n' "$macos_bootstrap" >"$macos_bootstrap_script"
+sh -n "$macos_bootstrap_script" || fail "macOS bootstrap default cleanup script should be valid sh"
+pass "macOS bootstrap default cleanup script is valid sh"
+
+macos_brew_bin="$tmp_dir/macos-brew-bin"
+macos_brew_log="$tmp_dir/macos-brew.log"
+mkdir -p "$macos_brew_bin"
+write_stub "$macos_brew_bin/brew" \
+  'printf "%s\n" "brew args:$*" >>"$MACOS_BREW_LOG"' \
+  'case "$1" in' \
+  '  shellenv) printf "%s\n" ":" ;;' \
+  '  analytics) exit 0 ;;' \
+  '  bundle) exit 0 ;;' \
+  '  *) exit 64 ;;' \
+  'esac'
+
+macos_marker_state="$tmp_dir/macos-marker-state"
+macos_marker_home="$tmp_dir/macos-marker-home"
+mkdir -p "$macos_marker_home"
+HOME="$macos_marker_home" XDG_STATE_HOME="$macos_marker_state" sh -c \
+  '. "$1"; terrapod_install_warning_write homebrew-desktop-apps "Homebrew desktop app install needs attention" "Rerun tpod apply after disabling macOS App Groups."' \
+  sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
+
+if [ ! -f "$macos_marker_state/terrapod/install-warnings/homebrew-desktop-apps" ]; then
+  fail "test setup should create a homebrew-desktop-apps warning marker"
+fi
+
+HOME="$macos_marker_home" XDG_STATE_HOME="$macos_marker_state" MACOS_BREW_LOG="$macos_brew_log" PATH="$macos_brew_bin:/usr/bin:/bin" sh "$macos_bootstrap_script"
+if [ -e "$macos_marker_state/terrapod/install-warnings/homebrew-desktop-apps" ]; then
+  fail "macOS bootstrap default cleanup should clear stale homebrew-desktop-apps marker"
+fi
+pass "macOS bootstrap default cleanup clears stale homebrew-desktop-apps marker"
+
+homebrew_installer_failure_script="$tmp_dir/macos-bootstrap-homebrew-installer-failure.sh"
+sed \
+  -e "s#/opt/homebrew/bin/brew#$tmp_dir/missing-opt-homebrew-brew#g" \
+  -e "s#/usr/local/bin/brew#$tmp_dir/missing-usr-local-brew#g" \
+  "$macos_bootstrap_script" >"$homebrew_installer_failure_script"
+sh -n "$homebrew_installer_failure_script" || fail "macOS bootstrap no-Homebrew test script should be valid sh"
+
+homebrew_installer_failure_bin="$tmp_dir/homebrew-installer-failure-bin"
+homebrew_installer_failure_state="$tmp_dir/homebrew-installer-failure-state"
+homebrew_installer_failure_home="$tmp_dir/homebrew-installer-failure-home"
+homebrew_installer_failure_log="$tmp_dir/homebrew-installer-failure.log"
+mkdir -p "$homebrew_installer_failure_bin" "$homebrew_installer_failure_home"
+write_stub "$homebrew_installer_failure_bin/curl" \
+  'printf "%s\n" "curl args:$*" >>"$HOMEBREW_INSTALLER_FAILURE_LOG"' \
+  'output_file=' \
+  'while [ "$#" -gt 0 ]; do' \
+  '  case "$1" in' \
+  '    -o)' \
+  '      shift' \
+  '      output_file="$1"' \
+  '      ;;' \
+  '  esac' \
+  '  shift' \
+  'done' \
+  'if [ -n "$output_file" ]; then' \
+  '  printf "%s\n" "echo simulated Homebrew installer failure >&2" "exit 42" >"$output_file"' \
+  'else' \
+  '  printf "%s\n" "echo simulated Homebrew installer failure >&2" "exit 42"' \
+  'fi'
+
+if HOME="$homebrew_installer_failure_home" XDG_STATE_HOME="$homebrew_installer_failure_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_installer_failure_log" PATH="$homebrew_installer_failure_bin:/usr/bin:/bin" \
+  sh "$homebrew_installer_failure_script" >"$tmp_dir/homebrew-installer-failure.out" 2>"$tmp_dir/homebrew-installer-failure.err"; then
+  fail "macOS bootstrap fails when the Homebrew installer command fails"
+fi
+
+homebrew_installer_failure_marker="$homebrew_installer_failure_state/terrapod/install-warnings/homebrew-core"
+if [ ! -f "$homebrew_installer_failure_marker" ]; then
+  fail "macOS bootstrap records homebrew-core marker when the Homebrew installer command fails"
+fi
+pass "macOS bootstrap records homebrew-core marker when the Homebrew installer command fails"
+
+homebrew_installer_failure_marker_text="$(cat "$homebrew_installer_failure_marker")"
+assert_contains_text "$homebrew_installer_failure_marker_text" "summary='Homebrew core install needs attention'" "macOS bootstrap Homebrew installer failure marker keeps the expected summary"
+assert_contains_text "$homebrew_installer_failure_marker_text" "guidance='Install Homebrew from https://brew.sh, then rerun tpod apply.'" "macOS bootstrap Homebrew installer failure marker keeps recovery guidance"
 
 assert_managed_paths_exclude_prefix \
   "$macos_managed_targets" \
@@ -446,10 +540,10 @@ assert_managed_paths_exclude_prefix \
   "dot_config/zellij/layouts/dev.kdl" \
   "Ubuntu VPS ignores Optional Development Workspace layout by default"
 
-assert_managed_paths_exclude_prefix \
+assert_managed_paths_include_prefix \
   "$ubuntu_managed" \
   ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
-  "Ubuntu VPS ignores Optional AI Tool Stack installer by default"
+  "Ubuntu VPS includes Optional AI Tool Stack warning cleanup by default"
 
 assert_managed_paths_exclude_prefix \
   "$macos_managed" \
@@ -527,6 +621,32 @@ pass "mise tool installer tracks rendered mise config changes"
 
 ai_cli_tools_installer="$(render_template "$ai_cli_tools_data" ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl")"
 development_workspace_ai_installer="$(render_template "$development_workspace_data" ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl")"
+disabled_ai_cli_tools_cleanup="$(render_template "$ubuntu_data" ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl")"
+
+assert_contains_text "$disabled_ai_cli_tools_cleanup" "clear_install_warning ai-cli-tools" "disabled Optional AI Tool Stack renders stale marker cleanup"
+assert_not_contains_text "$disabled_ai_cli_tools_cleanup" "https://chatgpt.com/codex/install.sh" "disabled Optional AI Tool Stack cleanup does not render installer URLs"
+
+disabled_ai_cli_tools_cleanup_script="$tmp_dir/disabled-ai-cli-tools-cleanup.sh"
+printf '%s\n' "$disabled_ai_cli_tools_cleanup" >"$disabled_ai_cli_tools_cleanup_script"
+sh -n "$disabled_ai_cli_tools_cleanup_script" || fail "disabled Optional AI Tool Stack cleanup script should be valid sh"
+pass "disabled Optional AI Tool Stack cleanup script is valid sh"
+
+ai_marker_state="$tmp_dir/ai-marker-state"
+ai_marker_home="$tmp_dir/ai-marker-home"
+mkdir -p "$ai_marker_home"
+HOME="$ai_marker_home" XDG_STATE_HOME="$ai_marker_state" sh -c \
+  '. "$1"; terrapod_install_warning_write ai-cli-tools "Optional AI CLI tool install needs attention" "Rerun tpod apply after network access is restored."' \
+  sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
+
+if [ ! -f "$ai_marker_state/terrapod/install-warnings/ai-cli-tools" ]; then
+  fail "test setup should create an ai-cli-tools warning marker"
+fi
+
+HOME="$ai_marker_home" XDG_STATE_HOME="$ai_marker_state" sh "$disabled_ai_cli_tools_cleanup_script"
+if [ -e "$ai_marker_state/terrapod/install-warnings/ai-cli-tools" ]; then
+  fail "disabled Optional AI Tool Stack cleanup should clear stale ai-cli-tools marker"
+fi
+pass "disabled Optional AI Tool Stack cleanup clears stale ai-cli-tools marker"
 
 for installer_url in \
   "https://antigravity.google/cli/install.sh" \

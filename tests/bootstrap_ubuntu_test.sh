@@ -73,6 +73,7 @@ mkdir -p "$tmp_dir/bin" "$tmp_dir/home"
 
 rendered="$tmp_dir/bootstrap-ubuntu.sh"
 chezmoi execute-template \
+  --source "$repo_root" \
   --override-data '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}}}' \
   --file "$repo_root/.chezmoiscripts/run_onchange_before_00-bootstrap-ubuntu.sh.tmpl" \
   >"$rendered"
@@ -149,7 +150,8 @@ write_stub "$tmp_dir/bin/zsh" \
   'exit 1'
 
 write_stub "$tmp_dir/bin/chsh" \
-  'printf "%s\n" "$*" >"$CHSH_TEST_LOG"'
+  'printf "%s\n" "$*" >"$CHSH_TEST_LOG"' \
+  'exit "${CHSH_TEST_STATUS:-0}"'
 
 export PATH="$tmp_dir/bin:/usr/bin:/bin"
 export HOME="$tmp_dir/home"
@@ -176,6 +178,31 @@ assert_contains "$bootstrap_log" "tee stdin:deb [signed-by=/etc/apt/keyrings/cha
 assert_contains "$bootstrap_log" "apt-get args:install -y gum" "Ubuntu bootstrap installs gum through APT"
 assert_contains "$bootstrap_log" "apt-get args:install -y mise" "Ubuntu bootstrap still installs mise through APT"
 assert_first_occurrence_before "$bootstrap_log" "tee stdin:deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" "apt-get args:install -y gum" "Ubuntu bootstrap adds the Charm repository before installing gum"
+
+rm -rf "$HOME/.local/state/terrapod/install-warnings"
+: >"$BOOTSTRAP_TEST_LOG"
+CHSH_TEST_STATUS=23
+export CHSH_TEST_STATUS
+if ! sh "$rendered" >"$tmp_dir/bootstrap-chsh-failure.out" 2>"$tmp_dir/bootstrap-chsh-failure.err"; then
+  unset CHSH_TEST_STATUS
+  fail "Ubuntu bootstrap should continue when automatic login shell change fails"
+fi
+unset CHSH_TEST_STATUS
+
+ubuntu_bootstrap_marker="$HOME/.local/state/terrapod/install-warnings/ubuntu-bootstrap"
+shell_integrations_marker="$HOME/.local/state/terrapod/install-warnings/shell-integrations"
+if [ ! -f "$ubuntu_bootstrap_marker" ]; then
+  fail "Ubuntu bootstrap should keep an ubuntu-bootstrap warning when automatic login shell change fails"
+fi
+pass "Ubuntu bootstrap keeps an ubuntu-bootstrap warning when automatic login shell change fails"
+
+if [ -e "$shell_integrations_marker" ]; then
+  fail "Ubuntu bootstrap should not write shell-integrations warnings for login shell failures"
+fi
+pass "Ubuntu bootstrap does not write shell-integrations warnings for login shell failures"
+
+ubuntu_bootstrap_marker_text="$(cat "$ubuntu_bootstrap_marker")"
+assert_contains "$ubuntu_bootstrap_marker_text" "guidance='Run chsh -s /usr/bin/zsh after fixing shell permission issues.'" "Ubuntu bootstrap marker preserves manual chsh guidance"
 
 : >"$BOOTSTRAP_TEST_LOG"
 BOOTSTRAP_CHARM_KEY_CURL_STATUS=17
