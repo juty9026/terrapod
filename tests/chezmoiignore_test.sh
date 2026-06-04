@@ -811,7 +811,15 @@ assert_contains_text "$ai_cli_retry_first_runs" "run:antigravity" "enabled Optio
 assert_contains_text "$ai_cli_retry_first_runs" "run:claude" "enabled Optional AI Tool Stack first run executes Claude installer"
 assert_contains_text "$ai_cli_retry_first_runs" "run:codex" "enabled Optional AI Tool Stack first run continues to Codex after Claude failure"
 assert_contains_text "$ai_cli_retry_first_runs" "codex:noninteractive=1" "enabled Optional AI Tool Stack first run keeps Codex noninteractive"
-assert_contains_text "$ai_cli_retry_first_runs" "codex:path=$ai_cli_retry_home/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" "enabled Optional AI Tool Stack first run passes expected Linux PATH to Codex"
+case "$(uname -s)" in
+  Darwin)
+    ai_cli_retry_expected_path="$ai_cli_retry_home/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    ;;
+  *)
+    ai_cli_retry_expected_path="$ai_cli_retry_home/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    ;;
+esac
+assert_contains_text "$ai_cli_retry_first_runs" "codex:path=$ai_cli_retry_expected_path" "enabled Optional AI Tool Stack first run passes host-expected PATH to Codex"
 
 ai_cli_retry_marker_dir="$ai_cli_retry_state/terrapod/install-warnings"
 ai_cli_retry_marker="$ai_cli_retry_marker_dir/optional-ai-cli-tools"
@@ -822,6 +830,7 @@ ai_cli_retry_marker_files="$(find "$ai_cli_retry_marker_dir" -type f -print | so
 assert_text_equals "$ai_cli_retry_marker_files" "$ai_cli_retry_marker" "enabled Optional AI Tool Stack installer writes one optional-ai-cli-tools marker for partial failures"
 ai_cli_retry_marker_text="$(cat "$ai_cli_retry_marker")"
 assert_contains_text "$ai_cli_retry_marker_text" "claude" "enabled Optional AI Tool Stack partial failure marker mentions Claude only"
+assert_not_contains_text "$ai_cli_retry_marker_text" "agy" "enabled Optional AI Tool Stack partial failure marker omits successful agy command"
 assert_not_contains_text "$ai_cli_retry_marker_text" "antigravity" "enabled Optional AI Tool Stack partial failure marker omits successful Antigravity"
 assert_not_contains_text "$ai_cli_retry_marker_text" "Antigravity" "enabled Optional AI Tool Stack partial failure marker omits successful Antigravity label"
 assert_not_contains_text "$ai_cli_retry_marker_text" "codex" "enabled Optional AI Tool Stack partial failure marker omits successful Codex"
