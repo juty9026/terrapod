@@ -32,6 +32,16 @@ clear_install_warning "$AI_CLI_WARNING_CATEGORY"
 exit 0
 {{ else }}
 installer_paths=
+failed_tools=
+
+case "$(uname -s)" in
+  Darwin)
+    AI_CLI_EXPECTED_PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    ;;
+  *)
+    AI_CLI_EXPECTED_PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    ;;
+esac
 
 cleanup_installers() {
   for installer_path in $installer_paths; do
@@ -41,76 +51,87 @@ cleanup_installers() {
 
 trap cleanup_installers EXIT HUP INT TERM
 
-require_command() {
-  command_name="$1"
+append_failed_tool() {
+  if [ -n "$failed_tools" ]; then
+    failed_tools="$failed_tools, $1"
+  else
+    failed_tools="$1"
+  fi
+}
 
-  if ! command -v "$command_name" >/dev/null 2>&1; then
-    echo "$command_name is required to install optional AI CLI tools." >&2
+finish_ai_cli_installers() {
+  if [ -n "$failed_tools" ]; then
+    clear_install_warning "$AI_CLI_WARNING_CATEGORY"
     mark_install_warning \
       "$AI_CLI_WARNING_CATEGORY" \
       "Optional AI CLI tool install needs attention" \
-      "Install $command_name or fix it on PATH, then rerun tpod apply."
-    exit 1
+      "Failed command(s): $failed_tools. Check installer output and network access, then rerun tpod apply."
+  else
+    clear_install_warning "$AI_CLI_WARNING_CATEGORY"
   fi
+}
+
+command_available_on_expected_path() {
+  PATH="$AI_CLI_EXPECTED_PATH" command -v "$1" >/dev/null 2>&1
 }
 
 run_installer() {
   label="$1"
-  shell_name="$2"
-  installer_url="$3"
-  shift 3
+  command_name="$2"
+  shell_name="$3"
+  installer_url="$4"
+  installer_mode="${5:-}"
 
-  installer_path="$(mktemp "${TMPDIR:-/tmp}/terrapod-ai-installer.XXXXXX")"
+  if command_available_on_expected_path "$command_name"; then
+    echo "$label is already available on expected PATH; skipping."
+    return 0
+  fi
+
+  if ! command_available_on_expected_path curl; then
+    echo "curl is required to install $label." >&2
+    append_failed_tool "$command_name"
+    return 0
+  fi
+
+  if ! command_available_on_expected_path "$shell_name"; then
+    echo "$shell_name is required to install $label." >&2
+    append_failed_tool "$command_name"
+    return 0
+  fi
+
+  if ! installer_path="$(mktemp "${TMPDIR:-/tmp}/terrapod-ai-installer.XXXXXX")"; then
+    echo "Failed to create a temporary installer file for $label." >&2
+    append_failed_tool "$command_name"
+    return 0
+  fi
   installer_paths="$installer_paths $installer_path"
 
   echo "Installing $label through official installer: $installer_url"
-  if ! curl -fsSL "$installer_url" -o "$installer_path"; then
-    mark_install_warning \
-      "$AI_CLI_WARNING_CATEGORY" \
-      "Optional AI CLI tool install needs attention" \
-      "Check network access to official AI CLI installers, then rerun tpod apply."
-    exit 1
+  if ! PATH="$AI_CLI_EXPECTED_PATH" curl -fsSL "$installer_url" -o "$installer_path"; then
+    append_failed_tool "$command_name"
+    return 0
   fi
-  if ! "$shell_name" "$installer_path" "$@"; then
-    mark_install_warning \
-      "$AI_CLI_WARNING_CATEGORY" \
-      "Optional AI CLI tool install needs attention" \
-      "Review $label installer output, then rerun tpod apply."
-    exit 1
+
+  if [ "$installer_mode" = codex ]; then
+    if ! CODEX_NON_INTERACTIVE=1 PATH="$AI_CLI_EXPECTED_PATH" "$shell_name" "$installer_path"; then
+      append_failed_tool "$command_name"
+      return 0
+    fi
+  elif ! PATH="$AI_CLI_EXPECTED_PATH" "$shell_name" "$installer_path"; then
+    append_failed_tool "$command_name"
+    return 0
   fi
-}
 
-run_codex_installer() {
-  label="Codex"
-  shell_name="sh"
-  installer_url="https://chatgpt.com/codex/install.sh"
-
-  installer_path="$(mktemp "${TMPDIR:-/tmp}/terrapod-ai-installer.XXXXXX")"
-  installer_paths="$installer_paths $installer_path"
-
-  echo "Installing $label through official installer: $installer_url"
-  if ! curl -fsSL "$installer_url" -o "$installer_path"; then
-    mark_install_warning \
-      "$AI_CLI_WARNING_CATEGORY" \
-      "Optional AI CLI tool install needs attention" \
-      "Check network access to the Codex installer, then rerun tpod apply."
-    exit 1
-  fi
-  if ! CODEX_NON_INTERACTIVE=1 PATH="$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin" "$shell_name" "$installer_path"; then
-    mark_install_warning \
-      "$AI_CLI_WARNING_CATEGORY" \
-      "Optional AI CLI tool install needs attention" \
-      "Review Codex installer output, then rerun tpod apply."
-    exit 1
+  if ! command_available_on_expected_path "$command_name"; then
+    echo "$label installer completed but $command_name is not available on expected PATH." >&2
+    append_failed_tool "$command_name"
   fi
 }
 
-require_command curl
-require_command bash
-
-run_installer "Antigravity CLI" bash "https://antigravity.google/cli/install.sh"
-run_installer "Claude Code" bash "https://claude.ai/install.sh"
-run_codex_installer
-clear_install_warning "$AI_CLI_WARNING_CATEGORY"
+run_installer "Antigravity CLI" agy bash "https://antigravity.google/cli/install.sh"
+run_installer "Claude Code" claude bash "https://claude.ai/install.sh"
+run_installer "Codex" codex sh "https://chatgpt.com/codex/install.sh" codex
+finish_ai_cli_installers
+exit 0
 {{ end }}
 {{- end }}

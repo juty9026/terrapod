@@ -822,14 +822,21 @@ write_stub "$fake_warning_bin/terrapod_install_warning_value" \
 write_stub "$fake_warning_bin/terrapod_install_warning_write" \
   'printf "%s\n" "write $*" >>"$FAKE_INSTALL_WARNING_CALLS"'
 
+fake_ai_cli_home="$tmp_dir/fake-ai-cli-home"
+mkdir -p "$fake_ai_cli_home/.local/bin"
+for command_name in agy claude codex; do
+  write_stub "$fake_ai_cli_home/.local/bin/$command_name" \
+    'exit 0'
+done
+
 fake_ai_cli_installer="$tmp_dir/fake-ai-cli-installer.sh"
 chezmoi execute-template \
   --override-data '{"chezmoi":{"os":"linux","sourceDir":"/missing-terrapod-source"},"enableAiCliTools":true}' \
   --file "$repo_root/.chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
   >"$fake_ai_cli_installer"
 
-if FAKE_INSTALL_WARNING_CALLS="$fake_warning_calls" PATH="$fake_warning_bin" /bin/sh "$fake_ai_cli_installer" >"$tmp_dir/fake-ai-cli-installer.out" 2>"$tmp_dir/fake-ai-cli-installer.err"; then
-  fail "rendered installer fixture fails before optional AI CLI tools when curl is unavailable"
+if ! HOME="$fake_ai_cli_home" FAKE_INSTALL_WARNING_CALLS="$fake_warning_calls" PATH="$fake_warning_bin" /bin/sh "$fake_ai_cli_installer" >"$tmp_dir/fake-ai-cli-installer.out" 2>"$tmp_dir/fake-ai-cli-installer.err"; then
+  fail "rendered installer fixture succeeds when optional AI CLI tools are already available and the shared library is missing"
 fi
 
 if [ -e "$fake_warning_calls" ]; then
