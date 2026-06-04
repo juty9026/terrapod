@@ -788,6 +788,10 @@ pass "install warning marker value falls back to legacy AI CLI marker files"
 HOME="$legacy_marker_home" XDG_STATE_HOME="$legacy_marker_state" sh -c \
   '. "$1"; terrapod_install_warning_write optional-ai-cli-tools "Current AI CLI tool install needs attention" "Rerun tpod apply after network access is restored."' \
   sh "$install_warnings_lib"
+if [ ! -f "$legacy_marker_dir/optional-ai-cli-tools" ] || [ -e "$legacy_ai_cli_marker" ]; then
+  fail "install warning marker write replaces legacy AI CLI marker files with the stable marker"
+fi
+pass "install warning marker write replaces legacy AI CLI marker files with the stable marker"
 current_marker_summary="$(
   HOME="$legacy_marker_home" XDG_STATE_HOME="$legacy_marker_state" sh -c '. "$1"; terrapod_install_warning_value optional-ai-cli-tools summary' sh "$install_warnings_lib"
 )"

@@ -714,6 +714,16 @@ ai_cli_retry_antigravity_installer="$tmp_dir/ai-cli-retry-antigravity-installer.
 ai_cli_retry_claude_installer="$tmp_dir/ai-cli-retry-claude-installer.sh"
 ai_cli_retry_codex_installer="$tmp_dir/ai-cli-retry-codex-installer.sh"
 mkdir -p "$ai_cli_retry_home/.local/bin"
+ai_cli_retry_marker_dir="$ai_cli_retry_state/terrapod/install-warnings"
+ai_cli_retry_marker="$ai_cli_retry_marker_dir/optional-ai-cli-tools"
+ai_cli_retry_legacy_marker="$ai_cli_retry_marker_dir/ai-cli-tools"
+mkdir -p "$ai_cli_retry_marker_dir"
+printf '%s\n' \
+  "category='ai-cli-tools'" \
+  "summary='Legacy AI CLI tool install needs attention'" \
+  "guidance='Rerun tpod apply after network access is restored.'" \
+  "updated_at='2026-01-01T00:00:00Z'" \
+  >"$ai_cli_retry_legacy_marker"
 
 write_stub "$ai_cli_retry_antigravity_installer" \
   'printf "%s\n" "run:antigravity" >>"$AI_CLI_RETRY_RUN_LOG"' \
@@ -826,8 +836,6 @@ case "$(uname -s)" in
 esac
 assert_contains_text "$ai_cli_retry_first_runs" "codex:path=$ai_cli_retry_expected_path" "enabled Optional AI Tool Stack first run passes host-expected PATH to Codex"
 
-ai_cli_retry_marker_dir="$ai_cli_retry_state/terrapod/install-warnings"
-ai_cli_retry_marker="$ai_cli_retry_marker_dir/optional-ai-cli-tools"
 if [ ! -f "$ai_cli_retry_marker" ]; then
   fail "enabled Optional AI Tool Stack installer writes optional-ai-cli-tools marker for partial failures"
 fi

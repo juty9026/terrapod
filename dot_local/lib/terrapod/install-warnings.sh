@@ -135,6 +135,11 @@ terrapod_install_warning_write() {
     rm -f "$tmp_file"
     return 1
   fi
+
+  legacy_marker_path="$(terrapod_install_warning_legacy_path "$category" 2>/dev/null || true)"
+  if [ -n "$legacy_marker_path" ]; then
+    rm -f "$legacy_marker_path"
+  fi
 }
 
 terrapod_install_warning_clear() {
