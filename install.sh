@@ -99,12 +99,74 @@ ensure_user_local_bin() {
   esac
 }
 
-reject_existing_source_dir() {
+source_dir_exists() {
+  [ -e "$1" ] || [ -L "$1" ]
+}
+
+source_has_recovery_core_files() {
   source_dir="$1"
 
-  if [ -e "$source_dir" ] || [ -L "$source_dir" ]; then
-    fatal "chezmoi source directory already exists: $source_dir. Move it aside before first-run install, or use the existing checkout with Terrapod or chezmoi."
-  fi
+  [ -x "$source_dir/dot_local/bin/executable_terrapod" ] &&
+    [ -e "$source_dir/dot_local/bin/symlink_tpod" ] &&
+    [ -e "$source_dir/dot_zshenv.tmpl" ] &&
+    [ -e "$source_dir/dot_zprofile" ] &&
+    [ -e "$source_dir/dot_zshrc.tmpl" ]
+}
+
+source_has_terrapod_repository_identity() {
+  config_file="$1/.git/config"
+
+  [ -f "$config_file" ] &&
+    awk -F= '
+      /^[[:space:]]*\[/ {
+        in_origin = $0 ~ /^[[:space:]]*\[[[:space:]]*remote[[:space:]]+"origin"[[:space:]]*\][[:space:]]*($|#|;)/
+      }
+
+      !in_origin {
+        next
+      }
+
+      /^[[:space:]]*url[[:space:]]*=/ {
+        url = $0
+        sub(/^[^=]*=/, "", url)
+        sub(/^[[:space:]]*/, "", url)
+        sub(/[[:space:]]*$/, "", url)
+        if (url == "https://github.com/juty9026/terrapod.git" || url == "git@github.com:juty9026/terrapod.git") {
+          found = 1
+        }
+      }
+      END { exit found ? 0 : 1 }
+    ' "$config_file"
+}
+
+source_is_resumable_terrapod_checkout() {
+  source_has_recovery_core_files "$1" &&
+    source_has_terrapod_repository_identity "$1"
+}
+
+reject_unresumable_source_dir() {
+  source_dir="$1"
+
+  fatal "chezmoi source directory already exists but is not a resumable Terrapod Source Repository checkout: $source_dir. Move it aside before first-run install, or run Terrapod from a checked-out juty9026/terrapod source repository."
+}
+
+installed_tpod_help_works() {
+  local_bin_dir="$1"
+  profile="$2"
+  tpod_bin="$local_bin_dir/tpod"
+
+  [ -x "$tpod_bin" ] &&
+    TERRAPOD_PROFILE="$profile" "$tpod_bin" help >/dev/null 2>&1
+}
+
+print_already_installed_guidance() {
+  local_bin_dir="$1"
+
+  printf '%s\n' "Terrapod is already installed."
+  printf '%s\n' "Routine commands:"
+  printf '%s\n' "  $local_bin_dir/tpod status"
+  printf '%s\n' "  $local_bin_dir/tpod apply"
+  printf '%s\n' "  $local_bin_dir/tpod help"
 }
 
 install_chezmoi_if_needed() {
@@ -224,6 +286,419 @@ checked_out_terrapod() {
   fi
 
   printf '%s\n' "$terrapod_source"
+}
+
+chezmoi_config_file() {
+  if [ "${XDG_CONFIG_HOME:-}" ]; then
+    printf '%s\n' "$XDG_CONFIG_HOME/chezmoi/chezmoi.toml"
+  else
+    printf '%s\n' "$HOME/.config/chezmoi/chezmoi.toml"
+  fi
+}
+
+config_file_state() {
+  config_file="$1"
+
+  if [ -L "$config_file" ] || [ -e "$config_file" ]; then
+    if [ ! -f "$config_file" ]; then
+      printf '%s\n' "non-regular"
+    elif [ ! -r "$config_file" ]; then
+      printf '%s\n' "unreadable"
+    else
+      printf '%s\n' "readable"
+    fi
+  else
+    printf '%s\n' "missing"
+  fi
+}
+
+reject_unsupported_managed_config_syntax() {
+  config_file="$1"
+
+  if problem_message="$(unsupported_managed_config_problem_message "$config_file")"; then
+    fatal "$problem_message"
+  fi
+}
+
+unsupported_managed_config_problem_message() {
+  config_file="$1"
+
+  if config_has_unsupported_multiline_strings "$config_file"; then
+    printf '%s\n' "unsupported multiline string in config; rewrite multiline values before running Terrapod commands: $config_file"
+    return 0
+  fi
+
+  if config_has_section_like_multiline_arrays "$config_file"; then
+    printf '%s\n' "unsupported multiline array with section-like entries in config; rewrite that array before running Terrapod commands: $config_file"
+    return 0
+  fi
+
+  if config_has_unsupported_inline_data_table "$config_file"; then
+    printf '%s\n' "unsupported inline data table in config; rewrite data = {...} as a [data] table before running Terrapod commands: $config_file"
+    return 0
+  fi
+
+  return 1
+}
+
+config_has_unsupported_inline_data_table() {
+  config_file="$1"
+
+  if [ ! -f "$config_file" ]; then
+    return 1
+  fi
+
+  awk '
+    function is_section(line) {
+      return line ~ /^[[:space:]]*(\[[^]]+\]|\[\[[^]]+\]\])[[:space:]]*($|#)/
+    }
+
+    function is_inline_data_table(line) {
+      return line ~ "^[[:space:]]*(data|\"data\"|\047data\047)[[:space:]]*=[[:space:]]*\\{"
+    }
+
+    {
+      if (is_section($0)) {
+        exit
+      }
+
+      if (is_inline_data_table($0)) {
+        found = 1
+      }
+    }
+
+    END {
+      exit found ? 0 : 1
+    }
+  ' "$config_file"
+}
+
+config_has_unsupported_multiline_strings() {
+  config_file="$1"
+
+  if [ ! -f "$config_file" ]; then
+    return 1
+  fi
+
+  awk '
+    BEGIN {
+      multiline_literal = sprintf("%c%c%c", 39, 39, 39)
+      multiline_basic = "\"\"\""
+    }
+
+    function is_comment(line) {
+      return line ~ "^[[:space:]]*#"
+    }
+
+    function has_multiline_string_marker(line) {
+      return !is_comment(line) && (index(line, multiline_basic) > 0 || index(line, multiline_literal) > 0)
+    }
+
+    {
+      if (has_multiline_string_marker($0)) {
+        found = 1
+      }
+    }
+
+    END {
+      exit found ? 0 : 1
+    }
+  ' "$config_file"
+}
+
+config_has_section_like_multiline_arrays() {
+  config_file="$1"
+
+  if [ ! -f "$config_file" ]; then
+    return 1
+  fi
+
+  awk '
+    function is_comment(line) {
+      return line ~ "^[[:space:]]*#"
+    }
+
+    function is_section(line) {
+      return line ~ /^[[:space:]]*(\[[^]]+\]|\[\[[^]]+\]\])[[:space:]]*($|#)/
+    }
+
+    function array_balance_delta(line, start, i, ch, in_basic_string, in_literal_string, escaped, balance) {
+      for (i = start; i <= length(line); i++) {
+        ch = substr(line, i, 1)
+
+        if (in_basic_string) {
+          if (escaped) {
+            escaped = 0
+          } else if (ch == "\\") {
+            escaped = 1
+          } else if (ch == "\"") {
+            in_basic_string = 0
+          }
+          continue
+        }
+
+        if (in_literal_string) {
+          if (ch == "\047") {
+            in_literal_string = 0
+          }
+          continue
+        }
+
+        if (ch == "#") {
+          break
+        }
+
+        if (ch == "\"") {
+          in_basic_string = 1
+          continue
+        }
+
+        if (ch == "\047") {
+          in_literal_string = 1
+          continue
+        }
+
+        if (ch == "[") {
+          balance++
+        } else if (ch == "]") {
+          balance--
+        }
+      }
+
+      return balance
+    }
+
+    function multiline_array_balance(line, i, ch, after_equals, saw_value) {
+      if (is_comment(line)) {
+        return 0
+      }
+
+      for (i = 1; i <= length(line); i++) {
+        ch = substr(line, i, 1)
+
+        if (!after_equals) {
+          if (ch == "=") {
+            after_equals = 1
+          }
+          continue
+        }
+
+        if (ch == "#") {
+          break
+        }
+
+        if (!saw_value) {
+          if (ch ~ /[[:space:]]/) {
+            continue
+          }
+
+          if (ch != "[") {
+            return 0
+          }
+
+          saw_value = 1
+          return array_balance_delta(line, i)
+        }
+      }
+
+      return 0
+    }
+
+    {
+      if (in_multiline_array) {
+        if (is_section($0)) {
+          found = 1
+        }
+
+        array_balance += array_balance_delta($0, 1)
+        if (array_balance <= 0) {
+          in_multiline_array = 0
+          array_balance = 0
+        }
+        next
+      }
+
+      array_balance = multiline_array_balance($0)
+      if (array_balance > 0) {
+        in_multiline_array = 1
+      }
+    }
+
+    END {
+      exit found ? 0 : 1
+    }
+  ' "$config_file"
+}
+
+managed_setup_keys() {
+  printf '%s\n' \
+    profile \
+    enableEditorStack \
+    enableAiCliTools \
+    enableDevelopmentWorkspace \
+    enableMacosAppGroupTerminalApps \
+    enableMacosAppGroupAutomation \
+    enableMacosAppGroupLauncher \
+    enableMacosAppGroupMonitoring \
+    enableMacosAppGroupAiApps
+}
+
+config_data_value() {
+  config_file="$1"
+  key="$2"
+
+  if [ ! -f "$config_file" ]; then
+    return 1
+  fi
+
+  awk -v wanted_key="$key" '
+    function strip_space(value) {
+      sub(/^[[:space:]]*/, "", value)
+      sub(/[[:space:]]*$/, "", value)
+      return value
+    }
+
+    function strip_comment(value) {
+      sub(/[[:space:]]*#.*/, "", value)
+      return value
+    }
+
+    function unquote_key(value, quote) {
+      value = strip_space(value)
+      quote = substr(value, 1, 1)
+
+      if ((quote == "\"" || quote == "\047") && substr(value, length(value), 1) == quote) {
+        return substr(value, 2, length(value) - 2)
+      }
+
+      return value
+    }
+
+    function is_comment(line) {
+      return line ~ "^[[:space:]]*#"
+    }
+
+    function is_data_section(line) {
+      return line ~ "^[[:space:]]*\\[[[:space:]]*(data|\"data\"|\047data\047)[[:space:]]*\\][[:space:]]*($|#)"
+    }
+
+    function is_section(line) {
+      return line ~ /^[[:space:]]*(\[[^]]+\]|\[\[[^]]+\]\])[[:space:]]*($|#)/
+    }
+
+    function is_key_assignment(line) {
+      return line ~ "^[[:space:]]*(\"[^\"]+\"|\047[^\047]+\047|[A-Za-z0-9_-]+)[[:space:]]*="
+    }
+
+    function is_root_dotted_data_key(line) {
+      return line ~ "^[[:space:]]*(data|\"data\"|\047data\047)[[:space:]]*\\."
+    }
+
+    function assignment_key_name(line, key) {
+      key = line
+      sub(/^[[:space:]]*/, "", key)
+      sub(/[[:space:]]*=.*/, "", key)
+      return unquote_key(key)
+    }
+
+    function dotted_data_key_name(line, key) {
+      key = line
+      sub(/^[[:space:]]*/, "", key)
+      sub(/[[:space:]]*=.*/, "", key)
+      sub("^[[:space:]]*(data|\"data\"|\047data\047)[[:space:]]*\\.[[:space:]]*", "", key)
+      return unquote_key(key)
+    }
+
+    function assignment_value(line, value) {
+      value = line
+      sub(/^[^=]*=/, "", value)
+      return strip_space(strip_comment(value))
+    }
+
+    BEGIN {
+      in_root = 1
+      found = 0
+    }
+
+    {
+      if (is_comment($0)) {
+        next
+      }
+
+      if (in_root && is_root_dotted_data_key($0)) {
+        if (dotted_data_key_name($0) == wanted_key) {
+          result = assignment_value($0)
+          found = 1
+        }
+        next
+      }
+
+      if (is_data_section($0)) {
+        in_root = 0
+        in_data = 1
+        next
+      }
+
+      if (is_section($0)) {
+        in_root = 0
+        in_data = 0
+        next
+      }
+
+      if (in_data && is_key_assignment($0) && assignment_key_name($0) == wanted_key) {
+        result = assignment_value($0)
+        found = 1
+      }
+    }
+
+    END {
+      if (!found) {
+        exit 1
+      }
+
+      print result
+    }
+  ' "$config_file"
+}
+
+config_data_key_present() {
+  config_data_value "$1" "$2" >/dev/null 2>&1
+}
+
+toml_string_value_matches() {
+  value="$1"
+  expected="$2"
+
+  [ "$value" = "\"$expected\"" ] || [ "$value" = "'$expected'" ]
+}
+
+managed_setup_config_path_is_usable_for_resume() {
+  config_file="$1"
+
+  case "$(config_file_state "$config_file")" in
+    missing|readable)
+      return 0
+      ;;
+    non-regular)
+      fatal "config path is not a regular file: $config_file"
+      ;;
+    unreadable)
+      fatal "config path is not readable: $config_file"
+      ;;
+  esac
+}
+
+managed_setup_config_complete() {
+  config_file="$1"
+  expected_profile="$2"
+
+  [ -f "$config_file" ] || return 1
+  setup_profile="$(config_data_value "$config_file" profile)" || return 1
+  toml_string_value_matches "$setup_profile" "$expected_profile" || return 1
+
+  for key in $(managed_setup_keys); do
+    config_data_key_present "$config_file" "$key" || return 1
+  done
 }
 
 print_setup_recovery() {
@@ -384,6 +859,24 @@ run_terrapod_setup() {
   return 1
 }
 
+ensure_first_run_setup() {
+  profile="$1"
+  source_dir="$2"
+  chezmoi_bin="$3"
+  config_file="$(chezmoi_config_file)"
+
+  managed_setup_config_path_is_usable_for_resume "$config_file"
+  reject_unsupported_managed_config_syntax "$config_file"
+
+  if managed_setup_config_complete "$config_file" "$profile"; then
+    printf '%s\n' "terrapod installer: Reusing complete managed Terrapod Setup config: $config_file"
+    return 0
+  fi
+
+  prepare_setup_ui_dependency "$profile" "$source_dir" "$chezmoi_bin"
+  run_terrapod_setup "$profile" "$source_dir"
+}
+
 run_initial_apply() {
   chezmoi_bin="$1"
 
@@ -413,12 +906,25 @@ main() {
   printf '%s\n' "Source repository: $DEFAULT_SOURCE_REPO"
 
   ensure_user_local_bin "$local_bin_dir"
-  reject_existing_source_dir "$source_dir"
+  source_already_present=false
+  if source_dir_exists "$source_dir"; then
+    if ! source_is_resumable_terrapod_checkout "$source_dir"; then
+      reject_unresumable_source_dir "$source_dir"
+    fi
+    source_already_present=true
+  fi
+
+  if [ "$source_already_present" = "true" ] && installed_tpod_help_works "$local_bin_dir" "$profile"; then
+    print_already_installed_guidance "$local_bin_dir"
+    return 0
+  fi
+
   chezmoi_bin="$(install_chezmoi_if_needed "$local_bin_dir")"
   ensure_source_repo_prerequisites "$profile"
-  initialize_source_repository "$chezmoi_bin"
-  prepare_setup_ui_dependency "$profile" "$source_dir" "$chezmoi_bin"
-  run_terrapod_setup "$profile" "$source_dir"
+  if [ "$source_already_present" = "false" ]; then
+    initialize_source_repository "$chezmoi_bin"
+  fi
+  ensure_first_run_setup "$profile" "$source_dir" "$chezmoi_bin"
   run_initial_apply "$chezmoi_bin"
   show_first_run_help "$profile" "$local_bin_dir"
 

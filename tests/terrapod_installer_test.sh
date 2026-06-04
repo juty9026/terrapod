@@ -20,7 +20,7 @@ pass() {
 }
 
 mkdir -p "$safe_path_dir"
-for command_name in cat chmod cp mkdir mktemp rm; do
+for command_name in awk cat chmod cp mkdir mktemp rm; do
   command_path="$(command -v "$command_name")"
   ln -s "$command_path" "$safe_path_dir/$command_name"
 done
@@ -501,6 +501,237 @@ TPOD_STUB
 esac
 EOF
   chmod +x "$stub"
+}
+
+write_terrapod_command_stub() {
+  stub="$1"
+
+  cat >"$stub" <<'EOF'
+#!/bin/sh
+set -eu
+
+log_file="${TERRAPOD_STUB_CALL_LOG:?}"
+
+printf '%s\n' "terrapod path:$0" >>"$log_file"
+printf '%s\n' "terrapod args:$*" >>"$log_file"
+printf '%s\n' "terrapod TERRAPOD_PROFILE:${TERRAPOD_PROFILE-}" >>"$log_file"
+printf '%s\n' "terrapod TERRAPOD_CHEZMOI_CONFIG:${TERRAPOD_CHEZMOI_CONFIG-unset}" >>"$log_file"
+case ":${PATH:-}:" in
+  *":$HOME/.local/bin:"*)
+    printf '%s\n' "terrapod path_has_local_bin:yes" >>"$log_file"
+    ;;
+  *)
+    printf '%s\n' "terrapod path_has_local_bin:no" >>"$log_file"
+    ;;
+esac
+
+case "${1-}" in
+  setup)
+    setup_stdin_line_number=0
+    while IFS= read -r setup_stdin_line || [ -n "$setup_stdin_line" ]; do
+      setup_stdin_line_number=$((setup_stdin_line_number + 1))
+      printf '%s\n' "terrapod setup stdin $setup_stdin_line_number:$setup_stdin_line" >>"$log_file"
+    done
+    printf '%s\n' "terrapod setup stdin lines:$setup_stdin_line_number" >>"$log_file"
+    ;;
+  configure)
+    ;;
+  *)
+    printf '%s\n' "unexpected terrapod command:${1-}" >>"$log_file"
+    exit 64
+    ;;
+esac
+EOF
+  chmod +x "$stub"
+}
+
+write_terrapod_source_checkout() {
+  source_dir="$1"
+  terrapod_stub="$2"
+
+  mkdir -p "$source_dir/.git" "$source_dir/dot_local/bin"
+  cat >"$source_dir/.git/config" <<'GITCONFIG'
+[remote "origin"]
+  url = https://github.com/juty9026/terrapod.git
+GITCONFIG
+  cp "$terrapod_stub" "$source_dir/dot_local/bin/executable_terrapod"
+  chmod +x "$source_dir/dot_local/bin/executable_terrapod"
+  : >"$source_dir/dot_local/bin/symlink_tpod"
+  : >"$source_dir/dot_zshenv.tmpl"
+  : >"$source_dir/dot_zprofile"
+  : >"$source_dir/dot_zshrc.tmpl"
+}
+
+write_installed_tpod_stub() {
+  path="$1"
+  status="$2"
+
+  mkdir -p "$(dirname "$path")"
+  {
+    printf '%s\n' '#!/bin/sh'
+    printf '%s\n' 'set -eu'
+    printf '%s\n' 'printf "%s\n" "tpod path:$0" >>"${TERRAPOD_STUB_CALL_LOG:?}"'
+    printf '%s\n' 'printf "%s\n" "tpod args:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"'
+    printf '%s\n' "if [ '$status' != '0' ]; then"
+    printf '%s\n' "  exit '$status'"
+    printf '%s\n' 'fi'
+    printf '%s\n' 'case "${1-}" in'
+    printf '%s\n' '  help|--help|-h) printf "%s\n" "installed tpod help output" ;;'
+    printf '%s\n' '  *) exit 64 ;;'
+    printf '%s\n' 'esac'
+  } >"$path"
+  chmod +x "$path"
+}
+
+write_complete_setup_config() {
+  config_file="$1"
+
+  write_complete_setup_config_with_profile "$config_file" "macos-terminal"
+}
+
+write_complete_setup_config_with_profile() {
+  config_file="$1"
+  profile="$2"
+
+  mkdir -p "$(dirname "$config_file")"
+  cat >"$config_file" <<TOML
+[data]
+profile = "$profile"
+enableEditorStack = false
+enableAiCliTools = false
+enableDevelopmentWorkspace = false
+enableMacosAppGroupTerminalApps = false
+enableMacosAppGroupAutomation = false
+enableMacosAppGroupLauncher = false
+enableMacosAppGroupMonitoring = false
+enableMacosAppGroupAiApps = false
+TOML
+}
+
+write_incomplete_setup_config() {
+  config_file="$1"
+
+  mkdir -p "$(dirname "$config_file")"
+  cat >"$config_file" <<'TOML'
+[data]
+profile = "macos-terminal"
+enableEditorStack = false
+TOML
+}
+
+write_root_dotted_complete_setup_config() {
+  config_file="$1"
+
+  mkdir -p "$(dirname "$config_file")"
+  cat >"$config_file" <<'TOML'
+data.profile = "macos-terminal"
+data.enableEditorStack = false
+data.enableAiCliTools = false
+data.enableDevelopmentWorkspace = false
+data.enableMacosAppGroupTerminalApps = false
+data.enableMacosAppGroupAutomation = false
+data.enableMacosAppGroupLauncher = false
+data.enableMacosAppGroupMonitoring = false
+data.enableMacosAppGroupAiApps = false
+TOML
+}
+
+write_quoted_complete_setup_config() {
+  config_file="$1"
+
+  mkdir -p "$(dirname "$config_file")"
+  cat >"$config_file" <<'TOML'
+["data"]
+"profile" = "macos-terminal" # active profile
+"enableEditorStack" = false
+"enableAiCliTools" = false
+"enableDevelopmentWorkspace" = false
+"enableMacosAppGroupTerminalApps" = false
+"enableMacosAppGroupAutomation" = false
+"enableMacosAppGroupLauncher" = false
+"enableMacosAppGroupMonitoring" = false
+"enableMacosAppGroupAiApps" = false
+TOML
+}
+
+write_literal_profile_complete_setup_config() {
+  config_file="$1"
+
+  mkdir -p "$(dirname "$config_file")"
+  cat >"$config_file" <<'TOML'
+[data]
+profile = 'macos-terminal'
+enableEditorStack = false
+enableAiCliTools = false
+enableDevelopmentWorkspace = false
+enableMacosAppGroupTerminalApps = false
+enableMacosAppGroupAutomation = false
+enableMacosAppGroupLauncher = false
+enableMacosAppGroupMonitoring = false
+enableMacosAppGroupAiApps = false
+TOML
+}
+
+write_unsupported_multiline_setup_config() {
+  config_file="$1"
+
+  mkdir -p "$(dirname "$config_file")"
+  cat >"$config_file" <<'TOML'
+[data]
+profile = "macos-terminal"
+enableEditorStack = false
+enableAiCliTools = false
+enableDevelopmentWorkspace = false
+enableMacosAppGroupTerminalApps = false
+enableMacosAppGroupAutomation = false
+enableMacosAppGroupLauncher = false
+enableMacosAppGroupMonitoring = false
+enableMacosAppGroupAiApps = false
+notes = """
+unsupported multiline value
+"""
+TOML
+}
+
+write_unsupported_inline_table_setup_config() {
+  config_file="$1"
+
+  mkdir -p "$(dirname "$config_file")"
+  cat >"$config_file" <<'TOML'
+data = { profile = "macos-terminal", enableEditorStack = false, enableAiCliTools = false, enableDevelopmentWorkspace = false, enableMacosAppGroupTerminalApps = false, enableMacosAppGroupAutomation = false, enableMacosAppGroupLauncher = false, enableMacosAppGroupMonitoring = false, enableMacosAppGroupAiApps = false }
+TOML
+}
+
+write_unsupported_multiline_array_setup_config() {
+  config_file="$1"
+
+  mkdir -p "$(dirname "$config_file")"
+  cat >"$config_file" <<'TOML'
+[data]
+profile = "macos-terminal"
+enableEditorStack = false
+enableAiCliTools = false
+enableDevelopmentWorkspace = false
+enableMacosAppGroupTerminalApps = false
+enableMacosAppGroupAutomation = false
+enableMacosAppGroupLauncher = false
+enableMacosAppGroupMonitoring = false
+enableMacosAppGroupAiApps = false
+matrix = [
+[1, 2]
+]
+TOML
+}
+
+prepare_resumable_macos_case() {
+  case_dir="$1"
+
+  write_uname_stub "$case_dir" "Darwin"
+  write_command_call_stubs "$case_dir" "curl" "wget" "git" "sh"
+  write_terrapod_command_stub "$case_dir/terrapod-template"
+  write_terrapod_source_checkout "$case_dir/xdg-data/chezmoi" "$case_dir/terrapod-template"
+  mkdir -p "$case_dir/home/.local/bin"
+  write_chezmoi_flow_stub "$case_dir/home/.local/bin/chezmoi"
 }
 
 write_installer_download_stubs() {
@@ -1285,15 +1516,301 @@ assert_no_stub_calls "$debian_log" "Debian rejection runs before network or chez
 
 source_guard_case="$(make_case_dir source-guard)"
 write_uname_stub "$source_guard_case" "Darwin"
-mkdir -p "$source_guard_case/xdg-data/chezmoi"
+mkdir -p "$source_guard_case/xdg-data/chezmoi/.git" "$source_guard_case/home/.local/bin"
+cat >"$source_guard_case/xdg-data/chezmoi/.git/config" <<'GITCONFIG'
+[remote "origin"]
+  url = https://github.com/juty9026/dotfiles.git
+GITCONFIG
+: >"$source_guard_case/xdg-data/chezmoi/arbitrary-file"
+write_installed_tpod_stub "$source_guard_case/home/.local/bin/tpod" 0
 source_guard_log="$source_guard_case/command-calls"
 write_command_call_stubs "$source_guard_case" "curl" "wget" "git" "chezmoi" "sh"
 TERRAPOD_STUB_CALL_LOG="$source_guard_log"
 export TERRAPOD_STUB_CALL_LOG
 run_installer_case "$source_guard_case"
 unset TERRAPOD_STUB_CALL_LOG
-assert_failure "$installer_status" "existing source directory is rejected"
+assert_failure "$installer_status" "unrelated existing source directory is rejected"
 source_guard_stderr="$(cat "$source_guard_case/stderr")"
-assert_contains "$source_guard_stderr" "chezmoi source directory already exists" "existing source directory rejection is explained"
-assert_contains "$source_guard_stderr" "Move it aside" "existing source directory rejection gives recovery guidance"
-assert_no_stub_calls "$source_guard_log" "existing source guard runs before network or chezmoi commands"
+source_guard_log_text="$(cat "$source_guard_log" 2>/dev/null || true)"
+assert_contains "$source_guard_stderr" "not a resumable Terrapod Source Repository checkout" "unrelated source directory rejection is explained"
+assert_contains "$source_guard_stderr" "Move it aside" "unrelated source directory rejection gives recovery guidance"
+assert_not_contains "$source_guard_log_text" "tpod args:help" "unrelated source rejection happens before installed detection"
+assert_no_stub_calls "$source_guard_log" "unrelated source guard runs before network or chezmoi commands"
+
+missing_recovery_core_case="$(make_case_dir missing-recovery-core)"
+write_uname_stub "$missing_recovery_core_case" "Darwin"
+write_command_call_stubs "$missing_recovery_core_case" "curl" "wget" "git" "chezmoi" "sh"
+write_terrapod_command_stub "$missing_recovery_core_case/terrapod-template"
+write_terrapod_source_checkout "$missing_recovery_core_case/xdg-data/chezmoi" "$missing_recovery_core_case/terrapod-template"
+rm -f "$missing_recovery_core_case/xdg-data/chezmoi/dot_local/bin/symlink_tpod"
+missing_recovery_core_log="$missing_recovery_core_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$missing_recovery_core_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$missing_recovery_core_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "Terrapod remote without recovery-core files is rejected"
+missing_recovery_core_stderr="$(cat "$missing_recovery_core_case/stderr")"
+assert_contains "$missing_recovery_core_stderr" "not a resumable Terrapod Source Repository checkout" "near-miss source rejection explains missing resumable state"
+assert_no_stub_calls "$missing_recovery_core_log" "near-miss source guard runs before network or chezmoi commands"
+
+terrapod_fork_case="$(make_case_dir terrapod-fork-source)"
+write_uname_stub "$terrapod_fork_case" "Darwin"
+write_command_call_stubs "$terrapod_fork_case" "curl" "wget" "git" "chezmoi" "sh"
+write_terrapod_command_stub "$terrapod_fork_case/terrapod-template"
+write_terrapod_source_checkout "$terrapod_fork_case/xdg-data/chezmoi" "$terrapod_fork_case/terrapod-template"
+cat >"$terrapod_fork_case/xdg-data/chezmoi/.git/config" <<'GITCONFIG'
+[remote "origin"]
+  url = https://github.com/juty9026/terrapod-fork.git
+[remote "upstream"]
+  url = https://github.com/juty9026/terrapod.git
+GITCONFIG
+terrapod_fork_log="$terrapod_fork_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$terrapod_fork_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$terrapod_fork_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "Terrapod-like fork source is rejected"
+terrapod_fork_stderr="$(cat "$terrapod_fork_case/stderr")"
+assert_contains "$terrapod_fork_stderr" "not a resumable Terrapod Source Repository checkout" "Terrapod-like fork rejection explains source identity mismatch"
+assert_no_stub_calls "$terrapod_fork_log" "Terrapod-like fork source guard runs before network or chezmoi commands"
+
+comment_identity_case="$(make_case_dir comment-only-identity)"
+write_uname_stub "$comment_identity_case" "Darwin"
+write_command_call_stubs "$comment_identity_case" "curl" "wget" "git" "chezmoi" "sh"
+write_terrapod_command_stub "$comment_identity_case/terrapod-template"
+write_terrapod_source_checkout "$comment_identity_case/xdg-data/chezmoi" "$comment_identity_case/terrapod-template"
+cat >"$comment_identity_case/xdg-data/chezmoi/.git/config" <<'GITCONFIG'
+[remote "origin"]
+  url = https://github.com/juty9026/dotfiles.git
+  # migrated to https://github.com/juty9026/terrapod.git later
+GITCONFIG
+comment_identity_log="$comment_identity_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$comment_identity_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$comment_identity_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "legacy source with Terrapod comment is rejected"
+comment_identity_stderr="$(cat "$comment_identity_case/stderr")"
+assert_contains "$comment_identity_stderr" "not a resumable Terrapod Source Repository checkout" "comment-only Terrapod identity is rejected"
+assert_no_stub_calls "$comment_identity_log" "comment-only identity rejection runs before network or chezmoi commands"
+
+complete_resume_case="$(make_case_dir complete-config-resume)"
+prepare_resumable_macos_case "$complete_resume_case"
+write_complete_setup_config "$complete_resume_case/xdg-config/chezmoi/chezmoi.toml"
+complete_resume_log="$complete_resume_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$complete_resume_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$complete_resume_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "resumable Terrapod checkout with complete setup config continues first-run"
+complete_resume_log_text="$(cat "$complete_resume_log")"
+assert_not_contains "$complete_resume_log_text" "chezmoi args:init" "resume does not reinitialize existing Terrapod source"
+assert_not_contains "$complete_resume_log_text" "terrapod args:setup" "resume reuses complete managed setup config"
+assert_contains "$complete_resume_log_text" "chezmoi args:apply" "resume runs initial apply after complete setup config"
+assert_contains "$complete_resume_log_text" "tpod args:help" "resume validates installed command after apply"
+
+ssh_origin_resume_case="$(make_case_dir ssh-origin-config-resume)"
+prepare_resumable_macos_case "$ssh_origin_resume_case"
+cat >"$ssh_origin_resume_case/xdg-data/chezmoi/.git/config" <<'GITCONFIG'
+[remote "origin"]
+  url = git@github.com:juty9026/terrapod.git
+GITCONFIG
+write_complete_setup_config "$ssh_origin_resume_case/xdg-config/chezmoi/chezmoi.toml"
+ssh_origin_resume_log="$ssh_origin_resume_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$ssh_origin_resume_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$ssh_origin_resume_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "resumable Terrapod checkout accepts SSH origin"
+ssh_origin_resume_log_text="$(cat "$ssh_origin_resume_log")"
+assert_not_contains "$ssh_origin_resume_log_text" "terrapod args:setup" "SSH origin resume reuses complete managed setup config"
+assert_contains "$ssh_origin_resume_log_text" "chezmoi args:apply" "SSH origin resume continues to apply"
+
+profile_mismatch_resume_case="$(make_case_dir profile-mismatch-config-resume)"
+prepare_resumable_macos_case "$profile_mismatch_resume_case"
+write_gum_command_stub "$profile_mismatch_resume_case"
+write_complete_setup_config_with_profile "$profile_mismatch_resume_case/xdg-config/chezmoi/chezmoi.toml" "vps-shell"
+profile_mismatch_resume_log="$profile_mismatch_resume_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$profile_mismatch_resume_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$profile_mismatch_resume_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "resumable Terrapod checkout with mismatched setup profile reruns setup"
+profile_mismatch_resume_log_text="$(cat "$profile_mismatch_resume_log")"
+assert_contains "$profile_mismatch_resume_log_text" "terrapod TERRAPOD_PROFILE:macos-terminal" "profile mismatch resume keeps detected first-run setup profile"
+assert_contains "$profile_mismatch_resume_log_text" "terrapod args:setup" "profile mismatch resume reruns Terrapod Setup"
+assert_first_occurrence_before "$profile_mismatch_resume_log_text" "terrapod args:setup" "chezmoi args:apply" "profile mismatch resume continues to initial apply after setup"
+
+root_dotted_resume_case="$(make_case_dir root-dotted-config-resume)"
+prepare_resumable_macos_case "$root_dotted_resume_case"
+write_root_dotted_complete_setup_config "$root_dotted_resume_case/xdg-config/chezmoi/chezmoi.toml"
+root_dotted_resume_log="$root_dotted_resume_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$root_dotted_resume_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$root_dotted_resume_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "resumable Terrapod checkout accepts root dotted complete setup config"
+root_dotted_resume_log_text="$(cat "$root_dotted_resume_log")"
+assert_not_contains "$root_dotted_resume_log_text" "terrapod args:setup" "root dotted complete setup config is reused"
+assert_contains "$root_dotted_resume_log_text" "chezmoi args:apply" "root dotted complete setup config continues to apply"
+
+quoted_resume_case="$(make_case_dir quoted-config-resume)"
+prepare_resumable_macos_case "$quoted_resume_case"
+write_quoted_complete_setup_config "$quoted_resume_case/xdg-config/chezmoi/chezmoi.toml"
+quoted_resume_log="$quoted_resume_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$quoted_resume_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$quoted_resume_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "resumable Terrapod checkout accepts quoted complete setup config"
+quoted_resume_log_text="$(cat "$quoted_resume_log")"
+assert_not_contains "$quoted_resume_log_text" "terrapod args:setup" "quoted complete setup config is reused"
+assert_contains "$quoted_resume_log_text" "chezmoi args:apply" "quoted complete setup config continues to apply"
+
+literal_profile_resume_case="$(make_case_dir literal-profile-config-resume)"
+prepare_resumable_macos_case "$literal_profile_resume_case"
+write_literal_profile_complete_setup_config "$literal_profile_resume_case/xdg-config/chezmoi/chezmoi.toml"
+literal_profile_resume_log="$literal_profile_resume_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$literal_profile_resume_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$literal_profile_resume_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "resumable Terrapod checkout accepts literal profile setup config"
+literal_profile_resume_log_text="$(cat "$literal_profile_resume_log")"
+assert_not_contains "$literal_profile_resume_log_text" "terrapod args:setup" "literal profile complete setup config is reused"
+assert_contains "$literal_profile_resume_log_text" "chezmoi args:apply" "literal profile complete setup config continues to apply"
+
+unsupported_multiline_config_case="$(make_case_dir unsupported-multiline-config-resume)"
+prepare_resumable_macos_case "$unsupported_multiline_config_case"
+write_unsupported_multiline_setup_config "$unsupported_multiline_config_case/xdg-config/chezmoi/chezmoi.toml"
+unsupported_multiline_config_log="$unsupported_multiline_config_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$unsupported_multiline_config_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$unsupported_multiline_config_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "resume fails when managed setup config has unsupported multiline syntax"
+unsupported_multiline_config_stderr="$(cat "$unsupported_multiline_config_case/stderr")"
+unsupported_multiline_config_log_text="$(cat "$unsupported_multiline_config_log" 2>/dev/null || true)"
+assert_contains "$unsupported_multiline_config_stderr" "unsupported multiline string in config" "unsupported multiline config gives syntax guidance"
+assert_not_contains "$unsupported_multiline_config_log_text" "terrapod args:setup" "unsupported multiline config is not treated as missing setup config"
+assert_not_contains "$unsupported_multiline_config_log_text" "chezmoi args:apply" "unsupported multiline config does not continue to apply"
+
+unsupported_inline_table_config_case="$(make_case_dir unsupported-inline-table-config-resume)"
+prepare_resumable_macos_case "$unsupported_inline_table_config_case"
+write_unsupported_inline_table_setup_config "$unsupported_inline_table_config_case/xdg-config/chezmoi/chezmoi.toml"
+unsupported_inline_table_config_log="$unsupported_inline_table_config_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$unsupported_inline_table_config_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$unsupported_inline_table_config_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "resume fails when managed setup config uses inline data table"
+unsupported_inline_table_config_stderr="$(cat "$unsupported_inline_table_config_case/stderr")"
+unsupported_inline_table_config_log_text="$(cat "$unsupported_inline_table_config_log" 2>/dev/null || true)"
+assert_contains "$unsupported_inline_table_config_stderr" "unsupported inline data table in config" "unsupported inline table config gives syntax guidance"
+assert_not_contains "$unsupported_inline_table_config_log_text" "terrapod args:setup" "unsupported inline table config is not treated as missing setup config"
+assert_not_contains "$unsupported_inline_table_config_log_text" "chezmoi args:apply" "unsupported inline table config does not continue to apply"
+
+unsupported_multiline_array_config_case="$(make_case_dir unsupported-multiline-array-config-resume)"
+prepare_resumable_macos_case "$unsupported_multiline_array_config_case"
+write_unsupported_multiline_array_setup_config "$unsupported_multiline_array_config_case/xdg-config/chezmoi/chezmoi.toml"
+unsupported_multiline_array_config_log="$unsupported_multiline_array_config_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$unsupported_multiline_array_config_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$unsupported_multiline_array_config_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "resume fails when managed setup config has unsupported multiline array syntax"
+unsupported_multiline_array_config_stderr="$(cat "$unsupported_multiline_array_config_case/stderr")"
+unsupported_multiline_array_config_log_text="$(cat "$unsupported_multiline_array_config_log" 2>/dev/null || true)"
+assert_contains "$unsupported_multiline_array_config_stderr" "unsupported multiline array" "unsupported multiline array config gives syntax guidance"
+assert_not_contains "$unsupported_multiline_array_config_log_text" "terrapod args:setup" "unsupported multiline array config is not treated as missing setup config"
+assert_not_contains "$unsupported_multiline_array_config_log_text" "chezmoi args:apply" "unsupported multiline array config does not continue to apply"
+
+incomplete_resume_case="$(make_case_dir incomplete-config-resume)"
+prepare_resumable_macos_case "$incomplete_resume_case"
+write_gum_command_stub "$incomplete_resume_case"
+write_incomplete_setup_config "$incomplete_resume_case/xdg-config/chezmoi/chezmoi.toml"
+incomplete_resume_log="$incomplete_resume_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$incomplete_resume_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$incomplete_resume_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "resumable Terrapod checkout with incomplete setup config reruns setup"
+incomplete_resume_log_text="$(cat "$incomplete_resume_log")"
+assert_not_contains "$incomplete_resume_log_text" "chezmoi args:init" "incomplete resume does not reinitialize source"
+assert_contains "$incomplete_resume_log_text" "terrapod TERRAPOD_PROFILE:macos-terminal" "incomplete resume keeps first-run setup profile"
+assert_contains "$incomplete_resume_log_text" "terrapod TERRAPOD_CHEZMOI_CONFIG:" "incomplete resume keeps first-run setup config override"
+assert_contains "$incomplete_resume_log_text" "terrapod args:setup" "incomplete resume reruns Terrapod Setup"
+assert_first_occurrence_before "$incomplete_resume_log_text" "terrapod args:setup" "chezmoi args:apply" "incomplete resume continues to initial apply after setup"
+
+non_regular_config_case="$(make_case_dir non-regular-config-resume)"
+prepare_resumable_macos_case "$non_regular_config_case"
+mkdir -p "$non_regular_config_case/xdg-config/chezmoi/chezmoi.toml"
+non_regular_config_log="$non_regular_config_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$non_regular_config_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$non_regular_config_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "resume fails when managed setup config path is unusable"
+non_regular_config_stderr="$(cat "$non_regular_config_case/stderr")"
+non_regular_config_log_text="$(cat "$non_regular_config_log" 2>/dev/null || true)"
+assert_contains "$non_regular_config_stderr" "config path is not a regular file" "unusable config path gives config guidance"
+assert_not_contains "$non_regular_config_log_text" "terrapod args:setup" "unusable config is not treated as missing setup config"
+assert_not_contains "$non_regular_config_log_text" "chezmoi args:apply" "unusable config does not continue to apply"
+
+unreadable_config_case="$(make_case_dir unreadable-config-resume)"
+prepare_resumable_macos_case "$unreadable_config_case"
+unreadable_config_file="$unreadable_config_case/xdg-config/chezmoi/chezmoi.toml"
+write_complete_setup_config "$unreadable_config_file"
+chmod 000 "$unreadable_config_file"
+if [ -r "$unreadable_config_file" ]; then
+  chmod 600 "$unreadable_config_file"
+  pass "unreadable config case is skipped when chmod 000 remains readable"
+else
+  unreadable_config_log="$unreadable_config_case/command-calls"
+  TERRAPOD_STUB_CALL_LOG="$unreadable_config_log"
+  export TERRAPOD_STUB_CALL_LOG
+  run_installer_case "$unreadable_config_case"
+  unset TERRAPOD_STUB_CALL_LOG
+  chmod 600 "$unreadable_config_file"
+  assert_failure "$installer_status" "resume fails when managed setup config is unreadable"
+  unreadable_config_stderr="$(cat "$unreadable_config_case/stderr")"
+  unreadable_config_log_text="$(cat "$unreadable_config_log" 2>/dev/null || true)"
+  assert_contains "$unreadable_config_stderr" "config path is not readable" "unreadable config path gives config guidance"
+  assert_not_contains "$unreadable_config_log_text" "terrapod args:setup" "unreadable config is not treated as missing setup config"
+  assert_not_contains "$unreadable_config_log_text" "chezmoi args:apply" "unreadable config does not continue to apply"
+fi
+
+already_installed_case="$(make_case_dir already-installed)"
+prepare_resumable_macos_case "$already_installed_case"
+write_complete_setup_config "$already_installed_case/xdg-config/chezmoi/chezmoi.toml"
+write_installed_tpod_stub "$already_installed_case/home/.local/bin/tpod" 0
+already_installed_log="$already_installed_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$already_installed_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$already_installed_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "already installed Terrapod exits successfully"
+already_installed_stdout="$(cat "$already_installed_case/stdout")"
+already_installed_log_text="$(cat "$already_installed_log")"
+assert_contains "$already_installed_stdout" "Terrapod is already installed." "already installed case explains state"
+assert_contains "$already_installed_stdout" "$already_installed_case/home/.local/bin/tpod status" "already installed case guides status"
+assert_contains "$already_installed_stdout" "$already_installed_case/home/.local/bin/tpod apply" "already installed case guides routine apply"
+assert_contains "$already_installed_log_text" "tpod args:help" "already installed detection validates tpod help"
+assert_not_contains "$already_installed_log_text" "terrapod args:setup" "already installed case does not rerun setup"
+assert_not_contains "$already_installed_log_text" "chezmoi args:apply" "already installed case does not automatically apply"
+
+broken_tpod_case="$(make_case_dir broken-tpod-resume)"
+prepare_resumable_macos_case "$broken_tpod_case"
+write_complete_setup_config "$broken_tpod_case/xdg-config/chezmoi/chezmoi.toml"
+write_installed_tpod_stub "$broken_tpod_case/home/.local/bin/tpod" 17
+broken_tpod_log="$broken_tpod_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$broken_tpod_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$broken_tpod_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "broken installed command surface resumes first-run"
+broken_tpod_stdout="$(cat "$broken_tpod_case/stdout")"
+broken_tpod_log_text="$(cat "$broken_tpod_log")"
+assert_contains "$broken_tpod_log_text" "tpod args:help" "broken command surface is tested with tpod help"
+assert_contains "$broken_tpod_log_text" "chezmoi args:apply" "broken command surface resumes apply instead of treating machine as installed"
+assert_not_contains "$broken_tpod_stdout" "Terrapod is already installed." "broken command surface is not reported as already installed"
