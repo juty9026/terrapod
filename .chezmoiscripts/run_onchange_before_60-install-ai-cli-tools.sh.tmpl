@@ -61,7 +61,6 @@ append_failed_tool() {
 
 finish_ai_cli_installers() {
   if [ -n "$failed_tools" ]; then
-    clear_install_warning "$AI_CLI_WARNING_CATEGORY"
     mark_install_warning \
       "$AI_CLI_WARNING_CATEGORY" \
       "Optional AI CLI tool install needs attention" \
