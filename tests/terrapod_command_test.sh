@@ -738,6 +738,69 @@ if HOME="$marker_home" XDG_STATE_HOME="$marker_xdg_state" sh -c '. "$1"; terrapo
 fi
 pass "install warning marker write rejects unknown categories"
 
+if HOME="$marker_home" XDG_STATE_HOME="$marker_xdg_state" sh -c '. "$1"; terrapod_install_warning_write ai-cli-tools "bad" "bad"' sh "$install_warnings_lib" 2>/dev/null; then
+  fail "install warning marker write rejects the legacy AI CLI category slug"
+fi
+pass "install warning marker write rejects the legacy AI CLI category slug"
+
+legacy_marker_home="$tmp_dir/legacy-marker-home"
+legacy_marker_state="$tmp_dir/legacy-marker-state"
+legacy_marker_dir="$legacy_marker_state/terrapod/install-warnings"
+legacy_ai_cli_marker="$legacy_marker_dir/ai-cli-tools"
+mkdir -p "$legacy_marker_dir" "$legacy_marker_home"
+printf '%s\n' \
+  "category='ai-cli-tools'" \
+  "summary='Legacy AI CLI tool install needs attention'" \
+  "guidance='Rerun tpod apply after network access is restored.'" \
+  "updated_at='2026-01-01T00:00:00Z'" \
+  >"$legacy_ai_cli_marker"
+
+legacy_marker_list="$(
+  HOME="$legacy_marker_home" XDG_STATE_HOME="$legacy_marker_state" sh -c '. "$1"; terrapod_install_warning_list' sh "$install_warnings_lib"
+)"
+if [ "$legacy_marker_list" != "optional-ai-cli-tools" ]; then
+  fail "install warning marker list exposes legacy AI CLI markers through the stable category slug"
+fi
+pass "install warning marker list exposes legacy AI CLI markers through the stable category slug"
+
+legacy_marker_read="$(
+  HOME="$legacy_marker_home" XDG_STATE_HOME="$legacy_marker_state" sh -c '. "$1"; terrapod_install_warning_read optional-ai-cli-tools' sh "$install_warnings_lib"
+)"
+assert_contains "$legacy_marker_read" "category='ai-cli-tools'" "install warning marker read falls back to legacy AI CLI marker files"
+
+legacy_marker_summary="$(
+  HOME="$legacy_marker_home" XDG_STATE_HOME="$legacy_marker_state" sh -c '. "$1"; terrapod_install_warning_value optional-ai-cli-tools summary' sh "$install_warnings_lib"
+)"
+if [ "$legacy_marker_summary" != "Legacy AI CLI tool install needs attention" ]; then
+  fail "install warning marker value falls back to legacy AI CLI marker files"
+fi
+pass "install warning marker value falls back to legacy AI CLI marker files"
+
+HOME="$legacy_marker_home" XDG_STATE_HOME="$legacy_marker_state" sh -c \
+  '. "$1"; terrapod_install_warning_write optional-ai-cli-tools "Current AI CLI tool install needs attention" "Rerun tpod apply after network access is restored."' \
+  sh "$install_warnings_lib"
+current_marker_summary="$(
+  HOME="$legacy_marker_home" XDG_STATE_HOME="$legacy_marker_state" sh -c '. "$1"; terrapod_install_warning_value optional-ai-cli-tools summary' sh "$install_warnings_lib"
+)"
+if [ "$current_marker_summary" != "Current AI CLI tool install needs attention" ]; then
+  fail "install warning marker value prefers stable AI CLI marker files over legacy marker files"
+fi
+pass "install warning marker value prefers stable AI CLI marker files over legacy marker files"
+
+HOME="$legacy_marker_home" XDG_STATE_HOME="$legacy_marker_state" sh -c '. "$1"; terrapod_install_warning_clear optional-ai-cli-tools' sh "$install_warnings_lib"
+if [ -e "$legacy_marker_dir/optional-ai-cli-tools" ] || [ -e "$legacy_ai_cli_marker" ]; then
+  fail "install warning marker clear removes stable and legacy AI CLI marker files"
+fi
+pass "install warning marker clear removes stable and legacy AI CLI marker files"
+
+HOME="$legacy_marker_home" XDG_STATE_HOME="$legacy_marker_state" sh -c \
+  '. "$1"; terrapod_install_warning_write optional-ai-cli-tools "AI CLI tool install needs attention" "Rerun tpod apply after network access is restored."' \
+  sh "$install_warnings_lib"
+if [ ! -f "$legacy_marker_dir/optional-ai-cli-tools" ] || [ -e "$legacy_ai_cli_marker" ]; then
+  fail "install warning marker write stores Optional AI CLI warnings only under the stable category slug"
+fi
+pass "install warning marker write stores Optional AI CLI warnings only under the stable category slug"
+
 fake_warning_bin="$tmp_dir/fake-warning-bin"
 fake_warning_calls="$tmp_dir/fake-warning.calls"
 mkdir -p "$fake_warning_bin"

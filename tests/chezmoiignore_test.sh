@@ -642,12 +642,24 @@ HOME="$ai_marker_home" XDG_STATE_HOME="$ai_marker_state" sh -c \
 if [ ! -f "$ai_marker_state/terrapod/install-warnings/optional-ai-cli-tools" ]; then
   fail "test setup should create an optional-ai-cli-tools warning marker"
 fi
+printf '%s\n' \
+  "category='ai-cli-tools'" \
+  "summary='Legacy Optional AI CLI tool install needs attention'" \
+  "guidance='Rerun tpod apply after network access is restored.'" \
+  "updated_at='2026-01-01T00:00:00Z'" \
+  >"$ai_marker_state/terrapod/install-warnings/ai-cli-tools"
+if [ ! -f "$ai_marker_state/terrapod/install-warnings/ai-cli-tools" ]; then
+  fail "test setup should create a legacy ai-cli-tools warning marker"
+fi
 
 HOME="$ai_marker_home" XDG_STATE_HOME="$ai_marker_state" sh "$disabled_ai_cli_tools_cleanup_script"
 if [ -e "$ai_marker_state/terrapod/install-warnings/optional-ai-cli-tools" ]; then
   fail "disabled Optional AI Tool Stack cleanup should clear stale optional-ai-cli-tools marker"
 fi
-pass "disabled Optional AI Tool Stack cleanup clears stale optional-ai-cli-tools marker"
+if [ -e "$ai_marker_state/terrapod/install-warnings/ai-cli-tools" ]; then
+  fail "disabled Optional AI Tool Stack cleanup should clear stale legacy ai-cli-tools marker"
+fi
+pass "disabled Optional AI Tool Stack cleanup clears stale optional AI CLI markers"
 
 for installer_url in \
   "https://antigravity.google/cli/install.sh" \

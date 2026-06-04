@@ -42,6 +42,37 @@ terrapod_install_warning_path() {
   printf '%s/%s\n' "$(terrapod_install_warning_dir)" "$category"
 }
 
+terrapod_install_warning_legacy_path() {
+  category="$1"
+
+  case "$category" in
+    optional-ai-cli-tools)
+      printf '%s/%s\n' "$(terrapod_install_warning_dir)" ai-cli-tools
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+terrapod_install_warning_existing_path() {
+  category="$1"
+
+  marker_path="$(terrapod_install_warning_path "$category")" || return 1
+  if [ -f "$marker_path" ]; then
+    printf '%s\n' "$marker_path"
+    return 0
+  fi
+
+  legacy_marker_path="$(terrapod_install_warning_legacy_path "$category")" || return 1
+  if [ -f "$legacy_marker_path" ]; then
+    printf '%s\n' "$legacy_marker_path"
+    return 0
+  fi
+
+  return 1
+}
+
 terrapod_install_warning_quote() {
   printf "'"
   printf '%s' "$1" | sed "s/'/'\\\\''/g"
@@ -103,13 +134,14 @@ terrapod_install_warning_clear() {
 
   marker_path="$(terrapod_install_warning_path "$category")" || return 1
   rm -f "$marker_path"
+
+  legacy_marker_path="$(terrapod_install_warning_legacy_path "$category")" || return 0
+  rm -f "$legacy_marker_path"
 }
 
 terrapod_install_warning_list() {
-  marker_dir="$(terrapod_install_warning_dir)"
-
   for category in $(terrapod_install_warning_categories); do
-    if [ -f "$marker_dir/$category" ]; then
+    if terrapod_install_warning_existing_path "$category" >/dev/null; then
       printf '%s\n' "$category"
     fi
   done
@@ -118,8 +150,7 @@ terrapod_install_warning_list() {
 terrapod_install_warning_read() {
   category="$1"
 
-  marker_path="$(terrapod_install_warning_path "$category")" || return 1
-  [ -f "$marker_path" ] || return 1
+  marker_path="$(terrapod_install_warning_existing_path "$category")" || return 1
   cat "$marker_path"
 }
 
@@ -127,8 +158,7 @@ terrapod_install_warning_value() {
   category="$1"
   field="$2"
 
-  marker_path="$(terrapod_install_warning_path "$category")" || return 1
-  [ -f "$marker_path" ] || return 1
+  marker_path="$(terrapod_install_warning_existing_path "$category")" || return 1
 
   case "$field" in
     category|summary|guidance|updated_at)
