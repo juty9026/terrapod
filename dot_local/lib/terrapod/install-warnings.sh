@@ -9,12 +9,12 @@ terrapod_install_warning_categories() {
     ubuntu-bootstrap \
     shell-integrations \
     mise-tools \
-    ai-cli-tools
+    optional-ai-cli-tools
 }
 
 terrapod_install_warning_is_category() {
   case "$1" in
-    homebrew-core|homebrew-desktop-apps|ubuntu-bootstrap|shell-integrations|mise-tools|ai-cli-tools)
+    homebrew-core|homebrew-desktop-apps|ubuntu-bootstrap|shell-integrations|mise-tools|optional-ai-cli-tools)
       return 0
       ;;
     *)
@@ -40,6 +40,45 @@ terrapod_install_warning_path() {
   fi
 
   printf '%s/%s\n' "$(terrapod_install_warning_dir)" "$category"
+}
+
+terrapod_install_warning_legacy_path() {
+  category="$1"
+
+  case "$category" in
+    optional-ai-cli-tools)
+      printf '%s/%s\n' "$(terrapod_install_warning_dir)" ai-cli-tools
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+terrapod_install_warning_existing_path() {
+  category="$1"
+
+  marker_path="$(terrapod_install_warning_path "$category")" || return 1
+  if [ -f "$marker_path" ]; then
+    printf '%s\n' "$marker_path"
+    return 0
+  fi
+
+  legacy_marker_path="$(terrapod_install_warning_legacy_path "$category")" || return 1
+  if [ -f "$legacy_marker_path" ]; then
+    printf '%s\n' "$legacy_marker_path"
+    return 0
+  fi
+
+  return 1
+}
+
+terrapod_install_warning_path_is_legacy() {
+  category="$1"
+  marker_path="$2"
+
+  legacy_marker_path="$(terrapod_install_warning_legacy_path "$category")" || return 1
+  [ "$marker_path" = "$legacy_marker_path" ]
 }
 
 terrapod_install_warning_quote() {
@@ -96,6 +135,11 @@ terrapod_install_warning_write() {
     rm -f "$tmp_file"
     return 1
   fi
+
+  legacy_marker_path="$(terrapod_install_warning_legacy_path "$category" 2>/dev/null || true)"
+  if [ -n "$legacy_marker_path" ]; then
+    rm -f "$legacy_marker_path"
+  fi
 }
 
 terrapod_install_warning_clear() {
@@ -103,13 +147,14 @@ terrapod_install_warning_clear() {
 
   marker_path="$(terrapod_install_warning_path "$category")" || return 1
   rm -f "$marker_path"
+
+  legacy_marker_path="$(terrapod_install_warning_legacy_path "$category")" || return 0
+  rm -f "$legacy_marker_path"
 }
 
 terrapod_install_warning_list() {
-  marker_dir="$(terrapod_install_warning_dir)"
-
   for category in $(terrapod_install_warning_categories); do
-    if [ -f "$marker_dir/$category" ]; then
+    if terrapod_install_warning_existing_path "$category" >/dev/null; then
       printf '%s\n' "$category"
     fi
   done
@@ -118,8 +163,21 @@ terrapod_install_warning_list() {
 terrapod_install_warning_read() {
   category="$1"
 
-  marker_path="$(terrapod_install_warning_path "$category")" || return 1
-  [ -f "$marker_path" ] || return 1
+  marker_path="$(terrapod_install_warning_existing_path "$category")" || return 1
+  if terrapod_install_warning_path_is_legacy "$category" "$marker_path"; then
+    awk -F= -v category="$category" '
+      $1 == "category" {
+        printf "category=\047%s\047\n", category
+        next
+      }
+
+      {
+        print
+      }
+    ' "$marker_path"
+    return
+  fi
+
   cat "$marker_path"
 }
 
@@ -127,8 +185,7 @@ terrapod_install_warning_value() {
   category="$1"
   field="$2"
 
-  marker_path="$(terrapod_install_warning_path "$category")" || return 1
-  [ -f "$marker_path" ] || return 1
+  marker_path="$(terrapod_install_warning_existing_path "$category")" || return 1
 
   case "$field" in
     category|summary|guidance|updated_at)
@@ -138,6 +195,11 @@ terrapod_install_warning_value() {
       return 1
       ;;
   esac
+
+  if [ "$field" = category ] && terrapod_install_warning_path_is_legacy "$category" "$marker_path"; then
+    printf '%s\n' "$category"
+    return
+  fi
 
   awk -F= -v wanted="$field" '
     $1 == wanted {

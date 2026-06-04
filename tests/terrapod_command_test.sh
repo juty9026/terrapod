@@ -640,7 +640,7 @@ pass "install warning markers honor XDG_STATE_HOME"
 marker_categories="$(
   sh -c '. "$1"; terrapod_install_warning_categories' sh "$install_warnings_lib"
 )"
-expected_marker_categories="$(printf '%s\n' homebrew-core homebrew-desktop-apps ubuntu-bootstrap shell-integrations mise-tools ai-cli-tools)"
+expected_marker_categories="$(printf '%s\n' homebrew-core homebrew-desktop-apps ubuntu-bootstrap shell-integrations mise-tools optional-ai-cli-tools)"
 
 if [ "$marker_categories" != "$expected_marker_categories" ]; then
   printf '%s\n' "expected marker categories:" >&2
@@ -686,13 +686,13 @@ fi
 pass "install warning marker updated_at is a UTC ISO 8601 timestamp ending in Z"
 
 HOME="$marker_home" XDG_STATE_HOME="$marker_xdg_state" sh -c \
-  '. "$1"; terrapod_install_warning_write ai-cli-tools "AI CLI tool install needs attention" "Rerun tpod apply after network access is restored."' \
+  '. "$1"; terrapod_install_warning_write optional-ai-cli-tools "AI CLI tool install needs attention" "Rerun tpod apply after network access is restored."' \
   sh "$install_warnings_lib"
 
 marker_list="$(
   HOME="$marker_home" XDG_STATE_HOME="$marker_xdg_state" sh -c '. "$1"; terrapod_install_warning_list' sh "$install_warnings_lib"
 )"
-expected_marker_list="$(printf '%s\n' homebrew-core ai-cli-tools)"
+expected_marker_list="$(printf '%s\n' homebrew-core optional-ai-cli-tools)"
 if [ "$marker_list" != "$expected_marker_list" ]; then
   printf '%s\n' "expected marker list:" >&2
   printf '%s\n' "$expected_marker_list" | sed 's/^/  /' >&2
@@ -728,7 +728,7 @@ if [ -e "$homebrew_core_marker" ]; then
 fi
 pass "install warning marker clear removes the matching category file"
 
-if [ ! -f "$marker_xdg_state/terrapod/install-warnings/ai-cli-tools" ]; then
+if [ ! -f "$marker_xdg_state/terrapod/install-warnings/optional-ai-cli-tools" ]; then
   fail "install warning marker clear does not remove other category files"
 fi
 pass "install warning marker clear does not remove other category files"
@@ -737,6 +737,82 @@ if HOME="$marker_home" XDG_STATE_HOME="$marker_xdg_state" sh -c '. "$1"; terrapo
   fail "install warning marker write rejects unknown categories"
 fi
 pass "install warning marker write rejects unknown categories"
+
+if HOME="$marker_home" XDG_STATE_HOME="$marker_xdg_state" sh -c '. "$1"; terrapod_install_warning_write ai-cli-tools "bad" "bad"' sh "$install_warnings_lib" 2>/dev/null; then
+  fail "install warning marker write rejects the legacy AI CLI category slug"
+fi
+pass "install warning marker write rejects the legacy AI CLI category slug"
+
+legacy_marker_home="$tmp_dir/legacy-marker-home"
+legacy_marker_state="$tmp_dir/legacy-marker-state"
+legacy_marker_dir="$legacy_marker_state/terrapod/install-warnings"
+legacy_ai_cli_marker="$legacy_marker_dir/ai-cli-tools"
+mkdir -p "$legacy_marker_dir" "$legacy_marker_home"
+printf '%s\n' \
+  "category='ai-cli-tools'" \
+  "summary='Legacy AI CLI tool install needs attention'" \
+  "guidance='Rerun tpod apply after network access is restored.'" \
+  "updated_at='2026-01-01T00:00:00Z'" \
+  >"$legacy_ai_cli_marker"
+
+legacy_marker_list="$(
+  HOME="$legacy_marker_home" XDG_STATE_HOME="$legacy_marker_state" sh -c '. "$1"; terrapod_install_warning_list' sh "$install_warnings_lib"
+)"
+if [ "$legacy_marker_list" != "optional-ai-cli-tools" ]; then
+  fail "install warning marker list exposes legacy AI CLI markers through the stable category slug"
+fi
+pass "install warning marker list exposes legacy AI CLI markers through the stable category slug"
+
+legacy_marker_read="$(
+  HOME="$legacy_marker_home" XDG_STATE_HOME="$legacy_marker_state" sh -c '. "$1"; terrapod_install_warning_read optional-ai-cli-tools' sh "$install_warnings_lib"
+)"
+assert_contains "$legacy_marker_read" "category='optional-ai-cli-tools'" "install warning marker read normalizes legacy AI CLI marker categories"
+assert_not_contains "$legacy_marker_read" "category='ai-cli-tools'" "install warning marker read does not expose legacy AI CLI marker categories"
+
+legacy_marker_category="$(
+  HOME="$legacy_marker_home" XDG_STATE_HOME="$legacy_marker_state" sh -c '. "$1"; terrapod_install_warning_value optional-ai-cli-tools category' sh "$install_warnings_lib"
+)"
+if [ "$legacy_marker_category" != "optional-ai-cli-tools" ]; then
+  fail "install warning marker category value normalizes legacy AI CLI marker files"
+fi
+pass "install warning marker category value normalizes legacy AI CLI marker files"
+
+legacy_marker_summary="$(
+  HOME="$legacy_marker_home" XDG_STATE_HOME="$legacy_marker_state" sh -c '. "$1"; terrapod_install_warning_value optional-ai-cli-tools summary' sh "$install_warnings_lib"
+)"
+if [ "$legacy_marker_summary" != "Legacy AI CLI tool install needs attention" ]; then
+  fail "install warning marker value falls back to legacy AI CLI marker files"
+fi
+pass "install warning marker value falls back to legacy AI CLI marker files"
+
+HOME="$legacy_marker_home" XDG_STATE_HOME="$legacy_marker_state" sh -c \
+  '. "$1"; terrapod_install_warning_write optional-ai-cli-tools "Current AI CLI tool install needs attention" "Rerun tpod apply after network access is restored."' \
+  sh "$install_warnings_lib"
+if [ ! -f "$legacy_marker_dir/optional-ai-cli-tools" ] || [ -e "$legacy_ai_cli_marker" ]; then
+  fail "install warning marker write replaces legacy AI CLI marker files with the stable marker"
+fi
+pass "install warning marker write replaces legacy AI CLI marker files with the stable marker"
+current_marker_summary="$(
+  HOME="$legacy_marker_home" XDG_STATE_HOME="$legacy_marker_state" sh -c '. "$1"; terrapod_install_warning_value optional-ai-cli-tools summary' sh "$install_warnings_lib"
+)"
+if [ "$current_marker_summary" != "Current AI CLI tool install needs attention" ]; then
+  fail "install warning marker value prefers stable AI CLI marker files over legacy marker files"
+fi
+pass "install warning marker value prefers stable AI CLI marker files over legacy marker files"
+
+HOME="$legacy_marker_home" XDG_STATE_HOME="$legacy_marker_state" sh -c '. "$1"; terrapod_install_warning_clear optional-ai-cli-tools' sh "$install_warnings_lib"
+if [ -e "$legacy_marker_dir/optional-ai-cli-tools" ] || [ -e "$legacy_ai_cli_marker" ]; then
+  fail "install warning marker clear removes stable and legacy AI CLI marker files"
+fi
+pass "install warning marker clear removes stable and legacy AI CLI marker files"
+
+HOME="$legacy_marker_home" XDG_STATE_HOME="$legacy_marker_state" sh -c \
+  '. "$1"; terrapod_install_warning_write optional-ai-cli-tools "AI CLI tool install needs attention" "Rerun tpod apply after network access is restored."' \
+  sh "$install_warnings_lib"
+if [ ! -f "$legacy_marker_dir/optional-ai-cli-tools" ] || [ -e "$legacy_ai_cli_marker" ]; then
+  fail "install warning marker write stores Optional AI CLI warnings only under the stable category slug"
+fi
+pass "install warning marker write stores Optional AI CLI warnings only under the stable category slug"
 
 fake_warning_bin="$tmp_dir/fake-warning-bin"
 fake_warning_calls="$tmp_dir/fake-warning.calls"
@@ -750,20 +826,108 @@ write_stub "$fake_warning_bin/terrapod_install_warning_value" \
 write_stub "$fake_warning_bin/terrapod_install_warning_write" \
   'printf "%s\n" "write $*" >>"$FAKE_INSTALL_WARNING_CALLS"'
 
+fake_ai_cli_home="$tmp_dir/fake-ai-cli-home"
+mkdir -p "$fake_ai_cli_home/.local/bin"
+for command_name in agy claude codex; do
+  write_stub "$fake_ai_cli_home/.local/bin/$command_name" \
+    'exit 0'
+done
+
 fake_ai_cli_installer="$tmp_dir/fake-ai-cli-installer.sh"
 chezmoi execute-template \
   --override-data '{"chezmoi":{"os":"linux","sourceDir":"/missing-terrapod-source"},"enableAiCliTools":true}' \
   --file "$repo_root/.chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
   >"$fake_ai_cli_installer"
 
-if FAKE_INSTALL_WARNING_CALLS="$fake_warning_calls" PATH="$fake_warning_bin" /bin/sh "$fake_ai_cli_installer" >"$tmp_dir/fake-ai-cli-installer.out" 2>"$tmp_dir/fake-ai-cli-installer.err"; then
-  fail "rendered installer fixture fails before optional AI CLI tools when curl is unavailable"
+if ! HOME="$fake_ai_cli_home" FAKE_INSTALL_WARNING_CALLS="$fake_warning_calls" PATH="$fake_warning_bin" /bin/sh "$fake_ai_cli_installer" >"$tmp_dir/fake-ai-cli-installer.out" 2>"$tmp_dir/fake-ai-cli-installer.err"; then
+  fail "rendered installer fixture succeeds when optional AI CLI tools are already available and the shared library is missing"
 fi
 
 if [ -e "$fake_warning_calls" ]; then
   fail "installer scripts ignore PATH fake install warning helpers when the shared library is not loaded"
 fi
 pass "installer scripts ignore PATH fake install warning helpers when the shared library is not loaded"
+
+fake_ai_cli_failure_home="$tmp_dir/fake-ai-cli-failure-home"
+mkdir -p "$fake_ai_cli_failure_home/.local/bin"
+for command_name in agy codex; do
+  write_stub "$fake_ai_cli_failure_home/.local/bin/$command_name" \
+    'exit 0'
+done
+write_stub "$fake_ai_cli_failure_home/.local/bin/bash" \
+  'exec sh "$@"'
+write_stub "$fake_ai_cli_failure_home/.local/bin/curl" \
+  'output=' \
+  'while [ "$#" -gt 0 ]; do' \
+  '  case "$1" in' \
+  '    -o)' \
+  '      shift' \
+  '      output="${1:-}"' \
+  '      ;;' \
+  '  esac' \
+  '  shift' \
+  'done' \
+  '[ -n "$output" ] || exit 2' \
+  'printf "%s\n" "#!/bin/sh" "exit 42" >"$output"'
+
+fake_ai_cli_failure_installer="$tmp_dir/fake-ai-cli-failure-installer.sh"
+chezmoi execute-template \
+  --override-data '{"chezmoi":{"os":"linux","sourceDir":"/missing-terrapod-source"},"enableAiCliTools":true}' \
+  --file "$repo_root/.chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
+  >"$fake_ai_cli_failure_installer"
+
+fake_ai_cli_failure_status=0
+HOME="$fake_ai_cli_failure_home" PATH="/usr/bin:/bin" /bin/sh "$fake_ai_cli_failure_installer" >"$tmp_dir/fake-ai-cli-failure.out" 2>"$tmp_dir/fake-ai-cli-failure.err" || fake_ai_cli_failure_status=$?
+if [ "$fake_ai_cli_failure_status" -eq 0 ]; then
+  fail "rendered installer fixture fails when optional AI CLI failures cannot be recorded without the shared library"
+fi
+pass "rendered installer fixture fails when optional AI CLI failures cannot be recorded without the shared library"
+
+fake_ai_cli_warning_source="$tmp_dir/fake-ai-cli-warning-source"
+fake_ai_cli_write_failure_home="$tmp_dir/fake-ai-cli-write-failure-home"
+mkdir -p "$fake_ai_cli_warning_source/dot_local/lib/terrapod" "$fake_ai_cli_write_failure_home/.local/bin"
+printf '%s\n' \
+  'TERRAPOD_INSTALL_WARNINGS_LOADED=1' \
+  'terrapod_install_warning_write() {' \
+  '  printf "%s\n" "write failed:$*" >&2' \
+  '  return 1' \
+  '}' \
+  'terrapod_install_warning_clear() {' \
+  '  return 0' \
+  '}' \
+  >"$fake_ai_cli_warning_source/dot_local/lib/terrapod/install-warnings.sh"
+for command_name in agy codex; do
+  write_stub "$fake_ai_cli_write_failure_home/.local/bin/$command_name" \
+    'exit 0'
+done
+write_stub "$fake_ai_cli_write_failure_home/.local/bin/bash" \
+  'exec sh "$@"'
+write_stub "$fake_ai_cli_write_failure_home/.local/bin/curl" \
+  'output=' \
+  'while [ "$#" -gt 0 ]; do' \
+  '  case "$1" in' \
+  '    -o)' \
+  '      shift' \
+  '      output="${1:-}"' \
+  '      ;;' \
+  '  esac' \
+  '  shift' \
+  'done' \
+  '[ -n "$output" ] || exit 2' \
+  'printf "%s\n" "#!/bin/sh" "exit 42" >"$output"'
+
+fake_ai_cli_write_failure_installer="$tmp_dir/fake-ai-cli-write-failure-installer.sh"
+chezmoi execute-template \
+  --override-data "{\"chezmoi\":{\"os\":\"linux\",\"sourceDir\":\"$fake_ai_cli_warning_source\"},\"enableAiCliTools\":true}" \
+  --file "$repo_root/.chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
+  >"$fake_ai_cli_write_failure_installer"
+
+fake_ai_cli_write_failure_status=0
+HOME="$fake_ai_cli_write_failure_home" PATH="/usr/bin:/bin" /bin/sh "$fake_ai_cli_write_failure_installer" >"$tmp_dir/fake-ai-cli-write-failure.out" 2>"$tmp_dir/fake-ai-cli-write-failure.err" || fake_ai_cli_write_failure_status=$?
+if [ "$fake_ai_cli_write_failure_status" -eq 0 ]; then
+  fail "rendered installer fixture fails when optional AI CLI failures cannot be recorded after marker write failure"
+fi
+pass "rendered installer fixture fails when optional AI CLI failures cannot be recorded after marker write failure"
 
 help_output="$(TERRAPOD_PROFILE=macos-terminal sh "$terrapod" help)"
 help_with_marker_output="$(
