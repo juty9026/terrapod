@@ -795,10 +795,10 @@ HOME="$ai_cli_retry_home" \
   TMPDIR="$tmp_dir" \
   PATH="$ai_cli_retry_home/.local/bin:/usr/bin:/bin" \
   sh "$ai_cli_tools_installer_script" >/dev/null 2>"$tmp_dir/ai-cli-retry-first.err" || ai_cli_retry_status=$?
-if [ "$ai_cli_retry_status" -ne 0 ]; then
-  fail "enabled Optional AI Tool Stack installer exits 0 while recording partial AI CLI installer failures"
+if [ "$ai_cli_retry_status" -eq 0 ]; then
+  fail "enabled Optional AI Tool Stack installer fails after recording partial AI CLI installer failures"
 fi
-pass "enabled Optional AI Tool Stack installer exits 0 while recording partial AI CLI installer failures"
+pass "enabled Optional AI Tool Stack installer fails after recording partial AI CLI installer failures"
 
 if [ ! -x "$ai_cli_retry_home/.local/bin/agy" ]; then
   fail "enabled Optional AI Tool Stack installer keeps successful Antigravity install after Claude failure"

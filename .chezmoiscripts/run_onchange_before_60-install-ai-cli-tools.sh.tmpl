@@ -70,6 +70,7 @@ finish_ai_cli_installers() {
       echo "Failed to record Optional AI CLI tool install warning for failed command(s): $failed_tools." >&2
       return 1
     fi
+    return 1
   else
     clear_install_warning "$AI_CLI_WARNING_CATEGORY"
   fi
