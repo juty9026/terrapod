@@ -455,6 +455,38 @@ write_failing_command_stub() {
     'exit 90'
 }
 
+write_brew_bundle_stub() {
+  path="$1"
+
+  write_stub "$path" \
+    'printf "%s\n" "brew args:$*" >>"$MACOS_BREW_LOG"' \
+    'bundle_file=' \
+    'for arg do' \
+    '  case "$arg" in' \
+    '    --file=*) bundle_file="${arg#--file=}" ;;' \
+    '  esac' \
+    'done' \
+    'case "$1" in' \
+    '  shellenv) printf "%s\n" ":" ;;' \
+    '  analytics) exit 0 ;;' \
+    '  bundle)' \
+    '    for cask in ${MACOS_BREW_FAIL_CASKS:-}; do' \
+    '      if [ -n "$bundle_file" ] && grep -Fx "cask \"$cask\"" "$bundle_file" >/dev/null 2>&1; then' \
+    '        exit 42' \
+    '      fi' \
+    '    done' \
+    '    if [ "${MACOS_BREW_FAIL_DESKTOP_BULK:-}" = "1" ] && [ -n "$bundle_file" ] && grep -Fx "# Rendered opt-in macOS Desktop App Stack." "$bundle_file" >/dev/null 2>&1; then' \
+    '      exit 42' \
+    '    fi' \
+    '    if [ "${MACOS_BREW_FAIL_BULK:-}" = "1" ] && [ -n "$bundle_file" ] && grep -Fx "tap \"homebrew/cask\"" "$bundle_file" >/dev/null 2>&1; then' \
+    '      exit 42' \
+    '    fi' \
+    '    exit 0' \
+    '    ;;' \
+    '  *) exit 64 ;;' \
+    'esac'
+}
+
 write_os_release() {
   path="$1"
   id="$2"
@@ -465,6 +497,47 @@ write_os_release() {
 ID=$id
 VERSION_ID="$version_id"
 PRETTY_NAME="$pretty_name"
+EOF
+}
+
+copy_desktop_apply_source_fixture() {
+  source_dir="$1"
+
+  # Keep this fixture minimal so real chezmoi apply only runs the Homebrew path under test.
+  mkdir -p \
+    "$source_dir/.chezmoiscripts" \
+    "$source_dir/dot_local/bin" \
+    "$source_dir/dot_local/lib/terrapod"
+
+  cp "$repo_root/Brewfile" "$source_dir/Brewfile"
+  cp "$repo_root/Brewfile.macos-desktop-apps.tmpl" "$source_dir/Brewfile.macos-desktop-apps.tmpl"
+  cp "$repo_root/.chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl" "$source_dir/.chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl"
+  cp "$terrapod" "$source_dir/dot_local/bin/executable_terrapod"
+  cp "$tpod_source" "$source_dir/dot_local/bin/symlink_tpod"
+  cp "$install_warnings_lib" "$source_dir/dot_local/lib/terrapod/install-warnings.sh"
+}
+
+write_desktop_apply_config() {
+  config_file="$1"
+  source_dir="$2"
+  dest_dir="$3"
+  terminal_apps="$4"
+  launcher="$5"
+
+  cat >"$config_file" <<EOF
+sourceDir = "$source_dir"
+destDir = "$dest_dir"
+
+[data]
+profile = "macos-terminal"
+enableEditorStack = false
+enableAiCliTools = false
+enableDevelopmentWorkspace = false
+enableMacosAppGroupTerminalApps = $terminal_apps
+enableMacosAppGroupAutomation = false
+enableMacosAppGroupLauncher = $launcher
+enableMacosAppGroupMonitoring = false
+enableMacosAppGroupAiApps = false
 EOF
 }
 
@@ -516,6 +589,7 @@ assert_no_terrapod_artifacts_under() {
 }
 
 mkdir -p "$tmp_dir/bin" "$tmp_dir/home"
+system_path="$PATH"
 write_gum_stub "$tmp_dir/bin/gum"
 no_gum_path="$tmp_dir/no-gum-bin"
 write_no_gum_path "$no_gum_path" sh
@@ -1746,6 +1820,9 @@ doctor_marker_state="$tmp_dir/doctor-marker-state"
 HOME="$tmp_dir/doctor-marker-home" XDG_STATE_HOME="$doctor_marker_state" sh -c \
   '. "$1"; terrapod_install_warning_write ubuntu-bootstrap "Ubuntu bootstrap needs attention" "Review APT output, fix package repository access, then rerun tpod apply."' \
   sh "$install_warnings_lib"
+HOME="$tmp_dir/doctor-marker-home" XDG_STATE_HOME="$doctor_marker_state" sh -c \
+  '. "$1"; terrapod_install_warning_write homebrew-desktop-apps "Homebrew desktop app install needs attention" "Review Homebrew cask output for failed casks: ghostty, raycast; App Groups: terminal-apps, launcher, fix app installation access, then rerun tpod apply."' \
+  sh "$install_warnings_lib"
 doctor_marker_file="$doctor_marker_state/terrapod/install-warnings/ubuntu-bootstrap"
 doctor_marker_before="$(cat "$doctor_marker_file")"
 
@@ -1758,8 +1835,11 @@ doctor_marker_output="$(cat "$tmp_dir/doctor-marker.out")"
 doctor_marker_after="$(cat "$doctor_marker_file")"
 
 assert_contains "$doctor_marker_output" "warn - install warning marker remains: ubuntu-bootstrap" "Terrapod doctor reports install warning marker categories"
+assert_contains "$doctor_marker_output" "warn - install warning marker remains: homebrew-desktop-apps" "Terrapod doctor reports homebrew desktop app warning marker categories"
 assert_contains "$doctor_marker_output" "Summary: Ubuntu bootstrap needs attention" "Terrapod doctor reports install warning marker summary"
+assert_contains "$doctor_marker_output" "Summary: Homebrew desktop app install needs attention" "Terrapod doctor reports homebrew desktop app warning marker summary"
 assert_contains "$doctor_marker_output" "Guidance: Review APT output, fix package repository access, then rerun tpod apply." "Terrapod doctor reports install warning marker guidance"
+assert_contains "$doctor_marker_output" "Guidance: Review Homebrew cask output for failed casks: ghostty, raycast; App Groups: terminal-apps, launcher, fix app installation access, then rerun tpod apply." "Terrapod doctor reports homebrew desktop app cask and App Group guidance"
 assert_contains "$doctor_marker_output" "Updated: " "Terrapod doctor reports install warning marker updated_at"
 if [ "$doctor_marker_after" != "$doctor_marker_before" ]; then
   fail "Terrapod doctor is read-only for install warning markers"
@@ -2521,6 +2601,55 @@ if [ -e "$BROAD_UPGRADE_CALL_FILE" ]; then
 fi
 
 pass "Terrapod apply does not call brew, apt, sudo, mise, or npm upgrade flows"
+
+real_chezmoi="$(PATH="$system_path" command -v chezmoi 2>/dev/null || true)"
+if [ -z "$real_chezmoi" ]; then
+  fail "desktop apply recalculation test requires chezmoi"
+fi
+
+desktop_apply_source="$tmp_dir/desktop-apply-source"
+desktop_apply_home="$tmp_dir/desktop-apply-home"
+desktop_apply_state="$tmp_dir/desktop-apply-state"
+desktop_apply_bin="$tmp_dir/desktop-apply-bin"
+desktop_apply_log="$tmp_dir/desktop-apply-brew.log"
+desktop_apply_config="$tmp_dir/desktop-apply.toml"
+mkdir -p "$desktop_apply_home" "$desktop_apply_bin"
+copy_desktop_apply_source_fixture "$desktop_apply_source"
+ln -s "$real_chezmoi" "$desktop_apply_bin/chezmoi"
+write_brew_bundle_stub "$desktop_apply_bin/brew"
+
+write_desktop_apply_config "$desktop_apply_config" "$desktop_apply_source" "$desktop_apply_home" true true
+
+if ! HOME="$desktop_apply_home" XDG_STATE_HOME="$desktop_apply_state" TERRAPOD_CHEZMOI_CONFIG="$desktop_apply_config" MACOS_BREW_LOG="$desktop_apply_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty raycast" PATH="$desktop_apply_bin:/usr/bin:/bin" \
+  /bin/sh "$terrapod" apply >"$tmp_dir/desktop-apply-first.out" 2>"$tmp_dir/desktop-apply-first.err"; then
+  printf '%s\n' "desktop apply first stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/desktop-apply-first.out" >&2
+  printf '%s\n' "desktop apply first stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/desktop-apply-first.err" >&2
+  fail "Terrapod apply succeeds when desktop App Group casks fail with a marker"
+fi
+
+desktop_apply_marker="$desktop_apply_state/terrapod/install-warnings/homebrew-desktop-apps"
+desktop_apply_marker_text="$(cat "$desktop_apply_marker")"
+assert_contains "$desktop_apply_marker_text" "failed casks: ghostty, raycast" "Terrapod apply records failed casks from enabled terminal and launcher groups"
+assert_contains "$desktop_apply_marker_text" "App Groups: terminal-apps, launcher" "Terrapod apply records failed App Groups from enabled terminal and launcher groups"
+
+write_desktop_apply_config "$desktop_apply_config" "$desktop_apply_source" "$desktop_apply_home" true false
+
+if ! HOME="$desktop_apply_home" XDG_STATE_HOME="$desktop_apply_state" TERRAPOD_CHEZMOI_CONFIG="$desktop_apply_config" MACOS_BREW_LOG="$desktop_apply_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty raycast" PATH="$desktop_apply_bin:/usr/bin:/bin" \
+  /bin/sh "$terrapod" apply >"$tmp_dir/desktop-apply-terminal-only.out" 2>"$tmp_dir/desktop-apply-terminal-only.err"; then
+  printf '%s\n' "desktop apply terminal-only stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/desktop-apply-terminal-only.out" >&2
+  printf '%s\n' "desktop apply terminal-only stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/desktop-apply-terminal-only.err" >&2
+  fail "Terrapod apply succeeds when disabled launcher failures are recalculated away"
+fi
+
+desktop_apply_marker_text="$(cat "$desktop_apply_marker")"
+assert_contains "$desktop_apply_marker_text" "failed casks: ghostty" "Terrapod apply retains enabled terminal-apps failure after App Group settings change"
+assert_contains "$desktop_apply_marker_text" "App Groups: terminal-apps" "Terrapod apply retains enabled terminal-apps group after App Group settings change"
+assert_not_contains "$desktop_apply_marker_text" "raycast" "Terrapod apply removes disabled launcher cask from marker content"
+assert_not_contains "$desktop_apply_marker_text" "launcher" "Terrapod apply removes disabled launcher group from marker content"
 
 rm -f "$CHEZMOI_APPLY_ARGS_FILE" "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
 
