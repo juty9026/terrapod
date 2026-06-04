@@ -4,7 +4,7 @@
 
 **Goal:** macOS Desktop App Stack Homebrew cask failures should write one App Group-aware `homebrew-desktop-apps` warning marker, avoid blocking `tpod` availability, and keep marker content aligned with currently enabled macOS App Groups.
 
-**Architecture:** Keep the existing category-based marker contract. Run the rendered desktop Brewfile once with bulk `brew bundle --no-upgrade` to detect the actual category failure. If bulk fails, parse Terrapod's rendered `Brewfile.macos-desktop-apps.tmpl` only to identify the desired cask-to-App Group mapping, then run each parsed cask through its own single-cask `brew bundle --no-upgrade` invocation so failed cask names are based on command exit status rather than Homebrew output parsing. If single-cask attribution finds no failed casks, fall back to generic bulk desktop bundle guidance; desktop stack failures write the marker and exit successfully so the optional desktop stack does not block the command surface.
+**Architecture:** Keep the existing category-based marker contract. Run the rendered desktop Brewfile once with bulk `brew bundle --no-upgrade` to detect the actual category failure. If bulk fails, parse Terrapod's rendered `Brewfile.macos-desktop-apps.tmpl` only to identify the desired cask-to-App Group mapping, then run each parsed cask through its own single-cask `brew bundle --no-upgrade` invocation so failed cask names are based on command exit status rather than Homebrew output parsing. If single-cask attribution finds no failed casks, fall back to generic bulk desktop bundle guidance; desktop stack failures write the marker and exit successfully so the optional desktop stack does not block the command surface. A marker-gated `run_before_` retry hook keeps those non-blocking failures retryable even when the original `run_onchange_` script content has not changed.
 
 **Tech Stack:** POSIX `sh`, chezmoi templates, Homebrew `brew bundle`, shell tests in `tests/chezmoiignore_test.sh` and `tests/terrapod_command_test.sh`.
 
@@ -24,6 +24,8 @@
   - Add a small parser for the rendered desktop Brewfile.
   - Use the parser to write App Group-aware marker guidance.
   - Return success after writing a desktop app marker so `tpod` availability is not blocked by optional desktop casks.
+- Add `.chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl`
+  - Retry only when a `homebrew-desktop-apps` marker already exists, then refresh or clear that marker.
 - Modify `tests/chezmoiignore_test.sh`
   - Add rendered-script behavior tests for cask/group detail, fallback detail, stale disabled-group removal, enabled-group retention, and successful rerun clear.
 - Modify `tests/terrapod_command_test.sh`

@@ -28,6 +28,7 @@ tests/**
 {{ if ne .chezmoi.os "darwin" }}
 # macOS Terminal Profile entries are not part of the VPS Shell Profile.
 .chezmoiscripts/00-bootstrap-homebrew.sh
+.chezmoiscripts/01-retry-homebrew-desktop-apps.sh
 .chezmoiscripts/50-open-karabiner-if-needed.sh
 .config/ghostty
 .config/ghostty/**

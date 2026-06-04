@@ -511,6 +511,7 @@ copy_desktop_apply_source_fixture() {
 
   cp "$repo_root/Brewfile" "$source_dir/Brewfile"
   cp "$repo_root/Brewfile.macos-desktop-apps.tmpl" "$source_dir/Brewfile.macos-desktop-apps.tmpl"
+  cp "$repo_root/.chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl" "$source_dir/.chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl"
   cp "$repo_root/.chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl" "$source_dir/.chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl"
   cp "$terrapod" "$source_dir/dot_local/bin/executable_terrapod"
   cp "$tpod_source" "$source_dir/dot_local/bin/symlink_tpod"
@@ -2633,6 +2634,29 @@ desktop_apply_marker="$desktop_apply_state/terrapod/install-warnings/homebrew-de
 desktop_apply_marker_text="$(cat "$desktop_apply_marker")"
 assert_contains "$desktop_apply_marker_text" "failed casks: ghostty, raycast" "Terrapod apply records failed casks from enabled terminal and launcher groups"
 assert_contains "$desktop_apply_marker_text" "App Groups: terminal-apps, launcher" "Terrapod apply records failed App Groups from enabled terminal and launcher groups"
+
+if ! HOME="$desktop_apply_home" XDG_STATE_HOME="$desktop_apply_state" TERRAPOD_CHEZMOI_CONFIG="$desktop_apply_config" MACOS_BREW_LOG="$desktop_apply_log" PATH="$desktop_apply_bin:/usr/bin:/bin" \
+  /bin/sh "$terrapod" apply >"$tmp_dir/desktop-apply-retry-success.out" 2>"$tmp_dir/desktop-apply-retry-success.err"; then
+  printf '%s\n' "desktop apply retry success stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/desktop-apply-retry-success.out" >&2
+  printf '%s\n' "desktop apply retry success stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/desktop-apply-retry-success.err" >&2
+  fail "Terrapod apply retries desktop App Group failures with unchanged settings"
+fi
+
+if [ -e "$desktop_apply_marker" ]; then
+  fail "Terrapod apply clears a desktop App Group marker after unchanged-settings retry succeeds"
+fi
+pass "Terrapod apply clears a desktop App Group marker after unchanged-settings retry succeeds"
+
+if ! HOME="$desktop_apply_home" XDG_STATE_HOME="$desktop_apply_state" TERRAPOD_CHEZMOI_CONFIG="$desktop_apply_config" MACOS_BREW_LOG="$desktop_apply_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty raycast" PATH="$desktop_apply_bin:/usr/bin:/bin" \
+  /bin/sh "$terrapod" apply >"$tmp_dir/desktop-apply-recreate.out" 2>"$tmp_dir/desktop-apply-recreate.err"; then
+  printf '%s\n' "desktop apply recreate stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/desktop-apply-recreate.out" >&2
+  printf '%s\n' "desktop apply recreate stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/desktop-apply-recreate.err" >&2
+  fail "Terrapod apply recreates desktop App Group marker before disabled-group recalculation"
+fi
 
 write_desktop_apply_config "$desktop_apply_config" "$desktop_apply_source" "$desktop_apply_home" true false
 

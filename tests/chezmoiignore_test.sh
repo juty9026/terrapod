@@ -216,6 +216,7 @@ development_workspace_data='{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu",
 development_workspace_managed="$(managed_source_paths "$development_workspace_data")"
 
 macos_only_entries="
+.chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl
 .chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl
 .chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl
 dot_config/ghostty
@@ -243,6 +244,8 @@ macos_terminal_apps_bootstrap="$(render_template "$macos_terminal_apps_data" ".c
 macos_terminal_launcher_apps_bootstrap="$(render_template "$macos_terminal_launcher_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
 macos_ai_apps_bootstrap="$(render_template "$macos_ai_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
 macos_development_workspace_bootstrap="$(render_template "$macos_development_workspace_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
+macos_desktop_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl")"
+macos_terminal_apps_desktop_retry="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl")"
 macos_karabiner_opener="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 macos_terminal_apps_karabiner_opener="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 macos_automation_apps_karabiner_opener="$(render_template "$macos_automation_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
@@ -277,6 +280,16 @@ macos_bootstrap_script="$tmp_dir/macos-bootstrap-default.sh"
 printf '%s\n' "$macos_bootstrap" >"$macos_bootstrap_script"
 sh -n "$macos_bootstrap_script" || fail "macOS bootstrap default cleanup script should be valid sh"
 pass "macOS bootstrap default cleanup script is valid sh"
+
+macos_desktop_retry_script="$tmp_dir/macos-desktop-retry-default.sh"
+printf '%s\n' "$macos_desktop_retry" >"$macos_desktop_retry_script"
+sh -n "$macos_desktop_retry_script" || fail "macOS desktop retry default cleanup script should be valid sh"
+pass "macOS desktop retry default cleanup script is valid sh"
+
+macos_terminal_apps_desktop_retry_script="$tmp_dir/macos-terminal-desktop-retry.sh"
+printf '%s\n' "$macos_terminal_apps_desktop_retry" >"$macos_terminal_apps_desktop_retry_script"
+sh -n "$macos_terminal_apps_desktop_retry_script" || fail "macOS desktop retry App Group script should be valid sh"
+pass "macOS desktop retry App Group script is valid sh"
 
 macos_brew_bin="$tmp_dir/macos-brew-bin"
 macos_brew_log="$tmp_dir/macos-brew.log"

@@ -1,0 +1,240 @@
+{{- if eq .chezmoi.os "darwin" -}}
+{{- $enableMacosAppGroups := or
+  (default false (get . "enableMacosAppGroupTerminalApps"))
+  (default false (get . "enableMacosAppGroupAutomation"))
+  (default false (get . "enableMacosAppGroupLauncher"))
+  (default false (get . "enableMacosAppGroupMonitoring"))
+  (default false (get . "enableMacosAppGroupAiApps"))
+-}}
+#!/bin/sh
+set -eu
+
+install_warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
+TERRAPOD_INSTALL_WARNINGS_LOADED=
+if [ -f "$install_warnings_lib" ]; then
+  . "$install_warnings_lib"
+fi
+
+if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
+  exit 0
+fi
+
+mark_install_warning() {
+  category="$1"
+  summary="$2"
+  guidance="$3"
+
+  terrapod_install_warning_write "$category" "$summary" "$guidance" || true
+}
+
+clear_install_warning() {
+  category="$1"
+
+  terrapod_install_warning_clear "$category" || true
+}
+
+desktop_marker_path="$(terrapod_install_warning_path homebrew-desktop-apps 2>/dev/null || true)"
+if [ -z "$desktop_marker_path" ]; then
+  exit 0
+fi
+
+{{ if $enableMacosAppGroups -}}
+if [ ! -f "$desktop_marker_path" ]; then
+  exit 0
+fi
+
+join_lines_with_commas() {
+  awk '
+    NF {
+      if (joined == "") {
+        joined = $0
+      } else {
+        joined = joined ", " $0
+      }
+    }
+
+    END {
+      print joined
+    }
+  ' "$1"
+}
+
+desktop_app_cask_records() {
+  brewfile="$1"
+
+  awk '
+    /^[[:space:]]*#[[:space:]]+.*[[:space:]]macOS App Group[[:space:]]*$/ {
+      group = $0
+      sub(/^[[:space:]]*#[[:space:]]+/, "", group)
+      sub(/[[:space:]]+macOS App Group[[:space:]]*$/, "", group)
+      next
+    }
+
+    /^[[:space:]]*cask[[:space:]]+"/ {
+      cask = $0
+      sub(/^[[:space:]]*cask[[:space:]]+"/, "", cask)
+      sub(/".*$/, "", cask)
+      if (cask != "") {
+        printf "%s\t%s\n", group, cask
+      }
+    }
+  ' "$brewfile"
+}
+
+desktop_app_failure_guidance_text=
+
+cleanup_desktop_app_bundle_temps() {
+  [ -z "${records_file:-}" ] || rm -f "$records_file"
+  [ -z "${failed_casks_file:-}" ] || rm -f "$failed_casks_file"
+  [ -z "${failed_groups_file:-}" ] || rm -f "$failed_groups_file"
+  [ -z "${single_cask_brewfile:-}" ] || rm -f "$single_cask_brewfile"
+}
+
+run_desktop_app_bundle() {
+  brewfile="$1"
+  desktop_app_failure_guidance_text="Review Homebrew desktop app bundle output, fix app installation access, then rerun tpod apply."
+
+  if brew bundle --no-upgrade --file="$brewfile"; then
+    return 0
+  fi
+
+  records_file=
+  failed_casks_file=
+  failed_groups_file=
+  single_cask_brewfile=
+
+  records_file="$(mktemp "${TMPDIR:-/tmp}/terrapod-macos-desktop-records.XXXXXX")" || return 1
+  failed_casks_file="$(mktemp "${TMPDIR:-/tmp}/terrapod-macos-desktop-failed-casks.XXXXXX")" || {
+    cleanup_desktop_app_bundle_temps
+    return 1
+  }
+  failed_groups_file="$(mktemp "${TMPDIR:-/tmp}/terrapod-macos-desktop-failed-groups.XXXXXX")" || {
+    cleanup_desktop_app_bundle_temps
+    return 1
+  }
+
+  if ! desktop_app_cask_records "$brewfile" >"$records_file"; then
+    cleanup_desktop_app_bundle_temps
+    return 1
+  fi
+
+  if [ ! -s "$records_file" ]; then
+    cleanup_desktop_app_bundle_temps
+    return 1
+  fi
+
+  tab="$(printf '\t')"
+  while IFS="$tab" read -r app_group cask; do
+    single_cask_brewfile="$(mktemp "${TMPDIR:-/tmp}/terrapod-macos-desktop-cask.XXXXXX")" || {
+      cleanup_desktop_app_bundle_temps
+      return 1
+    }
+    if ! printf 'cask "%s"\n' "$cask" >"$single_cask_brewfile"; then
+      cleanup_desktop_app_bundle_temps
+      return 1
+    fi
+
+    if ! brew bundle --no-upgrade --file="$single_cask_brewfile"; then
+      if ! printf '%s\n' "$cask" >>"$failed_casks_file"; then
+        cleanup_desktop_app_bundle_temps
+        return 1
+      fi
+      if [ -n "$app_group" ] && ! grep -Fx "$app_group" "$failed_groups_file" >/dev/null 2>&1; then
+        if ! printf '%s\n' "$app_group" >>"$failed_groups_file"; then
+          cleanup_desktop_app_bundle_temps
+          return 1
+        fi
+      fi
+    fi
+
+    rm -f "$single_cask_brewfile"
+    single_cask_brewfile=
+  done <"$records_file"
+
+  if [ -s "$failed_casks_file" ]; then
+    if ! failed_casks="$(join_lines_with_commas "$failed_casks_file")"; then
+      cleanup_desktop_app_bundle_temps
+      return 1
+    fi
+    if ! failed_groups="$(join_lines_with_commas "$failed_groups_file")"; then
+      cleanup_desktop_app_bundle_temps
+      return 1
+    fi
+    detail="failed casks: $failed_casks"
+    if [ -n "$failed_groups" ]; then
+      detail="$detail; App Groups: $failed_groups"
+    fi
+    desktop_app_failure_guidance_text="Review Homebrew cask output for $detail, fix app installation access, then rerun tpod apply."
+    cleanup_desktop_app_bundle_temps
+    return 1
+  fi
+
+  cleanup_desktop_app_bundle_temps
+  return 1
+}
+
+find_brew() {
+  if command -v brew >/dev/null 2>&1; then
+    command -v brew
+    return
+  fi
+
+  if [ -x /opt/homebrew/bin/brew ]; then
+    printf '%s\n' /opt/homebrew/bin/brew
+    return
+  fi
+
+  if [ -x /usr/local/bin/brew ]; then
+    printf '%s\n' /usr/local/bin/brew
+    return
+  fi
+
+  return 1
+}
+
+brew_bin="$(find_brew || true)"
+if [ -z "$brew_bin" ]; then
+  mark_install_warning \
+    homebrew-desktop-apps \
+    "Homebrew desktop app install needs attention" \
+    "Install Homebrew from https://brew.sh, then rerun tpod apply."
+  exit 0
+fi
+
+if ! brew_shellenv="$("$brew_bin" shellenv)"; then
+  mark_install_warning \
+    homebrew-desktop-apps \
+    "Homebrew desktop app install needs attention" \
+    "Fix Homebrew shellenv, then rerun tpod apply."
+  exit 0
+fi
+eval "$brew_shellenv"
+brew analytics off >/dev/null 2>&1 || true
+
+desktop_brewfile="$(mktemp "${TMPDIR:-/tmp}/terrapod-macos-desktop-apps.XXXXXX")"
+cleanup_desktop_brewfile() {
+  rm -f "$desktop_brewfile"
+}
+trap cleanup_desktop_brewfile EXIT HUP INT TERM
+
+# macOS Desktop App Stack App Groups checksum: {{ include "Brewfile.macos-desktop-apps.tmpl" | sha256sum }}
+cat >"$desktop_brewfile" <<'BREWFILE'
+{{ includeTemplate "Brewfile.macos-desktop-apps.tmpl" . -}}
+BREWFILE
+
+if [ -s "$desktop_brewfile" ]; then
+  if run_desktop_app_bundle "$desktop_brewfile"; then
+    clear_install_warning homebrew-desktop-apps
+  else
+    mark_install_warning \
+      homebrew-desktop-apps \
+      "Homebrew desktop app install needs attention" \
+      "$desktop_app_failure_guidance_text"
+  fi
+else
+  clear_install_warning homebrew-desktop-apps
+fi
+{{ else -}}
+clear_install_warning homebrew-desktop-apps
+{{- end }}
+{{- end }}
