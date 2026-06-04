@@ -623,7 +623,8 @@ ai_cli_tools_installer="$(render_template "$ai_cli_tools_data" ".chezmoiscripts/
 development_workspace_ai_installer="$(render_template "$development_workspace_data" ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl")"
 disabled_ai_cli_tools_cleanup="$(render_template "$ubuntu_data" ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl")"
 
-assert_contains_text "$disabled_ai_cli_tools_cleanup" "clear_install_warning ai-cli-tools" "disabled Optional AI Tool Stack renders stale marker cleanup"
+assert_contains_text "$disabled_ai_cli_tools_cleanup" "AI_CLI_WARNING_CATEGORY=optional-ai-cli-tools" "disabled Optional AI Tool Stack renders optional AI CLI warning category"
+assert_contains_text "$disabled_ai_cli_tools_cleanup" 'clear_install_warning "$AI_CLI_WARNING_CATEGORY"' "disabled Optional AI Tool Stack renders stale marker cleanup"
 assert_not_contains_text "$disabled_ai_cli_tools_cleanup" "https://chatgpt.com/codex/install.sh" "disabled Optional AI Tool Stack cleanup does not render installer URLs"
 
 disabled_ai_cli_tools_cleanup_script="$tmp_dir/disabled-ai-cli-tools-cleanup.sh"
@@ -635,18 +636,18 @@ ai_marker_state="$tmp_dir/ai-marker-state"
 ai_marker_home="$tmp_dir/ai-marker-home"
 mkdir -p "$ai_marker_home"
 HOME="$ai_marker_home" XDG_STATE_HOME="$ai_marker_state" sh -c \
-  '. "$1"; terrapod_install_warning_write ai-cli-tools "Optional AI CLI tool install needs attention" "Rerun tpod apply after network access is restored."' \
+  '. "$1"; terrapod_install_warning_write optional-ai-cli-tools "Optional AI CLI tool install needs attention" "Rerun tpod apply after network access is restored."' \
   sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
 
-if [ ! -f "$ai_marker_state/terrapod/install-warnings/ai-cli-tools" ]; then
-  fail "test setup should create an ai-cli-tools warning marker"
+if [ ! -f "$ai_marker_state/terrapod/install-warnings/optional-ai-cli-tools" ]; then
+  fail "test setup should create an optional-ai-cli-tools warning marker"
 fi
 
 HOME="$ai_marker_home" XDG_STATE_HOME="$ai_marker_state" sh "$disabled_ai_cli_tools_cleanup_script"
-if [ -e "$ai_marker_state/terrapod/install-warnings/ai-cli-tools" ]; then
-  fail "disabled Optional AI Tool Stack cleanup should clear stale ai-cli-tools marker"
+if [ -e "$ai_marker_state/terrapod/install-warnings/optional-ai-cli-tools" ]; then
+  fail "disabled Optional AI Tool Stack cleanup should clear stale optional-ai-cli-tools marker"
 fi
-pass "disabled Optional AI Tool Stack cleanup clears stale ai-cli-tools marker"
+pass "disabled Optional AI Tool Stack cleanup clears stale optional-ai-cli-tools marker"
 
 for installer_url in \
   "https://antigravity.google/cli/install.sh" \

@@ -640,7 +640,7 @@ pass "install warning markers honor XDG_STATE_HOME"
 marker_categories="$(
   sh -c '. "$1"; terrapod_install_warning_categories' sh "$install_warnings_lib"
 )"
-expected_marker_categories="$(printf '%s\n' homebrew-core homebrew-desktop-apps ubuntu-bootstrap shell-integrations mise-tools ai-cli-tools)"
+expected_marker_categories="$(printf '%s\n' homebrew-core homebrew-desktop-apps ubuntu-bootstrap shell-integrations mise-tools optional-ai-cli-tools)"
 
 if [ "$marker_categories" != "$expected_marker_categories" ]; then
   printf '%s\n' "expected marker categories:" >&2
@@ -686,13 +686,13 @@ fi
 pass "install warning marker updated_at is a UTC ISO 8601 timestamp ending in Z"
 
 HOME="$marker_home" XDG_STATE_HOME="$marker_xdg_state" sh -c \
-  '. "$1"; terrapod_install_warning_write ai-cli-tools "AI CLI tool install needs attention" "Rerun tpod apply after network access is restored."' \
+  '. "$1"; terrapod_install_warning_write optional-ai-cli-tools "AI CLI tool install needs attention" "Rerun tpod apply after network access is restored."' \
   sh "$install_warnings_lib"
 
 marker_list="$(
   HOME="$marker_home" XDG_STATE_HOME="$marker_xdg_state" sh -c '. "$1"; terrapod_install_warning_list' sh "$install_warnings_lib"
 )"
-expected_marker_list="$(printf '%s\n' homebrew-core ai-cli-tools)"
+expected_marker_list="$(printf '%s\n' homebrew-core optional-ai-cli-tools)"
 if [ "$marker_list" != "$expected_marker_list" ]; then
   printf '%s\n' "expected marker list:" >&2
   printf '%s\n' "$expected_marker_list" | sed 's/^/  /' >&2
@@ -728,7 +728,7 @@ if [ -e "$homebrew_core_marker" ]; then
 fi
 pass "install warning marker clear removes the matching category file"
 
-if [ ! -f "$marker_xdg_state/terrapod/install-warnings/ai-cli-tools" ]; then
+if [ ! -f "$marker_xdg_state/terrapod/install-warnings/optional-ai-cli-tools" ]; then
   fail "install warning marker clear does not remove other category files"
 fi
 pass "install warning marker clear does not remove other category files"
