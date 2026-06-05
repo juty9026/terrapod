@@ -2179,7 +2179,7 @@ assert_contains "$shell_backup_log_text" "chezmoi args:cat $shell_backup_case/ho
 assert_contains "$shell_backup_log_text" "chezmoi args:cat $shell_backup_case/home/.zprofile" "recovery-core compares rendered .zprofile"
 assert_contains "$shell_backup_log_text" "chezmoi args:cat $shell_backup_case/home/.zshrc" "recovery-core compares rendered .zshrc"
 assert_contains "$shell_backup_log_text" "chezmoi args:apply --force $shell_backup_case/home/.zshenv $shell_backup_case/home/.zprofile $shell_backup_case/home/.zshrc" "recovery-core force apply is bounded to shell startup targets"
-assert_first_occurrence_before "$shell_backup_log_text" "terrapod args:setup" "chezmoi args:apply --force" "shell startup force apply runs after Terrapod Setup"
+assert_first_occurrence_before "$shell_backup_log_text" "terrapod args:help" "chezmoi args:apply --force" "shell startup force apply runs after recovery-core command validation"
 assert_first_occurrence_before "$shell_backup_log_text" "chezmoi args:apply --force" "tpod args:help" "shell startup force apply runs before final help validation"
 assert_single_shell_backup_matches "$shell_backup_case/home/.zshenv" "$shell_backup_case/expected-zshenv" "different .zshenv content is backed up"
 assert_single_shell_backup_matches "$shell_backup_case/home/.zprofile" "$shell_backup_case/expected-zprofile" "different .zprofile content is backed up"
