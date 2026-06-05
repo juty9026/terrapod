@@ -1120,9 +1120,23 @@ append_line() {
   fi
 }
 
+copy_shell_startup_backup() {
+  target="$1"
+  backup_file="$target.terrapod-backup-$(shell_startup_backup_timestamp)-$$"
+
+  cp -P "$target" "$backup_file" ||
+    fatal "failed to back up shell startup file before first-run overwrite: $target"
+  printf '%s\n' "$backup_file"
+}
+
 backup_shell_startup_if_different() {
   chezmoi_bin="$1"
   target="$2"
+
+  if [ -L "$target" ]; then
+    copy_shell_startup_backup "$target"
+    return 0
+  fi
 
   [ -f "$target" ] || return 0
 
@@ -1144,10 +1158,7 @@ backup_shell_startup_if_different() {
     fatal "failed to compare shell startup file before backup: $target"
   fi
 
-  backup_file="$target.terrapod-backup-$(shell_startup_backup_timestamp)-$$"
-  cp "$target" "$backup_file" ||
-    fatal "failed to back up shell startup file before first-run overwrite: $target"
-  printf '%s\n' "$backup_file"
+  copy_shell_startup_backup "$target"
 }
 
 backup_recovery_core_shell_startup_files() {

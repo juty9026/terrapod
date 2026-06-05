@@ -284,6 +284,22 @@ assert_single_shell_backup_matches() {
   pass "$message"
 }
 
+assert_shell_backup_is_symlink_to() {
+  target="$1"
+  expected_link="$2"
+  message="$3"
+  backup_path="$(single_shell_backup_path "$target" "$message")"
+
+  if [ ! -L "$backup_path" ]; then
+    fail "$message; backup is not a symlink"
+  fi
+  if [ "$(readlink "$backup_path")" != "$expected_link" ]; then
+    fail "$message; backup link target differs"
+  fi
+
+  pass "$message"
+}
+
 assert_no_shell_backup_for() {
   target="$1"
   message="$2"
@@ -591,12 +607,15 @@ TERRAPOD_STUB
         target="$1"
         case "${target##*/}" in
           .zshenv)
+            rm -f "$target"
             printf '%s\n' "managed zshenv" >"$target"
             ;;
           .zprofile)
+            rm -f "$target"
             printf '%s\n' "managed zprofile" >"$target"
             ;;
           .zshrc)
+            rm -f "$target"
             printf '%s\n' "managed zshrc" >"$target"
             ;;
           *)
@@ -2201,6 +2220,33 @@ assert_contains "$shell_backup_stdout" "$zshrc_backup" "installer reports exact 
 assert_contains "$shell_backup_stdout" "Terrapod does not merge or delete these backups automatically." "installer explains backup retention"
 assert_contains "$shell_backup_stdout" "Review backups for vendor-installer shell startup edits" "installer explains vendor edits are not migrated"
 assert_contains "$shell_backup_stdout" "$shell_backup_case/home/.config/zsh/path.d/*.zsh" "installer points to the managed zsh extension point"
+
+shell_symlink_backup_case="$(make_case_dir shell-startup-symlink-backups)"
+prepare_resumable_macos_case "$shell_symlink_backup_case"
+write_complete_setup_config "$shell_symlink_backup_case/xdg-config/chezmoi/chezmoi.toml"
+managed_shell_startup_content "$shell_symlink_backup_case/home/.zshenv" >"$shell_symlink_backup_case/home/linked-zshenv"
+printf '%s\n' "user zprofile symlink target" >"$shell_symlink_backup_case/home/linked-zprofile"
+ln -s linked-zshenv "$shell_symlink_backup_case/home/.zshenv"
+ln -s linked-zprofile "$shell_symlink_backup_case/home/.zprofile"
+shell_symlink_backup_log="$shell_symlink_backup_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$shell_symlink_backup_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$shell_symlink_backup_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "shell startup symlinks are backed up before first-run forced apply"
+shell_symlink_backup_stdout="$(cat "$shell_symlink_backup_case/stdout")"
+shell_symlink_zshenv_backup="$(single_shell_backup_path "$shell_symlink_backup_case/home/.zshenv" "find symlink .zshenv backup path")"
+shell_symlink_zprofile_backup="$(single_shell_backup_path "$shell_symlink_backup_case/home/.zprofile" "find symlink .zprofile backup path")"
+assert_shell_backup_is_symlink_to "$shell_symlink_backup_case/home/.zshenv" "linked-zshenv" "identical .zshenv symlink is backed up as a symlink"
+assert_shell_backup_is_symlink_to "$shell_symlink_backup_case/home/.zprofile" "linked-zprofile" "different .zprofile symlink is backed up as a symlink"
+assert_shell_backup_path_is_timestamped "$shell_symlink_backup_case/home/.zshenv" "$shell_symlink_zshenv_backup" "symlink .zshenv backup path is timestamped"
+assert_shell_backup_path_is_timestamped "$shell_symlink_backup_case/home/.zprofile" "$shell_symlink_zprofile_backup" "symlink .zprofile backup path is timestamped"
+assert_contains "$shell_symlink_backup_stdout" "$shell_symlink_zshenv_backup" "installer reports exact symlink .zshenv backup path"
+assert_contains "$shell_symlink_backup_stdout" "$shell_symlink_zprofile_backup" "installer reports exact symlink .zprofile backup path"
+if [ -L "$shell_symlink_backup_case/home/.zshenv" ]; then
+  fail "forced apply replaces managed .zshenv symlink"
+fi
+pass "forced apply replaces managed .zshenv symlink"
 
 shell_no_backup_case="$(make_case_dir shell-startup-no-backups)"
 prepare_resumable_macos_case "$shell_no_backup_case"
