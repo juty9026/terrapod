@@ -1105,6 +1105,115 @@ validate_recovery_core_command_surface() {
     fatal "tpod help failed after recovery-core apply"
 }
 
+shell_startup_backup_timestamp() {
+  date -u +%Y%m%dT%H%M%SZ
+}
+
+append_line() {
+  current="$1"
+  line="$2"
+
+  if [ -n "$current" ]; then
+    printf '%s\n%s\n' "$current" "$line"
+  else
+    printf '%s\n' "$line"
+  fi
+}
+
+copy_shell_startup_backup() {
+  target="$1"
+  backup_file="$target.terrapod-backup-$(shell_startup_backup_timestamp)-$$"
+
+  cp -P "$target" "$backup_file" ||
+    fatal "failed to back up shell startup file before first-run overwrite: $target"
+  printf '%s\n' "$backup_file"
+}
+
+backup_shell_startup_if_different() {
+  chezmoi_bin="$1"
+  target="$2"
+
+  if [ -L "$target" ]; then
+    copy_shell_startup_backup "$target"
+    return 0
+  fi
+
+  [ -f "$target" ] || return 0
+
+  rendered_file="$(mktemp)" ||
+    fatal "failed to create temporary file for shell startup comparison"
+  if ! "$chezmoi_bin" cat "$target" >"$rendered_file"; then
+    rm -f "$rendered_file"
+    fatal "failed to render managed shell startup file before backup: $target"
+  fi
+
+  if cmp -s "$target" "$rendered_file"; then
+    rm -f "$rendered_file"
+    return 0
+  else
+    cmp_status="$?"
+  fi
+  rm -f "$rendered_file"
+  if [ "$cmp_status" -ne 1 ]; then
+    fatal "failed to compare shell startup file before backup: $target"
+  fi
+
+  copy_shell_startup_backup "$target"
+}
+
+backup_recovery_core_shell_startup_files() {
+  chezmoi_bin="$1"
+  profile="$2"
+  backup_paths=""
+
+  for target in "$HOME/.zshenv" "$HOME/.zprofile" "$HOME/.zshrc"; do
+    if [ "$target" = "$HOME/.zprofile" ] && [ "$profile" != "macos-terminal" ]; then
+      continue
+    fi
+    if backup_path="$(backup_shell_startup_if_different "$chezmoi_bin" "$target")"; then
+      if [ -n "$backup_path" ]; then
+        backup_paths="$(append_line "$backup_paths" "$backup_path")"
+      fi
+    else
+      return 1
+    fi
+  done
+
+  printf '%s' "$backup_paths"
+}
+
+report_shell_startup_backups() {
+  backup_paths="$1"
+
+  [ -n "$backup_paths" ] || return 0
+
+  printf '%s\n' "terrapod installer: Shell startup backups created:"
+  printf '%s\n' "$backup_paths" | while IFS= read -r backup_path; do
+    printf '%s\n' "terrapod installer:   $backup_path"
+  done
+  printf '%s\n' "terrapod installer: Terrapod does not merge or delete these backups automatically."
+  printf '%s\n' "terrapod installer: Review backups for vendor-installer shell startup edits; Terrapod does not migrate them automatically."
+  printf '%s\n' "terrapod installer: Move machine-local PATH or shell snippets into $HOME/.config/zsh/path.d/*.zsh before relying on managed shell startup files."
+}
+
+apply_recovery_core_shell_startup_files() {
+  profile="$1"
+  chezmoi_bin="$2"
+
+  if ! backup_paths="$(backup_recovery_core_shell_startup_files "$chezmoi_bin" "$profile")"; then
+    fatal "failed to back up recovery-core shell startup files"
+  fi
+  report_shell_startup_backups "$backup_paths"
+
+  if [ "$profile" = "macos-terminal" ]; then
+    "$chezmoi_bin" apply --force "$HOME/.zshenv" "$HOME/.zprofile" "$HOME/.zshrc" ||
+      fatal "failed to apply recovery-core shell startup files"
+  else
+    "$chezmoi_bin" apply --force "$HOME/.zshenv" "$HOME/.zshrc" ||
+      fatal "failed to apply recovery-core shell startup files"
+  fi
+}
+
 run_initial_apply() {
   chezmoi_bin="$1"
 
@@ -1154,6 +1263,7 @@ main() {
   fi
   ensure_first_run_setup "$profile" "$source_dir" "$chezmoi_bin"
   apply_recovery_core_command_surface "$profile" "$source_dir" "$local_bin_dir"
+  apply_recovery_core_shell_startup_files "$profile" "$chezmoi_bin"
   run_initial_apply "$chezmoi_bin"
   show_first_run_help "$profile" "$local_bin_dir"
 
