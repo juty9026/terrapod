@@ -150,13 +150,204 @@ reject_unresumable_source_dir() {
   fatal "chezmoi source directory already exists but is not a resumable Terrapod Source Repository checkout: $source_dir. Move it aside before first-run install, or run Terrapod from a checked-out juty9026/terrapod source repository."
 }
 
-installed_tpod_help_works() {
+terrapod_help_output_is_valid() {
+  help_output="$1"
+
+  printf '%s\n' "$help_output" | grep -F "Terrapod - a small landing pod for your dotfiles" >/dev/null 2>&1 &&
+    printf '%s\n' "$help_output" | grep -F "Usage:" >/dev/null 2>&1 &&
+    printf '%s\n' "$help_output" | grep -F "tpod apply" >/dev/null 2>&1
+}
+
+command_help_is_terrapod() {
+  command_path="$1"
+  profile="$2"
+
+  [ -x "$command_path" ] || return 1
+  if ! help_output="$(TERRAPOD_PROFILE="$profile" "$command_path" help 2>/dev/null)"; then
+    return 1
+  fi
+
+  terrapod_help_output_is_valid "$help_output"
+}
+
+installed_command_surface_is_valid() {
   local_bin_dir="$1"
   profile="$2"
+  terrapod_bin="$local_bin_dir/terrapod"
   tpod_bin="$local_bin_dir/tpod"
 
-  [ -x "$tpod_bin" ] &&
-    TERRAPOD_PROFILE="$profile" "$tpod_bin" help >/dev/null 2>&1
+  command_help_is_terrapod "$terrapod_bin" "$profile" &&
+    command_help_is_terrapod "$tpod_bin" "$profile"
+}
+
+path_points_to_terrapod_source_command() {
+  command_path="$1"
+  source_dir="$2"
+  expected_source="$source_dir/dot_local/bin/executable_terrapod"
+
+  [ -L "$command_path" ] || return 1
+  target="$(readlink "$command_path")" || return 1
+  case "$target" in
+    /*)
+      target_path="$target"
+      ;;
+    *)
+      target_path="${command_path%/*}/$target"
+      ;;
+  esac
+
+  target_dir="${target_path%/*}"
+  target_base="${target_path##*/}"
+  if ! resolved_dir="$(CDPATH= cd -P -- "$target_dir" 2>/dev/null && pwd -P)"; then
+    return 1
+  fi
+  resolved_target="$resolved_dir/$target_base"
+
+  expected_dir="${expected_source%/*}"
+  expected_base="${expected_source##*/}"
+  if ! resolved_expected_dir="$(CDPATH= cd -P -- "$expected_dir" 2>/dev/null && pwd -P)"; then
+    return 1
+  fi
+  resolved_expected="$resolved_expected_dir/$expected_base"
+
+  [ "$resolved_target" = "$resolved_expected" ]
+}
+
+path_points_to_installed_tpod_alias() {
+  command_path="$1"
+
+  [ "${command_path##*/}" = "tpod" ] || return 1
+  [ -L "$command_path" ] || return 1
+  target="$(readlink "$command_path")" || return 1
+  case "$target" in
+    /*)
+      target_path="$target"
+      ;;
+    *)
+      target_path="${command_path%/*}/$target"
+      ;;
+  esac
+
+  command_dir="${command_path%/*}"
+  if ! resolved_command_dir="$(CDPATH= cd -P -- "$command_dir" 2>/dev/null && pwd -P)"; then
+    return 1
+  fi
+
+  target_dir="${target_path%/*}"
+  target_base="${target_path##*/}"
+  if ! resolved_target_dir="$(CDPATH= cd -P -- "$target_dir" 2>/dev/null && pwd -P)"; then
+    return 1
+  fi
+  resolved_target="$resolved_target_dir/$target_base"
+
+  [ "$resolved_target" = "$resolved_command_dir/terrapod" ]
+}
+
+file_points_to_terrapod_source_command() {
+  command_path="$1"
+  source_dir="$2"
+  expected_exec="exec \"$source_dir/dot_local/bin/executable_terrapod\" \"\$@\""
+
+  [ -L "$command_path" ] && return 1
+  [ -f "$command_path" ] || return 1
+  awk -v expected_exec="$expected_exec" '
+    NR == 1 {
+      if ($0 != "#!/bin/sh") {
+        exit 1
+      }
+      next
+    }
+
+    NR == 2 {
+      if ($0 == expected_exec) {
+        found = 1
+        next
+      }
+      exit 1
+    }
+
+    $0 !~ /^[[:space:]]*$/ {
+      found = 0
+      exit 1
+    }
+
+    END { exit found ? 0 : 1 }
+  ' "$command_path"
+}
+
+file_looks_like_terrapod_command() {
+  command_path="$1"
+
+  [ -L "$command_path" ] && return 1
+  [ -f "$command_path" ] || return 1
+  awk '
+    NR == 1 {
+      if ($0 != "#!/bin/sh") {
+        exit 1
+      }
+      found_shebang = 1
+    }
+
+    index($0, "Terrapod - a small landing pod for your dotfiles") {
+      found_title = 1
+    }
+
+    index($0, "Usage:") {
+      found_usage = 1
+    }
+
+    index($0, "tpod apply") {
+      found_apply = 1
+    }
+
+    index($0, "help|--help|-h") {
+      found_help = 1
+    }
+
+    END {
+      exit found_shebang && found_title && found_usage && found_apply && found_help ? 0 : 1
+    }
+  ' "$command_path"
+}
+
+command_surface_path_is_repairable() {
+  command_path="$1"
+  source_dir="$2"
+  profile="$3"
+
+  if [ -L "$command_path" ]; then
+    path_points_to_terrapod_source_command "$command_path" "$source_dir" ||
+      path_points_to_installed_tpod_alias "$command_path"
+    return $?
+  fi
+
+  [ -e "$command_path" ] || return 0
+
+  if file_points_to_terrapod_source_command "$command_path" "$source_dir"; then
+    return 0
+  fi
+
+  if [ ! -x "$command_path" ] && file_looks_like_terrapod_command "$command_path"; then
+    return 0
+  fi
+
+  command_help_is_terrapod "$command_path" "$profile"
+}
+
+reject_command_surface_conflict() {
+  command_path="$1"
+
+  fatal "non-Terrapod command already exists at $command_path. Move or remove it, then rerun the Terrapod installer."
+}
+
+ensure_command_surface_path_repairable() {
+  command_path="$1"
+  source_dir="$2"
+  profile="$3"
+
+  if ! command_surface_path_is_repairable "$command_path" "$source_dir" "$profile"; then
+    reject_command_surface_conflict "$command_path"
+  fi
 }
 
 print_already_installed_guidance() {
@@ -877,6 +1068,43 @@ ensure_first_run_setup() {
   run_terrapod_setup "$profile" "$source_dir"
 }
 
+apply_recovery_core_command_surface() {
+  profile="$1"
+  source_dir="$2"
+  local_bin_dir="$3"
+  terrapod_source="$(checked_out_terrapod "$source_dir")"
+  terrapod_target="$local_bin_dir/terrapod"
+  tpod_target="$local_bin_dir/tpod"
+
+  ensure_command_surface_path_repairable "$terrapod_target" "$source_dir" "$profile"
+  ensure_command_surface_path_repairable "$tpod_target" "$source_dir" "$profile"
+
+  rm -f "$terrapod_target" "$tpod_target" ||
+    fatal "failed to repair Terrapod command surface under $local_bin_dir"
+  cp "$terrapod_source" "$terrapod_target" ||
+    fatal "failed to install Terrapod command at $terrapod_target"
+  chmod +x "$terrapod_target" ||
+    fatal "failed to make Terrapod command executable: $terrapod_target"
+  ln -s terrapod "$tpod_target" ||
+    fatal "failed to install tpod alias at $tpod_target"
+
+  validate_recovery_core_command_surface "$profile" "$local_bin_dir"
+}
+
+validate_recovery_core_command_surface() {
+  profile="$1"
+  local_bin_dir="$2"
+  terrapod_bin="$local_bin_dir/terrapod"
+  tpod_bin="$local_bin_dir/tpod"
+
+  [ -x "$terrapod_bin" ] ||
+    fatal "terrapod was not installed at $terrapod_bin after recovery-core apply"
+  [ -x "$tpod_bin" ] ||
+    fatal "tpod was not installed at $tpod_bin after recovery-core apply"
+  TERRAPOD_PROFILE="$profile" "$tpod_bin" help >/dev/null 2>&1 ||
+    fatal "tpod help failed after recovery-core apply"
+}
+
 run_initial_apply() {
   chezmoi_bin="$1"
 
@@ -914,7 +1142,7 @@ main() {
     source_already_present=true
   fi
 
-  if [ "$source_already_present" = "true" ] && installed_tpod_help_works "$local_bin_dir" "$profile"; then
+  if [ "$source_already_present" = "true" ] && installed_command_surface_is_valid "$local_bin_dir" "$profile"; then
     print_already_installed_guidance "$local_bin_dir"
     return 0
   fi
@@ -925,6 +1153,7 @@ main() {
     initialize_source_repository "$chezmoi_bin"
   fi
   ensure_first_run_setup "$profile" "$source_dir" "$chezmoi_bin"
+  apply_recovery_core_command_surface "$profile" "$source_dir" "$local_bin_dir"
   run_initial_apply "$chezmoi_bin"
   show_first_run_help "$profile" "$local_bin_dir"
 

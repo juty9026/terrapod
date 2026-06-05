@@ -20,7 +20,7 @@ pass() {
 }
 
 mkdir -p "$safe_path_dir"
-for command_name in awk cat chmod cp mkdir mktemp rm; do
+for command_name in awk cat chmod cp grep ln mkdir mktemp readlink rm; do
   command_path="$(command -v "$command_name")"
   ln -s "$command_path" "$safe_path_dir/$command_name"
 done
@@ -461,38 +461,57 @@ case "${1-}" in
     ;;
   configure)
     ;;
+  help|--help|-h)
+    if [ "${TPOD_HELP_STUB_STATUS:-0}" != "0" ]; then
+      exit "$TPOD_HELP_STUB_STATUS"
+    fi
+    printf '%s\n' "Terrapod - a small landing pod for your dotfiles"
+    printf '%s\n' "Usage:"
+    printf '%s\n' "  tpod apply"
+    ;;
+  *)
+    printf '%s\n' "unexpected terrapod command:${1-}" >>"$log_file"
+    exit 64
+    ;;
 esac
 TERRAPOD_STUB
     chmod +x "$source_dir/dot_local/bin/executable_terrapod"
     ;;
   apply)
     mkdir -p "$HOME/.local/bin"
-    cat >"$HOME/.local/bin/tpod" <<'TPOD_STUB'
+    cat >"$HOME/.local/bin/terrapod" <<'TERRAPOD_INSTALLED_STUB'
 #!/bin/sh
 set -eu
 
-printf '%s\n' "tpod path:$0" >>"${TERRAPOD_STUB_CALL_LOG:?}"
-printf '%s\n' "tpod args:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"
+command_name="${0##*/}"
+printf '%s\n' "$command_name path:$0" >>"${TERRAPOD_STUB_CALL_LOG:?}"
+printf '%s\n' "$command_name args:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"
 case ":${PATH:-}:" in
   *":$HOME/.local/bin:"*)
-    printf '%s\n' "tpod path_has_local_bin:yes" >>"${TERRAPOD_STUB_CALL_LOG:?}"
+    printf '%s\n' "$command_name path_has_local_bin:yes" >>"${TERRAPOD_STUB_CALL_LOG:?}"
     ;;
   *)
-    printf '%s\n' "tpod path_has_local_bin:no" >>"${TERRAPOD_STUB_CALL_LOG:?}"
+    printf '%s\n' "$command_name path_has_local_bin:no" >>"${TERRAPOD_STUB_CALL_LOG:?}"
     ;;
 esac
 
 case "${1-}" in
   help|--help|-h)
-    printf '%s\n' "tpod help output"
+    if [ "${TPOD_HELP_STUB_STATUS:-0}" != "0" ]; then
+      exit "$TPOD_HELP_STUB_STATUS"
+    fi
+    printf '%s\n' "Terrapod - a small landing pod for your dotfiles"
+    printf '%s\n' "Usage:"
+    printf '%s\n' "  tpod apply"
     ;;
   *)
-    printf '%s\n' "unexpected tpod command:${1-}" >>"${TERRAPOD_STUB_CALL_LOG:?}"
+    printf '%s\n' "unexpected $command_name command:${1-}" >>"${TERRAPOD_STUB_CALL_LOG:?}"
     exit 64
     ;;
 esac
-TPOD_STUB
-    chmod +x "$HOME/.local/bin/tpod"
+TERRAPOD_INSTALLED_STUB
+    chmod +x "$HOME/.local/bin/terrapod"
+    ln -sf terrapod "$HOME/.local/bin/tpod"
     ;;
   *)
     printf '%s\n' "unexpected chezmoi command:${1-}" >>"$log_file"
@@ -535,6 +554,14 @@ case "${1-}" in
     printf '%s\n' "terrapod setup stdin lines:$setup_stdin_line_number" >>"$log_file"
     ;;
   configure)
+    ;;
+  help|--help|-h)
+    if [ "${TPOD_HELP_STUB_STATUS:-0}" != "0" ]; then
+      exit "$TPOD_HELP_STUB_STATUS"
+    fi
+    printf '%s\n' "Terrapod - a small landing pod for your dotfiles"
+    printf '%s\n' "Usage:"
+    printf '%s\n' "  tpod apply"
     ;;
   *)
     printf '%s\n' "unexpected terrapod command:${1-}" >>"$log_file"
@@ -579,6 +606,55 @@ write_installed_tpod_stub() {
     printf '%s\n' '  help|--help|-h) printf "%s\n" "installed tpod help output" ;;'
     printf '%s\n' '  *) exit 64 ;;'
     printf '%s\n' 'esac'
+  } >"$path"
+  chmod +x "$path"
+}
+
+write_installed_terrapod_command_stub() {
+  path="$1"
+  status="$2"
+
+  mkdir -p "$(dirname "$path")"
+  {
+    printf '%s\n' '#!/bin/sh'
+    printf '%s\n' 'set -eu'
+    printf '%s\n' 'printf "%s\n" "terrapod-owned path:$0" >>"${TERRAPOD_STUB_CALL_LOG:?}"'
+    printf '%s\n' 'printf "%s\n" "terrapod-owned args:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"'
+    printf '%s\n' "if [ '$status' != '0' ]; then"
+    printf '%s\n' "  exit '$status'"
+    printf '%s\n' 'fi'
+    printf '%s\n' 'case "${1-}" in'
+    printf '%s\n' '  help|--help|-h)'
+    printf '%s\n' '    printf "%s\n" "Terrapod - a small landing pod for your dotfiles"'
+    printf '%s\n' '    printf "%s\n" "Usage:"'
+    printf '%s\n' '    printf "%s\n" "  tpod apply"'
+    printf '%s\n' '    ;;'
+    printf '%s\n' '  *) exit 64 ;;'
+    printf '%s\n' 'esac'
+  } >"$path"
+  chmod +x "$path"
+}
+
+write_non_terrapod_command_stub() {
+  path="$1"
+
+  mkdir -p "$(dirname "$path")"
+  {
+    printf '%s\n' '#!/bin/sh'
+    printf '%s\n' 'set -eu'
+    printf '%s\n' 'printf "%s\n" "external command"'
+  } >"$path"
+  chmod +x "$path"
+}
+
+write_source_pointer_command_file() {
+  path="$1"
+  source_dir="$2"
+
+  mkdir -p "$(dirname "$path")"
+  {
+    printf '%s\n' '#!/bin/sh'
+    printf '%s\n' "exec \"$source_dir/dot_local/bin/executable_terrapod\" \"\$@\""
   } >"$path"
   chmod +x "$path"
 }
@@ -1230,7 +1306,9 @@ assert_contains "$first_run_log_text" "chezmoi args:apply" "chezmoi apply runs a
 assert_first_occurrence_before "$first_run_log_text" "chezmoi args:apply" "tpod args:help" "first-run installer shows tpod help after initial apply"
 assert_contains "$first_run_log_text" "tpod path:$first_run_case/home/.local/bin/tpod" "first-run installer invokes installed tpod from user local bin"
 assert_contains "$first_run_log_text" "tpod path_has_local_bin:yes" "tpod help receives PATH containing user local bin"
-assert_contains "$first_run_stdout" "tpod help output" "first-run installer prints tpod help after initial apply"
+assert_contains "$first_run_stdout" "Terrapod - a small landing pod for your dotfiles" "first-run installer prints tpod help title after initial apply"
+assert_contains "$first_run_stdout" "Usage:" "first-run installer prints tpod help usage after initial apply"
+assert_contains "$first_run_stdout" "  tpod apply" "first-run installer prints tpod apply help after initial apply"
 assert_contains "$first_run_log_text" "chezmoi path_has_local_bin:yes" "child command PATH contains user local bin"
 assert_not_contains "$first_run_log_text" "brew args:upgrade" "first-run installer does not run broad Homebrew upgrades"
 assert_not_contains "$first_run_log_text" "brew args:bundle" "first-run installer leaves Brewfile bundle to initial apply"
@@ -1783,7 +1861,8 @@ fi
 already_installed_case="$(make_case_dir already-installed)"
 prepare_resumable_macos_case "$already_installed_case"
 write_complete_setup_config "$already_installed_case/xdg-config/chezmoi/chezmoi.toml"
-write_installed_tpod_stub "$already_installed_case/home/.local/bin/tpod" 0
+write_installed_terrapod_command_stub "$already_installed_case/home/.local/bin/terrapod" 0
+ln -sf terrapod "$already_installed_case/home/.local/bin/tpod"
 already_installed_log="$already_installed_case/command-calls"
 TERRAPOD_STUB_CALL_LOG="$already_installed_log"
 export TERRAPOD_STUB_CALL_LOG
@@ -1795,9 +1874,38 @@ already_installed_log_text="$(cat "$already_installed_log")"
 assert_contains "$already_installed_stdout" "Terrapod is already installed." "already installed case explains state"
 assert_contains "$already_installed_stdout" "$already_installed_case/home/.local/bin/tpod status" "already installed case guides status"
 assert_contains "$already_installed_stdout" "$already_installed_case/home/.local/bin/tpod apply" "already installed case guides routine apply"
-assert_contains "$already_installed_log_text" "tpod args:help" "already installed detection validates tpod help"
+assert_contains "$already_installed_log_text" "terrapod-owned args:help" "already installed detection validates canonical Terrapod help"
+assert_contains "$already_installed_log_text" "terrapod-owned path:$already_installed_case/home/.local/bin/terrapod" "already installed detection validates terrapod directly"
+assert_contains "$already_installed_log_text" "terrapod-owned path:$already_installed_case/home/.local/bin/tpod" "already installed detection validates tpod directly"
 assert_not_contains "$already_installed_log_text" "terrapod args:setup" "already installed case does not rerun setup"
 assert_not_contains "$already_installed_log_text" "chezmoi args:apply" "already installed case does not automatically apply"
+
+incomplete_installed_surface_case="$(make_case_dir incomplete-installed-surface)"
+prepare_resumable_macos_case "$incomplete_installed_surface_case"
+write_complete_setup_config "$incomplete_installed_surface_case/xdg-config/chezmoi/chezmoi.toml"
+write_installed_tpod_stub "$incomplete_installed_surface_case/home/.local/bin/tpod" 0
+incomplete_installed_surface_log="$incomplete_installed_surface_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$incomplete_installed_surface_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$incomplete_installed_surface_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "tpod-only installed surface is not treated as already installed"
+incomplete_installed_surface_stderr="$(cat "$incomplete_installed_surface_case/stderr")"
+assert_contains "$incomplete_installed_surface_stderr" "$incomplete_installed_surface_case/home/.local/bin/tpod" "tpod-only installed surface is handled as an unsafe conflict"
+
+external_terrapod_installed_surface_case="$(make_case_dir external-terrapod-installed-surface)"
+prepare_resumable_macos_case "$external_terrapod_installed_surface_case"
+write_complete_setup_config "$external_terrapod_installed_surface_case/xdg-config/chezmoi/chezmoi.toml"
+write_non_terrapod_command_stub "$external_terrapod_installed_surface_case/home/.local/bin/terrapod"
+write_installed_terrapod_command_stub "$external_terrapod_installed_surface_case/home/.local/bin/tpod" 0
+external_terrapod_installed_surface_log="$external_terrapod_installed_surface_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$external_terrapod_installed_surface_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$external_terrapod_installed_surface_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "external terrapod with Terrapod tpod does not short-circuit already-installed detection"
+external_terrapod_installed_surface_stderr="$(cat "$external_terrapod_installed_surface_case/stderr")"
+assert_contains "$external_terrapod_installed_surface_stderr" "$external_terrapod_installed_surface_case/home/.local/bin/terrapod" "external terrapod conflict is still reported"
 
 broken_tpod_case="$(make_case_dir broken-tpod-resume)"
 prepare_resumable_macos_case "$broken_tpod_case"
@@ -1808,9 +1916,176 @@ TERRAPOD_STUB_CALL_LOG="$broken_tpod_log"
 export TERRAPOD_STUB_CALL_LOG
 run_installer_case "$broken_tpod_case"
 unset TERRAPOD_STUB_CALL_LOG
-assert_status "$installer_status" 0 "broken installed command surface resumes first-run"
+assert_failure "$installer_status" "ambiguous broken tpod command conflict stops installation"
 broken_tpod_stdout="$(cat "$broken_tpod_case/stdout")"
+broken_tpod_stderr="$(cat "$broken_tpod_case/stderr")"
 broken_tpod_log_text="$(cat "$broken_tpod_log")"
 assert_contains "$broken_tpod_log_text" "tpod args:help" "broken command surface is tested with tpod help"
-assert_contains "$broken_tpod_log_text" "chezmoi args:apply" "broken command surface resumes apply instead of treating machine as installed"
+assert_contains "$broken_tpod_stderr" "$broken_tpod_case/home/.local/bin/tpod" "ambiguous broken tpod conflict guidance identifies path"
+assert_not_contains "$broken_tpod_log_text" "chezmoi args:apply" "ambiguous broken tpod conflict stops before full apply"
 assert_not_contains "$broken_tpod_stdout" "Terrapod is already installed." "broken command surface is not reported as already installed"
+
+missing_command_surface_case="$(make_case_dir missing-command-surface-repair)"
+prepare_resumable_macos_case "$missing_command_surface_case"
+write_complete_setup_config "$missing_command_surface_case/xdg-config/chezmoi/chezmoi.toml"
+missing_command_surface_log="$missing_command_surface_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$missing_command_surface_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$missing_command_surface_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "missing command surface is installed during recovery-core apply"
+missing_command_surface_log_text="$(cat "$missing_command_surface_log")"
+assert_first_occurrence_before "$missing_command_surface_log_text" "terrapod args:help" "chezmoi args:apply" "recovery-core validation happens before full apply"
+assert_contains "$missing_command_surface_log_text" "tpod args:help" "installed command surface is validated with tpod help"
+assert_contains "$missing_command_surface_log_text" "chezmoi args:apply" "missing command surface still continues to full apply after recovery-core validation"
+
+dangling_symlink_conflict_case="$(make_case_dir dangling-symlink-command-conflict)"
+prepare_resumable_macos_case "$dangling_symlink_conflict_case"
+write_complete_setup_config "$dangling_symlink_conflict_case/xdg-config/chezmoi/chezmoi.toml"
+ln -s "$dangling_symlink_conflict_case/missing-terrapod" "$dangling_symlink_conflict_case/home/.local/bin/terrapod"
+dangling_symlink_conflict_log="$dangling_symlink_conflict_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$dangling_symlink_conflict_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$dangling_symlink_conflict_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "ambiguous dangling symlink command conflict stops installation"
+dangling_symlink_conflict_stderr="$(cat "$dangling_symlink_conflict_case/stderr")"
+assert_contains "$dangling_symlink_conflict_stderr" "$dangling_symlink_conflict_case/home/.local/bin/terrapod" "dangling symlink conflict guidance identifies path"
+
+installed_tpod_alias_repair_case="$(make_case_dir installed-tpod-alias-repair)"
+prepare_resumable_macos_case "$installed_tpod_alias_repair_case"
+write_complete_setup_config "$installed_tpod_alias_repair_case/xdg-config/chezmoi/chezmoi.toml"
+ln -s terrapod "$installed_tpod_alias_repair_case/home/.local/bin/tpod"
+installed_tpod_alias_repair_log="$installed_tpod_alias_repair_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$installed_tpod_alias_repair_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$installed_tpod_alias_repair_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "installed tpod alias is repairable when terrapod is missing"
+installed_tpod_alias_repair_log_text="$(cat "$installed_tpod_alias_repair_log")"
+assert_contains "$installed_tpod_alias_repair_log_text" "tpod args:help" "installed tpod alias repair validates installed tpod"
+assert_contains "$installed_tpod_alias_repair_log_text" "chezmoi args:apply" "installed tpod alias repair continues to full apply"
+
+terrapod_owned_repair_case="$(make_case_dir terrapod-owned-command-repair)"
+prepare_resumable_macos_case "$terrapod_owned_repair_case"
+write_complete_setup_config "$terrapod_owned_repair_case/xdg-config/chezmoi/chezmoi.toml"
+write_installed_terrapod_command_stub "$terrapod_owned_repair_case/home/.local/bin/terrapod" 0
+terrapod_owned_repair_log="$terrapod_owned_repair_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$terrapod_owned_repair_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$terrapod_owned_repair_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "Terrapod-owned command files are repairable"
+terrapod_owned_repair_log_text="$(cat "$terrapod_owned_repair_log")"
+assert_contains "$terrapod_owned_repair_log_text" "terrapod-owned args:help" "Terrapod-owned repair checks existing help before overwrite"
+assert_contains "$terrapod_owned_repair_log_text" "tpod args:help" "Terrapod-owned repair validates installed tpod after recovery-core apply"
+
+nonexecutable_terrapod_owned_repair_case="$(make_case_dir nonexecutable-terrapod-owned-command-repair)"
+prepare_resumable_macos_case "$nonexecutable_terrapod_owned_repair_case"
+write_complete_setup_config "$nonexecutable_terrapod_owned_repair_case/xdg-config/chezmoi/chezmoi.toml"
+write_installed_terrapod_command_stub "$nonexecutable_terrapod_owned_repair_case/home/.local/bin/terrapod" 0
+write_installed_terrapod_command_stub "$nonexecutable_terrapod_owned_repair_case/home/.local/bin/tpod" 0
+chmod -x "$nonexecutable_terrapod_owned_repair_case/home/.local/bin/terrapod"
+chmod -x "$nonexecutable_terrapod_owned_repair_case/home/.local/bin/tpod"
+nonexecutable_terrapod_owned_repair_log="$nonexecutable_terrapod_owned_repair_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$nonexecutable_terrapod_owned_repair_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$nonexecutable_terrapod_owned_repair_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "non-executable Terrapod-owned command files are repairable"
+nonexecutable_terrapod_owned_repair_log_text="$(cat "$nonexecutable_terrapod_owned_repair_log")"
+assert_contains "$nonexecutable_terrapod_owned_repair_log_text" "tpod args:help" "non-executable Terrapod-owned repair validates installed tpod after recovery-core apply"
+assert_contains "$nonexecutable_terrapod_owned_repair_log_text" "chezmoi args:apply" "non-executable Terrapod-owned repair continues to full apply"
+
+source_pointer_repair_case="$(make_case_dir source-pointer-command-repair)"
+prepare_resumable_macos_case "$source_pointer_repair_case"
+write_complete_setup_config "$source_pointer_repair_case/xdg-config/chezmoi/chezmoi.toml"
+ln -s "$source_pointer_repair_case/xdg-data/chezmoi/dot_local/bin/executable_terrapod" "$source_pointer_repair_case/home/.local/bin/terrapod"
+source_pointer_repair_log="$source_pointer_repair_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$source_pointer_repair_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$source_pointer_repair_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "source-pointer symlink command files are repairable"
+source_pointer_repair_log_text="$(cat "$source_pointer_repair_log")"
+assert_contains "$source_pointer_repair_log_text" "tpod args:help" "source-pointer symlink repair validates installed tpod"
+
+source_pointer_file_repair_case="$(make_case_dir source-pointer-file-command-repair)"
+prepare_resumable_macos_case "$source_pointer_file_repair_case"
+write_complete_setup_config "$source_pointer_file_repair_case/xdg-config/chezmoi/chezmoi.toml"
+write_source_pointer_command_file "$source_pointer_file_repair_case/home/.local/bin/terrapod" "$source_pointer_file_repair_case/xdg-data/chezmoi"
+write_source_pointer_command_file "$source_pointer_file_repair_case/home/.local/bin/tpod" "$source_pointer_file_repair_case/xdg-data/chezmoi"
+chmod -x "$source_pointer_file_repair_case/home/.local/bin/tpod"
+source_pointer_file_repair_log="$source_pointer_file_repair_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$source_pointer_file_repair_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$source_pointer_file_repair_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "source-pointer regular command files are repairable"
+source_pointer_file_repair_log_text="$(cat "$source_pointer_file_repair_log")"
+assert_contains "$source_pointer_file_repair_log_text" "tpod args:help" "source-pointer regular file repair validates installed tpod"
+assert_contains "$source_pointer_file_repair_log_text" "chezmoi args:apply" "source-pointer regular file repair continues to full apply"
+
+non_terrapod_conflict_case="$(make_case_dir non-terrapod-command-conflict)"
+prepare_resumable_macos_case "$non_terrapod_conflict_case"
+write_complete_setup_config "$non_terrapod_conflict_case/xdg-config/chezmoi/chezmoi.toml"
+write_non_terrapod_command_stub "$non_terrapod_conflict_case/home/.local/bin/terrapod"
+non_terrapod_conflict_log="$non_terrapod_conflict_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$non_terrapod_conflict_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$non_terrapod_conflict_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "non-Terrapod terrapod command conflict stops installation"
+non_terrapod_conflict_stderr="$(cat "$non_terrapod_conflict_case/stderr")"
+non_terrapod_conflict_log_text="$(cat "$non_terrapod_conflict_log" 2>/dev/null || true)"
+assert_contains "$non_terrapod_conflict_stderr" "$non_terrapod_conflict_case/home/.local/bin/terrapod" "non-Terrapod conflict guidance identifies path"
+assert_contains "$non_terrapod_conflict_stderr" "Move or remove it, then rerun the Terrapod installer." "non-Terrapod conflict guidance asks user to move or remove"
+assert_not_contains "$non_terrapod_conflict_log_text" "chezmoi args:apply" "non-Terrapod conflict stops before full apply"
+
+non_terrapod_tpod_conflict_case="$(make_case_dir non-terrapod-tpod-command-conflict)"
+prepare_resumable_macos_case "$non_terrapod_tpod_conflict_case"
+write_complete_setup_config "$non_terrapod_tpod_conflict_case/xdg-config/chezmoi/chezmoi.toml"
+write_non_terrapod_command_stub "$non_terrapod_tpod_conflict_case/home/.local/bin/tpod"
+non_terrapod_tpod_conflict_log="$non_terrapod_tpod_conflict_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$non_terrapod_tpod_conflict_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$non_terrapod_tpod_conflict_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "non-Terrapod tpod command conflict stops installation"
+non_terrapod_tpod_conflict_stderr="$(cat "$non_terrapod_tpod_conflict_case/stderr")"
+non_terrapod_tpod_conflict_log_text="$(cat "$non_terrapod_tpod_conflict_log" 2>/dev/null || true)"
+assert_contains "$non_terrapod_tpod_conflict_stderr" "$non_terrapod_tpod_conflict_case/home/.local/bin/tpod" "non-Terrapod tpod conflict guidance identifies path"
+assert_contains "$non_terrapod_tpod_conflict_stderr" "Move or remove it, then rerun the Terrapod installer." "non-Terrapod tpod conflict guidance asks user to move or remove"
+assert_not_contains "$non_terrapod_tpod_conflict_log_text" "chezmoi args:apply" "non-Terrapod tpod conflict stops before full apply"
+
+ambiguous_tpod_conflict_case="$(make_case_dir ambiguous-tpod-command-conflict)"
+prepare_resumable_macos_case "$ambiguous_tpod_conflict_case"
+write_complete_setup_config "$ambiguous_tpod_conflict_case/xdg-config/chezmoi/chezmoi.toml"
+cat >"$ambiguous_tpod_conflict_case/home/.local/bin/tpod" <<'AMBIGUOUS_TPOD'
+not a script
+AMBIGUOUS_TPOD
+ambiguous_tpod_conflict_log="$ambiguous_tpod_conflict_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$ambiguous_tpod_conflict_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$ambiguous_tpod_conflict_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "ambiguous tpod command conflict stops installation"
+ambiguous_tpod_conflict_stderr="$(cat "$ambiguous_tpod_conflict_case/stderr")"
+assert_contains "$ambiguous_tpod_conflict_stderr" "$ambiguous_tpod_conflict_case/home/.local/bin/tpod" "ambiguous command conflict guidance identifies path"
+
+tpod_help_failure_case="$(make_case_dir tpod-help-failure)"
+prepare_resumable_macos_case "$tpod_help_failure_case"
+write_complete_setup_config "$tpod_help_failure_case/xdg-config/chezmoi/chezmoi.toml"
+TPOD_HELP_STUB_STATUS=17
+export TPOD_HELP_STUB_STATUS
+tpod_help_failure_log="$tpod_help_failure_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$tpod_help_failure_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$tpod_help_failure_case"
+unset TERRAPOD_STUB_CALL_LOG
+unset TPOD_HELP_STUB_STATUS
+assert_failure "$installer_status" "tpod help failure is a hard recovery-core failure"
+tpod_help_failure_stderr="$(cat "$tpod_help_failure_case/stderr")"
+tpod_help_failure_log_text="$(cat "$tpod_help_failure_log" 2>/dev/null || true)"
+assert_contains "$tpod_help_failure_stderr" "tpod help failed after recovery-core apply" "tpod help failure explains recovery-core validation failure"
+assert_not_contains "$tpod_help_failure_log_text" "chezmoi args:apply" "tpod help failure stops before full apply"
