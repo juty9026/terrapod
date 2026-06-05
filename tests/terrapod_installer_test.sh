@@ -1916,11 +1916,13 @@ TERRAPOD_STUB_CALL_LOG="$broken_tpod_log"
 export TERRAPOD_STUB_CALL_LOG
 run_installer_case "$broken_tpod_case"
 unset TERRAPOD_STUB_CALL_LOG
-assert_status "$installer_status" 0 "broken installed command surface resumes first-run"
+assert_failure "$installer_status" "ambiguous broken tpod command conflict stops installation"
 broken_tpod_stdout="$(cat "$broken_tpod_case/stdout")"
+broken_tpod_stderr="$(cat "$broken_tpod_case/stderr")"
 broken_tpod_log_text="$(cat "$broken_tpod_log")"
 assert_contains "$broken_tpod_log_text" "tpod args:help" "broken command surface is tested with tpod help"
-assert_contains "$broken_tpod_log_text" "chezmoi args:apply" "broken command surface resumes apply instead of treating machine as installed"
+assert_contains "$broken_tpod_stderr" "$broken_tpod_case/home/.local/bin/tpod" "ambiguous broken tpod conflict guidance identifies path"
+assert_not_contains "$broken_tpod_log_text" "chezmoi args:apply" "ambiguous broken tpod conflict stops before full apply"
 assert_not_contains "$broken_tpod_stdout" "Terrapod is already installed." "broken command surface is not reported as already installed"
 
 missing_command_surface_case="$(make_case_dir missing-command-surface-repair)"
