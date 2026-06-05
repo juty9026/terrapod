@@ -400,7 +400,8 @@ assert_no_shell_startup_backups_under() {
   : >"$found_file"
   if [ -d "$home_dir" ]; then
     find "$home_dir" \
-      \( -name '.zshrc.terrapod-backup-*' \
+      \( -name '.zshenv.terrapod-backup-*' \
+      -o -name '.zshrc.terrapod-backup-*' \
       -o -name '.zprofile.terrapod-backup-*' \
       -o -name '.bashrc.terrapod-backup-*' \
       -o -name '.bash_profile.terrapod-backup-*' \
