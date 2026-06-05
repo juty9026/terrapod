@@ -2248,6 +2248,39 @@ if [ -L "$shell_symlink_backup_case/home/.zshenv" ]; then
 fi
 pass "forced apply replaces managed .zshenv symlink"
 
+shell_vps_target_case="$(make_case_dir shell-startup-vps-targets)"
+write_uname_stub "$shell_vps_target_case" "Linux"
+shell_vps_os_release="$(write_os_release "$shell_vps_target_case" "ID=ubuntu" 'VERSION_ID="24.04"')"
+write_command_call_stubs "$shell_vps_target_case" "curl" "wget" "git" "gum" "sh"
+write_terrapod_command_stub "$shell_vps_target_case/terrapod-template"
+write_terrapod_source_checkout "$shell_vps_target_case/xdg-data/chezmoi" "$shell_vps_target_case/terrapod-template"
+mkdir -p "$shell_vps_target_case/home/.local/bin"
+write_chezmoi_flow_stub "$shell_vps_target_case/home/.local/bin/chezmoi"
+write_complete_setup_config_with_profile "$shell_vps_target_case/xdg-config/chezmoi/chezmoi.toml" "vps-shell"
+printf '%s\n' "vps user zshenv" >"$shell_vps_target_case/home/.zshenv"
+printf '%s\n' "vps user zprofile" >"$shell_vps_target_case/home/.zprofile"
+printf '%s\n' "vps user zshrc" >"$shell_vps_target_case/home/.zshrc"
+printf '%s\n' "vps user zprofile" >"$shell_vps_target_case/expected-zprofile"
+shell_vps_target_log="$shell_vps_target_case/command-calls"
+TERRAPOD_OS_RELEASE_FILE="$shell_vps_os_release"
+TERRAPOD_STUB_CALL_LOG="$shell_vps_target_log"
+export TERRAPOD_OS_RELEASE_FILE
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$shell_vps_target_case"
+unset TERRAPOD_OS_RELEASE_FILE
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "VPS shell startup recovery excludes ignored .zprofile"
+shell_vps_target_log_text="$(cat "$shell_vps_target_log")"
+assert_contains "$shell_vps_target_log_text" "chezmoi args:cat $shell_vps_target_case/home/.zshenv" "VPS recovery-core compares rendered .zshenv"
+assert_not_contains "$shell_vps_target_log_text" "chezmoi args:cat $shell_vps_target_case/home/.zprofile" "VPS recovery-core does not compare ignored .zprofile"
+assert_contains "$shell_vps_target_log_text" "chezmoi args:cat $shell_vps_target_case/home/.zshrc" "VPS recovery-core compares rendered .zshrc"
+assert_contains "$shell_vps_target_log_text" "chezmoi args:apply --force $shell_vps_target_case/home/.zshenv $shell_vps_target_case/home/.zshrc" "VPS recovery-core force apply excludes ignored .zprofile"
+assert_no_shell_backup_for "$shell_vps_target_case/home/.zprofile" "VPS ignored .zprofile is not backed up"
+if ! cmp -s "$shell_vps_target_case/home/.zprofile" "$shell_vps_target_case/expected-zprofile"; then
+  fail "VPS ignored .zprofile remains untouched"
+fi
+pass "VPS ignored .zprofile remains untouched"
+
 shell_no_backup_case="$(make_case_dir shell-startup-no-backups)"
 prepare_resumable_macos_case "$shell_no_backup_case"
 write_complete_setup_config "$shell_no_backup_case/xdg-config/chezmoi/chezmoi.toml"

@@ -1163,9 +1163,13 @@ backup_shell_startup_if_different() {
 
 backup_recovery_core_shell_startup_files() {
   chezmoi_bin="$1"
+  profile="$2"
   backup_paths=""
 
   for target in "$HOME/.zshenv" "$HOME/.zprofile" "$HOME/.zshrc"; do
+    if [ "$target" = "$HOME/.zprofile" ] && [ "$profile" != "macos-terminal" ]; then
+      continue
+    fi
     if backup_path="$(backup_shell_startup_if_different "$chezmoi_bin" "$target")"; then
       if [ -n "$backup_path" ]; then
         backup_paths="$(append_line "$backup_paths" "$backup_path")"
@@ -1193,15 +1197,21 @@ report_shell_startup_backups() {
 }
 
 apply_recovery_core_shell_startup_files() {
-  chezmoi_bin="$1"
+  profile="$1"
+  chezmoi_bin="$2"
 
-  if ! backup_paths="$(backup_recovery_core_shell_startup_files "$chezmoi_bin")"; then
+  if ! backup_paths="$(backup_recovery_core_shell_startup_files "$chezmoi_bin" "$profile")"; then
     fatal "failed to back up recovery-core shell startup files"
   fi
   report_shell_startup_backups "$backup_paths"
 
-  "$chezmoi_bin" apply --force "$HOME/.zshenv" "$HOME/.zprofile" "$HOME/.zshrc" ||
-    fatal "failed to apply recovery-core shell startup files"
+  if [ "$profile" = "macos-terminal" ]; then
+    "$chezmoi_bin" apply --force "$HOME/.zshenv" "$HOME/.zprofile" "$HOME/.zshrc" ||
+      fatal "failed to apply recovery-core shell startup files"
+  else
+    "$chezmoi_bin" apply --force "$HOME/.zshenv" "$HOME/.zshrc" ||
+      fatal "failed to apply recovery-core shell startup files"
+  fi
 }
 
 run_initial_apply() {
@@ -1253,7 +1263,7 @@ main() {
   fi
   ensure_first_run_setup "$profile" "$source_dir" "$chezmoi_bin"
   apply_recovery_core_command_surface "$profile" "$source_dir" "$local_bin_dir"
-  apply_recovery_core_shell_startup_files "$chezmoi_bin"
+  apply_recovery_core_shell_startup_files "$profile" "$chezmoi_bin"
   run_initial_apply "$chezmoi_bin"
   show_first_run_help "$profile" "$local_bin_dir"
 
