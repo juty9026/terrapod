@@ -1952,6 +1952,20 @@ assert_failure "$installer_status" "ambiguous dangling symlink command conflict 
 dangling_symlink_conflict_stderr="$(cat "$dangling_symlink_conflict_case/stderr")"
 assert_contains "$dangling_symlink_conflict_stderr" "$dangling_symlink_conflict_case/home/.local/bin/terrapod" "dangling symlink conflict guidance identifies path"
 
+installed_tpod_alias_repair_case="$(make_case_dir installed-tpod-alias-repair)"
+prepare_resumable_macos_case "$installed_tpod_alias_repair_case"
+write_complete_setup_config "$installed_tpod_alias_repair_case/xdg-config/chezmoi/chezmoi.toml"
+ln -s terrapod "$installed_tpod_alias_repair_case/home/.local/bin/tpod"
+installed_tpod_alias_repair_log="$installed_tpod_alias_repair_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$installed_tpod_alias_repair_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$installed_tpod_alias_repair_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "installed tpod alias is repairable when terrapod is missing"
+installed_tpod_alias_repair_log_text="$(cat "$installed_tpod_alias_repair_log")"
+assert_contains "$installed_tpod_alias_repair_log_text" "tpod args:help" "installed tpod alias repair validates installed tpod"
+assert_contains "$installed_tpod_alias_repair_log_text" "chezmoi args:apply" "installed tpod alias repair continues to full apply"
+
 terrapod_owned_repair_case="$(make_case_dir terrapod-owned-command-repair)"
 prepare_resumable_macos_case "$terrapod_owned_repair_case"
 write_complete_setup_config "$terrapod_owned_repair_case/xdg-config/chezmoi/chezmoi.toml"

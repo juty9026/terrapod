@@ -15,6 +15,7 @@
 - Issue #98 is scoped to first-run installer recovery-core command files, not routine `tpod apply` post-apply validation.
 - `~/.local/bin/tpod` should be a symlink to `terrapod`, matching `dot_local/bin/symlink_tpod`.
 - A clear Terrapod Source Repository pointer means an existing symlink target canonicalizes to `$source_dir/dot_local/bin/executable_terrapod`; relative symlink targets must be resolved from the command file's parent directory.
+- A clear installed alias pointer means an existing `tpod` symlink canonicalizes to sibling `terrapod`, because recovery-core itself installs `~/.local/bin/tpod -> terrapod`.
 - An existing executable whose `help` output contains Terrapod's canonical help markers counts as Terrapod-owned; arbitrary successful `help` output does not.
 - Broken symlinks and exact wrapper files that clearly exec `$source_dir/dot_local/bin/executable_terrapod` are repairable; ambiguous regular files are conflicts.
 
@@ -243,6 +244,20 @@ assert_failure "$installer_status" "ambiguous dangling symlink command conflict 
 dangling_symlink_conflict_stderr="$(cat "$dangling_symlink_conflict_case/stderr")"
 assert_contains "$dangling_symlink_conflict_stderr" "$dangling_symlink_conflict_case/home/.local/bin/terrapod" "dangling symlink conflict guidance identifies path"
 
+installed_tpod_alias_repair_case="$(make_case_dir installed-tpod-alias-repair)"
+prepare_resumable_macos_case "$installed_tpod_alias_repair_case"
+write_complete_setup_config "$installed_tpod_alias_repair_case/xdg-config/chezmoi/chezmoi.toml"
+ln -s terrapod "$installed_tpod_alias_repair_case/home/.local/bin/tpod"
+installed_tpod_alias_repair_log="$installed_tpod_alias_repair_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$installed_tpod_alias_repair_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$installed_tpod_alias_repair_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "installed tpod alias is repairable when terrapod is missing"
+installed_tpod_alias_repair_log_text="$(cat "$installed_tpod_alias_repair_log")"
+assert_contains "$installed_tpod_alias_repair_log_text" "tpod args:help" "installed tpod alias repair validates installed tpod"
+assert_contains "$installed_tpod_alias_repair_log_text" "chezmoi args:apply" "installed tpod alias repair continues to full apply"
+
 terrapod_owned_repair_case="$(make_case_dir terrapod-owned-command-repair)"
 prepare_resumable_macos_case "$terrapod_owned_repair_case"
 write_complete_setup_config "$terrapod_owned_repair_case/xdg-config/chezmoi/chezmoi.toml"
@@ -411,6 +426,36 @@ path_points_to_terrapod_source_command() {
   [ "$resolved_target" = "$expected_source" ]
 }
 
+path_points_to_installed_tpod_alias() {
+  command_path="$1"
+
+  [ "${command_path##*/}" = "tpod" ] || return 1
+  [ -L "$command_path" ] || return 1
+  target="$(readlink "$command_path")" || return 1
+  case "$target" in
+    /*)
+      target_path="$target"
+      ;;
+    *)
+      target_path="${command_path%/*}/$target"
+      ;;
+  esac
+
+  command_dir="${command_path%/*}"
+  if ! resolved_command_dir="$(CDPATH= cd -P -- "$command_dir" 2>/dev/null && pwd -P)"; then
+    return 1
+  fi
+
+  target_dir="${target_path%/*}"
+  target_base="${target_path##*/}"
+  if ! resolved_target_dir="$(CDPATH= cd -P -- "$target_dir" 2>/dev/null && pwd -P)"; then
+    return 1
+  fi
+  resolved_target="$resolved_target_dir/$target_base"
+
+  [ "$resolved_target" = "$resolved_command_dir/terrapod" ]
+}
+
 file_points_to_terrapod_source_command() {
   command_path="$1"
   source_dir="$2"
@@ -449,7 +494,8 @@ command_surface_path_is_repairable() {
   profile="$3"
 
   if [ -L "$command_path" ]; then
-    path_points_to_terrapod_source_command "$command_path" "$source_dir"
+    path_points_to_terrapod_source_command "$command_path" "$source_dir" ||
+      path_points_to_installed_tpod_alias "$command_path"
     return $?
   fi
 

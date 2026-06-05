@@ -213,6 +213,36 @@ path_points_to_terrapod_source_command() {
   [ "$resolved_target" = "$resolved_expected" ]
 }
 
+path_points_to_installed_tpod_alias() {
+  command_path="$1"
+
+  [ "${command_path##*/}" = "tpod" ] || return 1
+  [ -L "$command_path" ] || return 1
+  target="$(readlink "$command_path")" || return 1
+  case "$target" in
+    /*)
+      target_path="$target"
+      ;;
+    *)
+      target_path="${command_path%/*}/$target"
+      ;;
+  esac
+
+  command_dir="${command_path%/*}"
+  if ! resolved_command_dir="$(CDPATH= cd -P -- "$command_dir" 2>/dev/null && pwd -P)"; then
+    return 1
+  fi
+
+  target_dir="${target_path%/*}"
+  target_base="${target_path##*/}"
+  if ! resolved_target_dir="$(CDPATH= cd -P -- "$target_dir" 2>/dev/null && pwd -P)"; then
+    return 1
+  fi
+  resolved_target="$resolved_target_dir/$target_base"
+
+  [ "$resolved_target" = "$resolved_command_dir/terrapod" ]
+}
+
 file_points_to_terrapod_source_command() {
   command_path="$1"
   source_dir="$2"
@@ -251,7 +281,8 @@ command_surface_path_is_repairable() {
   profile="$3"
 
   if [ -L "$command_path" ]; then
-    path_points_to_terrapod_source_command "$command_path" "$source_dir"
+    path_points_to_terrapod_source_command "$command_path" "$source_dir" ||
+      path_points_to_installed_tpod_alias "$command_path"
     return $?
   fi
 
