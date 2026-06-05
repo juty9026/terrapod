@@ -2025,6 +2025,22 @@ assert_contains "$non_terrapod_conflict_stderr" "$non_terrapod_conflict_case/hom
 assert_contains "$non_terrapod_conflict_stderr" "Move or remove it, then rerun the Terrapod installer." "non-Terrapod conflict guidance asks user to move or remove"
 assert_not_contains "$non_terrapod_conflict_log_text" "chezmoi args:apply" "non-Terrapod conflict stops before full apply"
 
+non_terrapod_tpod_conflict_case="$(make_case_dir non-terrapod-tpod-command-conflict)"
+prepare_resumable_macos_case "$non_terrapod_tpod_conflict_case"
+write_complete_setup_config "$non_terrapod_tpod_conflict_case/xdg-config/chezmoi/chezmoi.toml"
+write_non_terrapod_command_stub "$non_terrapod_tpod_conflict_case/home/.local/bin/tpod"
+non_terrapod_tpod_conflict_log="$non_terrapod_tpod_conflict_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$non_terrapod_tpod_conflict_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$non_terrapod_tpod_conflict_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "non-Terrapod tpod command conflict stops installation"
+non_terrapod_tpod_conflict_stderr="$(cat "$non_terrapod_tpod_conflict_case/stderr")"
+non_terrapod_tpod_conflict_log_text="$(cat "$non_terrapod_tpod_conflict_log" 2>/dev/null || true)"
+assert_contains "$non_terrapod_tpod_conflict_stderr" "$non_terrapod_tpod_conflict_case/home/.local/bin/tpod" "non-Terrapod tpod conflict guidance identifies path"
+assert_contains "$non_terrapod_tpod_conflict_stderr" "Move or remove it, then rerun the Terrapod installer." "non-Terrapod tpod conflict guidance asks user to move or remove"
+assert_not_contains "$non_terrapod_tpod_conflict_log_text" "chezmoi args:apply" "non-Terrapod tpod conflict stops before full apply"
+
 ambiguous_tpod_conflict_case="$(make_case_dir ambiguous-tpod-command-conflict)"
 prepare_resumable_macos_case "$ambiguous_tpod_conflict_case"
 write_complete_setup_config "$ambiguous_tpod_conflict_case/xdg-config/chezmoi/chezmoi.toml"
