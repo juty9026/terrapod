@@ -1956,7 +1956,6 @@ terrapod_owned_repair_case="$(make_case_dir terrapod-owned-command-repair)"
 prepare_resumable_macos_case "$terrapod_owned_repair_case"
 write_complete_setup_config "$terrapod_owned_repair_case/xdg-config/chezmoi/chezmoi.toml"
 write_installed_terrapod_command_stub "$terrapod_owned_repair_case/home/.local/bin/terrapod" 0
-ln -sf terrapod "$terrapod_owned_repair_case/home/.local/bin/tpod"
 terrapod_owned_repair_log="$terrapod_owned_repair_case/command-calls"
 TERRAPOD_STUB_CALL_LOG="$terrapod_owned_repair_log"
 export TERRAPOD_STUB_CALL_LOG
@@ -1971,7 +1970,6 @@ source_pointer_repair_case="$(make_case_dir source-pointer-command-repair)"
 prepare_resumable_macos_case "$source_pointer_repair_case"
 write_complete_setup_config "$source_pointer_repair_case/xdg-config/chezmoi/chezmoi.toml"
 ln -s "$source_pointer_repair_case/xdg-data/chezmoi/dot_local/bin/executable_terrapod" "$source_pointer_repair_case/home/.local/bin/terrapod"
-ln -sf terrapod "$source_pointer_repair_case/home/.local/bin/tpod"
 source_pointer_repair_log="$source_pointer_repair_case/command-calls"
 TERRAPOD_STUB_CALL_LOG="$source_pointer_repair_log"
 export TERRAPOD_STUB_CALL_LOG
@@ -1986,6 +1984,7 @@ prepare_resumable_macos_case "$source_pointer_file_repair_case"
 write_complete_setup_config "$source_pointer_file_repair_case/xdg-config/chezmoi/chezmoi.toml"
 write_source_pointer_command_file "$source_pointer_file_repair_case/home/.local/bin/terrapod" "$source_pointer_file_repair_case/xdg-data/chezmoi"
 write_source_pointer_command_file "$source_pointer_file_repair_case/home/.local/bin/tpod" "$source_pointer_file_repair_case/xdg-data/chezmoi"
+chmod -x "$source_pointer_file_repair_case/home/.local/bin/tpod"
 source_pointer_file_repair_log="$source_pointer_file_repair_case/command-calls"
 TERRAPOD_STUB_CALL_LOG="$source_pointer_file_repair_log"
 export TERRAPOD_STUB_CALL_LOG
