@@ -8,14 +8,26 @@ if [ -f "$install_warnings_lib" ]; then
   . "$install_warnings_lib"
 fi
 
+INSTALL_WARNING_RECORDED=0
+
 mark_install_warning() {
   category="$1"
   summary="$2"
   guidance="$3"
+  INSTALL_WARNING_RECORDED=0
 
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
-    terrapod_install_warning_write "$category" "$summary" "$guidance" || true
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ] &&
+    terrapod_install_warning_write "$category" "$summary" "$guidance"; then
+    INSTALL_WARNING_RECORDED=1
   fi
+}
+
+exit_after_install_warning() {
+  if [ "${TERRAPOD_FIRST_RUN_APPLY:-}" = "1" ] && [ "$INSTALL_WARNING_RECORDED" -eq 1 ]; then
+    exit 0
+  fi
+
+  exit 1
 }
 
 clear_install_warning() {
@@ -56,7 +68,7 @@ setup_macos_brew() {
     shell-integrations \
     "Shell integration setup needs attention" \
     "Install Homebrew or fix brew on PATH, then rerun tpod apply."
-  exit 1
+  exit_after_install_warning
 }
 
 ensure_git() {
@@ -70,7 +82,7 @@ ensure_git() {
       shell-integrations \
       "Shell integration setup needs attention" \
       "Install git with Homebrew, then rerun tpod apply."
-    exit 1
+    exit_after_install_warning
   fi
 {{ else }}
   echo "git is required to install shell integrations." >&2
@@ -78,7 +90,7 @@ ensure_git() {
     shell-integrations \
     "Shell integration setup needs attention" \
     "Install git, then rerun tpod apply."
-  exit 1
+  exit_after_install_warning
 {{ end }}
 }
 
@@ -96,14 +108,14 @@ if [ ! -d "$HOME/.oh-my-zsh" ]; then
       shell-integrations \
       "Shell integration setup needs attention" \
       "Check network access to the Oh My Zsh installer, then rerun tpod apply."
-    exit 1
+    exit_after_install_warning
   fi
   if ! sh "$oh_my_zsh_installer" --unattended --keep-zshrc; then
     mark_install_warning \
       shell-integrations \
       "Shell integration setup needs attention" \
       "Review Oh My Zsh installer output, then rerun tpod apply."
-    exit 1
+    exit_after_install_warning
   fi
 fi
 
@@ -115,7 +127,7 @@ if [ ! -d "$HOME/.local/share/zinit/zinit.git" ]; then
       shell-integrations \
       "Shell integration setup needs attention" \
       "Review zinit git clone output, then rerun tpod apply."
-    exit 1
+    exit_after_install_warning
   fi
 fi
 
@@ -126,14 +138,14 @@ if [ ! -d "$HOME/.scm_breeze" ]; then
       shell-integrations \
       "Shell integration setup needs attention" \
       "Review SCM Breeze git clone output, then rerun tpod apply."
-    exit 1
+    exit_after_install_warning
   fi
   if ! "$HOME/.scm_breeze/install.sh"; then
     mark_install_warning \
       shell-integrations \
       "Shell integration setup needs attention" \
       "Review SCM Breeze installer output, then rerun tpod apply."
-    exit 1
+    exit_after_install_warning
   fi
 fi
 

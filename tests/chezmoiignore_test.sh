@@ -397,6 +397,22 @@ homebrew_installer_failure_marker_text="$(cat "$homebrew_installer_failure_marke
 assert_contains_text "$homebrew_installer_failure_marker_text" "summary='Homebrew core install needs attention'" "macOS bootstrap Homebrew installer failure marker keeps the expected summary"
 assert_contains_text "$homebrew_installer_failure_marker_text" "guidance='Install Homebrew from https://brew.sh, then rerun tpod apply.'" "macOS bootstrap Homebrew installer failure marker keeps recovery guidance"
 
+homebrew_first_run_failure_state="$tmp_dir/homebrew-first-run-failure-state"
+homebrew_first_run_failure_home="$tmp_dir/homebrew-first-run-failure-home"
+homebrew_first_run_failure_log="$tmp_dir/homebrew-first-run-failure.log"
+mkdir -p "$homebrew_first_run_failure_home"
+
+if ! HOME="$homebrew_first_run_failure_home" XDG_STATE_HOME="$homebrew_first_run_failure_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_first_run_failure_log" PATH="$homebrew_installer_failure_bin:/usr/bin:/bin" \
+  TERRAPOD_FIRST_RUN_APPLY=1 sh "$homebrew_installer_failure_script" >"$tmp_dir/homebrew-first-run-failure.out" 2>"$tmp_dir/homebrew-first-run-failure.err"; then
+  fail "first-run macOS bootstrap continues when the Homebrew installer warning is recorded"
+fi
+
+homebrew_first_run_failure_marker="$homebrew_first_run_failure_state/terrapod/install-warnings/homebrew-core"
+if [ ! -f "$homebrew_first_run_failure_marker" ]; then
+  fail "first-run macOS bootstrap records homebrew-core marker when the Homebrew installer command fails"
+fi
+pass "first-run macOS bootstrap records homebrew-core marker when the Homebrew installer command fails"
+
 assert_managed_paths_exclude_prefix \
   "$macos_managed_targets" \
   "Brewfile.macos-desktop-apps" \
@@ -479,6 +495,49 @@ assert_contains_text "$terminal_launcher_marker_text" "summary='Homebrew desktop
 assert_contains_text "$terminal_launcher_marker_text" "failed casks: ghostty, raycast" "desktop app marker guidance includes only casks whose single-cask bundle failed"
 assert_contains_text "$terminal_launcher_marker_text" "App Groups: terminal-apps, launcher" "desktop app marker guidance includes enabled App Groups"
 assert_not_contains_text "$terminal_launcher_marker_text" "1password-cli" "desktop app marker excludes casks whose single-cask bundle succeeded"
+
+terminal_launcher_marker_failure_bin="$tmp_dir/terminal-launcher-marker-failure-bin"
+terminal_launcher_marker_failure_state="$tmp_dir/terminal-launcher-marker-failure-state"
+terminal_launcher_marker_failure_home="$tmp_dir/terminal-launcher-marker-failure-home"
+terminal_launcher_marker_failure_log="$tmp_dir/terminal-launcher-marker-failure-brew.log"
+mkdir -p "$terminal_launcher_marker_failure_bin" "$terminal_launcher_marker_failure_home"
+write_brew_bundle_stub "$terminal_launcher_marker_failure_bin/brew"
+: >"$terminal_launcher_marker_failure_state"
+
+if HOME="$terminal_launcher_marker_failure_home" XDG_STATE_HOME="$terminal_launcher_marker_failure_state" MACOS_BREW_LOG="$terminal_launcher_marker_failure_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty" PATH="$terminal_launcher_marker_failure_bin:/usr/bin:/bin" \
+  sh "$terminal_launcher_bootstrap_script" >"$tmp_dir/terminal-launcher-marker-failure.out" 2>"$tmp_dir/terminal-launcher-marker-failure.err"; then
+  fail "macOS desktop app bundle failure blocks when the warning marker cannot be recorded"
+fi
+pass "macOS desktop app bundle failure blocks when the warning marker cannot be recorded"
+
+desktop_retry_marker_failure_bin="$tmp_dir/desktop-retry-marker-failure-bin"
+desktop_retry_marker_failure_state="$tmp_dir/desktop-retry-marker-failure-state"
+desktop_retry_marker_failure_home="$tmp_dir/desktop-retry-marker-failure-home"
+desktop_retry_marker_failure_log="$tmp_dir/desktop-retry-marker-failure-brew.log"
+desktop_retry_marker_failure_dir="$desktop_retry_marker_failure_state/terrapod/install-warnings"
+mkdir -p "$desktop_retry_marker_failure_bin" "$desktop_retry_marker_failure_home"
+mkdir -p "$desktop_retry_marker_failure_dir"
+HOME="$desktop_retry_marker_failure_home" XDG_STATE_HOME="$desktop_retry_marker_failure_state" sh -c \
+  '. "$1"; terrapod_install_warning_write homebrew-desktop-apps "Homebrew desktop app install needs attention" "Retry marker write failure setup."' \
+  sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
+write_stub "$desktop_retry_marker_failure_bin/brew" \
+  'printf "%s\n" "brew args:$*" >>"$MACOS_BREW_LOG"' \
+  'case "$1" in' \
+  '  shellenv) printf "%s\n" ":" ;;' \
+  '  analytics) exit 0 ;;' \
+  '  bundle)' \
+  '    rm -rf "$DESKTOP_RETRY_MARKER_FAILURE_DIR"' \
+  '    : >"$DESKTOP_RETRY_MARKER_FAILURE_DIR"' \
+  '    exit 42' \
+  '    ;;' \
+  '  *) exit 64 ;;' \
+  'esac'
+
+if HOME="$desktop_retry_marker_failure_home" XDG_STATE_HOME="$desktop_retry_marker_failure_state" DESKTOP_RETRY_MARKER_FAILURE_DIR="$desktop_retry_marker_failure_dir" MACOS_BREW_LOG="$desktop_retry_marker_failure_log" PATH="$desktop_retry_marker_failure_bin:/usr/bin:/bin" \
+  sh "$macos_terminal_apps_desktop_retry_script" >"$tmp_dir/desktop-retry-marker-failure.out" 2>"$tmp_dir/desktop-retry-marker-failure.err"; then
+  fail "macOS desktop retry failure blocks when the warning marker cannot be recorded"
+fi
+pass "macOS desktop retry failure blocks when the warning marker cannot be recorded"
 
 bulk_only_bootstrap_script="$tmp_dir/macos-bulk-only-bootstrap.sh"
 printf '%s\n' "$macos_terminal_launcher_apps_bootstrap" >"$bulk_only_bootstrap_script"
@@ -1033,6 +1092,32 @@ assert_not_contains_text "$ai_cli_retry_marker_text" "antigravity" "enabled Opti
 assert_not_contains_text "$ai_cli_retry_marker_text" "Antigravity" "enabled Optional AI Tool Stack partial failure marker omits successful Antigravity label"
 assert_not_contains_text "$ai_cli_retry_marker_text" "codex" "enabled Optional AI Tool Stack partial failure marker omits successful Codex"
 assert_not_contains_text "$ai_cli_retry_marker_text" "Codex" "enabled Optional AI Tool Stack partial failure marker omits successful Codex label"
+
+rm -f "$ai_cli_retry_marker"
+: >"$ai_cli_retry_url_log"
+: >"$ai_cli_retry_run_log"
+ai_cli_retry_first_run_status=0
+HOME="$ai_cli_retry_home" \
+  XDG_STATE_HOME="$ai_cli_retry_state" \
+  AI_CLI_RETRY_URL_LOG="$ai_cli_retry_url_log" \
+  AI_CLI_RETRY_RUN_LOG="$ai_cli_retry_run_log" \
+  AI_CLI_RETRY_ANTIGRAVITY_INSTALLER="$ai_cli_retry_antigravity_installer" \
+  AI_CLI_RETRY_CLAUDE_INSTALLER="$ai_cli_retry_claude_installer" \
+  AI_CLI_RETRY_CODEX_INSTALLER="$ai_cli_retry_codex_installer" \
+  AI_CLI_RETRY_CLAUDE_FAIL=1 \
+  TERRAPOD_FIRST_RUN_APPLY=1 \
+  TMPDIR="$tmp_dir" \
+  PATH="$ai_cli_retry_home/.local/bin:/usr/bin:/bin" \
+  sh "$ai_cli_tools_installer_script" >/dev/null 2>"$tmp_dir/ai-cli-retry-first-run.err" || ai_cli_retry_first_run_status=$?
+if [ "$ai_cli_retry_first_run_status" -ne 0 ]; then
+  fail "first-run Optional AI Tool Stack installer exits 0 after recording partial AI CLI installer failures"
+fi
+pass "first-run Optional AI Tool Stack installer exits 0 after recording partial AI CLI installer failures"
+
+if [ ! -f "$ai_cli_retry_marker" ]; then
+  fail "first-run Optional AI Tool Stack installer writes optional-ai-cli-tools marker for partial failures"
+fi
+pass "first-run Optional AI Tool Stack installer writes optional-ai-cli-tools marker for partial failures"
 
 : >"$ai_cli_retry_url_log"
 : >"$ai_cli_retry_run_log"

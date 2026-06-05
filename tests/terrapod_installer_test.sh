@@ -2,6 +2,8 @@
 set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+install_warnings_lib_template="$repo_root/dot_local/lib/terrapod/install-warnings.sh"
+export TERRAPOD_INSTALL_WARNINGS_LIB_TEMPLATE="$install_warnings_lib_template"
 tmp_dir="$(mktemp -d)"
 safe_path_dir="$tmp_dir/safe-bin"
 
@@ -20,7 +22,7 @@ pass() {
 }
 
 mkdir -p "$safe_path_dir"
-for command_name in awk cat chmod cmp cp date grep ln mkdir mktemp readlink rm; do
+for command_name in awk cat chmod cmp cp date grep ln mkdir mktemp mv readlink rm sed; do
   command_path="$(command -v "$command_name")"
   ln -s "$command_path" "$safe_path_dir/$command_name"
 done
@@ -581,6 +583,10 @@ case "${1-}" in
 esac
 TERRAPOD_STUB
     chmod +x "$source_dir/dot_local/bin/executable_terrapod"
+    if [ -f "${TERRAPOD_INSTALL_WARNINGS_LIB_TEMPLATE:-}" ]; then
+      mkdir -p "$source_dir/dot_local/lib/terrapod"
+      cp "$TERRAPOD_INSTALL_WARNINGS_LIB_TEMPLATE" "$source_dir/dot_local/lib/terrapod/install-warnings.sh"
+    fi
     ;;
   cat)
     target="${2-}"
@@ -626,6 +632,24 @@ TERRAPOD_STUB
         shift
       done
       exit 0
+    fi
+
+    if [ -n "${TERRAPOD_CHEZMOI_APPLY_STUB_STDOUT:-}" ]; then
+      printf '%s\n' "$TERRAPOD_CHEZMOI_APPLY_STUB_STDOUT"
+    fi
+    if [ -n "${TERRAPOD_CHEZMOI_APPLY_STUB_STDERR:-}" ]; then
+      printf '%s\n' "$TERRAPOD_CHEZMOI_APPLY_STUB_STDERR" >&2
+    fi
+    if [ -n "${TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_CATEGORY:-}" ] && [ -f "${TERRAPOD_INSTALL_WARNINGS_LIB_TEMPLATE:-}" ]; then
+      . "$TERRAPOD_INSTALL_WARNINGS_LIB_TEMPLATE"
+      terrapod_install_warning_write \
+        "$TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_CATEGORY" \
+        "${TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_SUMMARY:-mise tool install needs attention}" \
+        "${TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_GUIDANCE:-Run tpod apply after fixing installer output.}"
+    fi
+    apply_status="${TERRAPOD_CHEZMOI_APPLY_STUB_STATUS:-0}"
+    if [ "$apply_status" != "0" ]; then
+      exit "$apply_status"
     fi
 
     mkdir -p "$HOME/.local/bin"
@@ -733,6 +757,8 @@ write_terrapod_source_checkout() {
 GITCONFIG
   cp "$terrapod_stub" "$source_dir/dot_local/bin/executable_terrapod"
   chmod +x "$source_dir/dot_local/bin/executable_terrapod"
+  mkdir -p "$source_dir/dot_local/lib/terrapod"
+  cp "$repo_root/dot_local/lib/terrapod/install-warnings.sh" "$source_dir/dot_local/lib/terrapod/install-warnings.sh"
   : >"$source_dir/dot_local/bin/symlink_tpod"
   : >"$source_dir/dot_zshenv.tmpl"
   : >"$source_dir/dot_zprofile"
@@ -1453,15 +1479,168 @@ assert_first_occurrence_before "$first_run_log_text" "brew args:install gum" "te
 assert_first_occurrence_before "$first_run_log_text" "terrapod args:setup" "chezmoi args:apply" "setup runs before chezmoi apply"
 assert_first_occurrence_before "$first_run_log_text" "brew args:install gum" "chezmoi args:apply" "macOS setup UI gum bootstrap runs before initial apply"
 assert_contains "$first_run_log_text" "chezmoi args:apply" "chezmoi apply runs after setup"
+assert_first_occurrence_before "$first_run_log_text" "terrapod path:$first_run_case/home/.local/bin/tpod" "chezmoi args:apply --force" "first-run validates recovery-core command surface before shell startup recovery apply"
+assert_first_occurrence_before "$first_run_log_text" "chezmoi args:apply --force" "tpod args:help" "first-run applies recovery-core shell startup files before final help"
 assert_first_occurrence_before "$first_run_log_text" "chezmoi args:apply" "tpod args:help" "first-run installer shows tpod help after initial apply"
 assert_contains "$first_run_log_text" "tpod path:$first_run_case/home/.local/bin/tpod" "first-run installer invokes installed tpod from user local bin"
 assert_contains "$first_run_log_text" "tpod path_has_local_bin:yes" "tpod help receives PATH containing user local bin"
 assert_contains "$first_run_stdout" "Terrapod - a small landing pod for your dotfiles" "first-run installer prints tpod help title after initial apply"
 assert_contains "$first_run_stdout" "Usage:" "first-run installer prints tpod help usage after initial apply"
 assert_contains "$first_run_stdout" "  tpod apply" "first-run installer prints tpod apply help after initial apply"
+assert_contains "$first_run_stdout" "Terrapod command availability:" "clean first-run explains tpod availability"
+assert_contains "$first_run_stdout" "Use this absolute command now: $first_run_case/home/.local/bin/tpod" "clean first-run prints absolute tpod command"
+assert_contains "$first_run_stdout" "Open a new terminal or refresh your login shell before relying on plain 'tpod'." "clean first-run explains shell refresh guidance"
+assert_not_contains "$first_run_stdout" "$first_run_case/home/.local/bin/tpod doctor" "clean first-run does not print doctor recovery guidance"
 assert_contains "$first_run_log_text" "chezmoi path_has_local_bin:yes" "child command PATH contains user local bin"
 assert_not_contains "$first_run_log_text" "brew args:upgrade" "first-run installer does not run broad Homebrew upgrades"
 assert_not_contains "$first_run_log_text" "brew args:bundle" "first-run installer leaves Brewfile bundle to initial apply"
+
+warning_completion_case="$(make_case_dir warning-completion)"
+prepare_resumable_macos_case "$warning_completion_case"
+write_complete_setup_config "$warning_completion_case/xdg-config/chezmoi/chezmoi.toml"
+warning_completion_log="$warning_completion_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$warning_completion_log"
+TERRAPOD_CHEZMOI_APPLY_STUB_STDERR="simulated mise install failure"
+TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_CATEGORY=mise-tools
+TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_SUMMARY="mise tool install needs attention"
+TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_GUIDANCE="Review mise output, then rerun tpod apply."
+export TERRAPOD_STUB_CALL_LOG
+export TERRAPOD_CHEZMOI_APPLY_STUB_STDERR
+export TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_CATEGORY
+export TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_SUMMARY
+export TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_GUIDANCE
+run_installer_case "$warning_completion_case"
+unset TERRAPOD_STUB_CALL_LOG
+unset TERRAPOD_CHEZMOI_APPLY_STUB_STDERR
+unset TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_CATEGORY
+unset TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_SUMMARY
+unset TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_GUIDANCE
+assert_status "$installer_status" 0 "marker-backed full apply warning completes with installer status 0"
+warning_completion_stdout="$(cat "$warning_completion_case/stdout")"
+warning_completion_stderr="$(cat "$warning_completion_case/stderr")"
+assert_contains "$warning_completion_stderr" "simulated mise install failure" "warning completion preserves full apply output"
+assert_contains "$warning_completion_stdout" "Terrapod - a small landing pod for your dotfiles" "warning completion still prints tpod help"
+assert_contains "$warning_completion_stdout" "Terrapod first-run apply completed with warnings." "warning completion prints distinct final status"
+assert_contains "$warning_completion_stdout" "$warning_completion_case/home/.local/bin/tpod doctor" "warning completion prints absolute doctor recovery command"
+
+warning_marker_write_failure_case="$(make_case_dir warning-marker-write-failure)"
+prepare_resumable_macos_case "$warning_marker_write_failure_case"
+write_complete_setup_config "$warning_marker_write_failure_case/xdg-config/chezmoi/chezmoi.toml"
+mkdir -p "$warning_marker_write_failure_case/home/.local"
+: >"$warning_marker_write_failure_case/home/.local/state"
+warning_marker_write_failure_log="$warning_marker_write_failure_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$warning_marker_write_failure_log"
+TERRAPOD_CHEZMOI_APPLY_STUB_STDERR="simulated warning marker write failure"
+TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_CATEGORY=mise-tools
+export TERRAPOD_STUB_CALL_LOG
+export TERRAPOD_CHEZMOI_APPLY_STUB_STDERR
+export TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_CATEGORY
+run_installer_case "$warning_marker_write_failure_case"
+unset TERRAPOD_STUB_CALL_LOG
+unset TERRAPOD_CHEZMOI_APPLY_STUB_STDERR
+unset TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_CATEGORY
+assert_failure "$installer_status" "warning marker write failure remains a hard first-run failure"
+warning_marker_write_failure_stdout="$(cat "$warning_marker_write_failure_case/stdout")"
+warning_marker_write_failure_stderr="$(cat "$warning_marker_write_failure_case/stderr")"
+assert_contains "$warning_marker_write_failure_stderr" "simulated warning marker write failure" "warning marker write failure preserves apply output"
+assert_not_contains "$warning_marker_write_failure_stdout" "completed with warnings" "warning marker write failure does not print warning completion"
+
+unknown_apply_failure_case="$(make_case_dir unknown-apply-failure)"
+prepare_resumable_macos_case "$unknown_apply_failure_case"
+write_complete_setup_config "$unknown_apply_failure_case/xdg-config/chezmoi/chezmoi.toml"
+unknown_apply_failure_log="$unknown_apply_failure_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$unknown_apply_failure_log"
+TERRAPOD_CHEZMOI_APPLY_STUB_STATUS=43
+TERRAPOD_CHEZMOI_APPLY_STUB_STDERR="simulated template rendering failure"
+export TERRAPOD_STUB_CALL_LOG
+export TERRAPOD_CHEZMOI_APPLY_STUB_STATUS
+export TERRAPOD_CHEZMOI_APPLY_STUB_STDERR
+run_installer_case "$unknown_apply_failure_case"
+unset TERRAPOD_STUB_CALL_LOG
+unset TERRAPOD_CHEZMOI_APPLY_STUB_STATUS
+unset TERRAPOD_CHEZMOI_APPLY_STUB_STDERR
+assert_failure "$installer_status" "unknown full apply failure remains hard"
+unknown_apply_failure_stdout="$(cat "$unknown_apply_failure_case/stdout")"
+unknown_apply_failure_stderr="$(cat "$unknown_apply_failure_case/stderr")"
+assert_contains "$unknown_apply_failure_stderr" "simulated template rendering failure" "unknown full apply failure preserves apply output"
+assert_contains "$unknown_apply_failure_stderr" "terrapod installer: chezmoi apply failed" "unknown full apply failure keeps hard failure guidance"
+assert_not_contains "$unknown_apply_failure_stdout" "completed with warnings" "unknown full apply failure does not print warning completion"
+
+mixed_apply_failure_case="$(make_case_dir mixed-apply-failure)"
+prepare_resumable_macos_case "$mixed_apply_failure_case"
+write_complete_setup_config "$mixed_apply_failure_case/xdg-config/chezmoi/chezmoi.toml"
+mixed_apply_failure_log="$mixed_apply_failure_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$mixed_apply_failure_log"
+TERRAPOD_CHEZMOI_APPLY_STUB_STATUS=45
+TERRAPOD_CHEZMOI_APPLY_STUB_STDERR="simulated managed-file failure after marker"
+TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_CATEGORY=mise-tools
+export TERRAPOD_STUB_CALL_LOG
+export TERRAPOD_CHEZMOI_APPLY_STUB_STATUS
+export TERRAPOD_CHEZMOI_APPLY_STUB_STDERR
+export TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_CATEGORY
+run_installer_case "$mixed_apply_failure_case"
+unset TERRAPOD_STUB_CALL_LOG
+unset TERRAPOD_CHEZMOI_APPLY_STUB_STATUS
+unset TERRAPOD_CHEZMOI_APPLY_STUB_STDERR
+unset TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_CATEGORY
+assert_failure "$installer_status" "non-zero full apply remains hard even when an unrelated marker changed"
+mixed_apply_failure_stdout="$(cat "$mixed_apply_failure_case/stdout")"
+mixed_apply_failure_stderr="$(cat "$mixed_apply_failure_case/stderr")"
+assert_contains "$mixed_apply_failure_stderr" "simulated managed-file failure after marker" "mixed full apply failure preserves output"
+assert_not_contains "$mixed_apply_failure_stdout" "completed with warnings" "mixed full apply failure does not print warning completion"
+
+stale_marker_success_case="$(make_case_dir stale-marker-success)"
+prepare_resumable_macos_case "$stale_marker_success_case"
+write_complete_setup_config "$stale_marker_success_case/xdg-config/chezmoi/chezmoi.toml"
+HOME="$stale_marker_success_case/home" sh -c \
+  '. "$1"; terrapod_install_warning_write mise-tools "stale warning" "stale guidance"' \
+  sh "$install_warnings_lib_template"
+stale_marker_success_log="$stale_marker_success_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$stale_marker_success_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$stale_marker_success_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "unchanged stale marker does not prevent clean first-run completion"
+stale_marker_success_stdout="$(cat "$stale_marker_success_case/stdout")"
+assert_contains "$stale_marker_success_stdout" "Terrapod first-run apply complete." "stale marker success keeps clean completion"
+assert_not_contains "$stale_marker_success_stdout" "$stale_marker_success_case/home/.local/bin/tpod doctor" "stale marker success does not print doctor recovery guidance"
+
+same_second_marker_rewrite_case="$(make_case_dir same-second-marker-rewrite)"
+prepare_resumable_macos_case "$same_second_marker_rewrite_case"
+write_complete_setup_config "$same_second_marker_rewrite_case/xdg-config/chezmoi/chezmoi.toml"
+cat >"$same_second_marker_rewrite_case/bin/date" <<'EOF'
+#!/bin/sh
+case "$*" in
+  "-u +%Y-%m-%dT%H:%M:%SZ")
+    printf '%s\n' "2026-01-01T00:00:00Z"
+    ;;
+  *)
+    printf '%s\n' "20260101000000"
+    ;;
+esac
+EOF
+chmod +x "$same_second_marker_rewrite_case/bin/date"
+HOME="$same_second_marker_rewrite_case/home" PATH="$same_second_marker_rewrite_case/bin:$safe_path_dir" "$(command -v sh)" -c \
+  '. "$1"; terrapod_install_warning_write mise-tools "same warning" "same guidance"' \
+  sh "$install_warnings_lib_template"
+same_second_marker_rewrite_log="$same_second_marker_rewrite_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$same_second_marker_rewrite_log"
+TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_CATEGORY=mise-tools
+TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_SUMMARY="same warning"
+TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_GUIDANCE="same guidance"
+export TERRAPOD_STUB_CALL_LOG
+export TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_CATEGORY
+export TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_SUMMARY
+export TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_GUIDANCE
+run_installer_case "$same_second_marker_rewrite_case"
+unset TERRAPOD_STUB_CALL_LOG
+unset TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_CATEGORY
+unset TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_SUMMARY
+unset TERRAPOD_CHEZMOI_APPLY_STUB_WARNING_GUIDANCE
+assert_status "$installer_status" 0 "same-second marker rewrite keeps installer status 0"
+same_second_marker_rewrite_stdout="$(cat "$same_second_marker_rewrite_case/stdout")"
+assert_contains "$same_second_marker_rewrite_stdout" "Terrapod first-run apply completed with warnings." "same-second marker rewrite is classified as warning completion"
+assert_contains "$same_second_marker_rewrite_stdout" "$same_second_marker_rewrite_case/home/.local/bin/tpod doctor" "same-second marker rewrite prints doctor recovery command"
 
 homebrew_missing_case="$(make_case_dir homebrew-missing-macos)"
 write_uname_stub "$homebrew_missing_case" "Darwin"

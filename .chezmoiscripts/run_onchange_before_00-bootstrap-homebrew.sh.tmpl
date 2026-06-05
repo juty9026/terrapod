@@ -15,14 +15,29 @@ if [ -f "$install_warnings_lib" ]; then
   . "$install_warnings_lib"
 fi
 
+INSTALL_WARNING_RECORDED=0
+
 mark_install_warning() {
   category="$1"
   summary="$2"
   guidance="$3"
+  INSTALL_WARNING_RECORDED=0
 
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
-    terrapod_install_warning_write "$category" "$summary" "$guidance" || true
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ] &&
+    terrapod_install_warning_write "$category" "$summary" "$guidance"; then
+    INSTALL_WARNING_RECORDED=1
+    return 0
   fi
+
+  return 1
+}
+
+exit_after_install_warning() {
+  if [ "${TERRAPOD_FIRST_RUN_APPLY:-}" = "1" ] && [ "$INSTALL_WARNING_RECORDED" -eq 1 ]; then
+    exit 0
+  fi
+
+  exit 1
 }
 
 clear_install_warning() {
@@ -193,7 +208,7 @@ if [ -z "$brew_bin" ]; then
       homebrew-core \
       "Homebrew core install needs attention" \
       "Install Homebrew from https://brew.sh, then rerun tpod apply."
-    exit 1
+    exit_after_install_warning
   fi
   if ! NONINTERACTIVE=1 /bin/bash "$homebrew_installer"; then
     rm -f "$homebrew_installer"
@@ -201,7 +216,7 @@ if [ -z "$brew_bin" ]; then
       homebrew-core \
       "Homebrew core install needs attention" \
       "Install Homebrew from https://brew.sh, then rerun tpod apply."
-    exit 1
+    exit_after_install_warning
   fi
   rm -f "$homebrew_installer"
   brew_bin="$(find_brew || true)"
@@ -213,7 +228,7 @@ if [ -z "$brew_bin" ]; then
     homebrew-core \
     "Homebrew core install needs attention" \
     "Install Homebrew from https://brew.sh, then rerun tpod apply."
-  exit 1
+  exit_after_install_warning
 fi
 
 eval "$("$brew_bin" shellenv)"
@@ -230,7 +245,7 @@ if [ -f "$core_brewfile" ]; then
       homebrew-core \
       "Homebrew core install needs attention" \
       "Review Homebrew bundle output, fix package access, then rerun tpod apply."
-    exit 1
+    exit_after_install_warning
   fi
 fi
 
@@ -253,7 +268,8 @@ if [ -s "$desktop_brewfile" ]; then
     mark_install_warning \
       homebrew-desktop-apps \
       "Homebrew desktop app install needs attention" \
-      "$desktop_app_failure_guidance_text"
+      "$desktop_app_failure_guidance_text" ||
+      exit 1
     exit 0
   fi
 fi

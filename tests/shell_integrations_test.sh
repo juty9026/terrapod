@@ -112,3 +112,18 @@ assert_contains "$marker_text" "Oh My Zsh" "shell integrations marker mentions t
 test_log="$(cat "$SHELL_INTEGRATIONS_TEST_LOG")"
 assert_contains "$test_log" "curl args:-fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh" "shell integrations attempts to download the Oh My Zsh installer"
 assert_not_contains "$test_log" "git args:clone https://github.com/zdharma-continuum/zinit" "shell integrations stops before zinit when Oh My Zsh download fails"
+
+rm -f "$shell_integrations_marker"
+: >"$SHELL_INTEGRATIONS_TEST_LOG"
+SHELL_INTEGRATIONS_CURL_STATUS=23
+export SHELL_INTEGRATIONS_CURL_STATUS
+if ! TERRAPOD_FIRST_RUN_APPLY=1 sh "$rendered" >"$tmp_dir/shell-integrations-first-run-curl-failure.out" 2>"$tmp_dir/shell-integrations-first-run-curl-failure.err"; then
+  unset SHELL_INTEGRATIONS_CURL_STATUS
+  fail "first-run shell integrations should continue when the Oh My Zsh installer download warning is recorded"
+fi
+unset SHELL_INTEGRATIONS_CURL_STATUS
+
+if [ ! -f "$shell_integrations_marker" ]; then
+  fail "first-run shell integrations should record a warning marker when the Oh My Zsh installer download fails"
+fi
+pass "first-run shell integrations records a warning marker when the Oh My Zsh installer download fails"

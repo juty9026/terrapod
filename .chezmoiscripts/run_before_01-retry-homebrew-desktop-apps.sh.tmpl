@@ -24,7 +24,7 @@ mark_install_warning() {
   summary="$2"
   guidance="$3"
 
-  terrapod_install_warning_write "$category" "$summary" "$guidance" || true
+  terrapod_install_warning_write "$category" "$summary" "$guidance"
 }
 
 clear_install_warning() {
@@ -197,7 +197,8 @@ if [ -z "$brew_bin" ]; then
   mark_install_warning \
     homebrew-desktop-apps \
     "Homebrew desktop app install needs attention" \
-    "Install Homebrew from https://brew.sh, then rerun tpod apply."
+    "Install Homebrew from https://brew.sh, then rerun tpod apply." ||
+    exit 1
   exit 0
 fi
 
@@ -205,7 +206,8 @@ if ! brew_shellenv="$("$brew_bin" shellenv)"; then
   mark_install_warning \
     homebrew-desktop-apps \
     "Homebrew desktop app install needs attention" \
-    "Fix Homebrew shellenv, then rerun tpod apply."
+    "Fix Homebrew shellenv, then rerun tpod apply." ||
+    exit 1
   exit 0
 fi
 eval "$brew_shellenv"
@@ -229,7 +231,8 @@ if [ -s "$desktop_brewfile" ]; then
     mark_install_warning \
       homebrew-desktop-apps \
       "Homebrew desktop app install needs attention" \
-      "$desktop_app_failure_guidance_text"
+      "$desktop_app_failure_guidance_text" ||
+      exit 1
   fi
 else
   clear_install_warning homebrew-desktop-apps
