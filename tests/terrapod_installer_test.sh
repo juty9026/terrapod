@@ -20,7 +20,7 @@ pass() {
 }
 
 mkdir -p "$safe_path_dir"
-for command_name in awk cat chmod cp grep ln mkdir mktemp readlink rm; do
+for command_name in awk cat chmod cmp cp date grep ln mkdir mktemp readlink rm; do
   command_path="$(command -v "$command_name")"
   ln -s "$command_path" "$safe_path_dir/$command_name"
 done
@@ -201,6 +201,95 @@ assert_no_stub_calls() {
   if [ -s "$log_file" ]; then
     printf '%s\n' "stubbed command calls:" >&2
     sed 's/^/  /' "$log_file" >&2
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
+managed_shell_startup_content() {
+  target="$1"
+
+  case "${target##*/}" in
+    .zshenv)
+      printf '%s\n' "managed zshenv"
+      ;;
+    .zprofile)
+      printf '%s\n' "managed zprofile"
+      ;;
+    .zshrc)
+      printf '%s\n' "managed zshrc"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+single_shell_backup_path() {
+  target="$1"
+  message="$2"
+
+  set -- "$target".terrapod-backup-*
+  if [ "$1" = "$target.terrapod-backup-*" ]; then
+    fail "$message; expected one backup, found 0"
+  fi
+  if [ "$#" -ne 1 ]; then
+    fail "$message; expected one backup, found $#"
+  fi
+
+  printf '%s\n' "$1"
+}
+
+assert_shell_backup_path_is_timestamped() {
+  target="$1"
+  backup_path="$2"
+  message="$3"
+
+  suffix="${backup_path#"$target.terrapod-backup-"}"
+  timestamp="${suffix%-*}"
+  pid="${suffix##*-}"
+
+  case "$timestamp" in
+    [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z)
+      ;;
+    *)
+      fail "$message; backup path is not timestamped: $backup_path"
+      ;;
+  esac
+
+  case "$pid" in
+    ""|*[!0-9]*)
+      fail "$message; backup path does not include numeric process suffix: $backup_path"
+      ;;
+  esac
+
+  pass "$message"
+}
+
+assert_single_shell_backup_matches() {
+  target="$1"
+  expected_content="$2"
+  message="$3"
+  backup_path="$(single_shell_backup_path "$target" "$message")"
+
+  if ! cmp -s "$backup_path" "$expected_content"; then
+    printf '%s\n' "expected backup contents:" >&2
+    sed 's/^/  /' "$expected_content" >&2
+    printf '%s\n' "actual backup contents:" >&2
+    sed 's/^/  /' "$backup_path" >&2
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
+assert_no_shell_backup_for() {
+  target="$1"
+  message="$2"
+
+  set -- "$target".terrapod-backup-*
+  if [ "$1" != "$target.terrapod-backup-*" ]; then
     fail "$message"
   fi
 
@@ -477,7 +566,49 @@ esac
 TERRAPOD_STUB
     chmod +x "$source_dir/dot_local/bin/executable_terrapod"
     ;;
+  cat)
+    target="${2-}"
+    case "${target##*/}" in
+      .zshenv)
+        printf '%s\n' "managed zshenv"
+        ;;
+      .zprofile)
+        printf '%s\n' "managed zprofile"
+        ;;
+      .zshrc)
+        printf '%s\n' "managed zshrc"
+        ;;
+      *)
+        printf '%s\n' "unexpected chezmoi cat target:$target" >>"$log_file"
+        exit 64
+        ;;
+    esac
+    ;;
   apply)
+    if [ "${2-}" = "--force" ]; then
+      shift 2
+      while [ "$#" -gt 0 ]; do
+        target="$1"
+        case "${target##*/}" in
+          .zshenv)
+            printf '%s\n' "managed zshenv" >"$target"
+            ;;
+          .zprofile)
+            printf '%s\n' "managed zprofile" >"$target"
+            ;;
+          .zshrc)
+            printf '%s\n' "managed zshrc" >"$target"
+            ;;
+          *)
+            printf '%s\n' "unexpected recovery-core apply target:$target" >>"$log_file"
+            exit 64
+            ;;
+        esac
+        shift
+      done
+      exit 0
+    fi
+
     mkdir -p "$HOME/.local/bin"
     cat >"$HOME/.local/bin/terrapod" <<'TERRAPOD_INSTALLED_STUB'
 #!/bin/sh
@@ -2025,6 +2156,68 @@ assert_status "$installer_status" 0 "source-pointer regular command files are re
 source_pointer_file_repair_log_text="$(cat "$source_pointer_file_repair_log")"
 assert_contains "$source_pointer_file_repair_log_text" "tpod args:help" "source-pointer regular file repair validates installed tpod"
 assert_contains "$source_pointer_file_repair_log_text" "chezmoi args:apply" "source-pointer regular file repair continues to full apply"
+
+shell_backup_case="$(make_case_dir shell-startup-backups)"
+prepare_resumable_macos_case "$shell_backup_case"
+write_complete_setup_config "$shell_backup_case/xdg-config/chezmoi/chezmoi.toml"
+printf '%s\n' "user zshenv" >"$shell_backup_case/home/.zshenv"
+printf '%s\n' "user zprofile" >"$shell_backup_case/home/.zprofile"
+printf '%s\n' "user zshrc" >"$shell_backup_case/home/.zshrc"
+printf '%s\n' "unmanaged bashrc" >"$shell_backup_case/home/.bashrc"
+printf '%s\n' "user zshenv" >"$shell_backup_case/expected-zshenv"
+printf '%s\n' "user zprofile" >"$shell_backup_case/expected-zprofile"
+printf '%s\n' "user zshrc" >"$shell_backup_case/expected-zshrc"
+shell_backup_log="$shell_backup_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$shell_backup_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$shell_backup_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "different shell startup files are backed up before first-run forced apply"
+shell_backup_stdout="$(cat "$shell_backup_case/stdout")"
+shell_backup_log_text="$(cat "$shell_backup_log")"
+assert_contains "$shell_backup_log_text" "chezmoi args:cat $shell_backup_case/home/.zshenv" "recovery-core compares rendered .zshenv"
+assert_contains "$shell_backup_log_text" "chezmoi args:cat $shell_backup_case/home/.zprofile" "recovery-core compares rendered .zprofile"
+assert_contains "$shell_backup_log_text" "chezmoi args:cat $shell_backup_case/home/.zshrc" "recovery-core compares rendered .zshrc"
+assert_contains "$shell_backup_log_text" "chezmoi args:apply --force $shell_backup_case/home/.zshenv $shell_backup_case/home/.zprofile $shell_backup_case/home/.zshrc" "recovery-core force apply is bounded to shell startup targets"
+assert_first_occurrence_before "$shell_backup_log_text" "terrapod args:setup" "chezmoi args:apply --force" "shell startup force apply runs after Terrapod Setup"
+assert_first_occurrence_before "$shell_backup_log_text" "chezmoi args:apply --force" "tpod args:help" "shell startup force apply runs before final help validation"
+assert_single_shell_backup_matches "$shell_backup_case/home/.zshenv" "$shell_backup_case/expected-zshenv" "different .zshenv content is backed up"
+assert_single_shell_backup_matches "$shell_backup_case/home/.zprofile" "$shell_backup_case/expected-zprofile" "different .zprofile content is backed up"
+assert_single_shell_backup_matches "$shell_backup_case/home/.zshrc" "$shell_backup_case/expected-zshrc" "different .zshrc content is backed up"
+zshenv_backup="$(single_shell_backup_path "$shell_backup_case/home/.zshenv" "find .zshenv backup path")"
+zprofile_backup="$(single_shell_backup_path "$shell_backup_case/home/.zprofile" "find .zprofile backup path")"
+zshrc_backup="$(single_shell_backup_path "$shell_backup_case/home/.zshrc" "find .zshrc backup path")"
+assert_shell_backup_path_is_timestamped "$shell_backup_case/home/.zshenv" "$zshenv_backup" ".zshenv backup path is timestamped"
+assert_shell_backup_path_is_timestamped "$shell_backup_case/home/.zprofile" "$zprofile_backup" ".zprofile backup path is timestamped"
+assert_shell_backup_path_is_timestamped "$shell_backup_case/home/.zshrc" "$zshrc_backup" ".zshrc backup path is timestamped"
+assert_no_shell_backup_for "$shell_backup_case/home/.bashrc" "non-recovery shell startup file is not backed up"
+assert_contains "$(cat "$shell_backup_case/home/.zshenv")" "managed zshenv" "forced apply writes managed .zshenv"
+assert_contains "$(cat "$shell_backup_case/home/.zprofile")" "managed zprofile" "forced apply writes managed .zprofile"
+assert_contains "$(cat "$shell_backup_case/home/.zshrc")" "managed zshrc" "forced apply writes managed .zshrc"
+assert_contains "$shell_backup_stdout" "Shell startup backups created:" "installer reports shell startup backup heading"
+assert_contains "$shell_backup_stdout" "$zshenv_backup" "installer reports exact .zshenv backup path"
+assert_contains "$shell_backup_stdout" "$zprofile_backup" "installer reports exact .zprofile backup path"
+assert_contains "$shell_backup_stdout" "$zshrc_backup" "installer reports exact .zshrc backup path"
+assert_contains "$shell_backup_stdout" "Terrapod does not merge or delete these backups automatically." "installer explains backup retention"
+assert_contains "$shell_backup_stdout" "Review backups for vendor-installer shell startup edits" "installer explains vendor edits are not migrated"
+assert_contains "$shell_backup_stdout" "$shell_backup_case/home/.config/zsh/path.d/*.zsh" "installer points to the managed zsh extension point"
+
+shell_no_backup_case="$(make_case_dir shell-startup-no-backups)"
+prepare_resumable_macos_case "$shell_no_backup_case"
+write_complete_setup_config "$shell_no_backup_case/xdg-config/chezmoi/chezmoi.toml"
+printf '%s\n' "managed zprofile" >"$shell_no_backup_case/home/.zprofile"
+printf '%s\n' "managed zshrc" >"$shell_no_backup_case/home/.zshrc"
+shell_no_backup_log="$shell_no_backup_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$shell_no_backup_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$shell_no_backup_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "missing and identical shell startup files do not create backups"
+shell_no_backup_stdout="$(cat "$shell_no_backup_case/stdout")"
+assert_no_shell_backup_for "$shell_no_backup_case/home/.zshenv" "missing .zshenv does not create a backup"
+assert_no_shell_backup_for "$shell_no_backup_case/home/.zprofile" "identical .zprofile does not create a backup"
+assert_no_shell_backup_for "$shell_no_backup_case/home/.zshrc" "identical .zshrc does not create a backup"
+assert_not_contains "$shell_no_backup_stdout" "Shell startup backups created:" "installer omits backup report when no backups are created"
 
 non_terrapod_conflict_case="$(make_case_dir non-terrapod-command-conflict)"
 prepare_resumable_macos_case "$non_terrapod_conflict_case"
