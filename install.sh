@@ -1136,8 +1136,13 @@ backup_shell_startup_if_different() {
   if cmp -s "$target" "$rendered_file"; then
     rm -f "$rendered_file"
     return 0
+  else
+    cmp_status="$?"
   fi
   rm -f "$rendered_file"
+  if [ "$cmp_status" -ne 1 ]; then
+    fatal "failed to compare shell startup file before backup: $target"
+  fi
 
   backup_file="$target.terrapod-backup-$(shell_startup_backup_timestamp)-$$"
   cp "$target" "$backup_file" ||

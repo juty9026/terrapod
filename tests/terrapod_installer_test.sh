@@ -2222,6 +2222,31 @@ assert_not_contains "$shell_no_backup_stdout" "Shell startup backups created:" "
 assert_contains "$(cat "$shell_no_backup_case/home/.zshenv")" "managed zshenv" "forced apply creates missing .zshenv without backup"
 assert_contains "$shell_no_backup_log_text" "chezmoi args:apply --force $shell_no_backup_case/home/.zshenv $shell_no_backup_case/home/.zprofile $shell_no_backup_case/home/.zshrc" "recovery-core force apply still includes missing and identical shell startup targets"
 
+shell_cmp_error_case="$(make_case_dir shell-startup-cmp-error)"
+prepare_resumable_macos_case "$shell_cmp_error_case"
+write_complete_setup_config "$shell_cmp_error_case/xdg-config/chezmoi/chezmoi.toml"
+printf '%s\n' "user zshenv" >"$shell_cmp_error_case/home/.zshenv"
+cat >"$shell_cmp_error_case/bin/cmp" <<'EOF'
+#!/bin/sh
+set -eu
+
+printf '%s\n' "cmp args:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"
+exit 2
+EOF
+chmod +x "$shell_cmp_error_case/bin/cmp"
+shell_cmp_error_log="$shell_cmp_error_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$shell_cmp_error_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$shell_cmp_error_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "cmp error during shell startup backup stops installer"
+shell_cmp_error_stderr="$(cat "$shell_cmp_error_case/stderr")"
+shell_cmp_error_log_text="$(cat "$shell_cmp_error_log")"
+assert_contains "$shell_cmp_error_stderr" "failed to compare shell startup file before backup: $shell_cmp_error_case/home/.zshenv" "cmp error explains failed shell startup comparison"
+assert_contains "$shell_cmp_error_log_text" "cmp args:-s $shell_cmp_error_case/home/.zshenv" "cmp error case attempts shell startup comparison"
+assert_no_shell_backup_for "$shell_cmp_error_case/home/.zshenv" "cmp error does not create a shell startup backup"
+assert_not_contains "$shell_cmp_error_log_text" "chezmoi args:apply --force" "cmp error stops before recovery-core force apply"
+
 non_terrapod_conflict_case="$(make_case_dir non-terrapod-command-conflict)"
 prepare_resumable_macos_case "$non_terrapod_conflict_case"
 write_complete_setup_config "$non_terrapod_conflict_case/xdg-config/chezmoi/chezmoi.toml"
