@@ -1980,6 +1980,23 @@ terrapod_owned_repair_log_text="$(cat "$terrapod_owned_repair_log")"
 assert_contains "$terrapod_owned_repair_log_text" "terrapod-owned args:help" "Terrapod-owned repair checks existing help before overwrite"
 assert_contains "$terrapod_owned_repair_log_text" "tpod args:help" "Terrapod-owned repair validates installed tpod after recovery-core apply"
 
+nonexecutable_terrapod_owned_repair_case="$(make_case_dir nonexecutable-terrapod-owned-command-repair)"
+prepare_resumable_macos_case "$nonexecutable_terrapod_owned_repair_case"
+write_complete_setup_config "$nonexecutable_terrapod_owned_repair_case/xdg-config/chezmoi/chezmoi.toml"
+write_installed_terrapod_command_stub "$nonexecutable_terrapod_owned_repair_case/home/.local/bin/terrapod" 0
+write_installed_terrapod_command_stub "$nonexecutable_terrapod_owned_repair_case/home/.local/bin/tpod" 0
+chmod -x "$nonexecutable_terrapod_owned_repair_case/home/.local/bin/terrapod"
+chmod -x "$nonexecutable_terrapod_owned_repair_case/home/.local/bin/tpod"
+nonexecutable_terrapod_owned_repair_log="$nonexecutable_terrapod_owned_repair_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$nonexecutable_terrapod_owned_repair_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$nonexecutable_terrapod_owned_repair_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "non-executable Terrapod-owned command files are repairable"
+nonexecutable_terrapod_owned_repair_log_text="$(cat "$nonexecutable_terrapod_owned_repair_log")"
+assert_contains "$nonexecutable_terrapod_owned_repair_log_text" "tpod args:help" "non-executable Terrapod-owned repair validates installed tpod after recovery-core apply"
+assert_contains "$nonexecutable_terrapod_owned_repair_log_text" "chezmoi args:apply" "non-executable Terrapod-owned repair continues to full apply"
+
 source_pointer_repair_case="$(make_case_dir source-pointer-command-repair)"
 prepare_resumable_macos_case "$source_pointer_repair_case"
 write_complete_setup_config "$source_pointer_repair_case/xdg-config/chezmoi/chezmoi.toml"

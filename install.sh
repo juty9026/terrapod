@@ -275,6 +275,41 @@ file_points_to_terrapod_source_command() {
   ' "$command_path"
 }
 
+file_looks_like_terrapod_command() {
+  command_path="$1"
+
+  [ -L "$command_path" ] && return 1
+  [ -f "$command_path" ] || return 1
+  awk '
+    NR == 1 {
+      if ($0 != "#!/bin/sh") {
+        exit 1
+      }
+      found_shebang = 1
+    }
+
+    index($0, "Terrapod - a small landing pod for your dotfiles") {
+      found_title = 1
+    }
+
+    index($0, "Usage:") {
+      found_usage = 1
+    }
+
+    index($0, "tpod apply") {
+      found_apply = 1
+    }
+
+    index($0, "help|--help|-h") {
+      found_help = 1
+    }
+
+    END {
+      exit found_shebang && found_title && found_usage && found_apply && found_help ? 0 : 1
+    }
+  ' "$command_path"
+}
+
 command_surface_path_is_repairable() {
   command_path="$1"
   source_dir="$2"
@@ -289,6 +324,10 @@ command_surface_path_is_repairable() {
   [ -e "$command_path" ] || return 0
 
   if file_points_to_terrapod_source_command "$command_path" "$source_dir"; then
+    return 0
+  fi
+
+  if [ ! -x "$command_path" ] && file_looks_like_terrapod_command "$command_path"; then
     return 0
   fi
 
