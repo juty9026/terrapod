@@ -23,7 +23,7 @@ mark_install_warning() {
 }
 
 exit_after_install_warning() {
-  if [ "${TERRAPOD_FIRST_RUN_APPLY:-}" = "1" ] && [ "$INSTALL_WARNING_RECORDED" -eq 1 ]; then
+  if [ "$INSTALL_WARNING_RECORDED" -eq 1 ]; then
     exit 0
   fi
 
@@ -36,6 +36,38 @@ clear_install_warning() {
   if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
     terrapod_install_warning_clear "$category" || true
   fi
+}
+
+shell_integrations_warning_exists() {
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
+    return 1
+  fi
+
+  terrapod_install_warning_existing_path shell-integrations >/dev/null 2>&1
+}
+
+failed_shell_integrations=
+
+append_failed_shell_integration() {
+  failed_shell_integration="$1"
+
+  if [ -n "$failed_shell_integrations" ]; then
+    failed_shell_integrations="$failed_shell_integrations, $failed_shell_integration"
+  else
+    failed_shell_integrations="$failed_shell_integration"
+  fi
+}
+
+finish_shell_integrations() {
+  if [ -n "$failed_shell_integrations" ]; then
+    mark_install_warning \
+      shell-integrations \
+      "Shell integration setup needs attention" \
+      "Failed item(s): $failed_shell_integrations. Review installer output, fix network or installer requirements, then rerun tpod apply."
+    exit_after_install_warning
+  fi
+
+  clear_install_warning shell-integrations
 }
 
 installer_paths=
@@ -104,18 +136,9 @@ if [ ! -d "$HOME/.oh-my-zsh" ]; then
   oh_my_zsh_installer="$(mktemp "${TMPDIR:-/tmp}/terrapod-oh-my-zsh-installer.XXXXXX")"
   installer_paths="$installer_paths $oh_my_zsh_installer"
   if ! curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh -o "$oh_my_zsh_installer"; then
-    mark_install_warning \
-      shell-integrations \
-      "Shell integration setup needs attention" \
-      "Check network access to the Oh My Zsh installer, then rerun tpod apply."
-    exit_after_install_warning
-  fi
-  if ! sh "$oh_my_zsh_installer" --unattended --keep-zshrc; then
-    mark_install_warning \
-      shell-integrations \
-      "Shell integration setup needs attention" \
-      "Review Oh My Zsh installer output, then rerun tpod apply."
-    exit_after_install_warning
+    append_failed_shell_integration "Oh My Zsh"
+  elif ! sh "$oh_my_zsh_installer" --unattended --keep-zshrc; then
+    append_failed_shell_integration "Oh My Zsh"
   fi
 fi
 
@@ -123,31 +146,25 @@ if [ ! -d "$HOME/.local/share/zinit/zinit.git" ]; then
   echo "Installing zinit..."
   mkdir -p "$HOME/.local/share/zinit"
   if ! git clone https://github.com/zdharma-continuum/zinit "$HOME/.local/share/zinit/zinit.git"; then
-    mark_install_warning \
-      shell-integrations \
-      "Shell integration setup needs attention" \
-      "Review zinit git clone output, then rerun tpod apply."
-    exit_after_install_warning
+    append_failed_shell_integration "zinit"
   fi
 fi
 
 if [ ! -d "$HOME/.scm_breeze" ]; then
   echo "Installing SCM Breeze..."
   if ! git clone https://github.com/scmbreeze/scm_breeze.git "$HOME/.scm_breeze"; then
-    mark_install_warning \
-      shell-integrations \
-      "Shell integration setup needs attention" \
-      "Review SCM Breeze git clone output, then rerun tpod apply."
-    exit_after_install_warning
+    append_failed_shell_integration "SCM Breeze"
+  elif ! "$HOME/.scm_breeze/install.sh"; then
+    append_failed_shell_integration "SCM Breeze"
   fi
-  if ! "$HOME/.scm_breeze/install.sh"; then
-    mark_install_warning \
-      shell-integrations \
-      "Shell integration setup needs attention" \
-      "Review SCM Breeze installer output, then rerun tpod apply."
-    exit_after_install_warning
+elif shell_integrations_warning_exists; then
+  echo "Installing SCM Breeze..."
+  if [ ! -x "$HOME/.scm_breeze/install.sh" ]; then
+    append_failed_shell_integration "SCM Breeze"
+  elif ! "$HOME/.scm_breeze/install.sh"; then
+    append_failed_shell_integration "SCM Breeze"
   fi
 fi
 
-clear_install_warning shell-integrations
+finish_shell_integrations
 {{- end }}

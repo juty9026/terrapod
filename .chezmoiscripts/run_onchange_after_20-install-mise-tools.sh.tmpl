@@ -24,7 +24,7 @@ mark_install_warning() {
 }
 
 exit_after_install_warning() {
-  if [ "${TERRAPOD_FIRST_RUN_APPLY:-}" = "1" ] && [ "$INSTALL_WARNING_RECORDED" -eq 1 ]; then
+  if [ "$INSTALL_WARNING_RECORDED" -eq 1 ]; then
     exit 0
   fi
 
@@ -37,6 +37,30 @@ clear_install_warning() {
   if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
     terrapod_install_warning_clear "$category" || true
   fi
+}
+
+failed_mise_steps=
+
+append_failed_mise_step() {
+  step="$1"
+
+  if [ -n "$failed_mise_steps" ]; then
+    failed_mise_steps="$failed_mise_steps, $step"
+  else
+    failed_mise_steps="$step"
+  fi
+}
+
+finish_mise_tools() {
+  if [ -n "$failed_mise_steps" ]; then
+    mark_install_warning \
+      mise-tools \
+      "mise tool install needs attention" \
+      "Failed step(s): $failed_mise_steps. Review mise output, fix tool installation issues, then rerun tpod apply. If mise aqua resolution hit GitHub API rate limits, export a temporary GITHUB_TOKEN or run gh auth login before rerunning."
+    exit_after_install_warning
+  fi
+
+  clear_install_warning mise-tools
 }
 
 setup_mise() {
@@ -77,22 +101,14 @@ setup_mise() {
 
 setup_mise
 if ! mise install --yes -C "$HOME"; then
-  mark_install_warning \
-    mise-tools \
-    "mise tool install needs attention" \
-    "Review mise install output, fix tool installation issues, then rerun tpod apply."
-  exit_after_install_warning
+  append_failed_mise_step "mise install"
 fi
 
 if mise exec --yes -C "$HOME" -- sh -c 'command -v corepack' >/dev/null 2>&1; then
   if ! mise exec --yes -C "$HOME" -- corepack enable; then
-    mark_install_warning \
-      mise-tools \
-      "mise tool install needs attention" \
-      "Review corepack enable output, then rerun tpod apply."
-    exit_after_install_warning
+    append_failed_mise_step "corepack enable"
   fi
 fi
 
-clear_install_warning mise-tools
+finish_mise_tools
 {{- end }}
