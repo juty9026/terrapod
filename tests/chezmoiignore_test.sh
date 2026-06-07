@@ -249,6 +249,7 @@ macos_development_workspace_bootstrap="$(render_template "$macos_development_wor
 macos_core_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_01-retry-homebrew-core.sh.tmpl")"
 macos_desktop_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl")"
 macos_terminal_apps_desktop_retry="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl")"
+macos_mise_tools_installer="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_20-install-mise-tools.sh.tmpl")"
 macos_karabiner_opener="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 macos_terminal_apps_karabiner_opener="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 macos_automation_apps_karabiner_opener="$(render_template "$macos_automation_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
@@ -298,6 +299,15 @@ macos_terminal_apps_desktop_retry_script="$tmp_dir/macos-terminal-desktop-retry.
 printf '%s\n' "$macos_terminal_apps_desktop_retry" >"$macos_terminal_apps_desktop_retry_script"
 sh -n "$macos_terminal_apps_desktop_retry_script" || fail "macOS desktop retry App Group script should be valid sh"
 pass "macOS desktop retry App Group script is valid sh"
+
+macos_mise_missing_script="$tmp_dir/macos-mise-missing.sh"
+printf '%s\n' "$macos_mise_tools_installer" |
+  sed \
+    -e "s#/opt/homebrew/bin/brew#$tmp_dir/missing-opt-homebrew-brew#g" \
+    -e "s#/usr/local/bin/brew#$tmp_dir/missing-usr-local-brew#g" \
+    >"$macos_mise_missing_script"
+sh -n "$macos_mise_missing_script" || fail "macOS mise tool installer missing-mise test script should be valid sh"
+pass "macOS mise tool installer missing-mise test script is valid sh"
 
 macos_brew_bin="$tmp_dir/macos-brew-bin"
 macos_brew_log="$tmp_dir/macos-brew.log"
@@ -541,6 +551,46 @@ core_retry_failure_marker_text="$(cat "$core_retry_failure_state/terrapod/instal
 assert_contains_text "$core_retry_failure_marker_text" "failed formulae: mise" "failed core retry replaces marker with current failed formula detail"
 assert_not_contains_text "$core_retry_failure_marker_text" "old core retry warning" "failed core retry replaces stale marker guidance"
 assert_contains_text "$core_retry_failure_marker_text" "updated_at='" "failed core retry replacement marker keeps updated_at"
+
+mise_missing_without_core_home="$tmp_dir/mise-missing-without-core-home"
+mise_missing_without_core_state="$tmp_dir/mise-missing-without-core-state"
+mkdir -p "$mise_missing_without_core_home"
+mise_missing_without_core_status=0
+HOME="$mise_missing_without_core_home" XDG_STATE_HOME="$mise_missing_without_core_state" PATH="/usr/bin:/bin" \
+  sh "$macos_mise_missing_script" >"$tmp_dir/mise-missing-without-core.out" 2>"$tmp_dir/mise-missing-without-core.err" ||
+  mise_missing_without_core_status=$?
+if [ "$mise_missing_without_core_status" -eq 0 ]; then
+  fail "macOS mise tool installer fails when mise is missing without a homebrew-core marker"
+fi
+pass "macOS mise tool installer fails when mise is missing without a homebrew-core marker"
+
+mise_missing_with_core_home="$tmp_dir/mise-missing-with-core-home"
+mise_missing_with_core_state="$tmp_dir/mise-missing-with-core-state"
+mkdir -p "$mise_missing_with_core_home"
+HOME="$mise_missing_with_core_home" XDG_STATE_HOME="$mise_missing_with_core_state" sh -c \
+  '. "$1"; terrapod_install_warning_write homebrew-core "Homebrew core install needs attention" "Install failed formulae, then rerun tpod apply."' \
+  sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
+
+mise_missing_with_core_status=0
+HOME="$mise_missing_with_core_home" XDG_STATE_HOME="$mise_missing_with_core_state" PATH="/usr/bin:/bin" \
+  sh "$macos_mise_missing_script" >"$tmp_dir/mise-missing-with-core.out" 2>"$tmp_dir/mise-missing-with-core.err" ||
+  mise_missing_with_core_status=$?
+if [ "$mise_missing_with_core_status" -ne 0 ]; then
+  printf '%s\n' "mise missing with core stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/mise-missing-with-core.out" >&2
+  printf '%s\n' "mise missing with core stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/mise-missing-with-core.err" >&2
+  fail "macOS mise tool installer exits 0 when missing mise is covered by a homebrew-core marker"
+fi
+pass "macOS mise tool installer exits 0 when missing mise is covered by a homebrew-core marker"
+
+if [ ! -f "$mise_missing_with_core_state/terrapod/install-warnings/homebrew-core" ]; then
+  fail "macOS mise tool installer keeps the existing homebrew-core marker"
+fi
+if [ -e "$mise_missing_with_core_state/terrapod/install-warnings/mise-tools" ]; then
+  fail "macOS mise tool installer avoids duplicate mise-tools marker when homebrew-core is already actionable"
+fi
+pass "macOS mise tool installer leaves homebrew-core as the only actionable missing-mise marker"
 
 assert_managed_paths_exclude_prefix \
   "$macos_managed_targets" \
