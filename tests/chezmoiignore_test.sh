@@ -216,9 +216,11 @@ development_workspace_data='{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu",
 development_workspace_managed="$(managed_source_paths "$development_workspace_data")"
 
 macos_only_entries="
+.chezmoiscripts/run_before_01-retry-homebrew-core.sh.tmpl
 .chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl
 .chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl
 .chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl
+dot_local/lib/terrapod/homebrew-core-bundle.sh
 dot_config/ghostty
 dot_config/private_karabiner
 dot_hammerspoon
@@ -244,8 +246,10 @@ macos_terminal_apps_bootstrap="$(render_template "$macos_terminal_apps_data" ".c
 macos_terminal_launcher_apps_bootstrap="$(render_template "$macos_terminal_launcher_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
 macos_ai_apps_bootstrap="$(render_template "$macos_ai_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
 macos_development_workspace_bootstrap="$(render_template "$macos_development_workspace_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
+macos_core_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_01-retry-homebrew-core.sh.tmpl")"
 macos_desktop_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl")"
 macos_terminal_apps_desktop_retry="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl")"
+macos_mise_tools_installer="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_20-install-mise-tools.sh.tmpl")"
 macos_karabiner_opener="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 macos_terminal_apps_karabiner_opener="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 macos_automation_apps_karabiner_opener="$(render_template "$macos_automation_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
@@ -253,8 +257,8 @@ macos_ai_apps_karabiner_opener="$(render_template "$macos_ai_apps_data" ".chezmo
 
 assert_contains_text \
   "$macos_bootstrap" \
-  'brew bundle --no-upgrade --file="$core_brewfile"' \
-  "macOS bootstrap always runs the core Brewfile"
+  'terrapod_homebrew_core_run_bundle "$core_brewfile"' \
+  "macOS bootstrap always runs the core Brewfile through the core bundle helper"
 
 assert_not_contains_text \
   "$macos_bootstrap" \
@@ -281,6 +285,11 @@ printf '%s\n' "$macos_bootstrap" >"$macos_bootstrap_script"
 sh -n "$macos_bootstrap_script" || fail "macOS bootstrap default cleanup script should be valid sh"
 pass "macOS bootstrap default cleanup script is valid sh"
 
+macos_core_retry_script="$tmp_dir/macos-core-retry.sh"
+printf '%s\n' "$macos_core_retry" >"$macos_core_retry_script"
+sh -n "$macos_core_retry_script" || fail "macOS core retry script should be valid sh"
+pass "macOS core retry script is valid sh"
+
 macos_desktop_retry_script="$tmp_dir/macos-desktop-retry-default.sh"
 printf '%s\n' "$macos_desktop_retry" >"$macos_desktop_retry_script"
 sh -n "$macos_desktop_retry_script" || fail "macOS desktop retry default cleanup script should be valid sh"
@@ -290,6 +299,15 @@ macos_terminal_apps_desktop_retry_script="$tmp_dir/macos-terminal-desktop-retry.
 printf '%s\n' "$macos_terminal_apps_desktop_retry" >"$macos_terminal_apps_desktop_retry_script"
 sh -n "$macos_terminal_apps_desktop_retry_script" || fail "macOS desktop retry App Group script should be valid sh"
 pass "macOS desktop retry App Group script is valid sh"
+
+macos_mise_missing_script="$tmp_dir/macos-mise-missing.sh"
+printf '%s\n' "$macos_mise_tools_installer" |
+  sed \
+    -e "s#/opt/homebrew/bin/brew#$tmp_dir/missing-opt-homebrew-brew#g" \
+    -e "s#/usr/local/bin/brew#$tmp_dir/missing-usr-local-brew#g" \
+    >"$macos_mise_missing_script"
+sh -n "$macos_mise_missing_script" || fail "macOS mise tool installer missing-mise test script should be valid sh"
+pass "macOS mise tool installer missing-mise test script is valid sh"
 
 macos_brew_bin="$tmp_dir/macos-brew-bin"
 macos_brew_log="$tmp_dir/macos-brew.log"
@@ -315,9 +333,21 @@ write_brew_bundle_stub() {
     '  esac' \
     'done' \
     'case "$1" in' \
+    '  --prefix) printf "%s\n" "${MACOS_BREW_PREFIX:-/opt/homebrew}"; exit 0 ;;' \
     '  shellenv) printf "%s\n" ":" ;;' \
     '  analytics) exit 0 ;;' \
     '  bundle)' \
+    '    if [ "${MACOS_BREW_ECHO_OUTPUT:-}" = "1" ]; then' \
+    '      printf "%s\n" "visible brew bundle output: $*"' \
+    '    fi' \
+    '    for formula in ${MACOS_BREW_FAIL_FORMULAE:-}; do' \
+    '      if [ -n "$bundle_file" ] && grep -Fx "brew \"$formula\"" "$bundle_file" >/dev/null 2>&1; then' \
+    '        exit 42' \
+    '      fi' \
+    '    done' \
+    '    if [ "${MACOS_BREW_FAIL_CORE_BULK:-}" = "1" ] && [ -n "$bundle_file" ] && grep -Fx "brew \"mise\"" "$bundle_file" >/dev/null 2>&1 && grep -Fx "brew \"btop\"" "$bundle_file" >/dev/null 2>&1; then' \
+    '      exit 42' \
+    '    fi' \
     '    for cask in ${MACOS_BREW_FAIL_CASKS:-}; do' \
     '      if [ -n "$bundle_file" ] && grep -Fx "cask \"$cask\"" "$bundle_file" >/dev/null 2>&1; then' \
     '        exit 42' \
@@ -413,6 +443,155 @@ if [ ! -f "$homebrew_first_run_failure_marker" ]; then
 fi
 pass "first-run macOS bootstrap records homebrew-core marker when the Homebrew installer command fails"
 
+core_success_bin="$tmp_dir/core-success-bin"
+core_success_state="$tmp_dir/core-success-state"
+core_success_home="$tmp_dir/core-success-home"
+core_success_log="$tmp_dir/core-success-brew.log"
+mkdir -p "$core_success_bin" "$core_success_home"
+write_brew_bundle_stub "$core_success_bin/brew"
+
+HOME="$core_success_home" XDG_STATE_HOME="$core_success_state" sh -c \
+  '. "$1"; terrapod_install_warning_write homebrew-core "Homebrew core install needs attention" "stale core warning."' \
+  sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
+
+if ! HOME="$core_success_home" XDG_STATE_HOME="$core_success_state" MACOS_BREW_LOG="$core_success_log" PATH="$core_success_bin:/usr/bin:/bin" \
+  sh "$macos_bootstrap_script" >"$tmp_dir/core-success.out" 2>"$tmp_dir/core-success.err"; then
+  fail "successful core Homebrew bundle succeeds"
+fi
+
+if [ -e "$core_success_state/terrapod/install-warnings/homebrew-core" ]; then
+  fail "successful core Homebrew bundle clears stale homebrew-core marker"
+fi
+pass "successful core Homebrew bundle clears stale homebrew-core marker"
+
+core_detail_bin="$tmp_dir/core-detail-bin"
+core_detail_state="$tmp_dir/core-detail-state"
+core_detail_home="$tmp_dir/core-detail-home"
+core_detail_log="$tmp_dir/core-detail-brew.log"
+core_detail_prefix="$tmp_dir/core-detail-prefix"
+mkdir -p "$core_detail_bin" "$core_detail_home" "$core_detail_prefix"
+chmod 555 "$core_detail_prefix"
+write_brew_bundle_stub "$core_detail_bin/brew"
+
+if ! HOME="$core_detail_home" XDG_STATE_HOME="$core_detail_state" MACOS_BREW_LOG="$core_detail_log" MACOS_BREW_PREFIX="$core_detail_prefix" MACOS_BREW_ECHO_OUTPUT=1 MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_FORMULAE="gum" MACOS_BREW_FAIL_CASKS="font-d2coding" PATH="$core_detail_bin:/usr/bin:/bin" \
+  sh "$macos_bootstrap_script" >"$tmp_dir/core-detail.out" 2>"$tmp_dir/core-detail.err"; then
+  fail "core Homebrew bundle failure records a marker and does not block bootstrap script"
+fi
+chmod 755 "$core_detail_prefix"
+
+assert_contains_text "$(cat "$tmp_dir/core-detail.out")" "visible brew bundle output:" "core Homebrew failure preserves visible brew output"
+core_detail_marker="$core_detail_state/terrapod/install-warnings/homebrew-core"
+if [ ! -f "$core_detail_marker" ]; then
+  fail "core Homebrew bundle failure records a homebrew-core marker"
+fi
+pass "core Homebrew bundle failure records a homebrew-core marker"
+
+core_detail_marker_text="$(cat "$core_detail_marker")"
+assert_contains_text "$core_detail_marker_text" "category='homebrew-core'" "core marker keeps one stable category"
+assert_contains_text "$core_detail_marker_text" "summary='Homebrew core install needs attention'" "core marker keeps stable summary"
+assert_contains_text "$core_detail_marker_text" "failed formulae: gum" "core marker guidance includes reliable failed formula names"
+assert_contains_text "$core_detail_marker_text" "failed casks: font-d2coding" "core marker guidance includes reliable failed cask names"
+assert_contains_text "$core_detail_marker_text" "Homebrew prefix is not writable: $core_detail_prefix" "core marker guidance identifies unwritable shared prefix"
+assert_not_contains_text "$core_detail_marker_text" "btop" "core marker excludes successful formula names"
+assert_not_contains_text "$core_detail_marker_text" "chown" "core marker avoids broad ownership command guidance"
+
+core_fallback_bin="$tmp_dir/core-fallback-bin"
+core_fallback_state="$tmp_dir/core-fallback-state"
+core_fallback_home="$tmp_dir/core-fallback-home"
+core_fallback_log="$tmp_dir/core-fallback-brew.log"
+mkdir -p "$core_fallback_bin" "$core_fallback_home"
+write_brew_bundle_stub "$core_fallback_bin/brew"
+
+if ! HOME="$core_fallback_home" XDG_STATE_HOME="$core_fallback_state" MACOS_BREW_LOG="$core_fallback_log" MACOS_BREW_FAIL_CORE_BULK=1 PATH="$core_fallback_bin:/usr/bin:/bin" \
+  sh "$macos_bootstrap_script" >"$tmp_dir/core-fallback.out" 2>"$tmp_dir/core-fallback.err"; then
+  fail "core Homebrew bulk-only failure records a marker and does not block bootstrap script"
+fi
+
+core_fallback_marker_text="$(cat "$core_fallback_state/terrapod/install-warnings/homebrew-core")"
+assert_contains_text "$core_fallback_marker_text" "Review Homebrew core bundle output, fix package access, then rerun tpod apply." "core marker falls back to visible-output rerun guidance"
+assert_not_contains_text "$core_fallback_marker_text" "failed formulae:" "core fallback marker avoids invented formula detail"
+assert_not_contains_text "$core_fallback_marker_text" "failed casks:" "core fallback marker avoids invented cask detail"
+
+core_retry_success_bin="$tmp_dir/core-retry-success-bin"
+core_retry_success_state="$tmp_dir/core-retry-success-state"
+core_retry_success_home="$tmp_dir/core-retry-success-home"
+core_retry_success_log="$tmp_dir/core-retry-success-brew.log"
+mkdir -p "$core_retry_success_bin" "$core_retry_success_home"
+write_brew_bundle_stub "$core_retry_success_bin/brew"
+HOME="$core_retry_success_home" XDG_STATE_HOME="$core_retry_success_state" sh -c \
+  '. "$1"; terrapod_install_warning_write homebrew-core "Homebrew core install needs attention" "stale core retry warning."' \
+  sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
+
+if ! HOME="$core_retry_success_home" XDG_STATE_HOME="$core_retry_success_state" MACOS_BREW_LOG="$core_retry_success_log" PATH="$core_retry_success_bin:/usr/bin:/bin" \
+  sh "$macos_core_retry_script" >"$tmp_dir/core-retry-success.out" 2>"$tmp_dir/core-retry-success.err"; then
+  fail "successful core retry succeeds"
+fi
+
+if [ -e "$core_retry_success_state/terrapod/install-warnings/homebrew-core" ]; then
+  fail "successful core retry clears homebrew-core marker"
+fi
+pass "successful core retry clears homebrew-core marker"
+
+core_retry_failure_bin="$tmp_dir/core-retry-failure-bin"
+core_retry_failure_state="$tmp_dir/core-retry-failure-state"
+core_retry_failure_home="$tmp_dir/core-retry-failure-home"
+core_retry_failure_log="$tmp_dir/core-retry-failure-brew.log"
+mkdir -p "$core_retry_failure_bin" "$core_retry_failure_home"
+write_brew_bundle_stub "$core_retry_failure_bin/brew"
+HOME="$core_retry_failure_home" XDG_STATE_HOME="$core_retry_failure_state" sh -c \
+  '. "$1"; terrapod_install_warning_write homebrew-core "Homebrew core install needs attention" "old core retry warning."' \
+  sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
+
+if ! HOME="$core_retry_failure_home" XDG_STATE_HOME="$core_retry_failure_state" MACOS_BREW_LOG="$core_retry_failure_log" MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_FORMULAE="mise" PATH="$core_retry_failure_bin:/usr/bin:/bin" \
+  sh "$macos_core_retry_script" >"$tmp_dir/core-retry-failure.out" 2>"$tmp_dir/core-retry-failure.err"; then
+  fail "failed core retry records a replacement marker and exits successfully"
+fi
+
+core_retry_failure_marker_text="$(cat "$core_retry_failure_state/terrapod/install-warnings/homebrew-core")"
+assert_contains_text "$core_retry_failure_marker_text" "failed formulae: mise" "failed core retry replaces marker with current failed formula detail"
+assert_not_contains_text "$core_retry_failure_marker_text" "old core retry warning" "failed core retry replaces stale marker guidance"
+assert_contains_text "$core_retry_failure_marker_text" "updated_at='" "failed core retry replacement marker keeps updated_at"
+
+mise_missing_without_core_home="$tmp_dir/mise-missing-without-core-home"
+mise_missing_without_core_state="$tmp_dir/mise-missing-without-core-state"
+mkdir -p "$mise_missing_without_core_home"
+mise_missing_without_core_status=0
+HOME="$mise_missing_without_core_home" XDG_STATE_HOME="$mise_missing_without_core_state" PATH="/usr/bin:/bin" \
+  sh "$macos_mise_missing_script" >"$tmp_dir/mise-missing-without-core.out" 2>"$tmp_dir/mise-missing-without-core.err" ||
+  mise_missing_without_core_status=$?
+if [ "$mise_missing_without_core_status" -eq 0 ]; then
+  fail "macOS mise tool installer fails when mise is missing without a homebrew-core marker"
+fi
+pass "macOS mise tool installer fails when mise is missing without a homebrew-core marker"
+
+mise_missing_with_core_home="$tmp_dir/mise-missing-with-core-home"
+mise_missing_with_core_state="$tmp_dir/mise-missing-with-core-state"
+mkdir -p "$mise_missing_with_core_home"
+HOME="$mise_missing_with_core_home" XDG_STATE_HOME="$mise_missing_with_core_state" sh -c \
+  '. "$1"; terrapod_install_warning_write homebrew-core "Homebrew core install needs attention" "Install failed formulae, then rerun tpod apply."' \
+  sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
+
+mise_missing_with_core_status=0
+HOME="$mise_missing_with_core_home" XDG_STATE_HOME="$mise_missing_with_core_state" PATH="/usr/bin:/bin" \
+  sh "$macos_mise_missing_script" >"$tmp_dir/mise-missing-with-core.out" 2>"$tmp_dir/mise-missing-with-core.err" ||
+  mise_missing_with_core_status=$?
+if [ "$mise_missing_with_core_status" -ne 0 ]; then
+  printf '%s\n' "mise missing with core stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/mise-missing-with-core.out" >&2
+  printf '%s\n' "mise missing with core stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/mise-missing-with-core.err" >&2
+  fail "macOS mise tool installer exits 0 when missing mise is covered by a homebrew-core marker"
+fi
+pass "macOS mise tool installer exits 0 when missing mise is covered by a homebrew-core marker"
+
+if [ ! -f "$mise_missing_with_core_state/terrapod/install-warnings/homebrew-core" ]; then
+  fail "macOS mise tool installer keeps the existing homebrew-core marker"
+fi
+if [ -e "$mise_missing_with_core_state/terrapod/install-warnings/mise-tools" ]; then
+  fail "macOS mise tool installer avoids duplicate mise-tools marker when homebrew-core is already actionable"
+fi
+pass "macOS mise tool installer leaves homebrew-core as the only actionable missing-mise marker"
+
 assert_managed_paths_exclude_prefix \
   "$macos_managed_targets" \
   "Brewfile.macos-desktop-apps" \
@@ -495,6 +674,37 @@ assert_contains_text "$terminal_launcher_marker_text" "summary='Homebrew desktop
 assert_contains_text "$terminal_launcher_marker_text" "failed casks: ghostty, raycast" "desktop app marker guidance includes only casks whose single-cask bundle failed"
 assert_contains_text "$terminal_launcher_marker_text" "App Groups: terminal-apps, launcher" "desktop app marker guidance includes enabled App Groups"
 assert_not_contains_text "$terminal_launcher_marker_text" "1password-cli" "desktop app marker excludes casks whose single-cask bundle succeeded"
+
+core_then_desktop_bin="$tmp_dir/core-then-desktop-bin"
+core_then_desktop_state="$tmp_dir/core-then-desktop-state"
+core_then_desktop_home="$tmp_dir/core-then-desktop-home"
+core_then_desktop_log="$tmp_dir/core-then-desktop-brew.log"
+mkdir -p "$core_then_desktop_bin" "$core_then_desktop_home"
+write_brew_bundle_stub "$core_then_desktop_bin/brew"
+
+if ! HOME="$core_then_desktop_home" XDG_STATE_HOME="$core_then_desktop_state" MACOS_BREW_LOG="$core_then_desktop_log" MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_FORMULAE="gum" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty raycast" PATH="$core_then_desktop_bin:/usr/bin:/bin" \
+  sh "$terminal_launcher_bootstrap_script" >"$tmp_dir/core-then-desktop.out" 2>"$tmp_dir/core-then-desktop.err"; then
+  printf '%s\n' "core then desktop stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/core-then-desktop.out" >&2
+  printf '%s\n' "core then desktop stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/core-then-desktop.err" >&2
+  fail "macOS bootstrap records core and desktop app warnings in one App Groups run"
+fi
+
+core_then_desktop_core_marker="$core_then_desktop_state/terrapod/install-warnings/homebrew-core"
+core_then_desktop_desktop_marker="$core_then_desktop_state/terrapod/install-warnings/homebrew-desktop-apps"
+if [ ! -f "$core_then_desktop_core_marker" ]; then
+  fail "macOS bootstrap keeps homebrew-core marker when desktop App Groups also need attention"
+fi
+if [ ! -f "$core_then_desktop_desktop_marker" ]; then
+  fail "macOS bootstrap continues to desktop App Groups after recording a homebrew-core marker"
+fi
+pass "macOS bootstrap records core and desktop app warnings in one App Groups run"
+
+core_then_desktop_core_text="$(cat "$core_then_desktop_core_marker")"
+core_then_desktop_desktop_text="$(cat "$core_then_desktop_desktop_marker")"
+assert_contains_text "$core_then_desktop_core_text" "failed formulae: gum" "combined bootstrap core marker keeps failed formula detail"
+assert_contains_text "$core_then_desktop_desktop_text" "failed casks: ghostty, raycast" "combined bootstrap desktop marker keeps failed cask detail"
 
 terminal_launcher_marker_failure_bin="$tmp_dir/terminal-launcher-marker-failure-bin"
 terminal_launcher_marker_failure_state="$tmp_dir/terminal-launcher-marker-failure-state"

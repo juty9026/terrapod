@@ -1,0 +1,99 @@
+{{- if eq .chezmoi.os "darwin" -}}
+#!/bin/sh
+set -eu
+
+install_warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
+TERRAPOD_INSTALL_WARNINGS_LOADED=
+if [ -f "$install_warnings_lib" ]; then
+  . "$install_warnings_lib"
+fi
+
+homebrew_core_bundle_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/homebrew-core-bundle.sh"
+TERRAPOD_HOMEBREW_CORE_BUNDLE_LOADED=
+if [ -f "$homebrew_core_bundle_lib" ]; then
+  . "$homebrew_core_bundle_lib"
+fi
+
+if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ] ||
+  [ "${TERRAPOD_HOMEBREW_CORE_BUNDLE_LOADED:-}" != "1" ]; then
+  exit 0
+fi
+
+mark_install_warning() {
+  category="$1"
+  summary="$2"
+  guidance="$3"
+
+  terrapod_install_warning_write "$category" "$summary" "$guidance"
+}
+
+clear_install_warning() {
+  category="$1"
+
+  terrapod_install_warning_clear "$category" || true
+}
+
+core_marker_path="$(terrapod_install_warning_path homebrew-core 2>/dev/null || true)"
+if [ -z "$core_marker_path" ] || [ ! -f "$core_marker_path" ]; then
+  exit 0
+fi
+
+find_brew() {
+  if command -v brew >/dev/null 2>&1; then
+    command -v brew
+    return
+  fi
+
+  if [ -x /opt/homebrew/bin/brew ]; then
+    printf '%s\n' /opt/homebrew/bin/brew
+    return
+  fi
+
+  if [ -x /usr/local/bin/brew ]; then
+    printf '%s\n' /usr/local/bin/brew
+    return
+  fi
+
+  return 1
+}
+
+brew_bin="$(find_brew || true)"
+if [ -z "$brew_bin" ]; then
+  mark_install_warning \
+    homebrew-core \
+    "Homebrew core install needs attention" \
+    "Install Homebrew from https://brew.sh, then rerun tpod apply." ||
+    exit 1
+  exit 0
+fi
+
+if ! brew_shellenv="$("$brew_bin" shellenv)"; then
+  mark_install_warning \
+    homebrew-core \
+    "Homebrew core install needs attention" \
+    "Fix Homebrew shellenv, then rerun tpod apply." ||
+    exit 1
+  exit 0
+fi
+eval "$brew_shellenv"
+brew analytics off >/dev/null 2>&1 || true
+
+core_brewfile="{{ .chezmoi.sourceDir }}/Brewfile"
+if [ ! -f "$core_brewfile" ]; then
+  clear_install_warning homebrew-core
+  exit 0
+fi
+
+if terrapod_homebrew_core_run_bundle "$core_brewfile"; then
+  clear_install_warning homebrew-core
+else
+  if [ -z "${TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT:-}" ]; then
+    TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT="Review Homebrew core bundle output, fix package access, then rerun tpod apply."
+  fi
+  mark_install_warning \
+    homebrew-core \
+    "Homebrew core install needs attention" \
+    "$TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT" ||
+    exit 1
+fi
+{{- end }}

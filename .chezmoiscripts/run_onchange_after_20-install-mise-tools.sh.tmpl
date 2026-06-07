@@ -39,6 +39,16 @@ clear_install_warning() {
   fi
 }
 
+install_warning_exists() {
+  category="$1"
+
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
+    return 1
+  fi
+
+  terrapod_install_warning_existing_path "$category" >/dev/null 2>&1
+}
+
 setup_mise() {
   if command -v mise >/dev/null 2>&1; then
     return
@@ -58,6 +68,11 @@ setup_mise() {
   fi
 
   if ! command -v mise >/dev/null 2>&1; then
+    if install_warning_exists homebrew-core; then
+      echo "mise is required, but Homebrew core install already needs attention. Fix Homebrew core, then rerun tpod apply." >&2
+      exit 0
+    fi
+
     echo "mise is required. Run the Homebrew Brewfile bundle first." >&2
     mark_install_warning \
       mise-tools \

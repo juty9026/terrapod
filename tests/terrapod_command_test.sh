@@ -467,9 +467,21 @@ write_brew_bundle_stub() {
     '  esac' \
     'done' \
     'case "$1" in' \
+    '  --prefix) printf "%s\n" "${MACOS_BREW_PREFIX:-/opt/homebrew}"; exit 0 ;;' \
     '  shellenv) printf "%s\n" ":" ;;' \
     '  analytics) exit 0 ;;' \
     '  bundle)' \
+    '    if [ "${MACOS_BREW_ECHO_OUTPUT:-}" = "1" ]; then' \
+    '      printf "%s\n" "visible brew bundle output: $*"' \
+    '    fi' \
+    '    for formula in ${MACOS_BREW_FAIL_FORMULAE:-}; do' \
+    '      if [ -n "$bundle_file" ] && grep -Fx "brew \"$formula\"" "$bundle_file" >/dev/null 2>&1; then' \
+    '        exit 42' \
+    '      fi' \
+    '    done' \
+    '    if [ "${MACOS_BREW_FAIL_CORE_BULK:-}" = "1" ] && [ -n "$bundle_file" ] && grep -Fx "brew \"mise\"" "$bundle_file" >/dev/null 2>&1 && grep -Fx "brew \"btop\"" "$bundle_file" >/dev/null 2>&1; then' \
+    '      exit 42' \
+    '    fi' \
     '    for cask in ${MACOS_BREW_FAIL_CASKS:-}; do' \
     '      if [ -n "$bundle_file" ] && grep -Fx "cask \"$cask\"" "$bundle_file" >/dev/null 2>&1; then' \
     '        exit 42' \
@@ -511,10 +523,12 @@ copy_desktop_apply_source_fixture() {
 
   cp "$repo_root/Brewfile" "$source_dir/Brewfile"
   cp "$repo_root/Brewfile.macos-desktop-apps.tmpl" "$source_dir/Brewfile.macos-desktop-apps.tmpl"
+  cp "$repo_root/.chezmoiscripts/run_before_01-retry-homebrew-core.sh.tmpl" "$source_dir/.chezmoiscripts/run_before_01-retry-homebrew-core.sh.tmpl"
   cp "$repo_root/.chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl" "$source_dir/.chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl"
   cp "$repo_root/.chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl" "$source_dir/.chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl"
   cp "$terrapod" "$source_dir/dot_local/bin/executable_terrapod"
   cp "$tpod_source" "$source_dir/dot_local/bin/symlink_tpod"
+  cp "$repo_root/dot_local/lib/terrapod/homebrew-core-bundle.sh" "$source_dir/dot_local/lib/terrapod/homebrew-core-bundle.sh"
   cp "$install_warnings_lib" "$source_dir/dot_local/lib/terrapod/install-warnings.sh"
 }
 
@@ -2838,6 +2852,67 @@ assert_contains "$desktop_apply_marker_text" "failed casks: ghostty" "Terrapod a
 assert_contains "$desktop_apply_marker_text" "App Groups: terminal-apps" "Terrapod apply retains enabled terminal-apps group after App Group settings change"
 assert_not_contains "$desktop_apply_marker_text" "raycast" "Terrapod apply removes disabled launcher cask from marker content"
 assert_not_contains "$desktop_apply_marker_text" "launcher" "Terrapod apply removes disabled launcher group from marker content"
+
+core_apply_source="$tmp_dir/core-apply-source"
+core_apply_home="$tmp_dir/core-apply-home"
+core_apply_state="$tmp_dir/core-apply-state"
+core_apply_bin="$tmp_dir/core-apply-bin"
+core_apply_log="$tmp_dir/core-apply-brew.log"
+core_apply_config="$tmp_dir/core-apply.toml"
+core_apply_prefix="$tmp_dir/core-apply-prefix"
+mkdir -p "$core_apply_home" "$core_apply_bin" "$core_apply_prefix"
+chmod 555 "$core_apply_prefix"
+copy_desktop_apply_source_fixture "$core_apply_source"
+ln -s "$real_chezmoi" "$core_apply_bin/chezmoi"
+write_brew_bundle_stub "$core_apply_bin/brew"
+write_desktop_apply_config "$core_apply_config" "$core_apply_source" "$core_apply_home" false false
+
+if ! HOME="$core_apply_home" XDG_STATE_HOME="$core_apply_state" TERRAPOD_CHEZMOI_CONFIG="$core_apply_config" MACOS_BREW_LOG="$core_apply_log" MACOS_BREW_PREFIX="$core_apply_prefix" MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_FORMULAE="gum" PATH="$core_apply_bin:/usr/bin:/bin" \
+  /bin/sh "$terrapod" apply >"$tmp_dir/core-apply-first.out" 2>"$tmp_dir/core-apply-first.err"; then
+  printf '%s\n' "core apply first stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/core-apply-first.out" >&2
+  printf '%s\n' "core apply first stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/core-apply-first.err" >&2
+  fail "Terrapod apply succeeds when core Homebrew bundle fails with a marker"
+fi
+chmod 755 "$core_apply_prefix"
+
+core_apply_marker="$core_apply_state/terrapod/install-warnings/homebrew-core"
+core_apply_marker_text="$(cat "$core_apply_marker")"
+assert_contains "$core_apply_marker_text" "failed formulae: gum" "Terrapod apply records failed core formula detail"
+assert_contains "$core_apply_marker_text" "Homebrew prefix is not writable: $core_apply_prefix" "Terrapod apply records shared-prefix permission guidance"
+assert_not_contains "$core_apply_marker_text" "chown" "Terrapod apply core guidance avoids broad ownership command guidance"
+
+if ! HOME="$core_apply_home" XDG_STATE_HOME="$core_apply_state" TERRAPOD_CHEZMOI_CONFIG="$core_apply_config" MACOS_BREW_LOG="$core_apply_log" PATH="$core_apply_bin:/usr/bin:/bin" \
+  /bin/sh "$terrapod" apply >"$tmp_dir/core-apply-retry-success.out" 2>"$tmp_dir/core-apply-retry-success.err"; then
+  printf '%s\n' "core apply retry success stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/core-apply-retry-success.out" >&2
+  printf '%s\n' "core apply retry success stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/core-apply-retry-success.err" >&2
+  fail "Terrapod apply retries core Homebrew marker and succeeds"
+fi
+
+if [ -e "$core_apply_marker" ]; then
+  fail "Terrapod apply clears a core Homebrew marker after retry succeeds"
+fi
+pass "Terrapod apply clears a core Homebrew marker after retry succeeds"
+
+HOME="$core_apply_home" XDG_STATE_HOME="$core_apply_state" sh -c \
+  '. "$1"; terrapod_install_warning_write homebrew-core "Homebrew core install needs attention" "old apply core warning."' \
+  sh "$install_warnings_lib"
+
+if ! HOME="$core_apply_home" XDG_STATE_HOME="$core_apply_state" TERRAPOD_CHEZMOI_CONFIG="$core_apply_config" MACOS_BREW_LOG="$core_apply_log" MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_CASKS="font-d2coding" PATH="$core_apply_bin:/usr/bin:/bin" \
+  /bin/sh "$terrapod" apply >"$tmp_dir/core-apply-retry-failure.out" 2>"$tmp_dir/core-apply-retry-failure.err"; then
+  printf '%s\n' "core apply retry failure stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/core-apply-retry-failure.out" >&2
+  printf '%s\n' "core apply retry failure stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/core-apply-retry-failure.err" >&2
+  fail "Terrapod apply replaces a core Homebrew marker after retry fails"
+fi
+
+core_apply_marker_text="$(cat "$core_apply_marker")"
+assert_contains "$core_apply_marker_text" "failed casks: font-d2coding" "Terrapod apply replaces core marker with current failed cask detail"
+assert_not_contains "$core_apply_marker_text" "old apply core warning" "Terrapod apply removes stale core marker guidance after failed retry"
 
 rm -f "$CHEZMOI_APPLY_ARGS_FILE" "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
 
