@@ -217,3 +217,18 @@ bootstrap_curl_failure_log="$(cat "$BOOTSTRAP_TEST_LOG")"
 assert_contains "$bootstrap_curl_failure_log" "curl args:-fsSL https://repo.charm.sh/apt/gpg.key -o " "Ubuntu bootstrap Charm key failure attempts to fetch the signing key"
 assert_not_contains "$bootstrap_curl_failure_log" "apt-get args:install -y gum" "Ubuntu bootstrap Charm key failure stops before installing gum"
 pass "Ubuntu bootstrap fails when the Charm signing key download fails"
+
+rm -f "$ubuntu_bootstrap_marker"
+: >"$BOOTSTRAP_TEST_LOG"
+BOOTSTRAP_CHARM_KEY_CURL_STATUS=17
+export BOOTSTRAP_CHARM_KEY_CURL_STATUS
+if ! TERRAPOD_FIRST_RUN_APPLY=1 sh "$rendered" >"$tmp_dir/bootstrap-first-run-curl-failure.out" 2>"$tmp_dir/bootstrap-first-run-curl-failure.err"; then
+  unset BOOTSTRAP_CHARM_KEY_CURL_STATUS
+  fail "first-run Ubuntu bootstrap should continue when the Charm signing key download warning is recorded"
+fi
+unset BOOTSTRAP_CHARM_KEY_CURL_STATUS
+
+if [ ! -f "$ubuntu_bootstrap_marker" ]; then
+  fail "first-run Ubuntu bootstrap should record a warning marker when the Charm signing key download fails"
+fi
+pass "first-run Ubuntu bootstrap records a warning marker when the Charm signing key download fails"

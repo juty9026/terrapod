@@ -8,14 +8,26 @@ if [ -f "$install_warnings_lib" ]; then
   . "$install_warnings_lib"
 fi
 
+INSTALL_WARNING_RECORDED=0
+
 mark_install_warning() {
   category="$1"
   summary="$2"
   guidance="$3"
+  INSTALL_WARNING_RECORDED=0
 
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
-    terrapod_install_warning_write "$category" "$summary" "$guidance" || true
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ] &&
+    terrapod_install_warning_write "$category" "$summary" "$guidance"; then
+    INSTALL_WARNING_RECORDED=1
   fi
+}
+
+exit_after_install_warning() {
+  if [ "${TERRAPOD_FIRST_RUN_APPLY:-}" = "1" ] && [ "$INSTALL_WARNING_RECORDED" -eq 1 ]; then
+    exit 0
+  fi
+
+  exit 1
 }
 
 clear_install_warning() {
@@ -35,7 +47,7 @@ if [ "$os_id" != "ubuntu" ] || [ "$version_id" != "24.04" ]; then
     ubuntu-bootstrap \
     "Ubuntu bootstrap needs attention" \
     "Run Terrapod on Ubuntu 24.04, or use tpod doctor for current platform guidance."
-  exit 1
+  exit_after_install_warning
 fi
 
 if [ "$(id -u)" -eq 0 ]; then
@@ -48,7 +60,7 @@ else
     ubuntu-bootstrap \
     "Ubuntu bootstrap needs attention" \
     "Install sudo or run as root, then rerun tpod apply."
-  exit 1
+  exit_after_install_warning
 fi
 
 export DEBIAN_FRONTEND=noninteractive
@@ -59,7 +71,7 @@ if ! $sudo_cmd apt-get update -y; then
     ubuntu-bootstrap \
     "Ubuntu bootstrap needs attention" \
     "Review APT update output, fix package repository access, then rerun tpod apply."
-  exit 1
+  exit_after_install_warning
 fi
 
 if ! $sudo_cmd apt-get install -y \
@@ -86,7 +98,7 @@ if ! $sudo_cmd apt-get install -y \
     ubuntu-bootstrap \
     "Ubuntu bootstrap needs attention" \
     "Review APT install output, fix package access, then rerun tpod apply."
-  exit 1
+  exit_after_install_warning
 fi
 
 if ! $sudo_cmd install -dm 755 /etc/apt/keyrings; then
@@ -94,21 +106,21 @@ if ! $sudo_cmd install -dm 755 /etc/apt/keyrings; then
     ubuntu-bootstrap \
     "Ubuntu bootstrap needs attention" \
     "Check APT keyring permissions, then rerun tpod apply."
-  exit 1
+  exit_after_install_warning
 fi
 if ! curl -fSs https://mise.en.dev/gpg-key.pub | $sudo_cmd tee /etc/apt/keyrings/mise-archive-keyring.asc >/dev/null; then
   mark_install_warning \
     ubuntu-bootstrap \
     "Ubuntu bootstrap needs attention" \
     "Check network access to https://mise.en.dev, then rerun tpod apply."
-  exit 1
+  exit_after_install_warning
 fi
 if ! printf '%s\n' "deb [signed-by=/etc/apt/keyrings/mise-archive-keyring.asc] https://mise.en.dev/deb stable main" | $sudo_cmd tee /etc/apt/sources.list.d/mise.list >/dev/null; then
   mark_install_warning \
     ubuntu-bootstrap \
     "Ubuntu bootstrap needs attention" \
     "Check APT source list permissions, then rerun tpod apply."
-  exit 1
+  exit_after_install_warning
 fi
 charm_key_file="$(mktemp "${TMPDIR:-/tmp}/terrapod-charm-key.XXXXXX")"
 if ! curl -fsSL https://repo.charm.sh/apt/gpg.key -o "$charm_key_file"; then
@@ -118,7 +130,7 @@ if ! curl -fsSL https://repo.charm.sh/apt/gpg.key -o "$charm_key_file"; then
     "Ubuntu bootstrap needs attention" \
     "Check network access to https://repo.charm.sh, then rerun tpod apply."
   rm -f "$charm_key_file"
-  exit 1
+  exit_after_install_warning
 fi
 if ! $sudo_cmd gpg --dearmor --yes -o /etc/apt/keyrings/charm.gpg "$charm_key_file"; then
   echo "Failed to install the Charm APT signing key for gum. Check APT keyring permissions and rerun Terrapod apply." >&2
@@ -127,7 +139,7 @@ if ! $sudo_cmd gpg --dearmor --yes -o /etc/apt/keyrings/charm.gpg "$charm_key_fi
     "Ubuntu bootstrap needs attention" \
     "Check APT keyring permissions, then rerun tpod apply."
   rm -f "$charm_key_file"
-  exit 1
+  exit_after_install_warning
 fi
 rm -f "$charm_key_file"
 if ! printf '%s\n' "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | $sudo_cmd tee /etc/apt/sources.list.d/charm.list >/dev/null; then
@@ -135,7 +147,7 @@ if ! printf '%s\n' "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.cha
     ubuntu-bootstrap \
     "Ubuntu bootstrap needs attention" \
     "Check APT source list permissions, then rerun tpod apply."
-  exit 1
+  exit_after_install_warning
 fi
 
 if ! $sudo_cmd apt-get update -y; then
@@ -143,21 +155,21 @@ if ! $sudo_cmd apt-get update -y; then
     ubuntu-bootstrap \
     "Ubuntu bootstrap needs attention" \
     "Review APT update output after adding tool repositories, then rerun tpod apply."
-  exit 1
+  exit_after_install_warning
 fi
 if ! $sudo_cmd apt-get install -y mise; then
   mark_install_warning \
     ubuntu-bootstrap \
     "Ubuntu bootstrap needs attention" \
     "Review APT output for mise installation, then rerun tpod apply."
-  exit 1
+  exit_after_install_warning
 fi
 if ! $sudo_cmd apt-get install -y gum; then
   mark_install_warning \
     ubuntu-bootstrap \
     "Ubuntu bootstrap needs attention" \
     "Review APT output for gum installation, then rerun tpod apply."
-  exit 1
+  exit_after_install_warning
 fi
 
 target_user="$(id -un)"

@@ -9,14 +9,26 @@ if [ -f "$install_warnings_lib" ]; then
   . "$install_warnings_lib"
 fi
 
+INSTALL_WARNING_RECORDED=0
+
 mark_install_warning() {
   category="$1"
   summary="$2"
   guidance="$3"
+  INSTALL_WARNING_RECORDED=0
 
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
-    terrapod_install_warning_write "$category" "$summary" "$guidance" || true
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ] &&
+    terrapod_install_warning_write "$category" "$summary" "$guidance"; then
+    INSTALL_WARNING_RECORDED=1
   fi
+}
+
+exit_after_install_warning() {
+  if [ "${TERRAPOD_FIRST_RUN_APPLY:-}" = "1" ] && [ "$INSTALL_WARNING_RECORDED" -eq 1 ]; then
+    exit 0
+  fi
+
+  exit 1
 }
 
 clear_install_warning() {
@@ -51,7 +63,7 @@ setup_mise() {
       mise-tools \
       "mise tool install needs attention" \
       "Run the Homebrew Brewfile bundle or fix mise on PATH, then rerun tpod apply."
-    exit 1
+    exit_after_install_warning
   fi
 {{ else }}
   echo "mise is required. The Ubuntu bootstrap script should install mise from the official APT repository." >&2
@@ -59,7 +71,7 @@ setup_mise() {
     mise-tools \
     "mise tool install needs attention" \
     "Run the Ubuntu bootstrap script or fix mise on PATH, then rerun tpod apply."
-  exit 1
+  exit_after_install_warning
 {{ end }}
 }
 
@@ -69,7 +81,7 @@ if ! mise install --yes -C "$HOME"; then
     mise-tools \
     "mise tool install needs attention" \
     "Review mise install output, fix tool installation issues, then rerun tpod apply."
-  exit 1
+  exit_after_install_warning
 fi
 
 if mise exec --yes -C "$HOME" -- sh -c 'command -v corepack' >/dev/null 2>&1; then
@@ -78,7 +90,7 @@ if mise exec --yes -C "$HOME" -- sh -c 'command -v corepack' >/dev/null 2>&1; th
       mise-tools \
       "mise tool install needs attention" \
       "Review corepack enable output, then rerun tpod apply."
-    exit 1
+    exit_after_install_warning
   fi
 fi
 

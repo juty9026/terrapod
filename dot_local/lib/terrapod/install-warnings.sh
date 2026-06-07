@@ -121,11 +121,13 @@ terrapod_install_warning_write() {
   mkdir -p "$marker_dir" || return 1
 
   tmp_file="$(mktemp "$marker_dir/.$category.XXXXXX")" || return 1
+  write_id="$$:${tmp_file##*/}"
   {
     printf 'category=%s\n' "$(terrapod_install_warning_quote "$category")"
     printf 'summary=%s\n' "$(terrapod_install_warning_quote "$summary")"
     printf 'guidance=%s\n' "$(terrapod_install_warning_quote "$guidance")"
     printf 'updated_at=%s\n' "$(terrapod_install_warning_quote "$(terrapod_install_warning_now)")"
+    printf 'write_id=%s\n' "$(terrapod_install_warning_quote "$write_id")"
   } >"$tmp_file" || {
     rm -f "$tmp_file"
     return 1

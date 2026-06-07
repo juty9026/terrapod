@@ -964,6 +964,50 @@ clear_install_warning_from_source() {
   fi
 }
 
+load_install_warnings_from_source() {
+  source_dir="$1"
+  install_warnings_lib="$source_dir/dot_local/lib/terrapod/install-warnings.sh"
+  TERRAPOD_INSTALL_WARNINGS_LOADED=
+
+  if [ -f "$install_warnings_lib" ]; then
+    . "$install_warnings_lib"
+  fi
+
+  [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]
+}
+
+snapshot_install_warnings_from_source() {
+  source_dir="$1"
+  snapshot_dir="$2"
+
+  mkdir -p "$snapshot_dir" || return 1
+  load_install_warnings_from_source "$source_dir" || return 0
+
+  for category in $(terrapod_install_warning_categories); do
+    terrapod_install_warning_read "$category" >"$snapshot_dir/$category" 2>/dev/null || true
+  done
+}
+
+install_warning_markers_changed_since_snapshot() {
+  source_dir="$1"
+  snapshot_dir="$2"
+  changed=false
+
+  load_install_warnings_from_source "$source_dir" || return 1
+
+  for category in $(terrapod_install_warning_categories); do
+    current_file="$snapshot_dir/current-$category"
+    if terrapod_install_warning_read "$category" >"$current_file" 2>/dev/null; then
+      if [ ! -f "$snapshot_dir/$category" ] || ! cmp -s "$snapshot_dir/$category" "$current_file"; then
+        changed=true
+      fi
+    fi
+    rm -f "$current_file"
+  done
+
+  [ "$changed" = "true" ]
+}
+
 print_setup_ui_dependency_recovery() {
   profile="$1"
   source_dir="$2"
@@ -1216,8 +1260,25 @@ apply_recovery_core_shell_startup_files() {
 
 run_initial_apply() {
   chezmoi_bin="$1"
+  source_dir="$2"
+  marker_snapshot_dir="$(mktemp -d)" ||
+    fatal "failed to create install-warning snapshot directory"
 
-  "$chezmoi_bin" apply || fatal "chezmoi apply failed"
+  snapshot_install_warnings_from_source "$source_dir" "$marker_snapshot_dir" ||
+    fatal "failed to snapshot install warning markers"
+
+  if ! TERRAPOD_FIRST_RUN_APPLY=1 "$chezmoi_bin" apply; then
+    rm -rf "$marker_snapshot_dir"
+    fatal "chezmoi apply failed"
+  fi
+
+  if install_warning_markers_changed_since_snapshot "$source_dir" "$marker_snapshot_dir"; then
+    rm -rf "$marker_snapshot_dir"
+    return 2
+  fi
+
+  rm -rf "$marker_snapshot_dir"
+  return 0
 }
 
 show_first_run_help() {
@@ -1230,6 +1291,32 @@ show_first_run_help() {
   fi
 
   TERRAPOD_PROFILE="$profile" "$tpod_bin" help || fatal "tpod help failed after initial apply"
+}
+
+print_first_run_tpod_availability() {
+  local_bin_dir="$1"
+
+  printf '\n'
+  printf '%s\n' "Terrapod command availability:"
+  printf '%s\n' "  If this shell has not reloaded Terrapod's managed PATH yet, plain 'tpod' may not resolve."
+  printf '%s\n' "  Use this absolute command now: $local_bin_dir/tpod"
+  printf '%s\n' "  Open a new terminal or refresh your login shell before relying on plain 'tpod'."
+}
+
+print_first_run_clean_completion() {
+  printf '\n'
+  printf '%s\n' "Terrapod first-run apply complete."
+}
+
+print_first_run_warning_completion() {
+  local_bin_dir="$1"
+
+  printf '\n'
+  printf '%s\n' "Terrapod first-run apply completed with warnings."
+  printf '%s\n' "Warning:"
+  printf '%s\n' "  Terrapod installed and the recovery core is valid, but machine profile readiness needs attention."
+  printf '%s\n' "  Review the full apply output above, then run:"
+  printf '%s\n' "  $local_bin_dir/tpod doctor"
 }
 
 main() {
@@ -1264,10 +1351,22 @@ main() {
   ensure_first_run_setup "$profile" "$source_dir" "$chezmoi_bin"
   apply_recovery_core_command_surface "$profile" "$source_dir" "$local_bin_dir"
   apply_recovery_core_shell_startup_files "$profile" "$chezmoi_bin"
-  run_initial_apply "$chezmoi_bin"
+  initial_apply_status=0
+  run_initial_apply "$chezmoi_bin" "$source_dir" || initial_apply_status="$?"
   show_first_run_help "$profile" "$local_bin_dir"
+  print_first_run_tpod_availability "$local_bin_dir"
 
-  printf '%s\n' "Terrapod first-run apply complete."
+  case "$initial_apply_status" in
+    0)
+      print_first_run_clean_completion
+      ;;
+    2)
+      print_first_run_warning_completion "$local_bin_dir"
+      ;;
+    *)
+      fatal "unexpected initial apply status: $initial_apply_status"
+      ;;
+  esac
 }
 
 main "$@"
