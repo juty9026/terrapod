@@ -54,6 +54,16 @@ exit_after_nonblocking_install_warning() {
   exit 1
 }
 
+continue_after_core_install_warning() {
+{{ if $enableMacosAppGroups -}}
+  if [ "$INSTALL_WARNING_RECORDED" -ne 1 ]; then
+    exit 1
+  fi
+{{ else -}}
+  exit_after_nonblocking_install_warning
+{{ end -}}
+}
+
 clear_install_warning() {
   category="$1"
 
@@ -263,7 +273,7 @@ if [ -f "$core_brewfile" ]; then
         homebrew-core \
         "Homebrew core install needs attention" \
         "$TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT"
-      exit_after_nonblocking_install_warning
+      continue_after_core_install_warning
     fi
   else
     if brew bundle --no-upgrade --file="$core_brewfile"; then
@@ -273,7 +283,7 @@ if [ -f "$core_brewfile" ]; then
         homebrew-core \
         "Homebrew core install needs attention" \
         "Review Homebrew core bundle output, fix package access, then rerun tpod apply."
-      exit_after_nonblocking_install_warning
+      continue_after_core_install_warning
     fi
   fi
 fi

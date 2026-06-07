@@ -675,6 +675,37 @@ assert_contains_text "$terminal_launcher_marker_text" "failed casks: ghostty, ra
 assert_contains_text "$terminal_launcher_marker_text" "App Groups: terminal-apps, launcher" "desktop app marker guidance includes enabled App Groups"
 assert_not_contains_text "$terminal_launcher_marker_text" "1password-cli" "desktop app marker excludes casks whose single-cask bundle succeeded"
 
+core_then_desktop_bin="$tmp_dir/core-then-desktop-bin"
+core_then_desktop_state="$tmp_dir/core-then-desktop-state"
+core_then_desktop_home="$tmp_dir/core-then-desktop-home"
+core_then_desktop_log="$tmp_dir/core-then-desktop-brew.log"
+mkdir -p "$core_then_desktop_bin" "$core_then_desktop_home"
+write_brew_bundle_stub "$core_then_desktop_bin/brew"
+
+if ! HOME="$core_then_desktop_home" XDG_STATE_HOME="$core_then_desktop_state" MACOS_BREW_LOG="$core_then_desktop_log" MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_FORMULAE="gum" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty raycast" PATH="$core_then_desktop_bin:/usr/bin:/bin" \
+  sh "$terminal_launcher_bootstrap_script" >"$tmp_dir/core-then-desktop.out" 2>"$tmp_dir/core-then-desktop.err"; then
+  printf '%s\n' "core then desktop stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/core-then-desktop.out" >&2
+  printf '%s\n' "core then desktop stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/core-then-desktop.err" >&2
+  fail "macOS bootstrap records core and desktop app warnings in one App Groups run"
+fi
+
+core_then_desktop_core_marker="$core_then_desktop_state/terrapod/install-warnings/homebrew-core"
+core_then_desktop_desktop_marker="$core_then_desktop_state/terrapod/install-warnings/homebrew-desktop-apps"
+if [ ! -f "$core_then_desktop_core_marker" ]; then
+  fail "macOS bootstrap keeps homebrew-core marker when desktop App Groups also need attention"
+fi
+if [ ! -f "$core_then_desktop_desktop_marker" ]; then
+  fail "macOS bootstrap continues to desktop App Groups after recording a homebrew-core marker"
+fi
+pass "macOS bootstrap records core and desktop app warnings in one App Groups run"
+
+core_then_desktop_core_text="$(cat "$core_then_desktop_core_marker")"
+core_then_desktop_desktop_text="$(cat "$core_then_desktop_desktop_marker")"
+assert_contains_text "$core_then_desktop_core_text" "failed formulae: gum" "combined bootstrap core marker keeps failed formula detail"
+assert_contains_text "$core_then_desktop_desktop_text" "failed casks: ghostty, raycast" "combined bootstrap desktop marker keeps failed cask detail"
+
 terminal_launcher_marker_failure_bin="$tmp_dir/terminal-launcher-marker-failure-bin"
 terminal_launcher_marker_failure_state="$tmp_dir/terminal-launcher-marker-failure-state"
 terminal_launcher_marker_failure_home="$tmp_dir/terminal-launcher-marker-failure-home"
