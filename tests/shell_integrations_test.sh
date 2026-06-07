@@ -86,6 +86,7 @@ write_stub "$tmp_dir/bin/git" \
   '    exit "$zinit_status"' \
   '  fi' \
   '  mkdir -p "$3"' \
+  '  : >"$3/zinit.zsh"' \
   '  exit 0' \
   'fi' \
   'if [ "$1" = clone ] && [ "$2" = https://github.com/scmbreeze/scm_breeze.git ]; then' \
@@ -155,6 +156,68 @@ if [ -e "$retry_marker" ]; then
   fail "shell integrations retry should clear warning marker after recovery"
 fi
 pass "shell integrations retry clears warning marker after recovery"
+
+partial_retry_home="$tmp_dir/partial-retry-home"
+partial_retry_state="$tmp_dir/partial-retry-state"
+partial_retry_log="$tmp_dir/partial-retry-shell-integrations.log"
+mkdir -p \
+  "$partial_retry_home/.oh-my-zsh" \
+  "$partial_retry_home/.local/share/zinit/zinit.git" \
+  "$partial_retry_home/.scm_breeze"
+write_stub "$partial_retry_home/.scm_breeze/install.sh" \
+  'printf "%s\n" "scm-breeze install" >>"$SHELL_INTEGRATIONS_TEST_LOG"' \
+  'exit 0'
+: >"$partial_retry_log"
+HOME="$partial_retry_home" XDG_STATE_HOME="$partial_retry_state" sh -c \
+  '. "$1"; terrapod_install_warning_write shell-integrations "Shell integration setup needs attention" "Previous shell integration warning."' \
+  sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
+
+HOME="$partial_retry_home" \
+  XDG_STATE_HOME="$partial_retry_state" \
+  SHELL_INTEGRATIONS_TEST_LOG="$partial_retry_log" \
+  PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$retry_rendered" >"$tmp_dir/shell-integrations-retry-partial-dirs.out" 2>"$tmp_dir/shell-integrations-retry-partial-dirs.err"
+
+partial_retry_marker="$partial_retry_state/terrapod/install-warnings/shell-integrations"
+if [ ! -f "$partial_retry_marker" ]; then
+  fail "shell integrations retry should keep marker when previous failures left partial directories"
+fi
+pass "shell integrations retry keeps marker when previous failures left partial directories"
+
+partial_retry_marker_text="$(cat "$partial_retry_marker")"
+assert_contains "$partial_retry_marker_text" "Oh My Zsh" "shell integrations retry marker keeps partial Oh My Zsh warning"
+assert_contains "$partial_retry_marker_text" "zinit" "shell integrations retry marker keeps partial zinit warning"
+
+partial_onchange_home="$tmp_dir/partial-onchange-home"
+partial_onchange_state="$tmp_dir/partial-onchange-state"
+partial_onchange_log="$tmp_dir/partial-onchange-shell-integrations.log"
+mkdir -p \
+  "$partial_onchange_home/.oh-my-zsh" \
+  "$partial_onchange_home/.local/share/zinit/zinit.git" \
+  "$partial_onchange_home/.scm_breeze"
+write_stub "$partial_onchange_home/.scm_breeze/install.sh" \
+  'printf "%s\n" "scm-breeze install" >>"$SHELL_INTEGRATIONS_TEST_LOG"' \
+  'exit 0'
+: >"$partial_onchange_log"
+HOME="$partial_onchange_home" XDG_STATE_HOME="$partial_onchange_state" sh -c \
+  '. "$1"; terrapod_install_warning_write shell-integrations "Shell integration setup needs attention" "Previous shell integration warning."' \
+  sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
+
+HOME="$partial_onchange_home" \
+  XDG_STATE_HOME="$partial_onchange_state" \
+  SHELL_INTEGRATIONS_TEST_LOG="$partial_onchange_log" \
+  PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$rendered" >"$tmp_dir/shell-integrations-onchange-partial-dirs.out" 2>"$tmp_dir/shell-integrations-onchange-partial-dirs.err"
+
+partial_onchange_marker="$partial_onchange_state/terrapod/install-warnings/shell-integrations"
+if [ ! -f "$partial_onchange_marker" ]; then
+  fail "shell integrations onchange should keep marker when previous failures left partial directories"
+fi
+pass "shell integrations onchange keeps marker when previous failures left partial directories"
+
+partial_onchange_marker_text="$(cat "$partial_onchange_marker")"
+assert_contains "$partial_onchange_marker_text" "Oh My Zsh" "shell integrations onchange marker keeps partial Oh My Zsh warning"
+assert_contains "$partial_onchange_marker_text" "zinit" "shell integrations onchange marker keeps partial zinit warning"
 
 HOME="$HOME" XDG_STATE_HOME="$XDG_STATE_HOME" sh -c \
   '. "$1"; terrapod_install_warning_write shell-integrations "Shell integration setup needs attention" "Previous shell integration warning."' \
