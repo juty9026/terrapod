@@ -56,6 +56,51 @@ zinit_install_complete() {
   [ -f "$HOME/.local/share/zinit/zinit.git/zinit.zsh" ]
 }
 
+install_oh_my_zsh() {
+  echo "Installing Oh My Zsh..."
+  oh_my_zsh_installer="$(mktemp "${TMPDIR:-/tmp}/terrapod-oh-my-zsh-installer.XXXXXX")"
+  installer_paths="$installer_paths $oh_my_zsh_installer"
+  if ! curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh -o "$oh_my_zsh_installer"; then
+    append_failed_shell_integration "Oh My Zsh"
+  elif ! sh "$oh_my_zsh_installer" --unattended --keep-zshrc; then
+    append_failed_shell_integration "Oh My Zsh"
+  elif ! oh_my_zsh_install_complete; then
+    append_failed_shell_integration "Oh My Zsh"
+  fi
+}
+
+reinstall_partial_oh_my_zsh() {
+  if ! rm -rf "$HOME/.oh-my-zsh"; then
+    append_failed_shell_integration "Oh My Zsh"
+    return
+  fi
+
+  install_oh_my_zsh
+}
+
+install_zinit() {
+  echo "Installing zinit..."
+  if ! mkdir -p "$HOME/.local/share/zinit"; then
+    append_failed_shell_integration "zinit"
+    return
+  fi
+
+  if ! git clone https://github.com/zdharma-continuum/zinit "$HOME/.local/share/zinit/zinit.git"; then
+    append_failed_shell_integration "zinit"
+  elif ! zinit_install_complete; then
+    append_failed_shell_integration "zinit"
+  fi
+}
+
+reinstall_partial_zinit() {
+  if ! rm -rf "$HOME/.local/share/zinit/zinit.git"; then
+    append_failed_shell_integration "zinit"
+    return
+  fi
+
+  install_zinit
+}
+
 failed_shell_integrations=
 
 append_failed_shell_integration() {
@@ -142,26 +187,15 @@ setup_macos_brew
 ensure_git
 
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
-  echo "Installing Oh My Zsh..."
-  oh_my_zsh_installer="$(mktemp "${TMPDIR:-/tmp}/terrapod-oh-my-zsh-installer.XXXXXX")"
-  installer_paths="$installer_paths $oh_my_zsh_installer"
-  if ! curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh -o "$oh_my_zsh_installer"; then
-    append_failed_shell_integration "Oh My Zsh"
-  elif ! sh "$oh_my_zsh_installer" --unattended --keep-zshrc; then
-    append_failed_shell_integration "Oh My Zsh"
-  fi
+  install_oh_my_zsh
 elif shell_integrations_warning_exists && ! oh_my_zsh_install_complete; then
-  append_failed_shell_integration "Oh My Zsh"
+  reinstall_partial_oh_my_zsh
 fi
 
 if [ ! -d "$HOME/.local/share/zinit/zinit.git" ]; then
-  echo "Installing zinit..."
-  mkdir -p "$HOME/.local/share/zinit"
-  if ! git clone https://github.com/zdharma-continuum/zinit "$HOME/.local/share/zinit/zinit.git"; then
-    append_failed_shell_integration "zinit"
-  fi
+  install_zinit
 elif shell_integrations_warning_exists && ! zinit_install_complete; then
-  append_failed_shell_integration "zinit"
+  reinstall_partial_zinit
 fi
 
 if [ ! -d "$HOME/.scm_breeze" ]; then

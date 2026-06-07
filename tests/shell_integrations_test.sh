@@ -76,6 +76,23 @@ pass "rendered shell integrations retry script is valid sh"
 
 write_stub "$tmp_dir/bin/curl" \
   'printf "%s\n" "curl args:$*" >>"$SHELL_INTEGRATIONS_TEST_LOG"' \
+  'output_file=' \
+  'while [ "$#" -gt 0 ]; do' \
+  '  case "$1" in' \
+  '    -o)' \
+  '      shift' \
+  '      output_file="$1"' \
+  '      ;;' \
+  '  esac' \
+  '  shift' \
+  'done' \
+  'curl_status="${SHELL_INTEGRATIONS_CURL_STATUS:-0}"' \
+  'if [ "$curl_status" -ne 0 ]; then' \
+  '  exit "$curl_status"' \
+  'fi' \
+  'if [ -n "$output_file" ]; then' \
+  '  printf "%s\n" "#!/bin/sh" "mkdir -p \"\$HOME/.oh-my-zsh\"" ": >\"\$HOME/.oh-my-zsh/oh-my-zsh.sh\"" "exit \"\${SHELL_INTEGRATIONS_OMZ_INSTALL_STATUS:-0}\"" >"$output_file"' \
+  'fi' \
   'exit "${SHELL_INTEGRATIONS_CURL_STATUS:-0}"'
 
 write_stub "$tmp_dir/bin/git" \
@@ -179,14 +196,24 @@ HOME="$partial_retry_home" \
   sh "$retry_rendered" >"$tmp_dir/shell-integrations-retry-partial-dirs.out" 2>"$tmp_dir/shell-integrations-retry-partial-dirs.err"
 
 partial_retry_marker="$partial_retry_state/terrapod/install-warnings/shell-integrations"
-if [ ! -f "$partial_retry_marker" ]; then
-  fail "shell integrations retry should keep marker when previous failures left partial directories"
+if [ -f "$partial_retry_marker" ]; then
+  fail "shell integrations retry should clear marker after reinstalling partial directories"
 fi
-pass "shell integrations retry keeps marker when previous failures left partial directories"
+pass "shell integrations retry clears marker after reinstalling partial directories"
 
-partial_retry_marker_text="$(cat "$partial_retry_marker")"
-assert_contains "$partial_retry_marker_text" "Oh My Zsh" "shell integrations retry marker keeps partial Oh My Zsh warning"
-assert_contains "$partial_retry_marker_text" "zinit" "shell integrations retry marker keeps partial zinit warning"
+if [ ! -f "$partial_retry_home/.oh-my-zsh/oh-my-zsh.sh" ]; then
+  fail "shell integrations retry reinstalls partial Oh My Zsh directory"
+fi
+pass "shell integrations retry reinstalls partial Oh My Zsh directory"
+
+if [ ! -f "$partial_retry_home/.local/share/zinit/zinit.git/zinit.zsh" ]; then
+  fail "shell integrations retry reclones partial zinit directory"
+fi
+pass "shell integrations retry reclones partial zinit directory"
+
+partial_retry_log_text="$(cat "$partial_retry_log")"
+assert_contains "$partial_retry_log_text" "curl args:-fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh" "shell integrations retry reruns Oh My Zsh installer for partial directory"
+assert_contains "$partial_retry_log_text" "git args:clone https://github.com/zdharma-continuum/zinit" "shell integrations retry reclones zinit for partial directory"
 
 partial_onchange_home="$tmp_dir/partial-onchange-home"
 partial_onchange_state="$tmp_dir/partial-onchange-state"
@@ -210,14 +237,24 @@ HOME="$partial_onchange_home" \
   sh "$rendered" >"$tmp_dir/shell-integrations-onchange-partial-dirs.out" 2>"$tmp_dir/shell-integrations-onchange-partial-dirs.err"
 
 partial_onchange_marker="$partial_onchange_state/terrapod/install-warnings/shell-integrations"
-if [ ! -f "$partial_onchange_marker" ]; then
-  fail "shell integrations onchange should keep marker when previous failures left partial directories"
+if [ -f "$partial_onchange_marker" ]; then
+  fail "shell integrations onchange should clear marker after reinstalling partial directories"
 fi
-pass "shell integrations onchange keeps marker when previous failures left partial directories"
+pass "shell integrations onchange clears marker after reinstalling partial directories"
 
-partial_onchange_marker_text="$(cat "$partial_onchange_marker")"
-assert_contains "$partial_onchange_marker_text" "Oh My Zsh" "shell integrations onchange marker keeps partial Oh My Zsh warning"
-assert_contains "$partial_onchange_marker_text" "zinit" "shell integrations onchange marker keeps partial zinit warning"
+if [ ! -f "$partial_onchange_home/.oh-my-zsh/oh-my-zsh.sh" ]; then
+  fail "shell integrations onchange reinstalls partial Oh My Zsh directory"
+fi
+pass "shell integrations onchange reinstalls partial Oh My Zsh directory"
+
+if [ ! -f "$partial_onchange_home/.local/share/zinit/zinit.git/zinit.zsh" ]; then
+  fail "shell integrations onchange reclones partial zinit directory"
+fi
+pass "shell integrations onchange reclones partial zinit directory"
+
+partial_onchange_log_text="$(cat "$partial_onchange_log")"
+assert_contains "$partial_onchange_log_text" "curl args:-fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh" "shell integrations onchange reruns Oh My Zsh installer for partial directory"
+assert_contains "$partial_onchange_log_text" "git args:clone https://github.com/zdharma-continuum/zinit" "shell integrations onchange reclones zinit for partial directory"
 
 HOME="$HOME" XDG_STATE_HOME="$XDG_STATE_HOME" sh -c \
   '. "$1"; terrapod_install_warning_write shell-integrations "Shell integration setup needs attention" "Previous shell integration warning."' \
@@ -287,6 +324,7 @@ fi
 pass "shell integrations clears warning marker after successful rerun"
 
 rm -f "$shell_integrations_marker"
+rm -rf "$HOME/.oh-my-zsh"
 : >"$SHELL_INTEGRATIONS_TEST_LOG"
 SHELL_INTEGRATIONS_CURL_STATUS=23
 export SHELL_INTEGRATIONS_CURL_STATUS
