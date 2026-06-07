@@ -61,8 +61,18 @@ chezmoi execute-template \
   --file "$repo_root/.chezmoiscripts/run_onchange_before_30-install-shell-integrations.sh.tmpl" \
   >"$rendered"
 
+retry_rendered="$tmp_dir/shell-integrations-retry.sh"
+chezmoi execute-template \
+  --source "$repo_root" \
+  --override-data '{"chezmoi":{"os":"linux"}}' \
+  --file "$repo_root/.chezmoiscripts/run_before_31-retry-shell-integrations.sh.tmpl" \
+  >"$retry_rendered"
+
 sh -n "$rendered" || fail "rendered shell integrations script should be valid sh"
 pass "rendered shell integrations script is valid sh"
+
+sh -n "$retry_rendered" || fail "rendered shell integrations retry script should be valid sh"
+pass "rendered shell integrations retry script is valid sh"
 
 write_stub "$tmp_dir/bin/curl" \
   'printf "%s\n" "curl args:$*" >>"$SHELL_INTEGRATIONS_TEST_LOG"' \
@@ -90,6 +100,61 @@ export PATH="$tmp_dir/bin:/usr/bin:/bin"
 export HOME="$tmp_dir/home"
 export XDG_STATE_HOME="$tmp_dir/state"
 export SHELL_INTEGRATIONS_TEST_LOG="$tmp_dir/shell-integrations.log"
+
+retry_no_marker_home="$tmp_dir/retry-no-marker-home"
+retry_no_marker_state="$tmp_dir/retry-no-marker-state"
+retry_no_marker_log="$tmp_dir/retry-no-marker-shell-integrations.log"
+mkdir -p "$retry_no_marker_home"
+: >"$retry_no_marker_log"
+HOME="$retry_no_marker_home" \
+  XDG_STATE_HOME="$retry_no_marker_state" \
+  SHELL_INTEGRATIONS_TEST_LOG="$retry_no_marker_log" \
+  SHELL_INTEGRATIONS_CURL_STATUS=23 \
+  PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$retry_rendered" >"$tmp_dir/shell-integrations-retry-no-marker.out" 2>"$tmp_dir/shell-integrations-retry-no-marker.err"
+if [ -s "$retry_no_marker_log" ]; then
+  fail "shell integrations retry should be a no-op when no marker exists"
+fi
+pass "shell integrations retry is a no-op when no marker exists"
+
+retry_home="$tmp_dir/retry-home"
+retry_state="$tmp_dir/retry-state"
+retry_log="$tmp_dir/retry-shell-integrations.log"
+mkdir -p "$retry_home"
+: >"$retry_log"
+HOME="$retry_home" XDG_STATE_HOME="$retry_state" sh -c \
+  '. "$1"; terrapod_install_warning_write shell-integrations "Shell integration setup needs attention" "Previous shell integration warning."' \
+  sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
+
+SHELL_INTEGRATIONS_CURL_STATUS=23 \
+  HOME="$retry_home" \
+  XDG_STATE_HOME="$retry_state" \
+  SHELL_INTEGRATIONS_TEST_LOG="$retry_log" \
+  PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$retry_rendered" >"$tmp_dir/shell-integrations-retry-curl-failure.out" 2>"$tmp_dir/shell-integrations-retry-curl-failure.err"
+
+retry_marker="$retry_state/terrapod/install-warnings/shell-integrations"
+if [ ! -f "$retry_marker" ]; then
+  fail "shell integrations retry should keep a warning marker when retry still fails"
+fi
+pass "shell integrations retry keeps a warning marker when retry still fails"
+
+retry_marker_text="$(cat "$retry_marker")"
+assert_contains "$retry_marker_text" "Oh My Zsh" "shell integrations retry marker mentions the failed Oh My Zsh step"
+retry_log_text="$(cat "$retry_log")"
+assert_contains "$retry_log_text" "curl args:-fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh" "shell integrations retry attempts Oh My Zsh when marker exists"
+assert_contains "$retry_log_text" "git args:clone https://github.com/zdharma-continuum/zinit" "shell integrations retry continues to zinit when Oh My Zsh fails"
+
+: >"$retry_log"
+HOME="$retry_home" \
+  XDG_STATE_HOME="$retry_state" \
+  SHELL_INTEGRATIONS_TEST_LOG="$retry_log" \
+  PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$retry_rendered" >"$tmp_dir/shell-integrations-retry-recovery.out" 2>"$tmp_dir/shell-integrations-retry-recovery.err"
+if [ -e "$retry_marker" ]; then
+  fail "shell integrations retry should clear warning marker after recovery"
+fi
+pass "shell integrations retry clears warning marker after recovery"
 
 HOME="$HOME" XDG_STATE_HOME="$XDG_STATE_HOME" sh -c \
   '. "$1"; terrapod_install_warning_write shell-integrations "Shell integration setup needs attention" "Previous shell integration warning."' \

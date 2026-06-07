@@ -1,0 +1,119 @@
+{{- if or (eq .chezmoi.os "darwin") (eq .chezmoi.os "linux") -}}
+#!/bin/sh
+set -eu
+
+install_warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
+TERRAPOD_INSTALL_WARNINGS_LOADED=
+if [ -f "$install_warnings_lib" ]; then
+  . "$install_warnings_lib"
+fi
+
+if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
+  exit 0
+fi
+
+mise_tools_marker_path="$(terrapod_install_warning_path mise-tools 2>/dev/null || true)"
+if [ -z "$mise_tools_marker_path" ] || [ ! -f "$mise_tools_marker_path" ]; then
+  exit 0
+fi
+
+INSTALL_WARNING_RECORDED=0
+
+mark_install_warning() {
+  category="$1"
+  summary="$2"
+  guidance="$3"
+  INSTALL_WARNING_RECORDED=0
+
+  if terrapod_install_warning_write "$category" "$summary" "$guidance"; then
+    INSTALL_WARNING_RECORDED=1
+  fi
+}
+
+exit_after_install_warning() {
+  if [ "$INSTALL_WARNING_RECORDED" -eq 1 ]; then
+    exit 0
+  fi
+
+  exit 1
+}
+
+clear_install_warning() {
+  category="$1"
+
+  terrapod_install_warning_clear "$category" || true
+}
+
+failed_mise_steps=
+
+append_failed_mise_step() {
+  step="$1"
+
+  if [ -n "$failed_mise_steps" ]; then
+    failed_mise_steps="$failed_mise_steps, $step"
+  else
+    failed_mise_steps="$step"
+  fi
+}
+
+finish_mise_tools() {
+  if [ -n "$failed_mise_steps" ]; then
+    mark_install_warning \
+      mise-tools \
+      "mise tool install needs attention" \
+      "Failed step(s): $failed_mise_steps. Review mise output, fix tool installation issues, then rerun tpod apply. If mise aqua resolution hit GitHub API rate limits, export a temporary GITHUB_TOKEN or run gh auth login before rerunning."
+    exit_after_install_warning
+  fi
+
+  clear_install_warning mise-tools
+}
+
+setup_mise() {
+  if command -v mise >/dev/null 2>&1; then
+    return
+  fi
+
+{{ if eq .chezmoi.os "darwin" }}
+  if [ -x /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  fi
+
+  if command -v mise >/dev/null 2>&1; then
+    return
+  fi
+
+  if [ -x /usr/local/bin/brew ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+  fi
+
+  if ! command -v mise >/dev/null 2>&1; then
+    echo "mise is required. Run the Homebrew Brewfile bundle first." >&2
+    mark_install_warning \
+      mise-tools \
+      "mise tool install needs attention" \
+      "Run the Homebrew Brewfile bundle or fix mise on PATH, then rerun tpod apply."
+    exit_after_install_warning
+  fi
+{{ else }}
+  echo "mise is required. The Ubuntu bootstrap script should install mise from the official APT repository." >&2
+  mark_install_warning \
+    mise-tools \
+    "mise tool install needs attention" \
+    "Run the Ubuntu bootstrap script or fix mise on PATH, then rerun tpod apply."
+  exit_after_install_warning
+{{ end }}
+}
+
+setup_mise
+if ! mise install --yes -C "$HOME"; then
+  append_failed_mise_step "mise install"
+fi
+
+if mise exec --yes -C "$HOME" -- sh -c 'command -v corepack' >/dev/null 2>&1; then
+  if ! mise exec --yes -C "$HOME" -- corepack enable; then
+    append_failed_mise_step "corepack enable"
+  fi
+fi
+
+finish_mise_tools
+{{- end }}

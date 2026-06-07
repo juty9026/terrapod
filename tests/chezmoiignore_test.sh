@@ -789,10 +789,30 @@ assert_managed_paths_include_prefix \
   ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
   "Ubuntu VPS includes Optional AI Tool Stack warning cleanup by default"
 
+assert_managed_paths_include_prefix \
+  "$ubuntu_managed" \
+  ".chezmoiscripts/run_after_21-retry-mise-tools.sh.tmpl" \
+  "Ubuntu VPS includes marker-gated mise tool retry hook"
+
+assert_managed_paths_include_prefix \
+  "$ubuntu_managed" \
+  ".chezmoiscripts/run_before_31-retry-shell-integrations.sh.tmpl" \
+  "Ubuntu VPS includes marker-gated shell integration retry hook"
+
 assert_managed_paths_exclude_prefix \
   "$macos_managed" \
   "dot_config/nvim" \
   "macOS ignores Optional Editor Stack entries by default"
+
+assert_managed_paths_include_prefix \
+  "$macos_managed" \
+  ".chezmoiscripts/run_after_21-retry-mise-tools.sh.tmpl" \
+  "macOS includes marker-gated mise tool retry hook"
+
+assert_managed_paths_include_prefix \
+  "$macos_managed" \
+  ".chezmoiscripts/run_before_31-retry-shell-integrations.sh.tmpl" \
+  "macOS includes marker-gated shell integration retry hook"
 
 if [ -e "$repo_root/dot_config/zsh/path.d/antigravity.zsh.tmpl" ]; then
   fail "legacy Antigravity app-bundle PATH snippet is no longer managed"
@@ -855,6 +875,7 @@ fi
 pass "Ubuntu VPS installs GitHub CLI gh in the Core Shell Stack"
 
 mise_tools_installer="$(render_template "$ubuntu_data" ".chezmoiscripts/run_onchange_after_20-install-mise-tools.sh.tmpl")"
+mise_tools_retry="$(render_template "$ubuntu_data" ".chezmoiscripts/run_after_21-retry-mise-tools.sh.tmpl")"
 
 if ! printf '%s\n' "$mise_tools_installer" |
   grep -E '^# mise-config-sha256=[0-9a-f]{64}$' >/dev/null; then
@@ -867,6 +888,11 @@ mise_tools_installer_script="$tmp_dir/mise-tools-installer.sh"
 printf '%s\n' "$mise_tools_installer" >"$mise_tools_installer_script"
 sh -n "$mise_tools_installer_script" || fail "mise tool installer script should be valid sh"
 pass "mise tool installer script should be valid sh"
+
+mise_tools_retry_script="$tmp_dir/mise-tools-retry.sh"
+printf '%s\n' "$mise_tools_retry" >"$mise_tools_retry_script"
+sh -n "$mise_tools_retry_script" || fail "mise tool retry script should be valid sh"
+pass "mise tool retry script should be valid sh"
 
 mise_tools_bin="$tmp_dir/mise-tools-bin"
 mise_tools_state="$tmp_dir/mise-tools-state"
@@ -954,6 +980,59 @@ assert_contains_text "$mise_tools_marker_text" "summary='mise tool install needs
 assert_contains_text "$mise_tools_marker_text" "Failed step(s): corepack enable" "mise tool installer replaces stale marker with corepack enable failure"
 assert_not_contains_text "$mise_tools_marker_text" "stale guidance" "mise tool installer replaces stale marker guidance"
 assert_contains_text "$mise_tools_marker_text" "updated_at='" "mise tool installer replacement marker includes update timestamp"
+
+: >"$mise_tools_log"
+HOME="$mise_tools_home" \
+  XDG_STATE_HOME="$mise_tools_state" \
+  MISE_TOOLS_LOG="$mise_tools_log" \
+  PATH="$mise_tools_bin:/usr/bin:/bin" \
+  sh "$mise_tools_retry_script"
+if [ -e "$mise_tools_marker" ]; then
+  fail "mise tool retry should clear stale mise-tools marker after a successful retry"
+fi
+pass "mise tool retry clears stale mise-tools marker after a successful retry"
+mise_tools_retry_log_text="$(cat "$mise_tools_log")"
+assert_contains_text "$mise_tools_retry_log_text" "mise args:install --yes -C $mise_tools_home" "mise tool retry attempts mise install when marker exists"
+
+: >"$mise_tools_log"
+HOME="$mise_tools_home" \
+  XDG_STATE_HOME="$mise_tools_state" \
+  MISE_TOOLS_LOG="$mise_tools_log" \
+  MISE_TOOLS_INSTALL_STATUS=17 \
+  PATH="$mise_tools_bin:/usr/bin:/bin" \
+  sh "$mise_tools_retry_script"
+if [ -s "$mise_tools_log" ]; then
+  fail "mise tool retry should be a no-op when no marker exists"
+fi
+pass "mise tool retry is a no-op when no marker exists"
+
+HOME="$mise_tools_home" XDG_STATE_HOME="$mise_tools_state" sh -c \
+  '. "$1"; terrapod_install_warning_write mise-tools "mise tool install needs attention" "Previous mise warning."' \
+  sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
+: >"$mise_tools_log"
+HOME="$mise_tools_home" \
+  XDG_STATE_HOME="$mise_tools_state" \
+  MISE_TOOLS_LOG="$mise_tools_log" \
+  MISE_TOOLS_INSTALL_STATUS=17 \
+  PATH="$mise_tools_bin:/usr/bin:/bin" \
+  sh "$mise_tools_retry_script"
+if [ ! -f "$mise_tools_marker" ]; then
+  fail "mise tool retry should keep a warning marker when retry still fails"
+fi
+pass "mise tool retry keeps a warning marker when retry still fails"
+mise_tools_marker_text="$(cat "$mise_tools_marker")"
+assert_contains_text "$mise_tools_marker_text" "Failed step(s): mise install" "mise tool retry replacement marker records failed mise install step"
+
+: >"$mise_tools_log"
+HOME="$mise_tools_home" \
+  XDG_STATE_HOME="$mise_tools_state" \
+  MISE_TOOLS_LOG="$mise_tools_log" \
+  PATH="$mise_tools_bin:/usr/bin:/bin" \
+  sh "$mise_tools_retry_script"
+if [ -e "$mise_tools_marker" ]; then
+  fail "mise tool retry should clear warning marker after recovery"
+fi
+pass "mise tool retry clears warning marker after recovery"
 
 ai_cli_tools_installer="$(render_template "$ai_cli_tools_data" ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl")"
 development_workspace_ai_installer="$(render_template "$development_workspace_data" ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl")"

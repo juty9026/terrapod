@@ -4,7 +4,7 @@
 
 **Goal:** Make `mise-tools` and `shell-integrations` installer failures marker-backed, non-blocking recovery categories for routine `tpod apply`, while clearing or replacing each marker on later reruns.
 
-**Architecture:** Keep the shared install-warning marker storage in `dot_local/lib/terrapod/install-warnings.sh` unchanged. Update the two installer templates so reliable category failures are accumulated, written to one category marker, and return success after the marker write succeeds; successful reruns clear the category marker. Tests render the templates through chezmoi and run isolated stubbed commands so no real installers or network calls execute.
+**Architecture:** Keep the shared install-warning marker storage in `dot_local/lib/terrapod/install-warnings.sh` unchanged. Update the two installer templates so reliable category failures are accumulated, written to one category marker, and return success after the marker write succeeds; successful reruns clear the category marker. Because successful `run_onchange_` scripts are not rerun by chezmoi when their content is unchanged, add marker-gated always-run retry hooks that no-op without a marker and retry only when a category marker exists. Tests render the templates through chezmoi and run isolated stubbed commands so no real installers or network calls execute.
 
 **Tech Stack:** POSIX `sh`, chezmoi templates, shell test scripts under `tests/`, GitHub Issue #102.
 
@@ -15,13 +15,17 @@
 - Modify: `.chezmoiscripts/run_onchange_after_20-install-mise-tools.sh.tmpl`
   - Owns the `mise-tools` category.
   - Should collect failed steps, write one marker on failure, exit 0 after a successful marker write, and clear the marker when `mise install` and `corepack enable` both succeed.
+- Create: `.chezmoiscripts/run_after_21-retry-mise-tools.sh.tmpl`
+  - Always runs after apply, no-ops without a `mise-tools` marker, and retries the marker-backed recovery path on later `tpod apply` runs.
 - Modify: `.chezmoiscripts/run_onchange_before_30-install-shell-integrations.sh.tmpl`
   - Owns the `shell-integrations` category.
   - Should collect failed shell integration names, keep attempting independent integrations when practical, write one marker on failure, exit 0 after a successful marker write, and clear the marker on full success.
+- Create: `.chezmoiscripts/run_before_31-retry-shell-integrations.sh.tmpl`
+  - Always runs during the before phase, no-ops without a `shell-integrations` marker, and retries the marker-backed recovery path on later `tpod apply` runs.
 - Modify: `tests/chezmoiignore_test.sh`
-  - Covers rendered `mise-tools` behavior and broad render assertions.
+  - Covers rendered `mise-tools` behavior, marker-gated retry behavior, and broad render assertions.
 - Modify: `tests/shell_integrations_test.sh`
-  - Covers rendered `shell-integrations` behavior and continuing after practical per-item failures.
+  - Covers rendered `shell-integrations` behavior, marker-gated retry behavior, and continuing after practical per-item failures.
 - Create: `docs/superpowers/plans/2026-06-07-mise-shell-warning-categories.md`
   - This implementation plan.
 
