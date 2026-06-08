@@ -15,6 +15,12 @@ if [ -f "$install_warnings_lib" ]; then
   . "$install_warnings_lib"
 fi
 
+homebrew_core_bundle_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/homebrew-core-bundle.sh"
+TERRAPOD_HOMEBREW_CORE_BUNDLE_LOADED=
+if [ -f "$homebrew_core_bundle_lib" ]; then
+  . "$homebrew_core_bundle_lib"
+fi
+
 INSTALL_WARNING_RECORDED=0
 
 mark_install_warning() {
@@ -38,6 +44,24 @@ exit_after_install_warning() {
   fi
 
   exit 1
+}
+
+exit_after_nonblocking_install_warning() {
+  if [ "$INSTALL_WARNING_RECORDED" -eq 1 ]; then
+    exit 0
+  fi
+
+  exit 1
+}
+
+continue_after_core_install_warning() {
+{{ if $enableMacosAppGroups -}}
+  if [ "$INSTALL_WARNING_RECORDED" -ne 1 ]; then
+    exit 1
+  fi
+{{ else -}}
+  exit_after_nonblocking_install_warning
+{{ end -}}
 }
 
 clear_install_warning() {
@@ -238,14 +262,29 @@ core_brewfile="{{ .chezmoi.sourceDir }}/Brewfile"
 
 # Core Brewfile checksum: {{ include "Brewfile" | sha256sum }}
 if [ -f "$core_brewfile" ]; then
-  if brew bundle --no-upgrade --file="$core_brewfile"; then
-    clear_install_warning homebrew-core
+  if [ "${TERRAPOD_HOMEBREW_CORE_BUNDLE_LOADED:-}" = "1" ]; then
+    if terrapod_homebrew_core_run_bundle "$core_brewfile"; then
+      clear_install_warning homebrew-core
+    else
+      if [ -z "${TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT:-}" ]; then
+        TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT="Review Homebrew core bundle output, fix package access, then rerun tpod apply."
+      fi
+      mark_install_warning \
+        homebrew-core \
+        "Homebrew core install needs attention" \
+        "$TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT"
+      continue_after_core_install_warning
+    fi
   else
-    mark_install_warning \
-      homebrew-core \
-      "Homebrew core install needs attention" \
-      "Review Homebrew bundle output, fix package access, then rerun tpod apply."
-    exit_after_install_warning
+    if brew bundle --no-upgrade --file="$core_brewfile"; then
+      clear_install_warning homebrew-core
+    else
+      mark_install_warning \
+        homebrew-core \
+        "Homebrew core install needs attention" \
+        "Review Homebrew core bundle output, fix package access, then rerun tpod apply."
+      continue_after_core_install_warning
+    fi
   fi
 fi
 

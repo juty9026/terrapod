@@ -181,9 +181,6 @@ mkdir -p \
   "$partial_retry_home/.oh-my-zsh" \
   "$partial_retry_home/.local/share/zinit/zinit.git" \
   "$partial_retry_home/.scm_breeze"
-write_stub "$partial_retry_home/.scm_breeze/install.sh" \
-  'printf "%s\n" "scm-breeze install" >>"$SHELL_INTEGRATIONS_TEST_LOG"' \
-  'exit 0'
 : >"$partial_retry_log"
 HOME="$partial_retry_home" XDG_STATE_HOME="$partial_retry_state" sh -c \
   '. "$1"; terrapod_install_warning_write shell-integrations "Shell integration setup needs attention" "Previous shell integration warning."' \
@@ -211,9 +208,15 @@ if [ ! -f "$partial_retry_home/.local/share/zinit/zinit.git/zinit.zsh" ]; then
 fi
 pass "shell integrations retry reclones partial zinit directory"
 
+if [ ! -x "$partial_retry_home/.scm_breeze/install.sh" ]; then
+  fail "shell integrations retry reclones partial SCM Breeze directory"
+fi
+pass "shell integrations retry reclones partial SCM Breeze directory"
+
 partial_retry_log_text="$(cat "$partial_retry_log")"
 assert_contains "$partial_retry_log_text" "curl args:-fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh" "shell integrations retry reruns Oh My Zsh installer for partial directory"
 assert_contains "$partial_retry_log_text" "git args:clone https://github.com/zdharma-continuum/zinit" "shell integrations retry reclones zinit for partial directory"
+assert_contains "$partial_retry_log_text" "git args:clone https://github.com/scmbreeze/scm_breeze.git" "shell integrations retry reclones SCM Breeze for partial directory"
 
 partial_onchange_home="$tmp_dir/partial-onchange-home"
 partial_onchange_state="$tmp_dir/partial-onchange-state"
@@ -222,9 +225,6 @@ mkdir -p \
   "$partial_onchange_home/.oh-my-zsh" \
   "$partial_onchange_home/.local/share/zinit/zinit.git" \
   "$partial_onchange_home/.scm_breeze"
-write_stub "$partial_onchange_home/.scm_breeze/install.sh" \
-  'printf "%s\n" "scm-breeze install" >>"$SHELL_INTEGRATIONS_TEST_LOG"' \
-  'exit 0'
 : >"$partial_onchange_log"
 HOME="$partial_onchange_home" XDG_STATE_HOME="$partial_onchange_state" sh -c \
   '. "$1"; terrapod_install_warning_write shell-integrations "Shell integration setup needs attention" "Previous shell integration warning."' \
@@ -252,9 +252,15 @@ if [ ! -f "$partial_onchange_home/.local/share/zinit/zinit.git/zinit.zsh" ]; the
 fi
 pass "shell integrations onchange reclones partial zinit directory"
 
+if [ ! -x "$partial_onchange_home/.scm_breeze/install.sh" ]; then
+  fail "shell integrations onchange reclones partial SCM Breeze directory"
+fi
+pass "shell integrations onchange reclones partial SCM Breeze directory"
+
 partial_onchange_log_text="$(cat "$partial_onchange_log")"
 assert_contains "$partial_onchange_log_text" "curl args:-fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh" "shell integrations onchange reruns Oh My Zsh installer for partial directory"
 assert_contains "$partial_onchange_log_text" "git args:clone https://github.com/zdharma-continuum/zinit" "shell integrations onchange reclones zinit for partial directory"
+assert_contains "$partial_onchange_log_text" "git args:clone https://github.com/scmbreeze/scm_breeze.git" "shell integrations onchange reclones SCM Breeze for partial directory"
 
 HOME="$HOME" XDG_STATE_HOME="$XDG_STATE_HOME" sh -c \
   '. "$1"; terrapod_install_warning_write shell-integrations "Shell integration setup needs attention" "Previous shell integration warning."' \

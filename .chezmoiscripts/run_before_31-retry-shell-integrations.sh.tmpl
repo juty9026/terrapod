@@ -56,6 +56,10 @@ zinit_install_complete() {
   [ -f "$HOME/.local/share/zinit/zinit.git/zinit.zsh" ]
 }
 
+scm_breeze_install_complete() {
+  [ -x "$HOME/.scm_breeze/install.sh" ]
+}
+
 install_oh_my_zsh() {
   echo "Installing Oh My Zsh..."
   oh_my_zsh_installer="$(mktemp "${TMPDIR:-/tmp}/terrapod-oh-my-zsh-installer.XXXXXX")"
@@ -99,6 +103,26 @@ reinstall_partial_zinit() {
   fi
 
   install_zinit
+}
+
+install_scm_breeze() {
+  echo "Installing SCM Breeze..."
+  if ! git clone https://github.com/scmbreeze/scm_breeze.git "$HOME/.scm_breeze"; then
+    append_failed_shell_integration "SCM Breeze"
+  elif ! scm_breeze_install_complete; then
+    append_failed_shell_integration "SCM Breeze"
+  elif ! "$HOME/.scm_breeze/install.sh"; then
+    append_failed_shell_integration "SCM Breeze"
+  fi
+}
+
+reinstall_partial_scm_breeze() {
+  if ! rm -rf "$HOME/.scm_breeze"; then
+    append_failed_shell_integration "SCM Breeze"
+    return
+  fi
+
+  install_scm_breeze
 }
 
 failed_shell_integrations=
@@ -199,17 +223,12 @@ elif shell_integrations_warning_exists && ! zinit_install_complete; then
 fi
 
 if [ ! -d "$HOME/.scm_breeze" ]; then
-  echo "Installing SCM Breeze..."
-  if ! git clone https://github.com/scmbreeze/scm_breeze.git "$HOME/.scm_breeze"; then
-    append_failed_shell_integration "SCM Breeze"
-  elif ! "$HOME/.scm_breeze/install.sh"; then
-    append_failed_shell_integration "SCM Breeze"
-  fi
+  install_scm_breeze
+elif shell_integrations_warning_exists && ! scm_breeze_install_complete; then
+  reinstall_partial_scm_breeze
 elif shell_integrations_warning_exists; then
   echo "Installing SCM Breeze..."
-  if [ ! -x "$HOME/.scm_breeze/install.sh" ]; then
-    append_failed_shell_integration "SCM Breeze"
-  elif ! "$HOME/.scm_breeze/install.sh"; then
+  if ! "$HOME/.scm_breeze/install.sh"; then
     append_failed_shell_integration "SCM Breeze"
   fi
 fi
