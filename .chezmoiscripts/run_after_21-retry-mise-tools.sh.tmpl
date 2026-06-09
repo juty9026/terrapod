@@ -1,12 +1,20 @@
 {{- if or (eq .chezmoi.os "darwin") (eq .chezmoi.os "linux") -}}
 #!/bin/sh
-# mise-config-sha256={{ includeTemplate "dot_config/mise/config.toml.tmpl" . | sha256sum }}
 set -eu
 
 install_warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
 TERRAPOD_INSTALL_WARNINGS_LOADED=
 if [ -f "$install_warnings_lib" ]; then
   . "$install_warnings_lib"
+fi
+
+if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
+  exit 0
+fi
+
+mise_tools_marker_path="$(terrapod_install_warning_path mise-tools 2>/dev/null || true)"
+if [ -z "$mise_tools_marker_path" ] || [ ! -f "$mise_tools_marker_path" ]; then
+  exit 0
 fi
 
 INSTALL_WARNING_RECORDED=0
@@ -17,8 +25,7 @@ mark_install_warning() {
   guidance="$3"
   INSTALL_WARNING_RECORDED=0
 
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ] &&
-    terrapod_install_warning_write "$category" "$summary" "$guidance"; then
+  if terrapod_install_warning_write "$category" "$summary" "$guidance"; then
     INSTALL_WARNING_RECORDED=1
   fi
 }
@@ -34,9 +41,7 @@ exit_after_install_warning() {
 clear_install_warning() {
   category="$1"
 
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
-    terrapod_install_warning_clear "$category" || true
-  fi
+  terrapod_install_warning_clear "$category" || true
 }
 
 failed_mise_steps=
@@ -63,16 +68,6 @@ finish_mise_tools() {
   clear_install_warning mise-tools
 }
 
-install_warning_exists() {
-  category="$1"
-
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
-    return 1
-  fi
-
-  terrapod_install_warning_existing_path "$category" >/dev/null 2>&1
-}
-
 setup_mise() {
   if command -v mise >/dev/null 2>&1; then
     return
@@ -92,11 +87,6 @@ setup_mise() {
   fi
 
   if ! command -v mise >/dev/null 2>&1; then
-    if install_warning_exists homebrew-core; then
-      echo "mise is required, but Homebrew core install already needs attention. Fix Homebrew core, then rerun tpod apply." >&2
-      exit 0
-    fi
-
     echo "mise is required. Run the Homebrew Brewfile bundle first." >&2
     mark_install_warning \
       mise-tools \

@@ -8,6 +8,15 @@ if [ -f "$install_warnings_lib" ]; then
   . "$install_warnings_lib"
 fi
 
+if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
+  exit 0
+fi
+
+shell_integrations_marker_path="$(terrapod_install_warning_path shell-integrations 2>/dev/null || true)"
+if [ -z "$shell_integrations_marker_path" ] || [ ! -f "$shell_integrations_marker_path" ]; then
+  exit 0
+fi
+
 INSTALL_WARNING_RECORDED=0
 
 mark_install_warning() {
@@ -16,8 +25,7 @@ mark_install_warning() {
   guidance="$3"
   INSTALL_WARNING_RECORDED=0
 
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ] &&
-    terrapod_install_warning_write "$category" "$summary" "$guidance"; then
+  if terrapod_install_warning_write "$category" "$summary" "$guidance"; then
     INSTALL_WARNING_RECORDED=1
   fi
 }
@@ -33,16 +41,10 @@ exit_after_install_warning() {
 clear_install_warning() {
   category="$1"
 
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
-    terrapod_install_warning_clear "$category" || true
-  fi
+  terrapod_install_warning_clear "$category" || true
 }
 
 shell_integrations_warning_exists() {
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
-    return 1
-  fi
-
   terrapod_install_warning_existing_path shell-integrations >/dev/null 2>&1
 }
 
