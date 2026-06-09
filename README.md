@@ -286,6 +286,13 @@ Opting out of an optional stack excludes its files from chezmoi management; it d
 
 Existing npm-installed AI CLIs are left unmanaged; Terrapod does not uninstall or warn merely because they remain on a machine.
 
+### Zellij shortcuts
+
+Terrapod-managed `.zshrc` exposes these Zellij helpers:
+
+- `zja [session]`: attaches to a Zellij session. When `session` is omitted, it defaults to the current directory name.
+- `zdac [session]`: attaches to or creates a dev-layout Zellij session. It is available when `enableDevelopmentWorkspace` is true, and defaults to the current directory name when `session` is omitted.
+
 ### Optional stack profile examples
 
 The examples below show values to keep or change inside an existing complete

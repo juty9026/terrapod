@@ -19,6 +19,17 @@ pass() {
   print -- "ok - $1"
 }
 
+assert_log_contains() {
+  local expected="$1"
+  local message="$2"
+
+  if ! grep -F "$expected" "$ZELLIJ_TEST_LOG" >/dev/null 2>&1; then
+    fail "$message; expected log to contain '$expected'"
+  fi
+
+  pass "$message"
+}
+
 render_zshrc() {
   local data="$1"
 
@@ -116,7 +127,12 @@ fi
 exit 64
 STUB
 
-chmod +x "$tmp_dir/bin/fzf" "$tmp_dir/bin/zoxide"
+cat >"$tmp_dir/bin/zellij" <<'STUB'
+#!/bin/sh
+printf '%s\n' "zellij args:$*" >>"$ZELLIJ_TEST_LOG"
+STUB
+
+chmod +x "$tmp_dir/bin/fzf" "$tmp_dir/bin/zellij" "$tmp_dir/bin/zoxide"
 
 chezmoi_bin="$(command -v chezmoi)" || fail "chezmoi is required to render templates"
 
@@ -124,8 +140,10 @@ export HOME="$tmp_dir/home"
 export PATH="$tmp_dir/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export CLAUDECODE=1
 export ZOXIDE_TEST_SELECTION="$tmp_dir/selected"
+export ZELLIJ_TEST_LOG="$tmp_dir/zellij.log"
 
 : >"$tmp_dir/chezmoi.toml"
+: >"$ZELLIJ_TEST_LOG"
 render_zshrc '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}}}'
 
 cd "$tmp_dir/start" || fail "could not enter test start directory"
@@ -137,11 +155,26 @@ fi
 
 pass "default shell exposes the general Zellij launcher"
 
+if [[ "$(whence -w zja)" != "zja: function" ]]; then
+  fail "default shell should expose the general Zellij attach helper"
+fi
+
+pass "default shell exposes the general Zellij attach helper"
+
+zja
+assert_log_contains "zellij args:attach start" "zja attaches to a session named after the current directory"
+
 if alias zd >/dev/null 2>&1; then
   fail "default shell should not expose the Optional Development Workspace launcher"
 fi
 
 pass "default shell does not expose the Optional Development Workspace launcher"
+
+if whence -w zdac >/dev/null 2>&1; then
+  fail "default shell should not expose the Optional Development Workspace attach-or-create helper"
+fi
+
+pass "default shell does not expose the Optional Development Workspace attach-or-create helper"
 
 render_zshrc '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableAiCliTools":true}'
 
@@ -159,6 +192,12 @@ if alias zd >/dev/null 2>&1; then
 fi
 
 pass "enableAiCliTools alone does not expose the Optional Development Workspace launcher"
+
+if whence -w zdac >/dev/null 2>&1; then
+  fail "enableAiCliTools alone should not expose the Optional Development Workspace attach-or-create helper"
+fi
+
+pass "enableAiCliTools alone does not expose the Optional Development Workspace attach-or-create helper"
 
 if alias zi >/dev/null 2>&1; then
   fail ".zshrc should not define a zi alias over zoxide's function"
@@ -216,3 +255,14 @@ if ! alias zd >/dev/null 2>&1; then
 fi
 
 pass "enableDevelopmentWorkspace exposes the Optional Development Workspace launcher"
+
+if [[ "$(whence -w zdac)" != "zdac: function" ]]; then
+  fail "enableDevelopmentWorkspace should expose the Optional Development Workspace attach-or-create helper"
+fi
+
+pass "enableDevelopmentWorkspace exposes the Optional Development Workspace attach-or-create helper"
+
+cd "$tmp_dir/git-project" || fail "could not enter git project directory"
+: >"$ZELLIJ_TEST_LOG"
+zdac
+assert_log_contains "zellij args:--layout dev attach --create git-project" "zdac creates or attaches to a dev-layout session named after the current directory"
