@@ -30,6 +30,18 @@ assert_log_contains() {
   pass "$message"
 }
 
+assert_file_contains() {
+  local file="$1"
+  local expected="$2"
+  local message="$3"
+
+  if ! grep -F "$expected" "$file" >/dev/null 2>&1; then
+    fail "$message; expected $file to contain '$expected'"
+  fi
+
+  pass "$message"
+}
+
 render_zshrc() {
   local data="$1"
 
@@ -57,12 +69,14 @@ assert_pwd() {
 
 mkdir -p \
   "$tmp_dir/bin" \
+  "$tmp_dir/git-only-bin" \
   "$tmp_dir/home" \
   "$tmp_dir/home/.local/share/zinit/zinit.git" \
   "$tmp_dir/start" \
   "$tmp_dir/selected" \
   "$tmp_dir/recent" \
   "$tmp_dir/git-project/.git" \
+  "$tmp_dir/worktree-main" \
   "$tmp_dir/plain"
 
 cat >"$tmp_dir/home/.local/share/zinit/zinit.git/zinit.zsh" <<'STUB'
@@ -132,7 +146,16 @@ cat >"$tmp_dir/bin/zellij" <<'STUB'
 printf '%s\n' "zellij args:$*" >>"$ZELLIJ_TEST_LOG"
 STUB
 
-chmod +x "$tmp_dir/bin/fzf" "$tmp_dir/bin/zellij" "$tmp_dir/bin/zoxide"
+cat >"$tmp_dir/git-only-bin/git" <<'STUB'
+#!/bin/sh
+if [ "$1" = "rev-parse" ] && [ "$2" = "--is-inside-work-tree" ]; then
+  exit 0
+fi
+
+exit 64
+STUB
+
+chmod +x "$tmp_dir/bin/fzf" "$tmp_dir/bin/zellij" "$tmp_dir/bin/zoxide" "$tmp_dir/git-only-bin/git"
 
 chezmoi_bin="$(command -v chezmoi)" || fail "chezmoi is required to render templates"
 
@@ -246,6 +269,44 @@ export ZOXIDE_TEST_LIST="$tmp_dir/git-project"$'\n'"$tmp_dir/plain"
 zg
 assert_pwd "$tmp_dir/git-project" "zg should still jump to the selected git directory"
 pass "zg continues to change directory"
+
+cd "$tmp_dir/plain" || fail "could not enter plain directory"
+if wcd >"$tmp_dir/wcd-not-git.out" 2>&1; then
+  fail "wcd should fail outside a git repository"
+fi
+assert_file_contains "$tmp_dir/wcd-not-git.out" "이 디렉토리는 Git 저장소가 아닙니다." "wcd explains non-git directories"
+
+old_path="$PATH"
+PATH="$tmp_dir/git-only-bin"
+if wcd >"$tmp_dir/wcd-missing-fzf.out" 2>&1; then
+  fail "wcd should fail when fzf is unavailable"
+fi
+PATH="$old_path"
+assert_file_contains "$tmp_dir/wcd-missing-fzf.out" "fzf가 설치되어 있지 않습니다." "wcd explains missing fzf"
+
+git -C "$tmp_dir/worktree-main" init -b main >/dev/null
+git -C "$tmp_dir/worktree-main" config user.email "test@example.com"
+git -C "$tmp_dir/worktree-main" config user.name "Test User"
+: >"$tmp_dir/worktree-main/file.txt"
+git -C "$tmp_dir/worktree-main" add file.txt
+git -C "$tmp_dir/worktree-main" commit -m "initial commit" >/dev/null
+git -C "$tmp_dir/worktree-main" branch feature/worktree
+git -C "$tmp_dir/worktree-main" worktree add "$tmp_dir/worktree selected" feature/worktree >/dev/null 2>&1
+
+cd "$tmp_dir/worktree-main" || fail "could not enter worktree main directory"
+worktree_display="$(git -C "$tmp_dir/worktree-main" worktree list | command grep -F "$tmp_dir/worktree selected")"
+export FZF_TEST_SELECTION="$tmp_dir/worktree selected"$'\t'"$worktree_display"
+wcd
+assert_pwd "$tmp_dir/worktree selected" "wcd should jump to the selected worktree path"
+pass "wcd changes directory to a selected worktree path containing spaces"
+
+cd "$tmp_dir/worktree-main" || fail "could not reset to worktree main directory"
+export FZF_TEST_SELECTION=""
+if ! wcd >"$tmp_dir/wcd-cancel.out" 2>&1; then
+  fail "cancelled wcd should complete successfully"
+fi
+assert_pwd "$tmp_dir/worktree-main" "cancelled wcd should leave the current directory unchanged"
+pass "cancelled wcd keeps the current directory"
 
 render_zshrc '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableDevelopmentWorkspace":true}'
 source "$tmp_dir/home/.zshrc"
