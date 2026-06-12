@@ -123,3 +123,29 @@ function zg() {
   dir=$(zoxide query -l | xargs -I {} sh -c 'test -d {}/.git && echo {}' | fzf)
   [ -n "$dir" ] && z "$dir"
 }
+
+# ============================================
+# Git worktree
+# ============================================
+function wcd() {
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "이 디렉토리는 Git 저장소가 아닙니다."
+    return 1
+  fi
+
+  if ! command -v fzf >/dev/null 2>&1; then
+    echo "fzf가 설치되어 있지 않습니다. mise install 또는 brew install fzf를 실행하세요."
+    return 1
+  fi
+
+  local selected
+  selected="$(
+    paste \
+      <(git worktree list --porcelain | awk '/^worktree / { print substr($0, 10) }') \
+      <(git worktree list) |
+      fzf --delimiter=$'\t' --with-nth=2.. --height=40% --reverse --ansi
+  )"
+
+  [ -n "$selected" ] || return 0
+  cd "${selected%%$'\t'*}"
+}
