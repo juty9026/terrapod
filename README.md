@@ -146,7 +146,7 @@ groups from `Brewfile.macos-desktop-apps.tmpl` into a temporary Brewfile and
 installs that rendered bundle:
 
 - `terminal-apps`: Ghostty.
-- `automation`: Hammerspoon and Karabiner-Elements.
+- `automation`: Hammerspoon, Karabiner-Elements, and Scroll Reverser.
 - `launcher`: Raycast and 1Password CLI.
 - `monitoring`: iStat Menus.
 - `ai-apps`: Claude Desktop, Codex Desktop (`codex-app`), Antigravity 2.0, and Antigravity IDE.
@@ -270,7 +270,7 @@ Optional stack profiles and macOS App Group settings are disabled by default.
 | `enableAiCliTools` | `false` | Installs Antigravity CLI, Claude Code, and Codex through official vendor installers. Existing npm-installed AI CLIs are left unmanaged. |
 | `enableDevelopmentWorkspace` | `false` | Enables the Optional Development Workspace preset, including the Optional Editor Stack, Optional AI Tool Stack, and development-specific Zellij workspace surfaces. |
 | `enableMacosAppGroupTerminalApps` | `false` | Installs the terminal-apps macOS App Group: Ghostty. |
-| `enableMacosAppGroupAutomation` | `false` | Installs the automation macOS App Group: Hammerspoon and Karabiner-Elements. |
+| `enableMacosAppGroupAutomation` | `false` | Installs the automation macOS App Group: Hammerspoon, Karabiner-Elements, and Scroll Reverser. |
 | `enableMacosAppGroupLauncher` | `false` | Installs the launcher macOS App Group: Raycast and 1Password CLI. |
 | `enableMacosAppGroupMonitoring` | `false` | Installs the monitoring macOS App Group: iStat Menus. |
 | `enableMacosAppGroupAiApps` | `false` | Installs the ai-apps macOS App Group: Claude Desktop, Codex Desktop (`codex-app`), Antigravity 2.0, and Antigravity IDE. |

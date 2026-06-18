@@ -118,6 +118,8 @@ assert_key_row_contains '`enableMacosAppGroupAutomation`' 'Hammerspoon' \
   "README documents Hammerspoon on the automation option row"
 assert_key_row_contains '`enableMacosAppGroupAutomation`' 'Karabiner-Elements' \
   "README documents Karabiner-Elements on the automation option row"
+assert_key_row_contains '`enableMacosAppGroupAutomation`' 'Scroll Reverser' \
+  "README documents Scroll Reverser on the automation option row"
 assert_key_row_contains '`enableMacosAppGroupLauncher`' 'launcher' \
   "README documents launcher group on its option row"
 assert_key_row_contains '`enableMacosAppGroupLauncher`' 'Raycast' \

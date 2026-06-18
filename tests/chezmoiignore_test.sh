@@ -606,6 +606,7 @@ assert_not_contains_text "$macos_brewfile" 'cask "ghostty"' "macOS default does 
 assert_not_contains_text "$macos_brewfile" 'cask "cmux"' "macOS default does not render cmux"
 assert_not_contains_text "$macos_brewfile" 'cask "hammerspoon"' "macOS default does not render Hammerspoon"
 assert_not_contains_text "$macos_brewfile" 'cask "karabiner-elements"' "macOS default does not render Karabiner-Elements"
+assert_not_contains_text "$macos_brewfile" 'cask "scroll-reverser"' "macOS default does not render Scroll Reverser"
 assert_not_contains_text "$macos_brewfile" 'cask "raycast"' "macOS default does not render Raycast"
 assert_not_contains_text "$macos_brewfile" 'cask "1password-cli"' "macOS default does not render 1Password CLI"
 assert_not_contains_text "$macos_brewfile" 'cask "istat-menus"' "macOS default does not render iStat Menus"
@@ -621,6 +622,7 @@ assert_not_contains_text "$terminal_apps_brewfile" 'cask "hammerspoon"' "termina
 
 assert_contains_text "$automation_apps_brewfile" 'cask "hammerspoon"' "automation group renders Hammerspoon"
 assert_contains_text "$automation_apps_brewfile" 'cask "karabiner-elements"' "automation group renders Karabiner-Elements"
+assert_contains_text "$automation_apps_brewfile" 'cask "scroll-reverser"' "automation group renders Scroll Reverser"
 
 assert_contains_text "$launcher_apps_brewfile" 'cask "raycast"' "launcher group renders Raycast"
 assert_contains_text "$launcher_apps_brewfile" 'cask "1password-cli"' "launcher group renders 1Password CLI"
