@@ -522,7 +522,7 @@ show_setup_option_block() {
       printf '%s\n' "  Installs Ghostty."
       ;;
     "automation macOS App Group")
-      printf '%s\n' "  Installs Hammerspoon and Karabiner-Elements."
+      printf '%s\n' "  Installs Hammerspoon, Karabiner-Elements, and Scroll Reverser."
       ;;
     "launcher macOS App Group")
       printf '%s\n' "  Installs Raycast and 1Password CLI."
@@ -971,7 +971,7 @@ print_macos_app_group_status() {
     print_indented_colon_state_line "terminal-apps" "disabled"
   fi
   if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupAutomation)"; then
-    print_indented_colon_state_line "automation" "enabled" "(Hammerspoon and Karabiner-Elements)"
+    print_indented_colon_state_line "automation" "enabled" "(Hammerspoon, Karabiner-Elements, and Scroll Reverser)"
   else
     print_indented_colon_state_line "automation" "disabled"
   fi

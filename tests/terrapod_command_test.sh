@@ -1264,6 +1264,8 @@ assert_not_contains "$setup_output_text" "Optional Editor Stack: included by Opt
 assert_not_contains "$setup_output_text" "Optional AI Tool Stack: included by Optional Development Workspace" "gum setup no longer repeats workspace-included AI Tool Stack as a standalone message"
 assert_contains "$setup_output_text" "terminal-apps" "gum setup leads terminal-apps App Group prompt with the group name"
 assert_contains "$setup_output_text" "  Installs Ghostty." "gum setup describes terminal-apps under its group name"
+assert_contains "$setup_output_text" "automation" "gum setup leads automation App Group prompt with the group name"
+assert_contains "$setup_output_text" "  Installs Hammerspoon, Karabiner-Elements, and Scroll Reverser." "gum setup describes automation under its group name"
 assert_contains "$setup_output_text" "ai-apps" "gum setup leads ai-apps App Group prompt with the group name"
 assert_contains "$setup_output_text" "  Installs Claude Desktop, Codex Desktop, Antigravity 2.0, and Antigravity IDE." "gum setup describes ai-apps under its group name"
 assert_contains "$setup_output_text" "enableEditorStack = true" "gum setup summary includes concrete Editor Stack setting"
@@ -1556,7 +1558,7 @@ enableEditorStack = true
 enableAiCliTools = true
 enableDevelopmentWorkspace = true
 enableMacosAppGroupTerminalApps = true
-enableMacosAppGroupAutomation = false
+enableMacosAppGroupAutomation = true
 enableMacosAppGroupLauncher = true
 enableMacosAppGroupMonitoring = false
 enableMacosAppGroupAiApps = true
@@ -1576,7 +1578,7 @@ assert_contains "$macos_status_output" "Optional Editor Stack         : enabled 
 assert_contains "$macos_status_output" "Optional AI Tool Stack        : enabled (tools available: agy, claude, codex)" "Terrapod status reports enabled Optional AI Tool Stack tool state"
 assert_contains "$macos_status_output" "Optional Development Workspace: enabled (development Zellij layouts)" "Terrapod status reports enabled Optional Development Workspace state"
 assert_contains "$macos_status_output" "terminal-apps                 : enabled (Ghostty)" "Terrapod status reports enabled Ghostty-only terminal-apps macOS App Group"
-assert_contains "$macos_status_output" "automation                    : disabled" "Terrapod status reports disabled automation macOS App Group"
+assert_contains "$macos_status_output" "automation                    : enabled (Hammerspoon, Karabiner-Elements, and Scroll Reverser)" "Terrapod status reports enabled automation macOS App Group"
 assert_contains "$macos_status_output" "launcher                      : enabled (Raycast and 1Password CLI)" "Terrapod status reports enabled launcher macOS App Group"
 assert_contains "$macos_status_output" "monitoring                    : disabled" "Terrapod status reports disabled monitoring macOS App Group"
 assert_contains "$macos_status_output" "ai-apps                       : enabled (Claude Desktop, Codex Desktop, Antigravity 2.0, and Antigravity IDE)" "Terrapod status reports enabled ai-apps macOS App Group"
