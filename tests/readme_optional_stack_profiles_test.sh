@@ -134,10 +134,12 @@ assert_key_row_contains '`enableMacosAppGroupAiApps`' 'ai-apps' \
   "README documents ai-apps group on its option row"
 assert_key_row_contains '`enableMacosAppGroupAiApps`' 'Claude Desktop' \
   "README documents Claude Desktop on the ai-apps option row"
-assert_key_row_contains '`enableMacosAppGroupAiApps`' 'Codex Desktop' \
-  "README documents Codex Desktop on the ai-apps option row"
+assert_key_row_contains '`enableMacosAppGroupAiApps`' 'ChatGPT desktop app' \
+  "README documents the unified ChatGPT app on the ai-apps option row"
+assert_key_row_contains '`enableMacosAppGroupAiApps`' 'with Codex' \
+  "README documents that the unified ChatGPT app includes Codex"
 assert_key_row_contains '`enableMacosAppGroupAiApps`' 'codex-app' \
-  "README documents Codex Desktop cask token on the ai-apps option row"
+  "README documents the unified ChatGPT app cask token on the ai-apps option row"
 assert_key_row_contains '`enableMacosAppGroupAiApps`' 'Antigravity 2.0' \
   "README documents Antigravity 2.0 on the ai-apps option row"
 assert_key_row_contains '`enableMacosAppGroupAiApps`' 'Antigravity IDE' \

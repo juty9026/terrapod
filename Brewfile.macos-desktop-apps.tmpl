@@ -21,6 +21,7 @@ cask "istat-menus"
 {{ if default false (get . "enableMacosAppGroupAiApps") -}}
 # ai-apps macOS App Group
 cask "claude"
+# codex-app is the Codex-lineage installer for the unified ChatGPT desktop app; do not replace it with the legacy chatgpt cask.
 cask "codex-app"
 cask "antigravity"
 cask "antigravity-ide"

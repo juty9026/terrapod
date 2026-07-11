@@ -22,7 +22,7 @@ local appBindings = {
   { key = "d", label = "Discord", bundleID = "com.hnc.Discord" },
   { key = "n", label = "Notion", bundleID = "notion.id" },
   { key = "b", label = "Google Chrome", bundleID = "com.google.Chrome" },
-  { key = "1", label = "Codex Desktop", bundleID = "com.openai.codex" },
+  { key = "1", label = "ChatGPT", bundleID = "com.openai.codex" },
   { key = "2", label = "Claude Desktop", bundleID = "com.anthropic.claudefordesktop" },
   { key = "3", label = "Antigravity 2.0", bundleID = "com.google.antigravity" },
   { key = "i", label = "Antigravity IDE", bundleID = "com.google.antigravity-ide" },
