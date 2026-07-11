@@ -36,8 +36,12 @@ assert_not_contains() {
 }
 
 assert_contains \
+  '{ key = "1", label = "ChatGPT", bundleID = "com.openai.codex" }' \
+  "Hammerspoon launcher binds the unified ChatGPT app to 1 with the Codex-lineage bundle ID"
+
+assert_not_contains \
   '{ key = "1", label = "Codex Desktop", bundleID = "com.openai.codex" }' \
-  "Hammerspoon launcher binds Codex Desktop to 1"
+  "Hammerspoon launcher no longer presents the unified app as Codex Desktop"
 
 assert_contains \
   '{ key = "2", label = "Claude Desktop", bundleID = "com.anthropic.claudefordesktop" }' \
