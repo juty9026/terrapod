@@ -631,8 +631,8 @@ assert_contains_text "$launcher_apps_brewfile" 'cask "1password-cli"' "launcher 
 assert_contains_text "$monitoring_apps_brewfile" 'cask "istat-menus"' "monitoring group renders iStat Menus"
 
 assert_contains_text "$ai_apps_brewfile" 'cask "claude"' "ai-apps group renders Claude Desktop"
-assert_contains_text "$ai_apps_brewfile" '# codex-app is the Codex-lineage installer for the unified ChatGPT desktop app; do not replace it with the legacy chatgpt cask.' "ai-apps group explains why the unified ChatGPT app retains the codex-app token"
-assert_contains_text "$ai_apps_brewfile" 'cask "codex-app"' "ai-apps group renders the unified ChatGPT desktop app through the codex-app cask"
+assert_contains_text "$ai_apps_brewfile" '# codex-app installs Codex.app, which updates to the unified ChatGPT desktop app; do not replace it with the legacy chatgpt cask.' "ai-apps group explains the codex-app to unified ChatGPT app transition"
+assert_contains_text "$ai_apps_brewfile" 'cask "codex-app"' "ai-apps group renders the Codex app that updates to the unified ChatGPT desktop app"
 assert_not_contains_text "$ai_apps_brewfile" 'cask "chatgpt"' "ai-apps group does not render the legacy ChatGPT cask"
 assert_not_contains_text "$ai_apps_brewfile" 'cask "codex"' "ai-apps group does not render Codex CLI cask"
 assert_contains_text "$ai_apps_brewfile" 'cask "antigravity"' "ai-apps group renders Antigravity 2.0"

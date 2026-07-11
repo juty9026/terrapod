@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Hyper+1 displays `ChatGPT` and continues launching bundle ID `com.openai.codex`.
-- The `ai-apps` group describes the application as `ChatGPT desktop app (with Codex)` in English and `ChatGPT 데스크톱 앱(Codex 포함)` in Korean.
+- The `ai-apps` group describes the installed artifact as `Codex desktop app (updates to the unified ChatGPT desktop app)` in English and `Codex 데스크톱 앱(통합 ChatGPT 데스크톱 앱으로 업데이트)` in Korean.
 - The Homebrew token remains `codex-app`; `chatgpt` must not be added to the rendered `ai-apps` bundle.
 - Terrapod must not uninstall or warn about an existing unmanaged `chatgpt` cask.
 - Terrapod must not manage the unified application's default view.
@@ -34,7 +34,7 @@
 
 **Interfaces:**
 - Consumes: the existing `appBindings` Lua table, `enableMacosAppGroupAiApps` template flag, and setup/status text renderers.
-- Produces: the stable user-facing name `ChatGPT`, the explanatory inventory name `ChatGPT desktop app (with Codex)`, and a tested `codex-app`-only Homebrew contract.
+- Produces: the stable launcher name `ChatGPT`, an inventory that distinguishes the installed Codex artifact from its unified ChatGPT update, and a tested `codex-app`-only Homebrew contract.
 
 - [x] **Step 1: Write the failing tests**
 
@@ -42,8 +42,8 @@ Update the shell assertions to require:
 
 ```text
 { key = "1", label = "ChatGPT", bundleID = "com.openai.codex" }
-Installs Claude Desktop, ChatGPT desktop app (with Codex), Antigravity 2.0, and Antigravity IDE.
-ai-apps                       : enabled (Claude Desktop, ChatGPT desktop app (with Codex), Antigravity 2.0, and Antigravity IDE)
+Installs Claude Desktop, Codex desktop app (updates to the unified ChatGPT desktop app), Antigravity 2.0, and Antigravity IDE.
+ai-apps                       : enabled (Claude Desktop, Codex desktop app (updates to the unified ChatGPT desktop app), Antigravity 2.0, and Antigravity IDE)
 cask "codex-app"
 ```
 
@@ -74,11 +74,11 @@ Change the Hyper+1 binding to:
 Keep this cask and add an explanatory comment immediately above it:
 
 ```ruby
-# codex-app is the Codex-lineage installer for the unified ChatGPT desktop app; do not replace it with the legacy chatgpt cask.
+# codex-app installs Codex.app, which updates to the unified ChatGPT desktop app; do not replace it with the legacy chatgpt cask.
 cask "codex-app"
 ```
 
-Change English inventories to `ChatGPT desktop app (with Codex)` and Korean inventories to `ChatGPT 데스크톱 앱(Codex 포함)`, without changing the option key, bundle ID, or cask token.
+Change English inventories to `Codex desktop app (updates to the unified ChatGPT desktop app)` and Korean inventories to `Codex 데스크톱 앱(통합 ChatGPT 데스크톱 앱으로 업데이트)`, without changing the option key, bundle ID, or cask token.
 
 - [x] **Step 4: Run focused tests to verify they pass**
 

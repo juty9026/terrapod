@@ -141,10 +141,10 @@ assert_contains "$korean_readme" 'repository를 등록하고 APT로 `gum`을 설
   "README.ko.md documents Ubuntu Bootstrap UI Dependency boundary"
 assert_contains "$korean_readme" '준비합니다. 이 Bootstrap UI bootstrap은 `gum` 설치에만 해당되며 broad APT upgrade는 실행하지 않습니다.' \
   "README.ko.md verifies Ubuntu bootstrap UI dependency scope excludes broad APT upgrades"
-assert_contains "$korean_readme" '`ai-apps`: Claude Desktop, ChatGPT 데스크톱 앱(Codex 포함, `codex-app`), Antigravity 2.0, Antigravity IDE.' \
-  "README.ko.md documents the unified ChatGPT app in the ai-apps inventory"
-assert_contains "$korean_readme" '| `enableMacosAppGroupAiApps` | `false` | ai-apps macOS App Group인 Claude Desktop, ChatGPT 데스크톱 앱(Codex 포함, `codex-app`), Antigravity 2.0, Antigravity IDE를 설치합니다. |' \
-  "README.ko.md documents the unified ChatGPT app and cask token on the ai-apps option row"
+assert_contains "$korean_readme" '`ai-apps`: Claude Desktop, Codex 데스크톱 앱(통합 ChatGPT 데스크톱 앱으로 업데이트, `codex-app`), Antigravity 2.0, Antigravity IDE.' \
+  "README.ko.md documents the Codex app to unified ChatGPT update in the ai-apps inventory"
+assert_contains "$korean_readme" '| `enableMacosAppGroupAiApps` | `false` | ai-apps macOS App Group인 Claude Desktop, Codex 데스크톱 앱(통합 ChatGPT 데스크톱 앱으로 업데이트, `codex-app`), Antigravity 2.0, Antigravity IDE를 설치합니다. |' \
+  "README.ko.md documents the Codex app transition and cask token on the ai-apps option row"
 
 extract_headings "$readme" >"$tmp_dir/readme.headings"
 extract_headings "$korean_readme" >"$tmp_dir/readme-ko.headings"
