@@ -146,6 +146,8 @@ macOS desktop application은 machine-local data key로 제어되는 opt-in App G
 - `monitoring`: iStat Menus.
 - `ai-apps`: Claude Desktop, Codex 데스크톱 앱(통합 ChatGPT 데스크톱 앱으로 업데이트, `codex-app`), Antigravity 2.0, Antigravity IDE, Orca ADE(`stablyai/orca/orca`).
 
+Terrapod은 Orca를 설치할 때 fully-qualified `stablyai/orca/orca` cask만 trust하며, `stablyai/orca` tap 전체를 trust하지 않습니다.
+
 Machine-specific Homebrew package는 tracked `Brewfile` 밖에 둬야 합니다.
 
 ### Ubuntu 24.04 VPS

@@ -151,6 +151,8 @@ installs that rendered bundle:
 - `monitoring`: iStat Menus.
 - `ai-apps`: Claude Desktop, Codex desktop app (updates to the unified ChatGPT desktop app; `codex-app`), Antigravity 2.0, Antigravity IDE, and Orca ADE (`stablyai/orca/orca`).
 
+When installing Orca, Terrapod trusts only the fully-qualified `stablyai/orca/orca` cask, not the entire `stablyai/orca` tap.
+
 Machine-specific Homebrew packages should live outside the tracked `Brewfile`.
 
 ### Ubuntu 24.04 VPS

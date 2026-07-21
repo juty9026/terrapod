@@ -148,6 +148,8 @@ assert_key_row_contains '`enableMacosAppGroupAiApps`' 'Orca ADE' \
   "README documents Orca ADE on the ai-apps option row"
 assert_key_row_contains '`enableMacosAppGroupAiApps`' 'stablyai/orca/orca' \
   "README documents Orca's fully-qualified cask source"
+assert_contains 'When installing Orca, Terrapod trusts only the fully-qualified `stablyai/orca/orca` cask, not the entire `stablyai/orca` tap.' \
+  "README documents Orca's cask-specific trust boundary"
 
 assert_contains 'Optional stack profiles and macOS App Group settings are disabled by default.' \
   "README states optional stack profiles and App Groups are disabled by default"
