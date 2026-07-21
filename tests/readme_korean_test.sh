@@ -141,12 +141,16 @@ assert_contains "$korean_readme" 'repository를 등록하고 APT로 `gum`을 설
   "README.ko.md documents Ubuntu Bootstrap UI Dependency boundary"
 assert_contains "$korean_readme" '준비합니다. 이 Bootstrap UI bootstrap은 `gum` 설치에만 해당되며 broad APT upgrade는 실행하지 않습니다.' \
   "README.ko.md verifies Ubuntu bootstrap UI dependency scope excludes broad APT upgrades"
-assert_contains "$korean_readme" '`ai-apps`: Claude Desktop, Codex 데스크톱 앱(통합 ChatGPT 데스크톱 앱으로 업데이트, `codex-app`), Antigravity 2.0, Antigravity IDE, Orca ADE(`stablyai/orca/orca`).' \
-  "README.ko.md documents Orca ADE and its cask source in the ai-apps inventory"
-assert_contains "$korean_readme" '| `enableMacosAppGroupAiApps` | `false` | ai-apps macOS App Group인 Claude Desktop, Codex 데스크톱 앱(통합 ChatGPT 데스크톱 앱으로 업데이트, `codex-app`), Antigravity 2.0, Antigravity IDE, Orca ADE(`stablyai/orca/orca`)를 설치합니다. |' \
-  "README.ko.md documents Orca ADE and its cask source on the ai-apps option row"
+assert_contains "$korean_readme" '`development-apps`: Zed와 Orca ADE(`stablyai/orca/orca`).' \
+  "README.ko.md documents Zed and Orca ADE in the development-apps inventory"
+assert_contains "$korean_readme" '| `enableMacosAppGroupDevelopmentApps` | `false` | development-apps macOS App Group인 Zed와 Orca ADE(`stablyai/orca/orca`)를 설치합니다. |' \
+  "README.ko.md documents Zed and Orca ADE on the development-apps option row"
 assert_contains "$korean_readme" 'Terrapod은 Orca를 설치할 때 fully-qualified `stablyai/orca/orca` cask만 trust하며, `stablyai/orca` tap 전체를 trust하지 않습니다.' \
   "README.ko.md documents Orca's cask-specific trust boundary"
+assert_contains "$korean_readme" 'brew upgrade --cask claude-code codex antigravity-cli' \
+  "README.ko.md documents targeted AI CLI upgrades"
+assert_contains "$korean_readme" '`enableMacosAppGroupAiApps`는 deprecated key이며 alias로 해석하지 않습니다.' \
+  "README.ko.md documents explicit development-apps key migration"
 
 extract_headings "$readme" >"$tmp_dir/readme.headings"
 extract_headings "$korean_readme" >"$tmp_dir/readme-ko.headings"

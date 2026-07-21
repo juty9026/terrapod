@@ -139,6 +139,7 @@ On macOS, the initial apply also runs setup scripts under `.chezmoiscripts` for 
 - Oh My Zsh, zinit, and SCM Breeze
 - Bun, Python, uv/uvx, and Node.js via `~/.config/mise/config.toml`
 - pnpm through Node.js Corepack
+- Optional AI Tool Stack casks through Homebrew when that stack is enabled
 
 macOS desktop applications are split into opt-in App Groups controlled by
 machine-local data keys. During Homebrew bootstrap, chezmoi renders selected
@@ -149,7 +150,7 @@ installs that rendered bundle:
 - `automation`: Hammerspoon, Karabiner-Elements, and Scroll Reverser.
 - `launcher`: Raycast and 1Password CLI.
 - `monitoring`: iStat Menus.
-- `ai-apps`: Claude Desktop, Codex desktop app (updates to the unified ChatGPT desktop app; `codex-app`), Antigravity 2.0, Antigravity IDE, and Orca ADE (`stablyai/orca/orca`).
+- `development-apps`: Zed and Orca ADE (`stablyai/orca/orca`).
 
 When installing Orca, Terrapod trusts only the fully-qualified `stablyai/orca/orca` cask, not the entire `stablyai/orca` tap.
 
@@ -184,6 +185,7 @@ On Ubuntu, the initial apply runs setup scripts for the VPS shell profile:
 - Bun, Python, uv/uvx, and Node.js via mise
 - pnpm through Node.js Corepack
 - Login shell switch to zsh
+- Conditional Linux Homebrew and the Optional AI Tool Stack casks when that stack is enabled
 
 Only configure GitHub authentication on a VPS if write access is needed later.
 If the first mise install hits GitHub API rate limits while resolving aqua
@@ -202,7 +204,7 @@ result.
 
 ### Intentional Upgrades
 
-Homebrew and APT are Bootstrap Package Managers here: they prepare a machine for the declared shell state.
+Homebrew and APT prepare platform bootstrap state. Homebrew also owns the three cross-profile Optional AI Tool Stack casks.
 mise is the Modern CLI Provider for shared command-line tools and development runtimes.
 
 Use OS package managers directly only when intentionally updating OS-managed packages.
@@ -215,6 +217,13 @@ brew upgrade
 # Ubuntu
 sudo apt update
 sudo apt upgrade
+```
+
+Upgrade only the Homebrew-managed AI CLI tools explicitly on either profile.
+
+```sh
+brew update
+brew upgrade --cask claude-code codex antigravity-cli
 ```
 
 Use mise directly when intentionally updating modern CLI tools or development runtimes.
@@ -269,13 +278,13 @@ Optional stack profiles and macOS App Group settings are disabled by default.
 | --- | --- | --- |
 | `profile` | Detected by setup/configure | Records the active Terrapod machine profile. |
 | `enableEditorStack` | `false` | Enables the Optional Editor Stack, which manages the rich Neovim configuration. Plain Neovim remains in the Core Shell Stack either way. |
-| `enableAiCliTools` | `false` | Installs Antigravity CLI, Claude Code, and Codex through official vendor installers. Existing npm-installed AI CLIs are left unmanaged. |
+| `enableAiCliTools` | `false` | Installs Antigravity CLI, Claude Code, and Codex through Homebrew casks `antigravity-cli`, `claude-code`, and `codex`. |
 | `enableDevelopmentWorkspace` | `false` | Enables the Optional Development Workspace preset, including the Optional Editor Stack, Optional AI Tool Stack, and development-specific Zellij workspace surfaces. |
 | `enableMacosAppGroupTerminalApps` | `false` | Installs the terminal-apps macOS App Group: Ghostty. |
 | `enableMacosAppGroupAutomation` | `false` | Installs the automation macOS App Group: Hammerspoon, Karabiner-Elements, and Scroll Reverser. |
 | `enableMacosAppGroupLauncher` | `false` | Installs the launcher macOS App Group: Raycast and 1Password CLI. |
 | `enableMacosAppGroupMonitoring` | `false` | Installs the monitoring macOS App Group: iStat Menus. |
-| `enableMacosAppGroupAiApps` | `false` | Installs the ai-apps macOS App Group: Claude Desktop, Codex desktop app (updates to the unified ChatGPT desktop app; `codex-app`), Antigravity 2.0, Antigravity IDE, and Orca ADE (`stablyai/orca/orca`). |
+| `enableMacosAppGroupDevelopmentApps` | `false` | Installs the development-apps macOS App Group: Zed and Orca ADE (`stablyai/orca/orca`). |
 | `gitAllowedSigners` | `[]` | Adds workstation-specific SSH signing identities to `~/.ssh/allowed_signers`. |
 
 When `enableDevelopmentWorkspace` is `true`, it enables both the Optional Editor Stack and Optional AI Tool Stack
@@ -286,7 +295,9 @@ because desktop casks can affect shared applications outside one user's home dir
 
 Opting out of an optional stack excludes its files from chezmoi management; it does not remove files already present on a machine.
 
-Existing npm-installed AI CLIs are left unmanaged; Terrapod does not uninstall or warn merely because they remain on a machine.
+Terrapod does not remove legacy vendor-installed AI CLI binaries. When one shadows a Homebrew-managed command, `tpod status` and `tpod doctor` provide manual cleanup guidance.
+
+`enableMacosAppGroupAiApps` is deprecated and is not treated as an alias for `enableMacosAppGroupDevelopmentApps`. Run `tpod setup` or `terrapod configure <Preset>` to migrate explicitly; Terrapod does not install Zed based on the old selection.
 
 ### Zellij shortcuts
 
@@ -311,7 +322,7 @@ enableMacosAppGroupTerminalApps = false
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
-enableMacosAppGroupAiApps = false
+enableMacosAppGroupDevelopmentApps = false
 ```
 
 Editor-only machine:
