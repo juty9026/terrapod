@@ -638,7 +638,7 @@ assert_not_contains_text "$ai_apps_brewfile" 'cask "chatgpt"' "ai-apps group doe
 assert_not_contains_text "$ai_apps_brewfile" 'cask "codex"' "ai-apps group does not render Codex CLI cask"
 assert_contains_text "$ai_apps_brewfile" 'cask "antigravity"' "ai-apps group renders Antigravity 2.0"
 assert_contains_text "$ai_apps_brewfile" 'cask "antigravity-ide"' "ai-apps group renders Antigravity IDE"
-assert_contains_text "$ai_apps_brewfile" 'cask "stablyai/orca/orca"' "ai-apps group renders Orca from its official Homebrew tap"
+assert_contains_text "$ai_apps_brewfile" 'cask "stablyai/orca/orca", trusted: true' "ai-apps group trusts only Orca's fully-qualified vendor cask"
 ai_apps_casks="$(
   printf '%s\n' "$ai_apps_brewfile" |
     awk '/^[[:space:]]*cask[[:space:]]+"/ { print }'
@@ -647,7 +647,7 @@ expected_ai_apps_casks='cask "claude"
 cask "codex-app"
 cask "antigravity"
 cask "antigravity-ide"
-cask "stablyai/orca/orca"'
+cask "stablyai/orca/orca", trusted: true'
 assert_text_equals \
   "$ai_apps_casks" \
   "$expected_ai_apps_casks" \

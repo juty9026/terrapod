@@ -145,6 +145,8 @@ assert_contains "$korean_readme" '`ai-apps`: Claude Desktop, Codex 데스크톱 
   "README.ko.md documents Orca ADE and its cask source in the ai-apps inventory"
 assert_contains "$korean_readme" '| `enableMacosAppGroupAiApps` | `false` | ai-apps macOS App Group인 Claude Desktop, Codex 데스크톱 앱(통합 ChatGPT 데스크톱 앱으로 업데이트, `codex-app`), Antigravity 2.0, Antigravity IDE, Orca ADE(`stablyai/orca/orca`)를 설치합니다. |' \
   "README.ko.md documents Orca ADE and its cask source on the ai-apps option row"
+assert_contains "$korean_readme" 'Terrapod은 Orca를 설치할 때 fully-qualified `stablyai/orca/orca` cask만 trust하며, `stablyai/orca` tap 전체를 trust하지 않습니다.' \
+  "README.ko.md documents Orca's cask-specific trust boundary"
 
 extract_headings "$readme" >"$tmp_dir/readme.headings"
 extract_headings "$korean_readme" >"$tmp_dir/readme-ko.headings"

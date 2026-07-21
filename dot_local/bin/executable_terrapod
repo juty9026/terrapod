@@ -532,6 +532,7 @@ show_setup_option_block() {
       ;;
     "ai-apps macOS App Group")
       printf '%s\n' "  Installs Claude Desktop, Codex desktop app (updates to the unified ChatGPT desktop app), Antigravity 2.0, Antigravity IDE, and Orca."
+      printf '%s\n' "  Trusts only the fully-qualified stablyai/orca/orca cask, not the entire stablyai/orca tap."
       ;;
   esac
   printf '%s\n' ""

@@ -287,6 +287,8 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - The monitoring **macOS App Group** contains iStat Menus.
 - The ai-apps **macOS App Group** contains Claude Desktop, Codex Desktop, Antigravity 2.0, Antigravity IDE, and Orca.
 - The ai-apps **macOS App Group** installs these desktop apps through Homebrew casks `claude`, `codex-app`, `antigravity`, `antigravity-ide`, and the fully-qualified vendor cask `stablyai/orca/orca`.
+- The ai-apps **macOS App Group** declares `stablyai/orca/orca` with `trusted: true` so Homebrew trusts only the Orca cask, not the entire `stablyai/orca` tap.
+- Disabling the ai-apps **macOS App Group** does not revoke an existing Orca cask trust entry; Terrapod leaves Homebrew trust removal to an explicit user action.
 - The Hammerspoon app launcher maps Codex Desktop to `1`, Claude Desktop to `2`, Antigravity 2.0 to `3`, Orca to `4`, and Antigravity IDE to `i`.
 - Orca's bundled `orca` CLI remains an artifact of the ai-apps **macOS App Group** and is not a member of the cross-profile **Optional AI Tool Stack**.
 - Removing ChatGPT Atlas from the Hammerspoon app launcher is part of the planned launcher change.

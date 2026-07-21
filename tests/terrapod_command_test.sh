@@ -1268,6 +1268,7 @@ assert_contains "$setup_output_text" "automation" "gum setup leads automation Ap
 assert_contains "$setup_output_text" "  Installs Hammerspoon, Karabiner-Elements, and Scroll Reverser." "gum setup describes automation under its group name"
 assert_contains "$setup_output_text" "ai-apps" "gum setup leads ai-apps App Group prompt with the group name"
 assert_contains "$setup_output_text" "  Installs Claude Desktop, Codex desktop app (updates to the unified ChatGPT desktop app), Antigravity 2.0, Antigravity IDE, and Orca." "gum setup lists Orca in the ai-apps App Group"
+assert_contains "$setup_output_text" "  Trusts only the fully-qualified stablyai/orca/orca cask, not the entire stablyai/orca tap." "gum setup discloses Orca's cask-specific trust boundary"
 assert_contains "$setup_output_text" "enableEditorStack = true" "gum setup summary includes concrete Editor Stack setting"
 assert_contains "$setup_output_text" "enableMacosAppGroupMonitoring = true" "gum setup summary includes concrete macOS App Group setting"
 assert_contains "$setup_output_text" "enableMacosAppGroupAiApps = true" "gum setup summary includes concrete ai-apps App Group setting"
