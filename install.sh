@@ -103,7 +103,7 @@ expected_homebrew_path() {
   fi
 
   case "$profile:$arch" in
-    vps-shell:x86_64|vps-shell:aarch64|vps-shell:arm64)
+    vps-shell:x86_64|vps-shell:aarch64)
       printf '%s\n' /home/linuxbrew/.linuxbrew/bin/brew
       ;;
     macos-terminal:arm64|macos-terminal:aarch64)

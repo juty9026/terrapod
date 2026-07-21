@@ -1394,6 +1394,20 @@ unset TERRAPOD_OS_RELEASE_FILE TERRAPOD_STUB_CALL_LOG TERRAPOD_EXPECTED_HOMEBREW
 assert_failure "$installer_status" "unsupported Ubuntu architecture fails before Homebrew bootstrap"
 assert_contains "$(cat "$unsupported_arch_case/stderr")" "Unsupported CPU architecture: armv7l. Supported architectures: x86_64, aarch64." "unsupported architecture guidance is explicit"
 
+arm64_arch_case="$(make_case_dir arm64-architecture)"
+write_uname_machine_stub "$arm64_arch_case" "arm64"
+arm64_arch_os_release="$(write_os_release "$arm64_arch_case" "ID=ubuntu" 'VERSION_ID="24.04"')"
+write_ubuntu_package_stubs "$arm64_arch_case"
+TERRAPOD_OS_RELEASE_FILE="$arm64_arch_os_release"
+TERRAPOD_STUB_CALL_LOG="$arm64_arch_case/command-calls"
+TERRAPOD_EXPECTED_HOMEBREW_PATH=
+export TERRAPOD_OS_RELEASE_FILE TERRAPOD_STUB_CALL_LOG TERRAPOD_EXPECTED_HOMEBREW_PATH
+run_installer_case "$arm64_arch_case"
+unset TERRAPOD_OS_RELEASE_FILE TERRAPOD_STUB_CALL_LOG TERRAPOD_EXPECTED_HOMEBREW_PATH
+assert_failure "$installer_status" "Ubuntu arm64 identifier fails before Homebrew bootstrap"
+assert_contains "$(cat "$arm64_arch_case/stderr")" "Unsupported CPU architecture: arm64. Supported architectures: x86_64, aarch64." "Ubuntu arm64 identifier is reported as unsupported"
+assert_not_contains "$(cat "$arm64_arch_case/command-calls")" "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh" "Ubuntu arm64 identifier fails before invoking the Homebrew installer"
+
 nonstandard_prefix_case="$(make_case_dir nonstandard-homebrew-prefix)"
 write_uname_stub "$nonstandard_prefix_case" "Darwin"
 nonstandard_brew="$nonstandard_prefix_case/opt/custom/bin/brew"
