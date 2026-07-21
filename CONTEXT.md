@@ -176,29 +176,23 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - pnpm belongs to the **Development Runtime Stack** through Node.js Corepack, not as a mise-managed tool.
 - Rich Neovim configuration belongs to the **Optional Editor Stack**, not the **Core Shell Stack**, and is opt-in for every machine profile.
 - Antigravity CLI, Claude Code, and Codex belong to the **Optional AI Tool Stack**, not the **Core Shell Stack**.
-- Antigravity CLI is installed through its official native installer, while Terrapod remains responsible for the managed shell PATH.
-- Legacy Antigravity Desktop and Antigravity IDE app-bundle shell-command paths are not part of the **Optional AI Tool Stack** or the ai-apps **macOS App Group**.
-- Claude Code is installed through its official native installer rather than the npm package.
-- Codex is installed through its official standalone installer rather than the npm package or Homebrew cask.
-- Codex's official standalone installer supports unattended installation with `CODEX_NON_INTERACTIVE=1`.
-- Codex installation uses the official standalone installer path without Terrapod patching the installer or injecting GitHub authentication tokens into vendor installer requests.
-- Claude Code and Antigravity CLI use their official native installers in unattended Terrapod apply contexts when their expected commands are missing.
-- Terrapod does not pipe prompt answers, patch vendor installers, or inject authentication tokens to force **Optional AI Tool Stack** installation; if an official installer becomes interactive or fails, Terrapod records an install warning instead.
-- **Optional AI Tool Stack** installers run before the final chezmoi-managed shell files are applied, so vendor installer shell-profile edits do not define the final declared shell state.
+- The **Optional AI Tool Stack** installs Homebrew casks `antigravity-cli`, `claude-code`, and `codex` on both supported machine profiles.
+- `Brewfile.ai-cli-tools.tmpl` is the canonical cross-profile declaration for Optional AI Tool Stack packages.
+- The VPS Shell Profile bootstraps Homebrew only when the **Optional AI Tool Stack** is effectively enabled.
+- APT remains the Ubuntu **Bootstrap Package Manager**, while conditional Linux Homebrew owns only the Optional AI Tool Stack casks.
+- mise remains the **Modern CLI Provider** for all other shared CLI tools and development runtimes.
 - **Optional AI Tool Stack** installer failures do not block first-run declared-state apply; missing optional AI tools are reported by `tpod status` and `tpod doctor`.
-- **Optional AI Tool Stack** installers skip tools whose expected command is already available on `PATH`; Terrapod apply is not an AI CLI upgrade mechanism.
-- **Optional AI Tool Stack** skip checks use Terrapod's expected command lookup path, including managed user-bin and platform tool locations, so already installed AI CLIs are detected even before the current terminal has reloaded its shell startup files.
-- **Optional AI Tool Stack** skip checks use command availability only, not version or package-manager provenance; npm-installed legacy commands satisfy the skip check and remain unmanaged.
-- Partial **Optional AI Tool Stack** failures leave successful tools installed and skipped on the next apply; subsequent recovery attempts retry only tools whose expected commands are still missing.
+- **Optional AI Tool Stack** apply uses `brew bundle --no-upgrade`; Terrapod apply is not an AI CLI upgrade mechanism.
+- `tpod status` and `tpod doctor` compare resolved AI commands with the active Homebrew prefix and warn when legacy commands shadow managed casks.
 - When the **Optional AI Tool Stack** is disabled, `tpod apply` clears the optional AI CLI tools warning marker because those tools are no longer part of desired machine readiness.
-- Existing npm-installed AI CLIs are unmanaged legacy tools; Terrapod does not uninstall or warn merely because they remain on a machine.
+- Existing vendor-installed AI CLIs are unmanaged legacy tools; Terrapod does not uninstall them automatically.
 - Enabling only the **Optional AI Tool Stack** does not imply the **Optional Editor Stack** or **Optional Development Workspace**.
 - Development-specific terminal layouts belong to the **Optional Development Workspace**, not the **Core Shell Stack**.
 - Enabling the **Optional Development Workspace** also enables the **Optional Editor Stack** and **Optional AI Tool Stack**.
 - The **Optional Development Workspace** is a stack bundle that takes precedence over disabled optional stack flags.
 - Zellij and its general launcher alias belong to the **Core Shell Stack**, while development-specific Zellij layouts and aliases belong to the **Optional Development Workspace**.
 - Disabling an optional stack excludes its files from management but does not remove files already present on a machine.
-- Homebrew and APT are **Bootstrap Package Managers**, not the **Modern CLI Provider**.
+- Homebrew and APT prepare platform bootstrap state; Homebrew also owns the three cross-profile Optional AI Tool Stack casks.
 - mise with its aqua backend is the **Modern CLI Provider**.
 - **Terrapod** applies this repository's declared dotfiles state; it does not act as the package manager for OS packages or mise-managed tool upgrades.
 - **Terrapod** may install declared dependencies needed to reach the target state, but it does not run broad version upgrade commands such as `brew upgrade`, `apt upgrade`, or `mise upgrade`.
@@ -279,18 +273,19 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Enabling the **Optional Development Workspace** does not enable the **macOS Desktop App Stack**.
 - **macOS App Groups** are configured during **Terrapod** setup and remain within the **macOS Desktop App Stack** boundary.
 - When **macOS App Group** settings change, `tpod apply` keeps Homebrew desktop app warning marker content aligned with currently enabled groups; failures for disabled groups are removed from readiness warnings while enabled group failures remain.
-- The first implemented **macOS App Groups** are terminal-apps, automation, launcher, monitoring, and ai-apps.
+- The implemented **macOS App Groups** are terminal-apps, automation, launcher, monitoring, and development-apps.
 - The terminal-apps **macOS App Group** contains Ghostty.
 - cmux is outside the declared **macOS Desktop App Stack**; existing cmux installs or settings may remain on a machine unmanaged and are not removed by **Terrapod**.
 - The automation **macOS App Group** contains Hammerspoon and Karabiner-Elements.
 - The launcher **macOS App Group** contains Raycast and 1Password CLI.
 - The monitoring **macOS App Group** contains iStat Menus.
-- The ai-apps **macOS App Group** contains Claude Desktop, Codex Desktop, Antigravity 2.0, Antigravity IDE, and Orca.
-- The ai-apps **macOS App Group** installs these desktop apps through Homebrew casks `claude`, `codex-app`, `antigravity`, `antigravity-ide`, and the fully-qualified vendor cask `stablyai/orca/orca`.
-- The ai-apps **macOS App Group** declares `stablyai/orca/orca` with `trusted: true` so Homebrew trusts only the Orca cask, not the entire `stablyai/orca` tap.
-- Disabling the ai-apps **macOS App Group** does not revoke an existing Orca cask trust entry; Terrapod leaves Homebrew trust removal to an explicit user action.
+- The development-apps **macOS App Group** contains Zed and Orca ADE.
+- The development-apps **macOS App Group** installs Homebrew casks `zed` and `stablyai/orca/orca`.
+- The development-apps **macOS App Group** declares `stablyai/orca/orca` with `trusted: true` so Homebrew trusts only the Orca cask, not the entire `stablyai/orca` tap.
+- Disabling the development-apps **macOS App Group** does not revoke an existing Orca cask trust entry; Terrapod leaves Homebrew trust removal to an explicit user action.
+- `enableMacosAppGroupAiApps` is deprecated and is not an alias for `enableMacosAppGroupDevelopmentApps`; users must run explicit setup or configure migration.
 - The Hammerspoon app launcher maps Codex Desktop to `1`, Claude Desktop to `2`, Antigravity 2.0 to `3`, Orca to `4`, and Antigravity IDE to `i`.
-- Orca's bundled `orca` CLI remains an artifact of the ai-apps **macOS App Group** and is not a member of the cross-profile **Optional AI Tool Stack**.
+- Orca's bundled `orca` CLI remains an artifact of the development-apps **macOS App Group** and is not a member of the cross-profile **Optional AI Tool Stack**.
 - Removing ChatGPT Atlas from the Hammerspoon app launcher is part of the planned launcher change.
 - Individual macOS app toggles are excluded from the current **Terrapod** setup scope.
 - Repository renaming makes `juty9026/terrapod` the canonical slug for the **Terrapod Source Repository** without adding legacy URL fallback behavior.
@@ -332,7 +327,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 ## Example Dialogue
 
 > **Dev:** "Should the VPS just reuse the macOS terminal setup?"
-> **Domain expert:** "No. The **VPS Shell Profile** should share the **Core Shell Stack** and **Development Runtime Stack**, but avoid macOS-only applications and Homebrew."
+> **Domain expert:** "No. The **VPS Shell Profile** should share the **Core Shell Stack** and **Development Runtime Stack**, exclude macOS-only applications, and use Homebrew only when the **Optional AI Tool Stack** is enabled."
 
 ## Flagged Ambiguities
 

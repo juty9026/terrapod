@@ -1,0 +1,5 @@
+{{- if or (default false (get . "enableAiCliTools")) (default false (get . "enableDevelopmentWorkspace")) -}}
+cask "antigravity-cli"
+cask "claude-code"
+cask "codex"
+{{- end -}}

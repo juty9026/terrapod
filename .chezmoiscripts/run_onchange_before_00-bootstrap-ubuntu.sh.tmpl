@@ -78,6 +78,9 @@ if ! $sudo_cmd apt-get install -y \
   build-essential \
   ca-certificates \
   curl \
+{{ if or (default false (get . "enableAiCliTools")) (default false (get . "enableDevelopmentWorkspace")) }}
+  file \
+{{ end }}
   git \
   gpg \
   libbz2-dev \
@@ -89,6 +92,9 @@ if ! $sudo_cmd apt-get install -y \
   libssl-dev \
   libxml2-dev \
   libxmlsec1-dev \
+{{ if or (default false (get . "enableAiCliTools")) (default false (get . "enableDevelopmentWorkspace")) }}
+  procps \
+{{ end }}
   tk-dev \
   unzip \
   xz-utils \

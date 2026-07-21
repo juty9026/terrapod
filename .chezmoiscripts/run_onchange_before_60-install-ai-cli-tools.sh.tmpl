@@ -33,113 +33,103 @@ clear_install_warning() {
 clear_install_warning "$AI_CLI_WARNING_CATEGORY"
 exit 0
 {{ else }}
-installer_paths=
-failed_tools=
+homebrew_installer=
+ai_cli_brewfile=
 
-case "$(uname -s)" in
-  Darwin)
-    AI_CLI_EXPECTED_PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-    ;;
-  *)
-    AI_CLI_EXPECTED_PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-    ;;
-esac
-
-cleanup_installers() {
-  for installer_path in $installer_paths; do
-    rm -f "$installer_path"
-  done
+cleanup_ai_cli_install() {
+  [ -z "$homebrew_installer" ] || rm -f "$homebrew_installer"
+  [ -z "$ai_cli_brewfile" ] || rm -f "$ai_cli_brewfile"
 }
 
-trap cleanup_installers EXIT HUP INT TERM
+trap cleanup_ai_cli_install EXIT HUP INT TERM
 
-append_failed_tool() {
-  if [ -n "$failed_tools" ]; then
-    failed_tools="$failed_tools, $1"
-  else
-    failed_tools="$1"
-  fi
-}
-
-finish_ai_cli_installers() {
-  if [ -n "$failed_tools" ]; then
+finish_ai_cli_install() {
+  if [ "$1" -ne 0 ]; then
     if ! mark_install_warning \
       "$AI_CLI_WARNING_CATEGORY" \
       "Optional AI CLI tool install needs attention" \
-      "Failed command(s): $failed_tools. Check installer output and network access, then rerun tpod apply."; then
-      echo "Failed to record Optional AI CLI tool install warning for failed command(s): $failed_tools." >&2
+      "Homebrew setup or the AI CLI bundle failed. Review Homebrew output and network access, then rerun tpod apply."; then
+      echo "Failed to record Optional AI CLI tool install warning." >&2
       return 1
     fi
+
     if [ "${TERRAPOD_FIRST_RUN_APPLY:-}" = "1" ]; then
       return 0
     fi
     return 1
-  else
-    clear_install_warning "$AI_CLI_WARNING_CATEGORY"
   fi
+
+  clear_install_warning "$AI_CLI_WARNING_CATEGORY"
 }
 
-command_available_on_expected_path() {
-  PATH="$AI_CLI_EXPECTED_PATH" command -v "$1" >/dev/null 2>&1
-}
-
-run_installer() {
-  label="$1"
-  command_name="$2"
-  shell_name="$3"
-  installer_url="$4"
-  installer_mode="${5:-}"
-
-  if command_available_on_expected_path "$command_name"; then
-    echo "$label is already available on expected PATH; skipping."
-    return 0
+find_brew() {
+  if command -v brew >/dev/null 2>&1; then
+    command -v brew
+    return
   fi
 
-  if ! command_available_on_expected_path curl; then
-    echo "curl is required to install $label." >&2
-    append_failed_tool "$command_name"
-    return 0
-  fi
-
-  if ! command_available_on_expected_path "$shell_name"; then
-    echo "$shell_name is required to install $label." >&2
-    append_failed_tool "$command_name"
-    return 0
-  fi
-
-  if ! installer_path="$(mktemp "${TMPDIR:-/tmp}/terrapod-ai-installer.XXXXXX")"; then
-    echo "Failed to create a temporary installer file for $label." >&2
-    append_failed_tool "$command_name"
-    return 0
-  fi
-  installer_paths="$installer_paths $installer_path"
-
-  echo "Installing $label through official installer: $installer_url"
-  if ! PATH="$AI_CLI_EXPECTED_PATH" curl -fsSL "$installer_url" -o "$installer_path"; then
-    append_failed_tool "$command_name"
-    return 0
-  fi
-
-  if [ "$installer_mode" = codex ]; then
-    if ! CODEX_NON_INTERACTIVE=1 PATH="$AI_CLI_EXPECTED_PATH" "$shell_name" "$installer_path"; then
-      append_failed_tool "$command_name"
-      return 0
+  for candidate in \
+    /opt/homebrew/bin/brew \
+    /usr/local/bin/brew \
+    /home/linuxbrew/.linuxbrew/bin/brew
+  do
+    if [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return
     fi
-  elif ! PATH="$AI_CLI_EXPECTED_PATH" "$shell_name" "$installer_path"; then
-    append_failed_tool "$command_name"
-    return 0
-  fi
+  done
 
-  if ! command_available_on_expected_path "$command_name"; then
-    echo "$label installer completed but $command_name is not available on expected PATH." >&2
-    append_failed_tool "$command_name"
-  fi
+  return 1
 }
 
-run_installer "Antigravity CLI" agy bash "https://antigravity.google/cli/install.sh"
-run_installer "Claude Code" claude bash "https://claude.ai/install.sh"
-run_installer "Codex" codex sh "https://chatgpt.com/codex/install.sh" codex
-if ! finish_ai_cli_installers; then
+bootstrap_linux_homebrew() {
+  if [ "$(uname -s)" != "Linux" ]; then
+    return 1
+  fi
+
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "curl is required to install Homebrew for the Optional AI Tool Stack." >&2
+    return 1
+  fi
+
+  homebrew_installer="$(mktemp "${TMPDIR:-/tmp}/terrapod-homebrew-install.XXXXXX")" || return 1
+  if ! curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "$homebrew_installer"; then
+    return 1
+  fi
+
+  NONINTERACTIVE=1 /bin/bash "$homebrew_installer"
+}
+
+setup_brew_environment() {
+  brew_bin="$(find_brew || true)"
+  if [ -z "$brew_bin" ]; then
+    bootstrap_linux_homebrew || return 1
+    brew_bin="$(find_brew || true)"
+  fi
+
+  if [ -z "$brew_bin" ]; then
+    echo "Homebrew is required for the Optional AI Tool Stack." >&2
+    return 1
+  fi
+
+  brew_shellenv="$("$brew_bin" shellenv)" || return 1
+  eval "$brew_shellenv"
+}
+
+install_ai_cli_bundle() {
+  setup_brew_environment || return 1
+  ai_cli_brewfile="$(mktemp "${TMPDIR:-/tmp}/terrapod-ai-cli-brewfile.XXXXXX")" || return 1
+  cat >"$ai_cli_brewfile" <<'BREWFILE'
+{{ includeTemplate "Brewfile.ai-cli-tools.tmpl" . }}
+BREWFILE
+
+  "$brew_bin" bundle --no-upgrade --file="$ai_cli_brewfile"
+}
+
+# Optional AI Tool Stack Brewfile checksum: {{ includeTemplate "Brewfile.ai-cli-tools.tmpl" . | sha256sum }}
+ai_cli_install_status=0
+install_ai_cli_bundle || ai_cli_install_status=$?
+if ! finish_ai_cli_install "$ai_cli_install_status"; then
   exit 1
 fi
 exit 0

@@ -552,7 +552,7 @@ enableMacosAppGroupTerminalApps = $terminal_apps
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = $launcher
 enableMacosAppGroupMonitoring = false
-enableMacosAppGroupAiApps = false
+enableMacosAppGroupDevelopmentApps = false
 EOF
 }
 
@@ -571,8 +571,14 @@ status_doctor_path() {
   ln -s "$awk_path" "$isolated_path/awk"
 
   for command_name do
-    write_stub "$isolated_path/$command_name" \
-      'exit 0'
+    if [ "$command_name" = brew ]; then
+      write_stub "$isolated_path/$command_name" \
+        'if [ "${1:-}" = "--prefix" ]; then printf "%s\n" "${0%/*}"; fi' \
+        'exit 0'
+    else
+      write_stub "$isolated_path/$command_name" \
+        'exit 0'
+    fi
   done
 
   printf '%s\n' "$isolated_path"
@@ -917,19 +923,22 @@ write_stub "$fake_warning_bin/terrapod_install_warning_write" \
 
 fake_ai_cli_home="$tmp_dir/fake-ai-cli-home"
 mkdir -p "$fake_ai_cli_home/.local/bin"
-for command_name in agy claude codex; do
-  write_stub "$fake_ai_cli_home/.local/bin/$command_name" \
-    'exit 0'
-done
+write_stub "$fake_warning_bin/brew" \
+  'case "$1" in' \
+  '  shellenv) printf "%s\n" ":" ;;' \
+  '  bundle) exit 0 ;;' \
+  '  *) exit 64 ;;' \
+  'esac'
 
 fake_ai_cli_installer="$tmp_dir/fake-ai-cli-installer.sh"
 chezmoi execute-template \
+  --source "$repo_root" \
   --override-data '{"chezmoi":{"os":"linux","sourceDir":"/missing-terrapod-source"},"enableAiCliTools":true}' \
   --file "$repo_root/.chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
   >"$fake_ai_cli_installer"
 
-if ! HOME="$fake_ai_cli_home" FAKE_INSTALL_WARNING_CALLS="$fake_warning_calls" PATH="$fake_warning_bin" /bin/sh "$fake_ai_cli_installer" >"$tmp_dir/fake-ai-cli-installer.out" 2>"$tmp_dir/fake-ai-cli-installer.err"; then
-  fail "rendered installer fixture succeeds when optional AI CLI tools are already available and the shared library is missing"
+if ! HOME="$fake_ai_cli_home" FAKE_INSTALL_WARNING_CALLS="$fake_warning_calls" PATH="$fake_warning_bin:/usr/bin:/bin" /bin/sh "$fake_ai_cli_installer" >"$tmp_dir/fake-ai-cli-installer.out" 2>"$tmp_dir/fake-ai-cli-installer.err"; then
+  fail "rendered installer fixture succeeds when the Homebrew AI CLI bundle succeeds and the shared library is missing"
 fi
 
 if [ -e "$fake_warning_calls" ]; then
@@ -939,34 +948,22 @@ pass "installer scripts ignore PATH fake install warning helpers when the shared
 
 fake_ai_cli_failure_home="$tmp_dir/fake-ai-cli-failure-home"
 mkdir -p "$fake_ai_cli_failure_home/.local/bin"
-for command_name in agy codex; do
-  write_stub "$fake_ai_cli_failure_home/.local/bin/$command_name" \
-    'exit 0'
-done
-write_stub "$fake_ai_cli_failure_home/.local/bin/bash" \
-  'exec sh "$@"'
-write_stub "$fake_ai_cli_failure_home/.local/bin/curl" \
-  'output=' \
-  'while [ "$#" -gt 0 ]; do' \
-  '  case "$1" in' \
-  '    -o)' \
-  '      shift' \
-  '      output="${1:-}"' \
-  '      ;;' \
-  '  esac' \
-  '  shift' \
-  'done' \
-  '[ -n "$output" ] || exit 2' \
-  'printf "%s\n" "#!/bin/sh" "exit 42" >"$output"'
+write_stub "$fake_ai_cli_failure_home/.local/bin/brew" \
+  'case "$1" in' \
+  '  shellenv) printf "%s\n" ":" ;;' \
+  '  bundle) exit 42 ;;' \
+  '  *) exit 64 ;;' \
+  'esac'
 
 fake_ai_cli_failure_installer="$tmp_dir/fake-ai-cli-failure-installer.sh"
 chezmoi execute-template \
+  --source "$repo_root" \
   --override-data '{"chezmoi":{"os":"linux","sourceDir":"/missing-terrapod-source"},"enableAiCliTools":true}' \
   --file "$repo_root/.chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
   >"$fake_ai_cli_failure_installer"
 
 fake_ai_cli_failure_status=0
-HOME="$fake_ai_cli_failure_home" PATH="/usr/bin:/bin" /bin/sh "$fake_ai_cli_failure_installer" >"$tmp_dir/fake-ai-cli-failure.out" 2>"$tmp_dir/fake-ai-cli-failure.err" || fake_ai_cli_failure_status=$?
+HOME="$fake_ai_cli_failure_home" PATH="$fake_ai_cli_failure_home/.local/bin:/usr/bin:/bin" /bin/sh "$fake_ai_cli_failure_installer" >"$tmp_dir/fake-ai-cli-failure.out" 2>"$tmp_dir/fake-ai-cli-failure.err" || fake_ai_cli_failure_status=$?
 if [ "$fake_ai_cli_failure_status" -eq 0 ]; then
   fail "rendered installer fixture fails when optional AI CLI failures cannot be recorded without the shared library"
 fi
@@ -985,34 +982,22 @@ printf '%s\n' \
   '  return 0' \
   '}' \
   >"$fake_ai_cli_warning_source/dot_local/lib/terrapod/install-warnings.sh"
-for command_name in agy codex; do
-  write_stub "$fake_ai_cli_write_failure_home/.local/bin/$command_name" \
-    'exit 0'
-done
-write_stub "$fake_ai_cli_write_failure_home/.local/bin/bash" \
-  'exec sh "$@"'
-write_stub "$fake_ai_cli_write_failure_home/.local/bin/curl" \
-  'output=' \
-  'while [ "$#" -gt 0 ]; do' \
-  '  case "$1" in' \
-  '    -o)' \
-  '      shift' \
-  '      output="${1:-}"' \
-  '      ;;' \
-  '  esac' \
-  '  shift' \
-  'done' \
-  '[ -n "$output" ] || exit 2' \
-  'printf "%s\n" "#!/bin/sh" "exit 42" >"$output"'
+write_stub "$fake_ai_cli_write_failure_home/.local/bin/brew" \
+  'case "$1" in' \
+  '  shellenv) printf "%s\n" ":" ;;' \
+  '  bundle) exit 42 ;;' \
+  '  *) exit 64 ;;' \
+  'esac'
 
 fake_ai_cli_write_failure_installer="$tmp_dir/fake-ai-cli-write-failure-installer.sh"
 chezmoi execute-template \
+  --source "$repo_root" \
   --override-data "{\"chezmoi\":{\"os\":\"linux\",\"sourceDir\":\"$fake_ai_cli_warning_source\"},\"enableAiCliTools\":true}" \
   --file "$repo_root/.chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
   >"$fake_ai_cli_write_failure_installer"
 
 fake_ai_cli_write_failure_status=0
-HOME="$fake_ai_cli_write_failure_home" PATH="/usr/bin:/bin" /bin/sh "$fake_ai_cli_write_failure_installer" >"$tmp_dir/fake-ai-cli-write-failure.out" 2>"$tmp_dir/fake-ai-cli-write-failure.err" || fake_ai_cli_write_failure_status=$?
+HOME="$fake_ai_cli_write_failure_home" PATH="$fake_ai_cli_write_failure_home/.local/bin:/usr/bin:/bin" /bin/sh "$fake_ai_cli_write_failure_installer" >"$tmp_dir/fake-ai-cli-write-failure.out" 2>"$tmp_dir/fake-ai-cli-write-failure.err" || fake_ai_cli_write_failure_status=$?
 if [ "$fake_ai_cli_write_failure_status" -eq 0 ]; then
   fail "rendered installer fixture fails when optional AI CLI failures cannot be recorded after marker write failure"
 fi
@@ -1266,12 +1251,12 @@ assert_contains "$setup_output_text" "terminal-apps" "gum setup leads terminal-a
 assert_contains "$setup_output_text" "  Installs Ghostty." "gum setup describes terminal-apps under its group name"
 assert_contains "$setup_output_text" "automation" "gum setup leads automation App Group prompt with the group name"
 assert_contains "$setup_output_text" "  Installs Hammerspoon, Karabiner-Elements, and Scroll Reverser." "gum setup describes automation under its group name"
-assert_contains "$setup_output_text" "ai-apps" "gum setup leads ai-apps App Group prompt with the group name"
-assert_contains "$setup_output_text" "  Installs Claude Desktop, Codex desktop app (updates to the unified ChatGPT desktop app), Antigravity 2.0, Antigravity IDE, and Orca." "gum setup lists Orca in the ai-apps App Group"
+assert_contains "$setup_output_text" "development-apps" "gum setup leads development-apps App Group prompt with the group name"
+assert_contains "$setup_output_text" "  Installs Zed and Orca ADE." "gum setup lists Zed and Orca ADE in the development-apps App Group"
 assert_contains "$setup_output_text" "  Trusts only the fully-qualified stablyai/orca/orca cask, not the entire stablyai/orca tap." "gum setup discloses Orca's cask-specific trust boundary"
 assert_contains "$setup_output_text" "enableEditorStack = true" "gum setup summary includes concrete Editor Stack setting"
 assert_contains "$setup_output_text" "enableMacosAppGroupMonitoring = true" "gum setup summary includes concrete macOS App Group setting"
-assert_contains "$setup_output_text" "enableMacosAppGroupAiApps = true" "gum setup summary includes concrete ai-apps App Group setting"
+assert_contains "$setup_output_text" "enableMacosAppGroupDevelopmentApps = true" "gum setup summary includes concrete development-apps App Group setting"
 assert_contains "$setup_output_text" "Configured Terrapod Preset 'development'" "gum setup reports successful configuration"
 assert_contains "$setup_gum_log_text" "gum args: style" "gum setup uses gum style for setup-only presentation"
 assert_contains "$setup_gum_log_text" "gum args: choose" "gum setup uses gum choose for Preset selection"
@@ -1284,7 +1269,7 @@ assert_contains "$setup_gum_log_text" " --negative Disable" "gum setup uses Disa
 assert_contains "$setup_gum_log_text" "gum args: confirm Enable terminal-apps?" "gum setup asks stable Enable question for terminal-apps"
 assert_contains "$setup_gum_log_text" " --affirmative Enable" "gum setup uses Enable action for disabled Preset-proposed values"
 assert_contains "$setup_gum_log_text" " --negative Keep disabled" "gum setup uses Keep disabled action for disabled Preset-proposed values"
-assert_contains "$setup_gum_log_text" "gum args: confirm Enable ai-apps?" "gum setup asks stable Enable question for ai-apps"
+assert_contains "$setup_gum_log_text" "gum args: confirm Enable development-apps?" "gum setup asks stable Enable question for development-apps"
 assert_contains "$setup_gum_log_text" "gum args: confirm Write these Terrapod settings" "gum setup asks final confirmation with gum confirm"
 assert_first_occurrence_before "$setup_output_text" "Profile  macOS Terminal Profile" "Customize Terrapod settings." "gum setup shows profile before settings customization"
 assert_first_occurrence_before "$setup_output_text" "Choose a Preset" "Customize Terrapod settings." "gum setup presents Preset selection before customization"
@@ -1562,7 +1547,7 @@ enableMacosAppGroupTerminalApps = true
 enableMacosAppGroupAutomation = true
 enableMacosAppGroupLauncher = true
 enableMacosAppGroupMonitoring = false
-enableMacosAppGroupAiApps = true
+enableMacosAppGroupDevelopmentApps = true
 TOML
 
 macos_status_path="$(status_doctor_path macos chezmoi git zsh mise brew nvim agy claude codex zellij ghostty op)"
@@ -1582,7 +1567,7 @@ assert_contains "$macos_status_output" "terminal-apps                 : enabled 
 assert_contains "$macos_status_output" "automation                    : enabled (Hammerspoon, Karabiner-Elements, and Scroll Reverser)" "Terrapod status reports enabled automation macOS App Group"
 assert_contains "$macos_status_output" "launcher                      : enabled (Raycast and 1Password CLI)" "Terrapod status reports enabled launcher macOS App Group"
 assert_contains "$macos_status_output" "monitoring                    : disabled" "Terrapod status reports disabled monitoring macOS App Group"
-assert_contains "$macos_status_output" "ai-apps                       : enabled (Claude Desktop, Codex desktop app (updates to the unified ChatGPT desktop app), Antigravity 2.0, Antigravity IDE, and Orca)" "Terrapod status lists Orca in the enabled ai-apps App Group"
+assert_contains "$macos_status_output" "development-apps              : enabled (Zed and Orca ADE)" "Terrapod status lists Zed and Orca ADE in the enabled development-apps App Group"
 assert_contains "$macos_status_output" "chezmoi                       : available" "Terrapod status reports chezmoi availability"
 assert_contains "$macos_status_output" "brew                          : available" "Terrapod status reports macOS Bootstrap Package Manager availability"
 assert_contains "$macos_status_output" "Warnings: none" "Terrapod status reports no warnings when enabled tools are present"
@@ -1641,7 +1626,7 @@ data.enableMacosAppGroupAutomation = false
 data.enableMacosAppGroupLauncher = false
 data.enableMacosAppGroupMonitoring = false
 data.enableMacosAppGroupTerminalApps = true
-data.enableMacosAppGroupAiApps = true
+data.enableMacosAppGroupDevelopmentApps = true
 TOML
 
 dotted_status_path="$(status_doctor_path dotted chezmoi git zsh mise brew nvim agy claude codex zellij)"
@@ -1654,7 +1639,7 @@ dotted_status_output="$(
 assert_contains "$dotted_status_output" "Optional Editor Stack         : enabled (rich Neovim configuration)" "Terrapod status reads root dotted data keys for effective editor stack state"
 assert_contains "$dotted_status_output" "Optional AI Tool Stack        : enabled (tools available: agy, claude, codex)" "Terrapod status reads root dotted data keys for effective AI stack state"
 assert_contains "$dotted_status_output" "terminal-apps                 : enabled (Ghostty)" "Terrapod status reads root dotted data keys for Ghostty-only macOS App Groups"
-assert_contains "$dotted_status_output" "ai-apps                       : enabled (Claude Desktop, Codex desktop app (updates to the unified ChatGPT desktop app), Antigravity 2.0, Antigravity IDE, and Orca)" "Terrapod status reads root dotted data keys for Orca in ai-apps"
+assert_contains "$dotted_status_output" "development-apps              : enabled (Zed and Orca ADE)" "Terrapod status reads root dotted data keys for Zed and Orca ADE in development-apps"
 assert_contains "$dotted_status_output" "Warnings: none" "Terrapod status has no warnings for root dotted data keys when tools are present"
 
 status_ubuntu_config="$tmp_dir/status-ubuntu.toml"
@@ -1669,7 +1654,7 @@ enableMacosAppGroupTerminalApps = false
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
-enableMacosAppGroupAiApps = false
+enableMacosAppGroupDevelopmentApps = false
 TOML
 write_os_release "$status_ubuntu_os_release" ubuntu 24.04 "Ubuntu 24.04 LTS"
 
@@ -1689,6 +1674,7 @@ assert_contains "$ubuntu_status_output" "macOS App Groups: not applicable for VP
 assert_contains "$ubuntu_status_output" "apt                           : available" "Terrapod status reports Ubuntu Bootstrap Package Manager availability"
 assert_contains "$ubuntu_status_output" "Warnings: none" "Terrapod status has no warnings for disabled optional stacks"
 assert_not_contains "$ubuntu_status_output" "Warning:" "Terrapod status emits no warning lines for disabled optional stacks"
+assert_not_contains "$ubuntu_status_output" "brew                          : missing" "disabled Ubuntu Optional AI Tool Stack does not require Homebrew"
 assert_not_contains "$ubuntu_status_output" "missing tools: nvim" "Terrapod status distinguishes disabled Optional Editor Stack from missing tools"
 assert_not_contains "$ubuntu_status_output" "missing tools: agy" "Terrapod status distinguishes disabled Optional AI Tool Stack from missing tools"
 
@@ -1713,7 +1699,7 @@ if ! status_incomplete_vps_output="$(
 fi
 
 assert_contains "$status_incomplete_vps_output" "Config: $status_incomplete_vps_config (present; incomplete managed setup config)" "Terrapod status reports incomplete managed setup config in the Config section"
-assert_contains "$status_incomplete_vps_output" "enableMacosAppGroupAiApps" "Terrapod status identifies missing managed setup keys even on VPS"
+assert_contains "$status_incomplete_vps_output" "enableMacosAppGroupDevelopmentApps" "Terrapod status identifies missing managed setup keys even on VPS"
 assert_contains "$status_incomplete_vps_output" "Run 'tpod setup' or 'tpod configure <minimal|development>' to complete the managed setup config." "Terrapod status guides incomplete config recovery with tpod setup or configure"
 
 status_unsafe_multiline_config="$tmp_dir/status-unsafe-multiline.toml"
@@ -1728,7 +1714,7 @@ enableMacosAppGroupTerminalApps = false
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
-enableMacosAppGroupAiApps = false
+enableMacosAppGroupDevelopmentApps = false
 """
 TOML
 
@@ -1754,7 +1740,7 @@ enableMacosAppGroupTerminalApps = false
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
-enableMacosAppGroupAiApps = false
+enableMacosAppGroupDevelopmentApps = false
 TOML
 chmod 000 "$status_unreadable_config"
 
@@ -1805,7 +1791,54 @@ missing_status_output="$(
 assert_contains "$missing_status_output" "Optional Editor Stack         : enabled (rich Neovim configuration)" "Terrapod status reports enabled Optional Editor Stack as rich config state"
 assert_contains "$missing_status_output" "Optional AI Tool Stack        : enabled (missing tools: agy, claude, codex)" "Terrapod status reports missing tools only for enabled Optional AI Tool Stack"
 assert_contains "$missing_status_output" "Optional Development Workspace: enabled (development Zellij layouts)" "Terrapod status reports enabled Optional Development Workspace as layout state"
+assert_contains "$missing_status_output" "brew                          : missing" "enabled Ubuntu Optional AI Tool Stack requires Homebrew"
+assert_contains "$missing_status_output" "Warning: missing key tools: brew" "enabled Ubuntu Optional AI Tool Stack warns when Homebrew is missing"
 assert_contains "$missing_status_output" "Warning: Optional AI Tool Stack is enabled but missing tools: agy, claude, codex" "Terrapod status warns for enabled missing AI tools"
+
+status_shadow_config="$tmp_dir/status-shadow.toml"
+cat >"$status_shadow_config" <<'TOML'
+[data]
+profile = "vps-shell"
+enableEditorStack = false
+enableAiCliTools = true
+enableDevelopmentWorkspace = false
+enableMacosAppGroupTerminalApps = false
+enableMacosAppGroupAutomation = false
+enableMacosAppGroupLauncher = false
+enableMacosAppGroupMonitoring = false
+enableMacosAppGroupDevelopmentApps = false
+TOML
+
+status_shadow_path="$(status_doctor_path shadow chezmoi git zsh mise nvim zellij apt brew agy claude codex)"
+status_shadow_legacy="$tmp_dir/status-shadow-legacy"
+mkdir -p "$status_shadow_legacy"
+mv "$status_shadow_path/claude" "$status_shadow_legacy/claude"
+write_stub "$status_shadow_path/brew" \
+  'case "$1" in' \
+  '  --prefix) prefix="${0%/*}"; printf "%s\n" "$prefix" ;;' \
+  '  *) exit 0 ;;' \
+  'esac'
+write_stub "$status_shadow_path/uname" 'printf "%s\n" "Linux"'
+
+status_shadow_output="$(
+  TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_shadow_config" PATH="$status_shadow_legacy:$status_shadow_path" \
+    /bin/sh "$terrapod" status
+)"
+
+assert_contains "$status_shadow_output" "Warning: Optional AI Tool Stack has non-Homebrew commands shadowing managed casks: claude" "Terrapod status reports legacy Claude shadowing the Homebrew cask"
+
+status_broken_prefix_path="$(status_doctor_path broken-prefix chezmoi git zsh mise nvim zellij apt brew agy claude codex)"
+write_stub "$status_broken_prefix_path/brew" \
+  'if [ "${1:-}" = "--prefix" ]; then exit 1; fi' \
+  'exit 0'
+write_stub "$status_broken_prefix_path/uname" 'printf "%s\n" "Linux"'
+
+status_broken_prefix_output="$(
+  TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_shadow_config" PATH="$status_broken_prefix_path" \
+    /bin/sh "$terrapod" status
+)"
+
+assert_contains "$status_broken_prefix_output" "Warning: Optional AI Tool Stack cannot verify Homebrew command ownership because 'brew --prefix' failed" "Terrapod status reports an unusable Homebrew prefix"
 
 status_workspace_bundle_config="$tmp_dir/status-workspace-bundle.toml"
 cat >"$status_workspace_bundle_config" <<'TOML'
@@ -1851,7 +1884,7 @@ enableMacosAppGroupTerminalApps = false
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
-enableMacosAppGroupAiApps = false
+enableMacosAppGroupDevelopmentApps = false
 TOML
 write_os_release "$doctor_os_release" ubuntu 24.04 "Ubuntu 24.04 LTS"
 
@@ -1873,10 +1906,31 @@ assert_contains "$doctor_ok_output" "ok - zellij is available" "Terrapod doctor 
 assert_contains "$doctor_ok_output" "ok - apt is available" "Terrapod doctor validates Ubuntu Bootstrap Package Manager availability"
 assert_contains "$doctor_ok_output" "ok - Optional Editor Stack is disabled" "Terrapod doctor treats disabled Optional Editor Stack as valid"
 assert_contains "$doctor_ok_output" "ok - Optional AI Tool Stack is disabled" "Terrapod doctor treats disabled Optional AI Tool Stack as valid"
+assert_not_contains "$doctor_ok_output" "brew is missing" "disabled Ubuntu Optional AI Tool Stack doctor does not require Homebrew"
 assert_contains "$doctor_ok_output" "ok - Optional Development Workspace is disabled" "Terrapod doctor treats disabled Optional Development Workspace as valid"
 assert_contains "$doctor_ok_output" "Guidance: none" "Terrapod doctor prints no guidance when checks pass"
 assert_no_ansi_escape "$doctor_ok_output" "captured Terrapod doctor is plain without ANSI escapes"
 assert_no_routine_emoji "$doctor_ok_output" "captured Terrapod doctor has no routine emoji"
+
+if ! doctor_shadow_output="$(
+  TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_shadow_config" PATH="$status_shadow_legacy:$status_shadow_path" \
+    /bin/sh "$terrapod" doctor
+)"; then
+  fail "Terrapod doctor keeps legacy AI CLI shadowing as a non-fatal warning"
+fi
+
+assert_contains "$doctor_shadow_output" "ok - brew is available" "enabled Ubuntu Optional AI Tool Stack doctor requires Homebrew"
+assert_contains "$doctor_shadow_output" "warn - Optional AI Tool Stack has non-Homebrew commands shadowing managed casks: claude" "Terrapod doctor reports legacy Claude shadowing the Homebrew cask"
+assert_contains "$doctor_shadow_output" "Remove each legacy command with its original installer method, open a new shell, and rerun tpod apply." "Terrapod doctor gives non-destructive legacy cleanup guidance"
+
+if TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_shadow_config" PATH="$status_broken_prefix_path" \
+  /bin/sh "$terrapod" doctor >"$tmp_dir/doctor-broken-prefix.out" 2>"$tmp_dir/doctor-broken-prefix.err"; then
+  fail "Terrapod doctor fails when the enabled Optional AI Tool Stack cannot resolve the Homebrew prefix"
+fi
+
+doctor_broken_prefix_output="$(cat "$tmp_dir/doctor-broken-prefix.out")"
+assert_contains "$doctor_broken_prefix_output" "warn - Optional AI Tool Stack cannot resolve the Homebrew prefix" "Terrapod doctor reports an unusable Homebrew prefix"
+assert_contains "$doctor_broken_prefix_output" "Repair Homebrew until 'brew --prefix' succeeds, open a new shell, and rerun tpod apply." "Terrapod doctor gives Homebrew prefix recovery guidance"
 
 tty_doctor_output="$(
   run_command_in_pty xterm unset env TERRAPOD_PROFILE= TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_ok_path" /bin/sh "$terrapod" doctor
@@ -1904,7 +1958,7 @@ fi
 doctor_incomplete_config_output="$(cat "$tmp_dir/doctor-incomplete-config.out")"
 
 assert_contains "$doctor_incomplete_config_output" "warn - managed setup config is incomplete" "Terrapod doctor marks incomplete managed setup config as a failed check"
-assert_contains "$doctor_incomplete_config_output" "enableMacosAppGroupAiApps" "Terrapod doctor reports missing managed setup keys even on VPS"
+assert_contains "$doctor_incomplete_config_output" "enableMacosAppGroupDevelopmentApps" "Terrapod doctor reports missing managed setup keys even on VPS"
 assert_contains "$doctor_incomplete_config_output" "Run 'tpod setup' or 'tpod configure <minimal|development>' to complete the managed setup config." "Terrapod doctor guides incomplete config recovery with tpod setup or configure"
 
 if TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_unsafe_multiline_config" PATH="$doctor_ok_path" \
@@ -1928,7 +1982,7 @@ enableMacosAppGroupTerminalApps = false
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
-enableMacosAppGroupAiApps = false
+enableMacosAppGroupDevelopmentApps = false
 TOML
 chmod 000 "$doctor_unreadable_config"
 
@@ -2118,7 +2172,7 @@ enableMacosAppGroupTerminalApps = false
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
-enableMacosAppGroupAiApps = false
+enableMacosAppGroupDevelopmentApps = false
 TOML
 
 if ! HOME="$update_home" XDG_CONFIG_HOME="$update_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
@@ -2187,7 +2241,7 @@ update_incomplete_error="$(cat "$tmp_dir/update-incomplete.err")"
 assert_contains "$update_incomplete_output" "Config: $status_incomplete_vps_config (present; incomplete managed setup config)" "Terrapod update reports incomplete managed setup config in the Config section"
 assert_not_contains "$update_incomplete_output" "Delegating source update to:" "Terrapod update does not announce delegation when managed setup config is incomplete"
 assert_contains "$update_incomplete_error" "managed setup config is incomplete" "Terrapod update explains incomplete managed setup config"
-assert_contains "$update_incomplete_error" "enableMacosAppGroupAiApps" "Terrapod update reports missing managed setup keys even on VPS"
+assert_contains "$update_incomplete_error" "enableMacosAppGroupDevelopmentApps" "Terrapod update reports missing managed setup keys even on VPS"
 assert_contains "$update_incomplete_error" "Run 'tpod setup' or 'tpod configure <minimal|development>' to complete the managed setup config." "Terrapod update guides incomplete config recovery with tpod setup or configure"
 
 if [ -e "$CHEZMOI_INVOKED_FILE" ]; then
@@ -2232,7 +2286,7 @@ enableMacosAppGroupTerminalApps = false
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
-enableMacosAppGroupAiApps = false
+enableMacosAppGroupDevelopmentApps = false
 TOML
 
 rm -f "$CHEZMOI_CALL_FILE" "$CHEZMOI_INVOKED_FILE"
@@ -2329,7 +2383,7 @@ enableMacosAppGroupTerminalApps = true
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = true
 enableMacosAppGroupMonitoring = false
-enableMacosAppGroupAiApps = true
+enableMacosAppGroupDevelopmentApps = true
 TOML
 
 if ! HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
@@ -2410,8 +2464,8 @@ assert_contains \
 
 assert_contains \
   "$diff_output" \
-  "ai-apps                       : enabled" \
-  "Terrapod diff prints enabled ai-apps macOS App Group state"
+  "development-apps              : enabled" \
+  "Terrapod diff prints enabled development-apps macOS App Group state"
 
 assert_contains \
   "$diff_output" \
@@ -2552,7 +2606,7 @@ fi
 apply_incomplete_error="$(cat "$tmp_dir/apply-incomplete.err")"
 
 assert_contains "$apply_incomplete_error" "managed setup config is incomplete" "Terrapod apply explains incomplete managed setup config"
-assert_contains "$apply_incomplete_error" "enableMacosAppGroupAiApps" "Terrapod apply reports missing managed setup keys even on VPS"
+assert_contains "$apply_incomplete_error" "enableMacosAppGroupDevelopmentApps" "Terrapod apply reports missing managed setup keys even on VPS"
 assert_contains "$apply_incomplete_error" "Run 'tpod setup' or 'tpod configure <minimal|development>' to complete the managed setup config." "Terrapod apply guides incomplete config recovery with tpod setup or configure"
 
 if [ -e "$CHEZMOI_APPLY_INVOKED_FILE" ]; then
@@ -2595,7 +2649,7 @@ fi
 
 apply_inline_config="$tmp_dir/apply-inline-table.toml"
 cat >"$apply_inline_config" <<'TOML'
-data = { profile = "vps-shell", enableEditorStack = false, enableAiCliTools = false, enableDevelopmentWorkspace = false, enableMacosAppGroupTerminalApps = false, enableMacosAppGroupAutomation = false, enableMacosAppGroupLauncher = false, enableMacosAppGroupMonitoring = false, enableMacosAppGroupAiApps = false }
+data = { profile = "vps-shell", enableEditorStack = false, enableAiCliTools = false, enableDevelopmentWorkspace = false, enableMacosAppGroupTerminalApps = false, enableMacosAppGroupAutomation = false, enableMacosAppGroupLauncher = false, enableMacosAppGroupMonitoring = false, enableMacosAppGroupDevelopmentApps = false }
 TOML
 rm -f "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
 
@@ -2725,8 +2779,8 @@ assert_contains \
 
 assert_contains \
   "$apply_output" \
-  "ai-apps                       : enabled" \
-  "Terrapod apply prints enabled ai-apps macOS App Group state"
+  "development-apps              : enabled" \
+  "Terrapod apply prints enabled development-apps macOS App Group state"
 
 assert_contains \
   "$apply_output" \

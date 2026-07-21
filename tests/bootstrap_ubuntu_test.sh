@@ -72,14 +72,27 @@ write_stub() {
 mkdir -p "$tmp_dir/bin" "$tmp_dir/home"
 
 rendered="$tmp_dir/bootstrap-ubuntu.sh"
+rendered_ai="$tmp_dir/bootstrap-ubuntu-ai.sh"
 chezmoi execute-template \
   --source "$repo_root" \
-  --override-data '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}}}' \
+  --override-data '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableAiCliTools":false,"enableDevelopmentWorkspace":false}' \
   --file "$repo_root/.chezmoiscripts/run_onchange_before_00-bootstrap-ubuntu.sh.tmpl" \
   >"$rendered"
+chezmoi execute-template \
+  --source "$repo_root" \
+  --override-data '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableAiCliTools":true}' \
+  --file "$repo_root/.chezmoiscripts/run_onchange_before_00-bootstrap-ubuntu.sh.tmpl" \
+  >"$rendered_ai"
 
 sh -n "$rendered" || fail "rendered Ubuntu bootstrap script should be valid sh"
 pass "rendered Ubuntu bootstrap script is valid sh"
+sh -n "$rendered_ai" || fail "rendered AI-enabled Ubuntu bootstrap script should be valid sh"
+pass "rendered AI-enabled Ubuntu bootstrap script is valid sh"
+
+assert_not_contains "$(cat "$rendered")" "  file \\" "disabled Optional AI Tool Stack does not add Linuxbrew file prerequisite"
+assert_not_contains "$(cat "$rendered")" "  procps \\" "disabled Optional AI Tool Stack does not add Linuxbrew procps prerequisite"
+assert_contains "$(cat "$rendered_ai")" "  file \\" "AI-enabled Ubuntu bootstrap adds Linuxbrew file prerequisite"
+assert_contains "$(cat "$rendered_ai")" "  procps \\" "AI-enabled Ubuntu bootstrap adds Linuxbrew procps prerequisite"
 
 write_stub "$tmp_dir/bin/id" \
   'case "$1" in' \

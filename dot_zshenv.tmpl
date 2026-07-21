@@ -1,12 +1,18 @@
 export XDG_CONFIG_HOME="$HOME/.config"
 
+{{ if and (eq .chezmoi.os "linux") (or (default false (get . "enableAiCliTools")) (default false (get . "enableDevelopmentWorkspace"))) -}}
+# Linuxbrew owns the Optional AI Tool Stack on Ubuntu.
+if [[ -x /home/linuxbrew/.linuxbrew/bin/brew ]]; then
+  eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+fi
+
+{{ end -}}
 typeset -U path PATH
 
 # User-local binaries.
 if [[ -d "$HOME/.local/bin" ]]; then
   path=("$HOME/.local/bin" $path)
 fi
-
 # Managed PATH snippets.
 if [[ -d "$HOME/.config/zsh/path.d" ]]; then
   for path_snippet in "$HOME"/.config/zsh/path.d/*.zsh(N); do
