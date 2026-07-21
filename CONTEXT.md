@@ -285,9 +285,10 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - The automation **macOS App Group** contains Hammerspoon and Karabiner-Elements.
 - The launcher **macOS App Group** contains Raycast and 1Password CLI.
 - The monitoring **macOS App Group** contains iStat Menus.
-- The ai-apps **macOS App Group** contains Claude Desktop, Codex Desktop, Antigravity 2.0, and Antigravity IDE.
-- The ai-apps **macOS App Group** installs these desktop apps through Homebrew casks `claude`, `codex-app`, `antigravity`, and `antigravity-ide`.
-- The planned Hammerspoon app launcher change maps Codex Desktop to `1`, Claude Desktop to `2`, Antigravity 2.0 to `3`, and Antigravity IDE to `i`.
+- The ai-apps **macOS App Group** contains Claude Desktop, Codex Desktop, Antigravity 2.0, Antigravity IDE, and Orca.
+- The ai-apps **macOS App Group** installs these desktop apps through Homebrew casks `claude`, `codex-app`, `antigravity`, `antigravity-ide`, and the fully-qualified vendor cask `stablyai/orca/orca`.
+- The Hammerspoon app launcher maps Codex Desktop to `1`, Claude Desktop to `2`, Antigravity 2.0 to `3`, Orca to `4`, and Antigravity IDE to `i`.
+- Orca's bundled `orca` CLI remains an artifact of the ai-apps **macOS App Group** and is not a member of the cross-profile **Optional AI Tool Stack**.
 - Removing ChatGPT Atlas from the Hammerspoon app launcher is part of the planned launcher change.
 - Individual macOS app toggles are excluded from the current **Terrapod** setup scope.
 - Repository renaming makes `juty9026/terrapod` the canonical slug for the **Terrapod Source Repository** without adding legacy URL fallback behavior.

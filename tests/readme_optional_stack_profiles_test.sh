@@ -144,6 +144,10 @@ assert_key_row_contains '`enableMacosAppGroupAiApps`' 'Antigravity 2.0' \
   "README documents Antigravity 2.0 on the ai-apps option row"
 assert_key_row_contains '`enableMacosAppGroupAiApps`' 'Antigravity IDE' \
   "README documents Antigravity IDE on the ai-apps option row"
+assert_key_row_contains '`enableMacosAppGroupAiApps`' 'Orca ADE' \
+  "README documents Orca ADE on the ai-apps option row"
+assert_key_row_contains '`enableMacosAppGroupAiApps`' 'stablyai/orca/orca' \
+  "README documents Orca's fully-qualified cask source"
 
 assert_contains 'Optional stack profiles and macOS App Group settings are disabled by default.' \
   "README states optional stack profiles and App Groups are disabled by default"
