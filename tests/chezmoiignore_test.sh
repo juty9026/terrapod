@@ -215,6 +215,16 @@ ai_cli_tools_managed="$(managed_source_paths "$ai_cli_tools_data")"
 development_workspace_data='{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableEditorStack":false,"enableAiCliTools":false,"enableDevelopmentWorkspace":true}'
 development_workspace_managed="$(managed_source_paths "$development_workspace_data")"
 
+assert_managed_paths_exclude_prefix \
+  "$macos_ai_cli_tools_managed" \
+  "Brewfile.ai-cli-tools.tmpl" \
+  "macOS does not manage the rendered AI CLI tools Brewfile"
+
+assert_managed_paths_exclude_prefix \
+  "$ai_cli_tools_managed" \
+  "Brewfile.ai-cli-tools.tmpl" \
+  "Ubuntu does not manage the rendered AI CLI tools Brewfile"
+
 macos_only_entries="
 .chezmoiscripts/run_before_01-retry-homebrew-core.sh.tmpl
 .chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl
