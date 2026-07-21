@@ -1,8 +1,22 @@
-# Homebrew bootstrap and macOS-only dependencies.
+# Mandatory cross-profile Core Shell Stack CLI tools.
 
-brew "mise"
+brew "bat"
 brew "btop"
+brew "chezmoi"
+brew "dust"
+brew "duf"
+brew "fastfetch"
+brew "fd"
+brew "fzf"
+brew "gh"
+brew "git"
+brew "git-delta"
 brew "gum"
-
-cask "font-jetbrains-mono-nerd-font"
-cask "font-d2coding"
+brew "lazygit"
+brew "lsd"
+brew "mise"
+brew "neovim"
+brew "ripgrep"
+brew "starship"
+brew "zellij"
+brew "zoxide"
