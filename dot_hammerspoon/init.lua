@@ -25,6 +25,7 @@ local appBindings = {
   { key = "1", label = "ChatGPT", bundleID = "com.openai.codex" },
   { key = "2", label = "Claude Desktop", bundleID = "com.anthropic.claudefordesktop" },
   { key = "3", label = "Antigravity 2.0", bundleID = "com.google.antigravity" },
+  { key = "4", label = "Orca", bundleID = "com.stablyai.orca" },
   { key = "i", label = "Antigravity IDE", bundleID = "com.google.antigravity-ide" },
   { key = "o", label = "Obsidian", bundleID = "md.obsidian" },
   { key = "p", label = "Postman", bundleID = "com.postmanlabs.mac" },

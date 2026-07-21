@@ -52,6 +52,10 @@ assert_contains \
   "Hammerspoon launcher binds Antigravity 2.0 to 3"
 
 assert_contains \
+  '{ key = "4", label = "Orca", bundleID = "com.stablyai.orca" }' \
+  "Hammerspoon launcher binds Orca to 4"
+
+assert_contains \
   '{ key = "i", label = "Antigravity IDE", bundleID = "com.google.antigravity-ide" }' \
   "Hammerspoon launcher binds Antigravity IDE to i"
 

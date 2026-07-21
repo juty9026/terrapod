@@ -616,6 +616,7 @@ assert_not_contains_text "$macos_brewfile" 'cask "chatgpt"' "macOS default does 
 assert_not_contains_text "$macos_brewfile" 'cask "codex"' "macOS default does not render Codex CLI as a desktop app"
 assert_not_contains_text "$macos_brewfile" 'cask "antigravity"' "macOS default does not render Antigravity 2.0"
 assert_not_contains_text "$macos_brewfile" 'cask "antigravity-ide"' "macOS default does not render Antigravity IDE"
+assert_not_contains_text "$macos_brewfile" 'cask "stablyai/orca/orca"' "macOS default does not render Orca"
 
 assert_contains_text "$terminal_apps_brewfile" 'cask "ghostty"' "terminal-apps group renders Ghostty"
 assert_not_contains_text "$terminal_apps_brewfile" 'cask "cmux"' "terminal-apps group does not render cmux"
@@ -637,6 +638,7 @@ assert_not_contains_text "$ai_apps_brewfile" 'cask "chatgpt"' "ai-apps group doe
 assert_not_contains_text "$ai_apps_brewfile" 'cask "codex"' "ai-apps group does not render Codex CLI cask"
 assert_contains_text "$ai_apps_brewfile" 'cask "antigravity"' "ai-apps group renders Antigravity 2.0"
 assert_contains_text "$ai_apps_brewfile" 'cask "antigravity-ide"' "ai-apps group renders Antigravity IDE"
+assert_contains_text "$ai_apps_brewfile" 'cask "stablyai/orca/orca"' "ai-apps group renders Orca from its official Homebrew tap"
 ai_apps_casks="$(
   printf '%s\n' "$ai_apps_brewfile" |
     awk '/^[[:space:]]*cask[[:space:]]+"/ { print }'
@@ -644,11 +646,39 @@ ai_apps_casks="$(
 expected_ai_apps_casks='cask "claude"
 cask "codex-app"
 cask "antigravity"
-cask "antigravity-ide"'
+cask "antigravity-ide"
+cask "stablyai/orca/orca"'
 assert_text_equals \
   "$ai_apps_casks" \
   "$expected_ai_apps_casks" \
   "ai-apps group renders exactly the expected casks"
+
+ai_apps_bootstrap_script="$tmp_dir/macos-ai-apps-bootstrap.sh"
+printf '%s\n' "$macos_ai_apps_bootstrap" >"$ai_apps_bootstrap_script"
+sh -n "$ai_apps_bootstrap_script" || fail "ai-apps bootstrap script should be valid sh"
+pass "ai-apps bootstrap script is valid sh"
+
+ai_apps_failure_bin="$tmp_dir/ai-apps-failure-bin"
+ai_apps_failure_state="$tmp_dir/ai-apps-failure-state"
+ai_apps_failure_home="$tmp_dir/ai-apps-failure-home"
+ai_apps_failure_log="$tmp_dir/ai-apps-failure-brew.log"
+mkdir -p "$ai_apps_failure_bin" "$ai_apps_failure_home"
+write_brew_bundle_stub "$ai_apps_failure_bin/brew"
+
+if ! HOME="$ai_apps_failure_home" XDG_STATE_HOME="$ai_apps_failure_state" MACOS_BREW_LOG="$ai_apps_failure_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="stablyai/orca/orca" PATH="$ai_apps_failure_bin:/usr/bin:/bin" \
+  sh "$ai_apps_bootstrap_script" >"$tmp_dir/ai-apps-failure.out" 2>"$tmp_dir/ai-apps-failure.err"; then
+  fail "Orca desktop app bundle failure does not block bootstrap script"
+fi
+
+ai_apps_failure_marker="$ai_apps_failure_state/terrapod/install-warnings/homebrew-desktop-apps"
+if [ ! -f "$ai_apps_failure_marker" ]; then
+  fail "Orca desktop app bundle failure records a homebrew-desktop-apps marker"
+fi
+pass "Orca desktop app bundle failure records a homebrew-desktop-apps marker"
+
+ai_apps_failure_marker_text="$(cat "$ai_apps_failure_marker")"
+assert_contains_text "$ai_apps_failure_marker_text" "failed casks: stablyai/orca/orca" "Orca failure attribution preserves its fully-qualified cask source"
+assert_contains_text "$ai_apps_failure_marker_text" "App Groups: ai-apps" "Orca failure attribution identifies the ai-apps group"
 
 terminal_launcher_bootstrap_script="$tmp_dir/macos-terminal-launcher-bootstrap.sh"
 printf '%s\n' "$macos_terminal_launcher_apps_bootstrap" >"$terminal_launcher_bootstrap_script"

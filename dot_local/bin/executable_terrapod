@@ -531,7 +531,7 @@ show_setup_option_block() {
       printf '%s\n' "  Installs iStat Menus."
       ;;
     "ai-apps macOS App Group")
-      printf '%s\n' "  Installs Claude Desktop, Codex desktop app (updates to the unified ChatGPT desktop app), Antigravity 2.0, and Antigravity IDE."
+      printf '%s\n' "  Installs Claude Desktop, Codex desktop app (updates to the unified ChatGPT desktop app), Antigravity 2.0, Antigravity IDE, and Orca."
       ;;
   esac
   printf '%s\n' ""
@@ -986,7 +986,7 @@ print_macos_app_group_status() {
     print_indented_colon_state_line "monitoring" "disabled"
   fi
   if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupAiApps)"; then
-    print_indented_colon_state_line "ai-apps" "enabled" "(Claude Desktop, Codex desktop app (updates to the unified ChatGPT desktop app), Antigravity 2.0, and Antigravity IDE)"
+    print_indented_colon_state_line "ai-apps" "enabled" "(Claude Desktop, Codex desktop app (updates to the unified ChatGPT desktop app), Antigravity 2.0, Antigravity IDE, and Orca)"
   else
     print_indented_colon_state_line "ai-apps" "disabled"
   fi
