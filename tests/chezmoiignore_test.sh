@@ -1278,12 +1278,23 @@ fi
 pass "mise tool retry clears warning marker after recovery"
 
 ai_cli_tools_installer="$(render_template "$ai_cli_tools_data" ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl")"
+macos_ai_cli_tools_installer="$(render_template "$macos_ai_cli_tools_data" ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl")"
 development_workspace_ai_installer="$(render_template "$development_workspace_data" ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl")"
 disabled_ai_cli_tools_cleanup="$(render_template "$ubuntu_data" ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl")"
+ai_cli_tools_brewfile="$(render_template "$ai_cli_tools_data" "Brewfile.ai-cli-tools.tmpl")"
+development_workspace_ai_brewfile="$(render_template "$development_workspace_data" "Brewfile.ai-cli-tools.tmpl")"
+disabled_ai_cli_tools_brewfile="$(render_template "$ubuntu_data" "Brewfile.ai-cli-tools.tmpl")"
+
+for rendered_brewfile in "$ai_cli_tools_brewfile" "$development_workspace_ai_brewfile"; do
+  assert_contains_text "$rendered_brewfile" 'cask "antigravity-cli"' "Optional AI Tool Stack declares Antigravity CLI cask"
+  assert_contains_text "$rendered_brewfile" 'cask "claude-code"' "Optional AI Tool Stack declares Claude Code cask"
+  assert_contains_text "$rendered_brewfile" 'cask "codex"' "Optional AI Tool Stack declares Codex CLI cask"
+done
+assert_text_equals "$disabled_ai_cli_tools_brewfile" "" "disabled Optional AI Tool Stack renders no Homebrew casks"
 
 assert_contains_text "$disabled_ai_cli_tools_cleanup" "AI_CLI_WARNING_CATEGORY=optional-ai-cli-tools" "disabled Optional AI Tool Stack renders optional AI CLI warning category"
 assert_contains_text "$disabled_ai_cli_tools_cleanup" 'clear_install_warning "$AI_CLI_WARNING_CATEGORY"' "disabled Optional AI Tool Stack renders stale marker cleanup"
-assert_not_contains_text "$disabled_ai_cli_tools_cleanup" "https://chatgpt.com/codex/install.sh" "disabled Optional AI Tool Stack cleanup does not render installer URLs"
+assert_not_contains_text "$disabled_ai_cli_tools_cleanup" "raw.githubusercontent.com/Homebrew/install" "disabled Optional AI Tool Stack cleanup does not render Homebrew installer URL"
 
 disabled_ai_cli_tools_cleanup_script="$tmp_dir/disabled-ai-cli-tools-cleanup.sh"
 printf '%s\n' "$disabled_ai_cli_tools_cleanup" >"$disabled_ai_cli_tools_cleanup_script"
@@ -1296,332 +1307,122 @@ mkdir -p "$ai_marker_home"
 HOME="$ai_marker_home" XDG_STATE_HOME="$ai_marker_state" sh -c \
   '. "$1"; terrapod_install_warning_write optional-ai-cli-tools "Optional AI CLI tool install needs attention" "Rerun tpod apply after network access is restored."' \
   sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
-
-if [ ! -f "$ai_marker_state/terrapod/install-warnings/optional-ai-cli-tools" ]; then
-  fail "test setup should create an optional-ai-cli-tools warning marker"
-fi
-printf '%s\n' \
-  "category='ai-cli-tools'" \
-  "summary='Legacy Optional AI CLI tool install needs attention'" \
-  "guidance='Rerun tpod apply after network access is restored.'" \
-  "updated_at='2026-01-01T00:00:00Z'" \
-  >"$ai_marker_state/terrapod/install-warnings/ai-cli-tools"
-if [ ! -f "$ai_marker_state/terrapod/install-warnings/ai-cli-tools" ]; then
-  fail "test setup should create a legacy ai-cli-tools warning marker"
-fi
-
 HOME="$ai_marker_home" XDG_STATE_HOME="$ai_marker_state" sh "$disabled_ai_cli_tools_cleanup_script"
 if [ -e "$ai_marker_state/terrapod/install-warnings/optional-ai-cli-tools" ]; then
-  fail "disabled Optional AI Tool Stack cleanup should clear stale optional-ai-cli-tools marker"
-fi
-if [ -e "$ai_marker_state/terrapod/install-warnings/ai-cli-tools" ]; then
-  fail "disabled Optional AI Tool Stack cleanup should clear stale legacy ai-cli-tools marker"
+  fail "disabled Optional AI Tool Stack cleanup clears stale optional-ai-cli-tools marker"
 fi
 pass "disabled Optional AI Tool Stack cleanup clears stale optional AI CLI markers"
 
 ai_cli_tools_installer_script="$tmp_dir/ai-cli-tools-installer.sh"
-printf '%s\n' "$ai_cli_tools_installer" >"$ai_cli_tools_installer_script"
+macos_ai_cli_tools_installer_script="$tmp_dir/macos-ai-cli-tools-installer.sh"
+printf '%s\n' "$ai_cli_tools_installer" |
+  sed \
+    -e "s#/opt/homebrew/bin/brew#$tmp_dir/missing-opt-homebrew-brew#g" \
+    -e "s#/usr/local/bin/brew#$tmp_dir/missing-usr-local-brew#g" \
+    -e "s#/home/linuxbrew/.linuxbrew/bin/brew#$tmp_dir/missing-linuxbrew-brew#g" \
+    >"$ai_cli_tools_installer_script"
+printf '%s\n' "$macos_ai_cli_tools_installer" >"$macos_ai_cli_tools_installer_script"
 sh -n "$ai_cli_tools_installer_script" || fail "enabled Optional AI Tool Stack installer script should be valid sh"
-pass "enabled Optional AI Tool Stack installer script is valid sh"
+sh -n "$macos_ai_cli_tools_installer_script" || fail "macOS Optional AI Tool Stack installer script should be valid sh"
+pass "enabled Optional AI Tool Stack installer scripts are valid sh"
 
-ai_cli_skip_home="$tmp_dir/ai-cli-skip-home"
-ai_cli_skip_state="$tmp_dir/ai-cli-skip-state"
-ai_cli_skip_curl_log="$tmp_dir/ai-cli-skip-curl.log"
-mkdir -p "$ai_cli_skip_home/.local/bin"
-for command_name in agy claude codex; do
-  write_stub "$ai_cli_skip_home/.local/bin/$command_name" \
-    'exit 0'
-done
-write_stub "$ai_cli_skip_home/.local/bin/curl" \
-  'printf "%s\n" "curl called:$*" >>"$AI_CLI_SKIP_CURL_LOG"' \
-  'exit 7'
+write_ai_brew_stub() {
+  path="$1"
+  write_stub "$path" \
+    'printf "%s\n" "brew args:$*" >>"$AI_BREW_LOG"' \
+    'case "$1" in' \
+    '  shellenv) printf "export PATH=\"%s:$PATH\"\n" "$AI_BREW_BIN" ;;' \
+    '  bundle)' \
+    '    bundle_file=' \
+    '    for arg do case "$arg" in --file=*) bundle_file="$(printf "%s" "$arg" | cut -d= -f2-)" ;; esac; done' \
+    '    [ -n "$bundle_file" ] || exit 64' \
+    '    grep -Fx "cask \"antigravity-cli\"" "$bundle_file" >/dev/null || exit 65' \
+    '    grep -Fx "cask \"claude-code\"" "$bundle_file" >/dev/null || exit 66' \
+    '    grep -Fx "cask \"codex\"" "$bundle_file" >/dev/null || exit 67' \
+    '    [ "$AI_BREW_FAIL" = "0" ] || exit 42' \
+    '    ;;' \
+    '  *) exit 64 ;;' \
+    'esac'
+}
 
-ai_cli_skip_status=0
-HOME="$ai_cli_skip_home" \
-  XDG_STATE_HOME="$ai_cli_skip_state" \
-  AI_CLI_SKIP_CURL_LOG="$ai_cli_skip_curl_log" \
-  TMPDIR="$tmp_dir" \
-  PATH="/usr/bin:/bin" \
-  http_proxy="http://127.0.0.1:9" \
-  https_proxy="http://127.0.0.1:9" \
-  all_proxy="http://127.0.0.1:9" \
-  HTTP_PROXY="http://127.0.0.1:9" \
-  HTTPS_PROXY="http://127.0.0.1:9" \
-  ALL_PROXY="http://127.0.0.1:9" \
-  sh "$ai_cli_tools_installer_script" >/dev/null 2>"$tmp_dir/ai-cli-skip.err" || ai_cli_skip_status=$?
-if [ "$ai_cli_skip_status" -ne 0 ]; then
-  fail "enabled Optional AI Tool Stack installer exits 0 when all tools already exist under HOME-local PATH"
-fi
-pass "enabled Optional AI Tool Stack installer exits 0 when all tools already exist under HOME-local PATH"
+macos_ai_brew_bin="$tmp_dir/macos-ai-brew-bin"
+macos_ai_brew_home="$tmp_dir/macos-ai-brew-home"
+macos_ai_brew_state="$tmp_dir/macos-ai-brew-state"
+macos_ai_brew_log="$tmp_dir/macos-ai-brew.log"
+mkdir -p "$macos_ai_brew_bin" "$macos_ai_brew_home"
+write_ai_brew_stub "$macos_ai_brew_bin/brew"
+HOME="$macos_ai_brew_home" XDG_STATE_HOME="$macos_ai_brew_state" \
+  AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$macos_ai_brew_log" AI_BREW_FAIL=0 \
+  PATH="$macos_ai_brew_bin:/usr/bin:/bin" sh "$macos_ai_cli_tools_installer_script"
+macos_ai_brew_log_text="$(cat "$macos_ai_brew_log")"
+assert_contains_text "$macos_ai_brew_log_text" "brew args:shellenv" "macOS Optional AI Tool Stack loads Homebrew shellenv"
+assert_contains_text "$macos_ai_brew_log_text" "brew args:bundle --no-upgrade --file=" "macOS Optional AI Tool Stack installs the common no-upgrade bundle"
 
-if [ -s "$ai_cli_skip_curl_log" ]; then
-  fail "enabled Optional AI Tool Stack installer skips curl when all tools already exist under HOME-local PATH"
-fi
-pass "enabled Optional AI Tool Stack installer skips curl when all tools already exist under HOME-local PATH"
-
-if [ -e "$ai_cli_skip_state/terrapod/install-warnings/optional-ai-cli-tools" ]; then
-  fail "enabled Optional AI Tool Stack installer leaves no optional-ai-cli-tools marker when all tools are already installed"
-fi
-pass "enabled Optional AI Tool Stack installer leaves no optional-ai-cli-tools marker when all tools are already installed"
-
-ai_cli_retry_home="$tmp_dir/ai-cli-retry-home"
-ai_cli_retry_state="$tmp_dir/ai-cli-retry-state"
-ai_cli_retry_url_log="$tmp_dir/ai-cli-retry-url.log"
-ai_cli_retry_run_log="$tmp_dir/ai-cli-retry-run.log"
-ai_cli_retry_antigravity_installer="$tmp_dir/ai-cli-retry-antigravity-installer.sh"
-ai_cli_retry_claude_installer="$tmp_dir/ai-cli-retry-claude-installer.sh"
-ai_cli_retry_codex_installer="$tmp_dir/ai-cli-retry-codex-installer.sh"
-mkdir -p "$ai_cli_retry_home/.local/bin"
-ai_cli_retry_marker_dir="$ai_cli_retry_state/terrapod/install-warnings"
-ai_cli_retry_marker="$ai_cli_retry_marker_dir/optional-ai-cli-tools"
-ai_cli_retry_legacy_marker="$ai_cli_retry_marker_dir/ai-cli-tools"
-mkdir -p "$ai_cli_retry_marker_dir"
-printf '%s\n' \
-  "category='ai-cli-tools'" \
-  "summary='Legacy AI CLI tool install needs attention'" \
-  "guidance='Rerun tpod apply after network access is restored.'" \
-  "updated_at='2026-01-01T00:00:00Z'" \
-  >"$ai_cli_retry_legacy_marker"
-
-write_stub "$ai_cli_retry_antigravity_installer" \
-  'printf "%s\n" "run:antigravity" >>"$AI_CLI_RETRY_RUN_LOG"' \
-  'mkdir -p "$HOME/.local/bin"' \
-  'printf "%s\n" "#!/bin/sh" "exit 0" >"$HOME/.local/bin/agy"' \
-  'chmod +x "$HOME/.local/bin/agy"'
-write_stub "$ai_cli_retry_claude_installer" \
-  'printf "%s\n" "run:claude" >>"$AI_CLI_RETRY_RUN_LOG"' \
-  'if [ "${AI_CLI_RETRY_CLAUDE_FAIL:-}" = "1" ]; then exit 42; fi' \
-  'mkdir -p "$HOME/.local/bin"' \
-  'printf "%s\n" "#!/bin/sh" "exit 0" >"$HOME/.local/bin/claude"' \
-  'chmod +x "$HOME/.local/bin/claude"'
-write_stub "$ai_cli_retry_codex_installer" \
-  'printf "%s\n" "run:codex" >>"$AI_CLI_RETRY_RUN_LOG"' \
-  'printf "%s\n" "codex:noninteractive=${CODEX_NON_INTERACTIVE:-}" >>"$AI_CLI_RETRY_RUN_LOG"' \
-  'printf "%s\n" "codex:path=$PATH" >>"$AI_CLI_RETRY_RUN_LOG"' \
-  'mkdir -p "$HOME/.local/bin"' \
-  'printf "%s\n" "#!/bin/sh" "exit 0" >"$HOME/.local/bin/codex"' \
-  'chmod +x "$HOME/.local/bin/codex"'
-
-write_stub "$ai_cli_retry_home/.local/bin/bash" \
-  'printf "%s\n" "bash:$1" >>"$AI_CLI_RETRY_RUN_LOG"' \
-  'exec sh "$@"'
-write_stub "$ai_cli_retry_home/.local/bin/curl" \
-  'url=' \
-  'output=' \
-  'while [ "$#" -gt 0 ]; do' \
-  '  case "$1" in' \
-  '    -o)' \
-  '      shift' \
-  '      output="${1:-}"' \
-  '      ;;' \
-  '    https://*)' \
-  '      url="$1"' \
-  '      ;;' \
-  '  esac' \
-  '  shift' \
-  'done' \
-  'if [ -z "$url" ] || [ -z "$output" ]; then' \
-  '  printf "%s\n" "bad curl args" >>"$AI_CLI_RETRY_RUN_LOG"' \
-  '  exit 2' \
-  'fi' \
-  'printf "%s\n" "$url" >>"$AI_CLI_RETRY_URL_LOG"' \
-  'case "$url" in' \
-  '  https://antigravity.google/cli/install.sh)' \
-  '    cp "$AI_CLI_RETRY_ANTIGRAVITY_INSTALLER" "$output"' \
-  '    ;;' \
-  '  https://claude.ai/install.sh)' \
-  '    cp "$AI_CLI_RETRY_CLAUDE_INSTALLER" "$output"' \
-  '    ;;' \
-  '  https://chatgpt.com/codex/install.sh)' \
-  '    cp "$AI_CLI_RETRY_CODEX_INSTALLER" "$output"' \
-  '    ;;' \
-  '  *)' \
-  '    printf "%s\n" "unexpected url:$url" >>"$AI_CLI_RETRY_RUN_LOG"' \
-  '    exit 3' \
-  '    ;;' \
-  'esac'
-
-ai_cli_retry_status=0
-HOME="$ai_cli_retry_home" \
-  XDG_STATE_HOME="$ai_cli_retry_state" \
-  AI_CLI_RETRY_URL_LOG="$ai_cli_retry_url_log" \
-  AI_CLI_RETRY_RUN_LOG="$ai_cli_retry_run_log" \
-  AI_CLI_RETRY_ANTIGRAVITY_INSTALLER="$ai_cli_retry_antigravity_installer" \
-  AI_CLI_RETRY_CLAUDE_INSTALLER="$ai_cli_retry_claude_installer" \
-  AI_CLI_RETRY_CODEX_INSTALLER="$ai_cli_retry_codex_installer" \
-  AI_CLI_RETRY_CLAUDE_FAIL=1 \
-  TMPDIR="$tmp_dir" \
-  PATH="$ai_cli_retry_home/.local/bin:/usr/bin:/bin" \
-  sh "$ai_cli_tools_installer_script" >/dev/null 2>"$tmp_dir/ai-cli-retry-first.err" || ai_cli_retry_status=$?
-if [ "$ai_cli_retry_status" -eq 0 ]; then
-  fail "enabled Optional AI Tool Stack installer fails after recording partial AI CLI installer failures"
-fi
-pass "enabled Optional AI Tool Stack installer fails after recording partial AI CLI installer failures"
-
-if [ ! -x "$ai_cli_retry_home/.local/bin/agy" ]; then
-  fail "enabled Optional AI Tool Stack installer keeps successful Antigravity install after Claude failure"
-fi
-if [ ! -x "$ai_cli_retry_home/.local/bin/codex" ]; then
-  fail "enabled Optional AI Tool Stack installer keeps running Codex after Claude failure"
-fi
-if [ -x "$ai_cli_retry_home/.local/bin/claude" ]; then
-  fail "enabled Optional AI Tool Stack installer does not mark failed Claude install as present"
-fi
-pass "enabled Optional AI Tool Stack installer records successful and failed AI CLI installs independently"
-
-ai_cli_retry_first_urls="$(cat "$ai_cli_retry_url_log")"
-assert_contains_text "$ai_cli_retry_first_urls" "https://antigravity.google/cli/install.sh" "enabled Optional AI Tool Stack first run downloads official Antigravity installer"
-assert_contains_text "$ai_cli_retry_first_urls" "https://claude.ai/install.sh" "enabled Optional AI Tool Stack first run downloads official Claude installer"
-assert_contains_text "$ai_cli_retry_first_urls" "https://chatgpt.com/codex/install.sh" "enabled Optional AI Tool Stack first run downloads official Codex installer"
-
-ai_cli_retry_first_runs="$(cat "$ai_cli_retry_run_log")"
-assert_contains_text "$ai_cli_retry_first_runs" "run:antigravity" "enabled Optional AI Tool Stack first run executes Antigravity installer"
-assert_contains_text "$ai_cli_retry_first_runs" "run:claude" "enabled Optional AI Tool Stack first run executes Claude installer"
-assert_contains_text "$ai_cli_retry_first_runs" "run:codex" "enabled Optional AI Tool Stack first run continues to Codex after Claude failure"
-ai_cli_retry_first_bash_runs="$(printf '%s\n' "$ai_cli_retry_first_runs" | grep -c '^bash:' || true)"
-if [ "$ai_cli_retry_first_bash_runs" -ne 2 ]; then
-  fail "enabled Optional AI Tool Stack first run executes Antigravity and Claude installers with bash"
-fi
-pass "enabled Optional AI Tool Stack first run executes Antigravity and Claude installers with bash"
-assert_contains_text "$ai_cli_retry_first_runs" "codex:noninteractive=1" "enabled Optional AI Tool Stack first run keeps Codex noninteractive"
-case "$(uname -s)" in
-  Darwin)
-    ai_cli_retry_expected_path="$ai_cli_retry_home/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-    ;;
-  *)
-    ai_cli_retry_expected_path="$ai_cli_retry_home/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-    ;;
-esac
-assert_contains_text "$ai_cli_retry_first_runs" "codex:path=$ai_cli_retry_expected_path" "enabled Optional AI Tool Stack first run passes host-expected PATH to Codex"
-
-if [ ! -f "$ai_cli_retry_marker" ]; then
-  fail "enabled Optional AI Tool Stack installer writes optional-ai-cli-tools marker for partial failures"
-fi
-ai_cli_retry_marker_files="$(find "$ai_cli_retry_marker_dir" -type f -print | sort)"
-assert_text_equals "$ai_cli_retry_marker_files" "$ai_cli_retry_marker" "enabled Optional AI Tool Stack installer writes one optional-ai-cli-tools marker for partial failures"
-ai_cli_retry_marker_text="$(cat "$ai_cli_retry_marker")"
-assert_contains_text "$ai_cli_retry_marker_text" "claude" "enabled Optional AI Tool Stack partial failure marker mentions Claude only"
-assert_not_contains_text "$ai_cli_retry_marker_text" "agy" "enabled Optional AI Tool Stack partial failure marker omits successful agy command"
-assert_not_contains_text "$ai_cli_retry_marker_text" "antigravity" "enabled Optional AI Tool Stack partial failure marker omits successful Antigravity"
-assert_not_contains_text "$ai_cli_retry_marker_text" "Antigravity" "enabled Optional AI Tool Stack partial failure marker omits successful Antigravity label"
-assert_not_contains_text "$ai_cli_retry_marker_text" "codex" "enabled Optional AI Tool Stack partial failure marker omits successful Codex"
-assert_not_contains_text "$ai_cli_retry_marker_text" "Codex" "enabled Optional AI Tool Stack partial failure marker omits successful Codex label"
-
-rm -f "$ai_cli_retry_marker"
-: >"$ai_cli_retry_url_log"
-: >"$ai_cli_retry_run_log"
-ai_cli_retry_first_run_status=0
-HOME="$ai_cli_retry_home" \
-  XDG_STATE_HOME="$ai_cli_retry_state" \
-  AI_CLI_RETRY_URL_LOG="$ai_cli_retry_url_log" \
-  AI_CLI_RETRY_RUN_LOG="$ai_cli_retry_run_log" \
-  AI_CLI_RETRY_ANTIGRAVITY_INSTALLER="$ai_cli_retry_antigravity_installer" \
-  AI_CLI_RETRY_CLAUDE_INSTALLER="$ai_cli_retry_claude_installer" \
-  AI_CLI_RETRY_CODEX_INSTALLER="$ai_cli_retry_codex_installer" \
-  AI_CLI_RETRY_CLAUDE_FAIL=1 \
-  TERRAPOD_FIRST_RUN_APPLY=1 \
-  TMPDIR="$tmp_dir" \
-  PATH="$ai_cli_retry_home/.local/bin:/usr/bin:/bin" \
-  sh "$ai_cli_tools_installer_script" >/dev/null 2>"$tmp_dir/ai-cli-retry-first-run.err" || ai_cli_retry_first_run_status=$?
-if [ "$ai_cli_retry_first_run_status" -ne 0 ]; then
-  fail "first-run Optional AI Tool Stack installer exits 0 after recording partial AI CLI installer failures"
-fi
-pass "first-run Optional AI Tool Stack installer exits 0 after recording partial AI CLI installer failures"
-
-if [ ! -f "$ai_cli_retry_marker" ]; then
-  fail "first-run Optional AI Tool Stack installer writes optional-ai-cli-tools marker for partial failures"
-fi
-pass "first-run Optional AI Tool Stack installer writes optional-ai-cli-tools marker for partial failures"
-
-: >"$ai_cli_retry_url_log"
-: >"$ai_cli_retry_run_log"
-ai_cli_retry_second_status=0
-HOME="$ai_cli_retry_home" \
-  XDG_STATE_HOME="$ai_cli_retry_state" \
-  AI_CLI_RETRY_URL_LOG="$ai_cli_retry_url_log" \
-  AI_CLI_RETRY_RUN_LOG="$ai_cli_retry_run_log" \
-  AI_CLI_RETRY_ANTIGRAVITY_INSTALLER="$ai_cli_retry_antigravity_installer" \
-  AI_CLI_RETRY_CLAUDE_INSTALLER="$ai_cli_retry_claude_installer" \
-  AI_CLI_RETRY_CODEX_INSTALLER="$ai_cli_retry_codex_installer" \
-  AI_CLI_RETRY_CLAUDE_FAIL=0 \
-  TMPDIR="$tmp_dir" \
-  PATH="$ai_cli_retry_home/.local/bin:/usr/bin:/bin" \
-  sh "$ai_cli_tools_installer_script" >/dev/null 2>"$tmp_dir/ai-cli-retry-second.err" || ai_cli_retry_second_status=$?
-if [ "$ai_cli_retry_second_status" -ne 0 ]; then
-  fail "enabled Optional AI Tool Stack retry exits 0 after recovering failed Claude install"
-fi
-pass "enabled Optional AI Tool Stack retry exits 0 after recovering failed Claude install"
-
-if [ ! -x "$ai_cli_retry_home/.local/bin/claude" ]; then
-  fail "enabled Optional AI Tool Stack retry installs Claude after previous failure"
-fi
-pass "enabled Optional AI Tool Stack retry installs Claude after previous failure"
-
-ai_cli_retry_second_urls="$(cat "$ai_cli_retry_url_log" 2>/dev/null || true)"
-assert_text_equals "$ai_cli_retry_second_urls" "https://claude.ai/install.sh" "enabled Optional AI Tool Stack retry downloads only Claude after partial failure"
-ai_cli_retry_second_runs="$(cat "$ai_cli_retry_run_log" 2>/dev/null || true)"
-assert_contains_text "$ai_cli_retry_second_runs" "run:claude" "enabled Optional AI Tool Stack retry executes Claude after partial failure"
-ai_cli_retry_second_bash_runs="$(printf '%s\n' "$ai_cli_retry_second_runs" | grep -c '^bash:' || true)"
-if [ "$ai_cli_retry_second_bash_runs" -ne 1 ]; then
-  fail "enabled Optional AI Tool Stack retry executes only Claude installer with bash"
-fi
-pass "enabled Optional AI Tool Stack retry executes only Claude installer with bash"
-assert_not_contains_text "$ai_cli_retry_second_runs" "run:antigravity" "enabled Optional AI Tool Stack retry skips pre-existing Antigravity"
-assert_not_contains_text "$ai_cli_retry_second_runs" "run:codex" "enabled Optional AI Tool Stack retry skips pre-existing Codex"
-
-if [ -e "$ai_cli_retry_marker" ]; then
-  fail "enabled Optional AI Tool Stack retry clears optional-ai-cli-tools marker after recovery"
-fi
-pass "enabled Optional AI Tool Stack retry clears optional-ai-cli-tools marker after recovery"
-
-for installer_url in \
+for vendor_url in \
   "https://antigravity.google/cli/install.sh" \
   "https://claude.ai/install.sh" \
   "https://chatgpt.com/codex/install.sh"
 do
-  assert_contains_text "$ai_cli_tools_installer" "$installer_url" "enableAiCliTools renders official AI CLI installer URL: $installer_url"
-  assert_contains_text "$development_workspace_ai_installer" "$installer_url" "enableDevelopmentWorkspace renders official AI CLI installer URL: $installer_url"
+  assert_not_contains_text "$ai_cli_tools_installer" "$vendor_url" "Optional AI Tool Stack no longer renders vendor installer URL: $vendor_url"
 done
 
-for legacy_text in \
-  "@anthropic-ai/claude-code" \
-  "@google/gemini-cli" \
-  "@openai/codex" \
-  "npm install -g" \
-  "npm uninstall" \
-  "--skip-path" \
-  "--skip-aliases"
-do
-  assert_not_contains_text "$ai_cli_tools_installer" "$legacy_text" "enableAiCliTools does not render legacy npm AI CLI management: $legacy_text"
-  assert_not_contains_text "$development_workspace_ai_installer" "$legacy_text" "enableDevelopmentWorkspace does not render legacy npm AI CLI management: $legacy_text"
-done
+linux_ai_brew_bin="$tmp_dir/linux-ai-brew-bin"
+linux_ai_brew_home="$tmp_dir/linux-ai-brew-home"
+linux_ai_brew_state="$tmp_dir/linux-ai-brew-state"
+linux_ai_brew_log="$tmp_dir/linux-ai-brew.log"
+linux_ai_curl_log="$tmp_dir/linux-ai-curl.log"
+linux_ai_brew_template="$tmp_dir/linux-ai-brew-template"
+mkdir -p "$linux_ai_brew_bin" "$linux_ai_brew_home"
+write_ai_brew_stub "$linux_ai_brew_template"
+write_stub "$linux_ai_brew_bin/uname" 'printf "%s\n" Linux'
+write_stub "$linux_ai_brew_bin/curl" \
+  'printf "%s\n" "curl args:$*" >>"$AI_CURL_LOG"' \
+  'output=' \
+  'while [ "$#" -gt 0 ]; do' \
+  '  if [ "$1" = "-o" ]; then shift; output="$1"; fi' \
+  '  shift' \
+  'done' \
+  '[ -n "$output" ] || exit 2' \
+  'printf "%s\n" "#!/bin/sh" "cp \"$AI_BREW_TEMPLATE\" \"$AI_BREW_BIN/brew\"" "chmod +x \"$AI_BREW_BIN/brew\"" >"$output"'
+HOME="$linux_ai_brew_home" XDG_STATE_HOME="$linux_ai_brew_state" \
+  AI_BREW_BIN="$linux_ai_brew_bin" AI_BREW_LOG="$linux_ai_brew_log" AI_BREW_FAIL=0 \
+  AI_BREW_TEMPLATE="$linux_ai_brew_template" AI_CURL_LOG="$linux_ai_curl_log" \
+  PATH="$linux_ai_brew_bin:/usr/bin:/bin" sh "$ai_cli_tools_installer_script"
+assert_contains_text "$(cat "$linux_ai_curl_log")" "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh" "Ubuntu Optional AI Tool Stack downloads only the official Homebrew installer"
+assert_contains_text "$(cat "$linux_ai_brew_log")" "brew args:bundle --no-upgrade --file=" "Ubuntu Optional AI Tool Stack installs the common no-upgrade bundle"
 
-for expected_path_assignment in \
-  'AI_CLI_EXPECTED_PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"' \
-  'AI_CLI_EXPECTED_PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"'
-do
-  assert_contains_text "$ai_cli_tools_installer" "$expected_path_assignment" "enableAiCliTools renders expected AI CLI installer PATH assignment: $expected_path_assignment"
-  assert_contains_text "$development_workspace_ai_installer" "$expected_path_assignment" "enableDevelopmentWorkspace renders expected AI CLI installer PATH assignment: $expected_path_assignment"
-done
+ai_cli_failure_state="$tmp_dir/ai-cli-failure-state"
+ai_cli_failure_home="$tmp_dir/ai-cli-failure-home"
+ai_cli_failure_log="$tmp_dir/ai-cli-failure.log"
+mkdir -p "$ai_cli_failure_home"
+ai_cli_failure_status=0
+HOME="$ai_cli_failure_home" XDG_STATE_HOME="$ai_cli_failure_state" \
+  AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$ai_cli_failure_log" AI_BREW_FAIL=1 \
+  PATH="$macos_ai_brew_bin:/usr/bin:/bin" sh "$macos_ai_cli_tools_installer_script" >/dev/null 2>&1 ||
+  ai_cli_failure_status=$?
+if [ "$ai_cli_failure_status" -eq 0 ]; then
+  fail "routine Optional AI Tool Stack bundle failure exits non-zero after recording a warning"
+fi
+ai_cli_failure_marker="$ai_cli_failure_state/terrapod/install-warnings/optional-ai-cli-tools"
+if [ ! -f "$ai_cli_failure_marker" ]; then
+  fail "Optional AI Tool Stack bundle failure records optional-ai-cli-tools marker"
+fi
+pass "routine Optional AI Tool Stack bundle failure records a warning and exits non-zero"
 
-for unsafe_installer_text in \
-  "GITHUB_TOKEN" \
-  "Authorization:" \
-  "api.github.com" \
-  "sed -i" \
-  "apply_patch" \
-  "yes |" \
-  "| sh" \
-  "| bash"
-do
-  assert_not_contains_text "$ai_cli_tools_installer" "$unsafe_installer_text" "enableAiCliTools renders official-only AI CLI installer without unsafe automation text: $unsafe_installer_text"
-  assert_not_contains_text "$development_workspace_ai_installer" "$unsafe_installer_text" "enableDevelopmentWorkspace renders official-only AI CLI installer without unsafe automation text: $unsafe_installer_text"
-done
+HOME="$ai_cli_failure_home" XDG_STATE_HOME="$ai_cli_failure_state" \
+  AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$ai_cli_failure_log" AI_BREW_FAIL=1 \
+  TERRAPOD_FIRST_RUN_APPLY=1 PATH="$macos_ai_brew_bin:/usr/bin:/bin" \
+  sh "$macos_ai_cli_tools_installer_script" >/dev/null 2>&1 ||
+  fail "first-run Optional AI Tool Stack bundle failure remains recoverable"
+pass "first-run Optional AI Tool Stack bundle failure records a warning and exits zero"
 
-assert_contains_text "$ai_cli_tools_installer" 'CODEX_NON_INTERACTIVE=1' \
-  "enableAiCliTools runs Codex installer noninteractively"
-assert_contains_text "$development_workspace_ai_installer" 'CODEX_NON_INTERACTIVE=1' \
-  "enableDevelopmentWorkspace runs Codex installer noninteractively"
+HOME="$ai_cli_failure_home" XDG_STATE_HOME="$ai_cli_failure_state" \
+  AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$ai_cli_failure_log" AI_BREW_FAIL=0 \
+  PATH="$macos_ai_brew_bin:/usr/bin:/bin" sh "$macos_ai_cli_tools_installer_script"
+if [ -e "$ai_cli_failure_marker" ]; then
+  fail "successful Optional AI Tool Stack retry clears warning marker"
+fi
+pass "successful Optional AI Tool Stack retry clears warning marker"
 
 development_workspace_zellij_layout="$(render_managed_file "$development_workspace_data" ".config/zellij/layouts/dev.kdl")"
 

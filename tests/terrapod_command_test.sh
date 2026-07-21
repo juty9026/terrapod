@@ -917,19 +917,22 @@ write_stub "$fake_warning_bin/terrapod_install_warning_write" \
 
 fake_ai_cli_home="$tmp_dir/fake-ai-cli-home"
 mkdir -p "$fake_ai_cli_home/.local/bin"
-for command_name in agy claude codex; do
-  write_stub "$fake_ai_cli_home/.local/bin/$command_name" \
-    'exit 0'
-done
+write_stub "$fake_warning_bin/brew" \
+  'case "$1" in' \
+  '  shellenv) printf "%s\n" ":" ;;' \
+  '  bundle) exit 0 ;;' \
+  '  *) exit 64 ;;' \
+  'esac'
 
 fake_ai_cli_installer="$tmp_dir/fake-ai-cli-installer.sh"
 chezmoi execute-template \
+  --source "$repo_root" \
   --override-data '{"chezmoi":{"os":"linux","sourceDir":"/missing-terrapod-source"},"enableAiCliTools":true}' \
   --file "$repo_root/.chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
   >"$fake_ai_cli_installer"
 
-if ! HOME="$fake_ai_cli_home" FAKE_INSTALL_WARNING_CALLS="$fake_warning_calls" PATH="$fake_warning_bin" /bin/sh "$fake_ai_cli_installer" >"$tmp_dir/fake-ai-cli-installer.out" 2>"$tmp_dir/fake-ai-cli-installer.err"; then
-  fail "rendered installer fixture succeeds when optional AI CLI tools are already available and the shared library is missing"
+if ! HOME="$fake_ai_cli_home" FAKE_INSTALL_WARNING_CALLS="$fake_warning_calls" PATH="$fake_warning_bin:/usr/bin:/bin" /bin/sh "$fake_ai_cli_installer" >"$tmp_dir/fake-ai-cli-installer.out" 2>"$tmp_dir/fake-ai-cli-installer.err"; then
+  fail "rendered installer fixture succeeds when the Homebrew AI CLI bundle succeeds and the shared library is missing"
 fi
 
 if [ -e "$fake_warning_calls" ]; then
@@ -939,34 +942,22 @@ pass "installer scripts ignore PATH fake install warning helpers when the shared
 
 fake_ai_cli_failure_home="$tmp_dir/fake-ai-cli-failure-home"
 mkdir -p "$fake_ai_cli_failure_home/.local/bin"
-for command_name in agy codex; do
-  write_stub "$fake_ai_cli_failure_home/.local/bin/$command_name" \
-    'exit 0'
-done
-write_stub "$fake_ai_cli_failure_home/.local/bin/bash" \
-  'exec sh "$@"'
-write_stub "$fake_ai_cli_failure_home/.local/bin/curl" \
-  'output=' \
-  'while [ "$#" -gt 0 ]; do' \
-  '  case "$1" in' \
-  '    -o)' \
-  '      shift' \
-  '      output="${1:-}"' \
-  '      ;;' \
-  '  esac' \
-  '  shift' \
-  'done' \
-  '[ -n "$output" ] || exit 2' \
-  'printf "%s\n" "#!/bin/sh" "exit 42" >"$output"'
+write_stub "$fake_ai_cli_failure_home/.local/bin/brew" \
+  'case "$1" in' \
+  '  shellenv) printf "%s\n" ":" ;;' \
+  '  bundle) exit 42 ;;' \
+  '  *) exit 64 ;;' \
+  'esac'
 
 fake_ai_cli_failure_installer="$tmp_dir/fake-ai-cli-failure-installer.sh"
 chezmoi execute-template \
+  --source "$repo_root" \
   --override-data '{"chezmoi":{"os":"linux","sourceDir":"/missing-terrapod-source"},"enableAiCliTools":true}' \
   --file "$repo_root/.chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
   >"$fake_ai_cli_failure_installer"
 
 fake_ai_cli_failure_status=0
-HOME="$fake_ai_cli_failure_home" PATH="/usr/bin:/bin" /bin/sh "$fake_ai_cli_failure_installer" >"$tmp_dir/fake-ai-cli-failure.out" 2>"$tmp_dir/fake-ai-cli-failure.err" || fake_ai_cli_failure_status=$?
+HOME="$fake_ai_cli_failure_home" PATH="$fake_ai_cli_failure_home/.local/bin:/usr/bin:/bin" /bin/sh "$fake_ai_cli_failure_installer" >"$tmp_dir/fake-ai-cli-failure.out" 2>"$tmp_dir/fake-ai-cli-failure.err" || fake_ai_cli_failure_status=$?
 if [ "$fake_ai_cli_failure_status" -eq 0 ]; then
   fail "rendered installer fixture fails when optional AI CLI failures cannot be recorded without the shared library"
 fi
@@ -985,34 +976,22 @@ printf '%s\n' \
   '  return 0' \
   '}' \
   >"$fake_ai_cli_warning_source/dot_local/lib/terrapod/install-warnings.sh"
-for command_name in agy codex; do
-  write_stub "$fake_ai_cli_write_failure_home/.local/bin/$command_name" \
-    'exit 0'
-done
-write_stub "$fake_ai_cli_write_failure_home/.local/bin/bash" \
-  'exec sh "$@"'
-write_stub "$fake_ai_cli_write_failure_home/.local/bin/curl" \
-  'output=' \
-  'while [ "$#" -gt 0 ]; do' \
-  '  case "$1" in' \
-  '    -o)' \
-  '      shift' \
-  '      output="${1:-}"' \
-  '      ;;' \
-  '  esac' \
-  '  shift' \
-  'done' \
-  '[ -n "$output" ] || exit 2' \
-  'printf "%s\n" "#!/bin/sh" "exit 42" >"$output"'
+write_stub "$fake_ai_cli_write_failure_home/.local/bin/brew" \
+  'case "$1" in' \
+  '  shellenv) printf "%s\n" ":" ;;' \
+  '  bundle) exit 42 ;;' \
+  '  *) exit 64 ;;' \
+  'esac'
 
 fake_ai_cli_write_failure_installer="$tmp_dir/fake-ai-cli-write-failure-installer.sh"
 chezmoi execute-template \
+  --source "$repo_root" \
   --override-data "{\"chezmoi\":{\"os\":\"linux\",\"sourceDir\":\"$fake_ai_cli_warning_source\"},\"enableAiCliTools\":true}" \
   --file "$repo_root/.chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
   >"$fake_ai_cli_write_failure_installer"
 
 fake_ai_cli_write_failure_status=0
-HOME="$fake_ai_cli_write_failure_home" PATH="/usr/bin:/bin" /bin/sh "$fake_ai_cli_write_failure_installer" >"$tmp_dir/fake-ai-cli-write-failure.out" 2>"$tmp_dir/fake-ai-cli-write-failure.err" || fake_ai_cli_write_failure_status=$?
+HOME="$fake_ai_cli_write_failure_home" PATH="$fake_ai_cli_write_failure_home/.local/bin:/usr/bin:/bin" /bin/sh "$fake_ai_cli_write_failure_installer" >"$tmp_dir/fake-ai-cli-write-failure.out" 2>"$tmp_dir/fake-ai-cli-write-failure.err" || fake_ai_cli_write_failure_status=$?
 if [ "$fake_ai_cli_write_failure_status" -eq 0 ]; then
   fail "rendered installer fixture fails when optional AI CLI failures cannot be recorded after marker write failure"
 fi
