@@ -327,7 +327,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 ## Example Dialogue
 
 > **Dev:** "Should the VPS just reuse the macOS terminal setup?"
-> **Domain expert:** "No. The **VPS Shell Profile** should share the **Core Shell Stack** and **Development Runtime Stack**, but avoid macOS-only applications and Homebrew."
+> **Domain expert:** "No. The **VPS Shell Profile** should share the **Core Shell Stack** and **Development Runtime Stack**, exclude macOS-only applications, and use Homebrew only when the **Optional AI Tool Stack** is enabled."
 
 ## Flagged Ambiguities
 

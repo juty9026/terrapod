@@ -935,6 +935,11 @@ homebrew_prefix() {
   brew --prefix 2>/dev/null
 }
 
+homebrew_prefix_is_available() {
+  prefix="$(homebrew_prefix 2>/dev/null || true)"
+  [ -n "$prefix" ]
+}
+
 shadowed_ai_cli_tools() {
   brew_prefix="$(homebrew_prefix 2>/dev/null || true)"
   shadowed=
@@ -1143,6 +1148,11 @@ print_status_warnings() {
     missing="$(missing_tools agy claude codex)"
     if [ -n "$missing" ]; then
       print_warning_line "Optional AI Tool Stack is enabled but missing tools: $missing"
+      printed=1
+    fi
+
+    if command -v brew >/dev/null 2>&1 && ! homebrew_prefix_is_available; then
+      print_warning_line "Optional AI Tool Stack cannot verify Homebrew command ownership because 'brew --prefix' failed"
       printed=1
     fi
 
@@ -1633,6 +1643,11 @@ run_doctor() {
     agy claude codex
 
   if is_enabled "$(effective_ai_cli_tools_enabled "$config_file")"; then
+    if command -v brew >/dev/null 2>&1 && ! homebrew_prefix_is_available; then
+      doctor_warn "Optional AI Tool Stack cannot resolve the Homebrew prefix"
+      doctor_guidance "Repair Homebrew until 'brew --prefix' succeeds, open a new shell, and rerun tpod apply."
+    fi
+
     shadowed="$(shadowed_ai_cli_tools)"
     if [ -n "$shadowed" ]; then
       doctor_advisory "Optional AI Tool Stack has non-Homebrew commands shadowing managed casks: $shadowed"

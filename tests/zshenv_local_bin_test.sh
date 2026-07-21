@@ -94,6 +94,29 @@ STUB
   pass "$message"
 }
 
+assert_linuxbrew_shellenv_rendering() {
+  data="$1"
+  expected="$2"
+  message="$3"
+
+  render_zshenv "$data"
+
+  if [ "$expected" = present ]; then
+    if ! grep -F '/home/linuxbrew/.linuxbrew/bin/brew shellenv' "$tmp_dir/home/.zshenv" >/dev/null; then
+      fail "$message; expected persistent Linuxbrew shellenv setup"
+    fi
+    linuxbrew_line="$(grep -n -F '/home/linuxbrew/.linuxbrew/bin/brew shellenv' "$tmp_dir/home/.zshenv" | cut -d: -f1)"
+    user_local_line="$(grep -n -F '# User-local binaries.' "$tmp_dir/home/.zshenv" | cut -d: -f1)"
+    if [ "$linuxbrew_line" -ge "$user_local_line" ]; then
+      fail "$message; Linuxbrew must load before user-local PATH is prepended for shadow diagnostics"
+    fi
+  elif grep -F '/home/linuxbrew/.linuxbrew/bin/brew shellenv' "$tmp_dir/home/.zshenv" >/dev/null; then
+    fail "$message; Linuxbrew shellenv setup should be absent"
+  fi
+
+  pass "$message"
+}
+
 chezmoi_bin="$(command -v chezmoi)" || fail "chezmoi is required to render templates"
 
 mkdir -p "$tmp_dir/home/.local/bin"
@@ -116,3 +139,18 @@ assert_lookup_success \
 assert_path_snippet_lookup_success \
   '{"chezmoi":{"os":"darwin"}}' \
   "macOS zshenv loads user PATH snippets"
+
+assert_linuxbrew_shellenv_rendering \
+  '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableAiCliTools":true,"enableDevelopmentWorkspace":false}' \
+  present \
+  "Ubuntu Optional AI Tool Stack persists Linuxbrew in new zsh sessions"
+
+assert_linuxbrew_shellenv_rendering \
+  '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableAiCliTools":false,"enableDevelopmentWorkspace":false}' \
+  absent \
+  "Ubuntu without the Optional AI Tool Stack does not add Linuxbrew shell setup"
+
+assert_linuxbrew_shellenv_rendering \
+  '{"chezmoi":{"os":"darwin"},"enableAiCliTools":true,"enableDevelopmentWorkspace":false}' \
+  absent \
+  "macOS keeps Linuxbrew shell setup out of zshenv"

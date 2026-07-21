@@ -571,8 +571,14 @@ status_doctor_path() {
   ln -s "$awk_path" "$isolated_path/awk"
 
   for command_name do
-    write_stub "$isolated_path/$command_name" \
-      'exit 0'
+    if [ "$command_name" = brew ]; then
+      write_stub "$isolated_path/$command_name" \
+        'if [ "${1:-}" = "--prefix" ]; then printf "%s\n" "${0%/*}"; fi' \
+        'exit 0'
+    else
+      write_stub "$isolated_path/$command_name" \
+        'exit 0'
+    fi
   done
 
   printf '%s\n' "$isolated_path"
@@ -1821,6 +1827,19 @@ status_shadow_output="$(
 
 assert_contains "$status_shadow_output" "Warning: Optional AI Tool Stack has non-Homebrew commands shadowing managed casks: claude" "Terrapod status reports legacy Claude shadowing the Homebrew cask"
 
+status_broken_prefix_path="$(status_doctor_path broken-prefix chezmoi git zsh mise nvim zellij apt brew agy claude codex)"
+write_stub "$status_broken_prefix_path/brew" \
+  'if [ "${1:-}" = "--prefix" ]; then exit 1; fi' \
+  'exit 0'
+write_stub "$status_broken_prefix_path/uname" 'printf "%s\n" "Linux"'
+
+status_broken_prefix_output="$(
+  TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_shadow_config" PATH="$status_broken_prefix_path" \
+    /bin/sh "$terrapod" status
+)"
+
+assert_contains "$status_broken_prefix_output" "Warning: Optional AI Tool Stack cannot verify Homebrew command ownership because 'brew --prefix' failed" "Terrapod status reports an unusable Homebrew prefix"
+
 status_workspace_bundle_config="$tmp_dir/status-workspace-bundle.toml"
 cat >"$status_workspace_bundle_config" <<'TOML'
 [data]
@@ -1903,6 +1922,15 @@ fi
 assert_contains "$doctor_shadow_output" "ok - brew is available" "enabled Ubuntu Optional AI Tool Stack doctor requires Homebrew"
 assert_contains "$doctor_shadow_output" "warn - Optional AI Tool Stack has non-Homebrew commands shadowing managed casks: claude" "Terrapod doctor reports legacy Claude shadowing the Homebrew cask"
 assert_contains "$doctor_shadow_output" "Remove each legacy command with its original installer method, open a new shell, and rerun tpod apply." "Terrapod doctor gives non-destructive legacy cleanup guidance"
+
+if TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_shadow_config" PATH="$status_broken_prefix_path" \
+  /bin/sh "$terrapod" doctor >"$tmp_dir/doctor-broken-prefix.out" 2>"$tmp_dir/doctor-broken-prefix.err"; then
+  fail "Terrapod doctor fails when the enabled Optional AI Tool Stack cannot resolve the Homebrew prefix"
+fi
+
+doctor_broken_prefix_output="$(cat "$tmp_dir/doctor-broken-prefix.out")"
+assert_contains "$doctor_broken_prefix_output" "warn - Optional AI Tool Stack cannot resolve the Homebrew prefix" "Terrapod doctor reports an unusable Homebrew prefix"
+assert_contains "$doctor_broken_prefix_output" "Repair Homebrew until 'brew --prefix' succeeds, open a new shell, and rerun tpod apply." "Terrapod doctor gives Homebrew prefix recovery guidance"
 
 tty_doctor_output="$(
   run_command_in_pty xterm unset env TERRAPOD_PROFILE= TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_ok_path" /bin/sh "$terrapod" doctor
