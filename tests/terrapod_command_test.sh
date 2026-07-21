@@ -1668,6 +1668,7 @@ assert_contains "$ubuntu_status_output" "macOS App Groups: not applicable for VP
 assert_contains "$ubuntu_status_output" "apt                           : available" "Terrapod status reports Ubuntu Bootstrap Package Manager availability"
 assert_contains "$ubuntu_status_output" "Warnings: none" "Terrapod status has no warnings for disabled optional stacks"
 assert_not_contains "$ubuntu_status_output" "Warning:" "Terrapod status emits no warning lines for disabled optional stacks"
+assert_not_contains "$ubuntu_status_output" "brew                          : missing" "disabled Ubuntu Optional AI Tool Stack does not require Homebrew"
 assert_not_contains "$ubuntu_status_output" "missing tools: nvim" "Terrapod status distinguishes disabled Optional Editor Stack from missing tools"
 assert_not_contains "$ubuntu_status_output" "missing tools: agy" "Terrapod status distinguishes disabled Optional AI Tool Stack from missing tools"
 
@@ -1784,7 +1785,41 @@ missing_status_output="$(
 assert_contains "$missing_status_output" "Optional Editor Stack         : enabled (rich Neovim configuration)" "Terrapod status reports enabled Optional Editor Stack as rich config state"
 assert_contains "$missing_status_output" "Optional AI Tool Stack        : enabled (missing tools: agy, claude, codex)" "Terrapod status reports missing tools only for enabled Optional AI Tool Stack"
 assert_contains "$missing_status_output" "Optional Development Workspace: enabled (development Zellij layouts)" "Terrapod status reports enabled Optional Development Workspace as layout state"
+assert_contains "$missing_status_output" "brew                          : missing" "enabled Ubuntu Optional AI Tool Stack requires Homebrew"
+assert_contains "$missing_status_output" "Warning: missing key tools: brew" "enabled Ubuntu Optional AI Tool Stack warns when Homebrew is missing"
 assert_contains "$missing_status_output" "Warning: Optional AI Tool Stack is enabled but missing tools: agy, claude, codex" "Terrapod status warns for enabled missing AI tools"
+
+status_shadow_config="$tmp_dir/status-shadow.toml"
+cat >"$status_shadow_config" <<'TOML'
+[data]
+profile = "vps-shell"
+enableEditorStack = false
+enableAiCliTools = true
+enableDevelopmentWorkspace = false
+enableMacosAppGroupTerminalApps = false
+enableMacosAppGroupAutomation = false
+enableMacosAppGroupLauncher = false
+enableMacosAppGroupMonitoring = false
+enableMacosAppGroupDevelopmentApps = false
+TOML
+
+status_shadow_path="$(status_doctor_path shadow chezmoi git zsh mise nvim zellij apt brew agy claude codex)"
+status_shadow_legacy="$tmp_dir/status-shadow-legacy"
+mkdir -p "$status_shadow_legacy"
+mv "$status_shadow_path/claude" "$status_shadow_legacy/claude"
+write_stub "$status_shadow_path/brew" \
+  'case "$1" in' \
+  '  --prefix) prefix="${0%/*}"; printf "%s\n" "$prefix" ;;' \
+  '  *) exit 0 ;;' \
+  'esac'
+write_stub "$status_shadow_path/uname" 'printf "%s\n" "Linux"'
+
+status_shadow_output="$(
+  TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_shadow_config" PATH="$status_shadow_legacy:$status_shadow_path" \
+    /bin/sh "$terrapod" status
+)"
+
+assert_contains "$status_shadow_output" "Warning: Optional AI Tool Stack has non-Homebrew commands shadowing managed casks: claude" "Terrapod status reports legacy Claude shadowing the Homebrew cask"
 
 status_workspace_bundle_config="$tmp_dir/status-workspace-bundle.toml"
 cat >"$status_workspace_bundle_config" <<'TOML'
@@ -1852,10 +1887,22 @@ assert_contains "$doctor_ok_output" "ok - zellij is available" "Terrapod doctor 
 assert_contains "$doctor_ok_output" "ok - apt is available" "Terrapod doctor validates Ubuntu Bootstrap Package Manager availability"
 assert_contains "$doctor_ok_output" "ok - Optional Editor Stack is disabled" "Terrapod doctor treats disabled Optional Editor Stack as valid"
 assert_contains "$doctor_ok_output" "ok - Optional AI Tool Stack is disabled" "Terrapod doctor treats disabled Optional AI Tool Stack as valid"
+assert_not_contains "$doctor_ok_output" "brew is missing" "disabled Ubuntu Optional AI Tool Stack doctor does not require Homebrew"
 assert_contains "$doctor_ok_output" "ok - Optional Development Workspace is disabled" "Terrapod doctor treats disabled Optional Development Workspace as valid"
 assert_contains "$doctor_ok_output" "Guidance: none" "Terrapod doctor prints no guidance when checks pass"
 assert_no_ansi_escape "$doctor_ok_output" "captured Terrapod doctor is plain without ANSI escapes"
 assert_no_routine_emoji "$doctor_ok_output" "captured Terrapod doctor has no routine emoji"
+
+if ! doctor_shadow_output="$(
+  TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_shadow_config" PATH="$status_shadow_legacy:$status_shadow_path" \
+    /bin/sh "$terrapod" doctor
+)"; then
+  fail "Terrapod doctor keeps legacy AI CLI shadowing as a non-fatal warning"
+fi
+
+assert_contains "$doctor_shadow_output" "ok - brew is available" "enabled Ubuntu Optional AI Tool Stack doctor requires Homebrew"
+assert_contains "$doctor_shadow_output" "warn - Optional AI Tool Stack has non-Homebrew commands shadowing managed casks: claude" "Terrapod doctor reports legacy Claude shadowing the Homebrew cask"
+assert_contains "$doctor_shadow_output" "Remove each legacy command with its original installer method, open a new shell, and rerun tpod apply." "Terrapod doctor gives non-destructive legacy cleanup guidance"
 
 tty_doctor_output="$(
   run_command_in_pty xterm unset env TERRAPOD_PROFILE= TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_ok_path" /bin/sh "$terrapod" doctor
