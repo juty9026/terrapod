@@ -559,10 +559,14 @@ mise_missing_without_core_status=0
 HOME="$mise_missing_without_core_home" XDG_STATE_HOME="$mise_missing_without_core_state" PATH="/usr/bin:/bin" \
   sh "$macos_mise_missing_script" >"$tmp_dir/mise-missing-without-core.out" 2>"$tmp_dir/mise-missing-without-core.err" ||
   mise_missing_without_core_status=$?
-if [ "$mise_missing_without_core_status" -eq 0 ]; then
-  fail "macOS mise tool installer fails when mise is missing without a homebrew-core marker"
+if [ "$mise_missing_without_core_status" -ne 0 ]; then
+  fail "macOS mise tool installer records a recoverable warning when mise is missing without a homebrew-core marker"
 fi
-pass "macOS mise tool installer fails when mise is missing without a homebrew-core marker"
+mise_missing_without_core_marker="$mise_missing_without_core_state/terrapod/install-warnings/mise-tools"
+if [ ! -f "$mise_missing_without_core_marker" ]; then
+  fail "macOS mise tool installer records a mise-tools marker when mise is missing without a homebrew-core marker"
+fi
+pass "macOS mise tool installer records a recoverable mise-tools warning when mise is missing without a homebrew-core marker"
 
 mise_missing_with_core_home="$tmp_dir/mise-missing-with-core-home"
 mise_missing_with_core_state="$tmp_dir/mise-missing-with-core-state"
