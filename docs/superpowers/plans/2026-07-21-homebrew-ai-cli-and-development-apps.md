@@ -34,6 +34,7 @@
 - Modify: `.chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl`
 - Modify: `.chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl`
 - Modify: `.chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl`
+- Modify: `install.sh`
 - Modify: `dot_local/bin/executable_terrapod`
 
 **Interfaces:**

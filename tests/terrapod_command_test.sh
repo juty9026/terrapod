@@ -552,7 +552,7 @@ enableMacosAppGroupTerminalApps = $terminal_apps
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = $launcher
 enableMacosAppGroupMonitoring = false
-enableMacosAppGroupAiApps = false
+enableMacosAppGroupDevelopmentApps = false
 EOF
 }
 
@@ -1266,12 +1266,12 @@ assert_contains "$setup_output_text" "terminal-apps" "gum setup leads terminal-a
 assert_contains "$setup_output_text" "  Installs Ghostty." "gum setup describes terminal-apps under its group name"
 assert_contains "$setup_output_text" "automation" "gum setup leads automation App Group prompt with the group name"
 assert_contains "$setup_output_text" "  Installs Hammerspoon, Karabiner-Elements, and Scroll Reverser." "gum setup describes automation under its group name"
-assert_contains "$setup_output_text" "ai-apps" "gum setup leads ai-apps App Group prompt with the group name"
-assert_contains "$setup_output_text" "  Installs Claude Desktop, Codex desktop app (updates to the unified ChatGPT desktop app), Antigravity 2.0, Antigravity IDE, and Orca." "gum setup lists Orca in the ai-apps App Group"
+assert_contains "$setup_output_text" "development-apps" "gum setup leads development-apps App Group prompt with the group name"
+assert_contains "$setup_output_text" "  Installs Zed and Orca ADE." "gum setup lists Zed and Orca ADE in the development-apps App Group"
 assert_contains "$setup_output_text" "  Trusts only the fully-qualified stablyai/orca/orca cask, not the entire stablyai/orca tap." "gum setup discloses Orca's cask-specific trust boundary"
 assert_contains "$setup_output_text" "enableEditorStack = true" "gum setup summary includes concrete Editor Stack setting"
 assert_contains "$setup_output_text" "enableMacosAppGroupMonitoring = true" "gum setup summary includes concrete macOS App Group setting"
-assert_contains "$setup_output_text" "enableMacosAppGroupAiApps = true" "gum setup summary includes concrete ai-apps App Group setting"
+assert_contains "$setup_output_text" "enableMacosAppGroupDevelopmentApps = true" "gum setup summary includes concrete development-apps App Group setting"
 assert_contains "$setup_output_text" "Configured Terrapod Preset 'development'" "gum setup reports successful configuration"
 assert_contains "$setup_gum_log_text" "gum args: style" "gum setup uses gum style for setup-only presentation"
 assert_contains "$setup_gum_log_text" "gum args: choose" "gum setup uses gum choose for Preset selection"
@@ -1284,7 +1284,7 @@ assert_contains "$setup_gum_log_text" " --negative Disable" "gum setup uses Disa
 assert_contains "$setup_gum_log_text" "gum args: confirm Enable terminal-apps?" "gum setup asks stable Enable question for terminal-apps"
 assert_contains "$setup_gum_log_text" " --affirmative Enable" "gum setup uses Enable action for disabled Preset-proposed values"
 assert_contains "$setup_gum_log_text" " --negative Keep disabled" "gum setup uses Keep disabled action for disabled Preset-proposed values"
-assert_contains "$setup_gum_log_text" "gum args: confirm Enable ai-apps?" "gum setup asks stable Enable question for ai-apps"
+assert_contains "$setup_gum_log_text" "gum args: confirm Enable development-apps?" "gum setup asks stable Enable question for development-apps"
 assert_contains "$setup_gum_log_text" "gum args: confirm Write these Terrapod settings" "gum setup asks final confirmation with gum confirm"
 assert_first_occurrence_before "$setup_output_text" "Profile  macOS Terminal Profile" "Customize Terrapod settings." "gum setup shows profile before settings customization"
 assert_first_occurrence_before "$setup_output_text" "Choose a Preset" "Customize Terrapod settings." "gum setup presents Preset selection before customization"
@@ -1562,7 +1562,7 @@ enableMacosAppGroupTerminalApps = true
 enableMacosAppGroupAutomation = true
 enableMacosAppGroupLauncher = true
 enableMacosAppGroupMonitoring = false
-enableMacosAppGroupAiApps = true
+enableMacosAppGroupDevelopmentApps = true
 TOML
 
 macos_status_path="$(status_doctor_path macos chezmoi git zsh mise brew nvim agy claude codex zellij ghostty op)"
@@ -1582,7 +1582,7 @@ assert_contains "$macos_status_output" "terminal-apps                 : enabled 
 assert_contains "$macos_status_output" "automation                    : enabled (Hammerspoon, Karabiner-Elements, and Scroll Reverser)" "Terrapod status reports enabled automation macOS App Group"
 assert_contains "$macos_status_output" "launcher                      : enabled (Raycast and 1Password CLI)" "Terrapod status reports enabled launcher macOS App Group"
 assert_contains "$macos_status_output" "monitoring                    : disabled" "Terrapod status reports disabled monitoring macOS App Group"
-assert_contains "$macos_status_output" "ai-apps                       : enabled (Claude Desktop, Codex desktop app (updates to the unified ChatGPT desktop app), Antigravity 2.0, Antigravity IDE, and Orca)" "Terrapod status lists Orca in the enabled ai-apps App Group"
+assert_contains "$macos_status_output" "development-apps              : enabled (Zed and Orca ADE)" "Terrapod status lists Zed and Orca ADE in the enabled development-apps App Group"
 assert_contains "$macos_status_output" "chezmoi                       : available" "Terrapod status reports chezmoi availability"
 assert_contains "$macos_status_output" "brew                          : available" "Terrapod status reports macOS Bootstrap Package Manager availability"
 assert_contains "$macos_status_output" "Warnings: none" "Terrapod status reports no warnings when enabled tools are present"
@@ -1641,7 +1641,7 @@ data.enableMacosAppGroupAutomation = false
 data.enableMacosAppGroupLauncher = false
 data.enableMacosAppGroupMonitoring = false
 data.enableMacosAppGroupTerminalApps = true
-data.enableMacosAppGroupAiApps = true
+data.enableMacosAppGroupDevelopmentApps = true
 TOML
 
 dotted_status_path="$(status_doctor_path dotted chezmoi git zsh mise brew nvim agy claude codex zellij)"
@@ -1654,7 +1654,7 @@ dotted_status_output="$(
 assert_contains "$dotted_status_output" "Optional Editor Stack         : enabled (rich Neovim configuration)" "Terrapod status reads root dotted data keys for effective editor stack state"
 assert_contains "$dotted_status_output" "Optional AI Tool Stack        : enabled (tools available: agy, claude, codex)" "Terrapod status reads root dotted data keys for effective AI stack state"
 assert_contains "$dotted_status_output" "terminal-apps                 : enabled (Ghostty)" "Terrapod status reads root dotted data keys for Ghostty-only macOS App Groups"
-assert_contains "$dotted_status_output" "ai-apps                       : enabled (Claude Desktop, Codex desktop app (updates to the unified ChatGPT desktop app), Antigravity 2.0, Antigravity IDE, and Orca)" "Terrapod status reads root dotted data keys for Orca in ai-apps"
+assert_contains "$dotted_status_output" "development-apps              : enabled (Zed and Orca ADE)" "Terrapod status reads root dotted data keys for Zed and Orca ADE in development-apps"
 assert_contains "$dotted_status_output" "Warnings: none" "Terrapod status has no warnings for root dotted data keys when tools are present"
 
 status_ubuntu_config="$tmp_dir/status-ubuntu.toml"
@@ -1669,7 +1669,7 @@ enableMacosAppGroupTerminalApps = false
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
-enableMacosAppGroupAiApps = false
+enableMacosAppGroupDevelopmentApps = false
 TOML
 write_os_release "$status_ubuntu_os_release" ubuntu 24.04 "Ubuntu 24.04 LTS"
 
@@ -1713,7 +1713,7 @@ if ! status_incomplete_vps_output="$(
 fi
 
 assert_contains "$status_incomplete_vps_output" "Config: $status_incomplete_vps_config (present; incomplete managed setup config)" "Terrapod status reports incomplete managed setup config in the Config section"
-assert_contains "$status_incomplete_vps_output" "enableMacosAppGroupAiApps" "Terrapod status identifies missing managed setup keys even on VPS"
+assert_contains "$status_incomplete_vps_output" "enableMacosAppGroupDevelopmentApps" "Terrapod status identifies missing managed setup keys even on VPS"
 assert_contains "$status_incomplete_vps_output" "Run 'tpod setup' or 'tpod configure <minimal|development>' to complete the managed setup config." "Terrapod status guides incomplete config recovery with tpod setup or configure"
 
 status_unsafe_multiline_config="$tmp_dir/status-unsafe-multiline.toml"
@@ -1728,7 +1728,7 @@ enableMacosAppGroupTerminalApps = false
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
-enableMacosAppGroupAiApps = false
+enableMacosAppGroupDevelopmentApps = false
 """
 TOML
 
@@ -1754,7 +1754,7 @@ enableMacosAppGroupTerminalApps = false
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
-enableMacosAppGroupAiApps = false
+enableMacosAppGroupDevelopmentApps = false
 TOML
 chmod 000 "$status_unreadable_config"
 
@@ -1851,7 +1851,7 @@ enableMacosAppGroupTerminalApps = false
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
-enableMacosAppGroupAiApps = false
+enableMacosAppGroupDevelopmentApps = false
 TOML
 write_os_release "$doctor_os_release" ubuntu 24.04 "Ubuntu 24.04 LTS"
 
@@ -1904,7 +1904,7 @@ fi
 doctor_incomplete_config_output="$(cat "$tmp_dir/doctor-incomplete-config.out")"
 
 assert_contains "$doctor_incomplete_config_output" "warn - managed setup config is incomplete" "Terrapod doctor marks incomplete managed setup config as a failed check"
-assert_contains "$doctor_incomplete_config_output" "enableMacosAppGroupAiApps" "Terrapod doctor reports missing managed setup keys even on VPS"
+assert_contains "$doctor_incomplete_config_output" "enableMacosAppGroupDevelopmentApps" "Terrapod doctor reports missing managed setup keys even on VPS"
 assert_contains "$doctor_incomplete_config_output" "Run 'tpod setup' or 'tpod configure <minimal|development>' to complete the managed setup config." "Terrapod doctor guides incomplete config recovery with tpod setup or configure"
 
 if TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_unsafe_multiline_config" PATH="$doctor_ok_path" \
@@ -1928,7 +1928,7 @@ enableMacosAppGroupTerminalApps = false
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
-enableMacosAppGroupAiApps = false
+enableMacosAppGroupDevelopmentApps = false
 TOML
 chmod 000 "$doctor_unreadable_config"
 
@@ -2118,7 +2118,7 @@ enableMacosAppGroupTerminalApps = false
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
-enableMacosAppGroupAiApps = false
+enableMacosAppGroupDevelopmentApps = false
 TOML
 
 if ! HOME="$update_home" XDG_CONFIG_HOME="$update_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
@@ -2187,7 +2187,7 @@ update_incomplete_error="$(cat "$tmp_dir/update-incomplete.err")"
 assert_contains "$update_incomplete_output" "Config: $status_incomplete_vps_config (present; incomplete managed setup config)" "Terrapod update reports incomplete managed setup config in the Config section"
 assert_not_contains "$update_incomplete_output" "Delegating source update to:" "Terrapod update does not announce delegation when managed setup config is incomplete"
 assert_contains "$update_incomplete_error" "managed setup config is incomplete" "Terrapod update explains incomplete managed setup config"
-assert_contains "$update_incomplete_error" "enableMacosAppGroupAiApps" "Terrapod update reports missing managed setup keys even on VPS"
+assert_contains "$update_incomplete_error" "enableMacosAppGroupDevelopmentApps" "Terrapod update reports missing managed setup keys even on VPS"
 assert_contains "$update_incomplete_error" "Run 'tpod setup' or 'tpod configure <minimal|development>' to complete the managed setup config." "Terrapod update guides incomplete config recovery with tpod setup or configure"
 
 if [ -e "$CHEZMOI_INVOKED_FILE" ]; then
@@ -2232,7 +2232,7 @@ enableMacosAppGroupTerminalApps = false
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
-enableMacosAppGroupAiApps = false
+enableMacosAppGroupDevelopmentApps = false
 TOML
 
 rm -f "$CHEZMOI_CALL_FILE" "$CHEZMOI_INVOKED_FILE"
@@ -2329,7 +2329,7 @@ enableMacosAppGroupTerminalApps = true
 enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = true
 enableMacosAppGroupMonitoring = false
-enableMacosAppGroupAiApps = true
+enableMacosAppGroupDevelopmentApps = true
 TOML
 
 if ! HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
@@ -2410,8 +2410,8 @@ assert_contains \
 
 assert_contains \
   "$diff_output" \
-  "ai-apps                       : enabled" \
-  "Terrapod diff prints enabled ai-apps macOS App Group state"
+  "development-apps              : enabled" \
+  "Terrapod diff prints enabled development-apps macOS App Group state"
 
 assert_contains \
   "$diff_output" \
@@ -2552,7 +2552,7 @@ fi
 apply_incomplete_error="$(cat "$tmp_dir/apply-incomplete.err")"
 
 assert_contains "$apply_incomplete_error" "managed setup config is incomplete" "Terrapod apply explains incomplete managed setup config"
-assert_contains "$apply_incomplete_error" "enableMacosAppGroupAiApps" "Terrapod apply reports missing managed setup keys even on VPS"
+assert_contains "$apply_incomplete_error" "enableMacosAppGroupDevelopmentApps" "Terrapod apply reports missing managed setup keys even on VPS"
 assert_contains "$apply_incomplete_error" "Run 'tpod setup' or 'tpod configure <minimal|development>' to complete the managed setup config." "Terrapod apply guides incomplete config recovery with tpod setup or configure"
 
 if [ -e "$CHEZMOI_APPLY_INVOKED_FILE" ]; then
@@ -2595,7 +2595,7 @@ fi
 
 apply_inline_config="$tmp_dir/apply-inline-table.toml"
 cat >"$apply_inline_config" <<'TOML'
-data = { profile = "vps-shell", enableEditorStack = false, enableAiCliTools = false, enableDevelopmentWorkspace = false, enableMacosAppGroupTerminalApps = false, enableMacosAppGroupAutomation = false, enableMacosAppGroupLauncher = false, enableMacosAppGroupMonitoring = false, enableMacosAppGroupAiApps = false }
+data = { profile = "vps-shell", enableEditorStack = false, enableAiCliTools = false, enableDevelopmentWorkspace = false, enableMacosAppGroupTerminalApps = false, enableMacosAppGroupAutomation = false, enableMacosAppGroupLauncher = false, enableMacosAppGroupMonitoring = false, enableMacosAppGroupDevelopmentApps = false }
 TOML
 rm -f "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
 
@@ -2725,8 +2725,8 @@ assert_contains \
 
 assert_contains \
   "$apply_output" \
-  "ai-apps                       : enabled" \
-  "Terrapod apply prints enabled ai-apps macOS App Group state"
+  "development-apps              : enabled" \
+  "Terrapod apply prints enabled development-apps macOS App Group state"
 
 assert_contains \
   "$apply_output" \

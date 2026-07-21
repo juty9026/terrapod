@@ -18,12 +18,8 @@ cask "1password-cli"
 # monitoring macOS App Group
 cask "istat-menus"
 {{ end -}}
-{{ if default false (get . "enableMacosAppGroupAiApps") -}}
-# ai-apps macOS App Group
-cask "claude"
-# codex-app installs Codex.app, which updates to the unified ChatGPT desktop app; do not replace it with the legacy chatgpt cask.
-cask "codex-app"
-cask "antigravity"
-cask "antigravity-ide"
+{{ if default false (get . "enableMacosAppGroupDevelopmentApps") -}}
+# development-apps macOS App Group
+cask "zed"
 cask "stablyai/orca/orca", trusted: true
 {{ end -}}

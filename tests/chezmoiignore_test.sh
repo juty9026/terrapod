@@ -199,11 +199,11 @@ macos_managed_targets="$(managed_target_paths "$macos_data")"
 macos_terminal_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":true,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":false,"enableMacosAppGroupMonitoring":false}'
 macos_automation_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":true,"enableMacosAppGroupLauncher":false,"enableMacosAppGroupMonitoring":false}'
 macos_launcher_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":true,"enableMacosAppGroupMonitoring":false}'
-macos_terminal_launcher_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":true,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":true,"enableMacosAppGroupMonitoring":false,"enableMacosAppGroupAiApps":false}'
+macos_terminal_launcher_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":true,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":true,"enableMacosAppGroupMonitoring":false,"enableMacosAppGroupDevelopmentApps":false}'
 macos_monitoring_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":false,"enableMacosAppGroupMonitoring":true}'
-macos_ai_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":false,"enableMacosAppGroupMonitoring":false,"enableMacosAppGroupAiApps":true}'
+macos_development_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":false,"enableMacosAppGroupMonitoring":false,"enableMacosAppGroupDevelopmentApps":true}'
 macos_terminal_apps_managed_targets="$(managed_target_paths "$macos_terminal_apps_data")"
-macos_ai_apps_managed="$(managed_source_paths "$macos_ai_apps_data")"
+macos_development_apps_managed="$(managed_source_paths "$macos_development_apps_data")"
 macos_ai_cli_tools_data='{"chezmoi":{"os":"darwin"},"enableEditorStack":false,"enableAiCliTools":true,"enableDevelopmentWorkspace":false}'
 macos_ai_cli_tools_managed="$(managed_source_paths "$macos_ai_cli_tools_data")"
 macos_development_workspace_data='{"chezmoi":{"os":"darwin"},"enableEditorStack":false,"enableAiCliTools":false,"enableDevelopmentWorkspace":true}'
@@ -240,11 +240,11 @@ terminal_apps_brewfile="$(render_template "$macos_terminal_apps_data" "Brewfile.
 automation_apps_brewfile="$(render_template "$macos_automation_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 launcher_apps_brewfile="$(render_template "$macos_launcher_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 monitoring_apps_brewfile="$(render_template "$macos_monitoring_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
-ai_apps_brewfile="$(render_template "$macos_ai_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
+development_apps_brewfile="$(render_template "$macos_development_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 macos_bootstrap="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
 macos_terminal_apps_bootstrap="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
 macos_terminal_launcher_apps_bootstrap="$(render_template "$macos_terminal_launcher_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
-macos_ai_apps_bootstrap="$(render_template "$macos_ai_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
+macos_development_apps_bootstrap="$(render_template "$macos_development_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
 macos_development_workspace_bootstrap="$(render_template "$macos_development_workspace_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
 macos_core_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_01-retry-homebrew-core.sh.tmpl")"
 macos_desktop_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl")"
@@ -253,7 +253,7 @@ macos_mise_tools_installer="$(render_template "$macos_data" ".chezmoiscripts/run
 macos_karabiner_opener="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 macos_terminal_apps_karabiner_opener="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 macos_automation_apps_karabiner_opener="$(render_template "$macos_automation_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
-macos_ai_apps_karabiner_opener="$(render_template "$macos_ai_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
+macos_development_apps_karabiner_opener="$(render_template "$macos_development_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 
 assert_contains_text \
   "$macos_bootstrap" \
@@ -635,54 +635,48 @@ assert_contains_text "$launcher_apps_brewfile" 'cask "1password-cli"' "launcher 
 
 assert_contains_text "$monitoring_apps_brewfile" 'cask "istat-menus"' "monitoring group renders iStat Menus"
 
-assert_contains_text "$ai_apps_brewfile" 'cask "claude"' "ai-apps group renders Claude Desktop"
-assert_contains_text "$ai_apps_brewfile" '# codex-app installs Codex.app, which updates to the unified ChatGPT desktop app; do not replace it with the legacy chatgpt cask.' "ai-apps group explains the codex-app to unified ChatGPT app transition"
-assert_contains_text "$ai_apps_brewfile" 'cask "codex-app"' "ai-apps group renders the Codex app that updates to the unified ChatGPT desktop app"
-assert_not_contains_text "$ai_apps_brewfile" 'cask "chatgpt"' "ai-apps group does not render the legacy ChatGPT cask"
-assert_not_contains_text "$ai_apps_brewfile" 'cask "codex"' "ai-apps group does not render Codex CLI cask"
-assert_contains_text "$ai_apps_brewfile" 'cask "antigravity"' "ai-apps group renders Antigravity 2.0"
-assert_contains_text "$ai_apps_brewfile" 'cask "antigravity-ide"' "ai-apps group renders Antigravity IDE"
-assert_contains_text "$ai_apps_brewfile" 'cask "stablyai/orca/orca", trusted: true' "ai-apps group trusts only Orca's fully-qualified vendor cask"
-ai_apps_casks="$(
-  printf '%s\n' "$ai_apps_brewfile" |
+assert_contains_text "$development_apps_brewfile" 'cask "zed"' "development-apps group renders Zed"
+assert_contains_text "$development_apps_brewfile" 'cask "stablyai/orca/orca", trusted: true' "development-apps group trusts only Orca's fully-qualified vendor cask"
+for removed_cask in claude codex-app chatgpt antigravity antigravity-ide; do
+  assert_not_contains_text "$development_apps_brewfile" "cask \"$removed_cask\"" "development-apps group excludes removed desktop cask: $removed_cask"
+done
+development_apps_casks="$(
+  printf '%s\n' "$development_apps_brewfile" |
     awk '/^[[:space:]]*cask[[:space:]]+"/ { print }'
 )"
-expected_ai_apps_casks='cask "claude"
-cask "codex-app"
-cask "antigravity"
-cask "antigravity-ide"
+expected_development_apps_casks='cask "zed"
 cask "stablyai/orca/orca", trusted: true'
 assert_text_equals \
-  "$ai_apps_casks" \
-  "$expected_ai_apps_casks" \
-  "ai-apps group renders exactly the expected casks"
+  "$development_apps_casks" \
+  "$expected_development_apps_casks" \
+  "development-apps group renders exactly the expected casks"
 
-ai_apps_bootstrap_script="$tmp_dir/macos-ai-apps-bootstrap.sh"
-printf '%s\n' "$macos_ai_apps_bootstrap" >"$ai_apps_bootstrap_script"
-sh -n "$ai_apps_bootstrap_script" || fail "ai-apps bootstrap script should be valid sh"
-pass "ai-apps bootstrap script is valid sh"
+development_apps_bootstrap_script="$tmp_dir/macos-development-apps-bootstrap.sh"
+printf '%s\n' "$macos_development_apps_bootstrap" >"$development_apps_bootstrap_script"
+sh -n "$development_apps_bootstrap_script" || fail "development-apps bootstrap script should be valid sh"
+pass "development-apps bootstrap script is valid sh"
 
-ai_apps_failure_bin="$tmp_dir/ai-apps-failure-bin"
-ai_apps_failure_state="$tmp_dir/ai-apps-failure-state"
-ai_apps_failure_home="$tmp_dir/ai-apps-failure-home"
-ai_apps_failure_log="$tmp_dir/ai-apps-failure-brew.log"
-mkdir -p "$ai_apps_failure_bin" "$ai_apps_failure_home"
-write_brew_bundle_stub "$ai_apps_failure_bin/brew"
+development_apps_failure_bin="$tmp_dir/development-apps-failure-bin"
+development_apps_failure_state="$tmp_dir/development-apps-failure-state"
+development_apps_failure_home="$tmp_dir/development-apps-failure-home"
+development_apps_failure_log="$tmp_dir/development-apps-failure-brew.log"
+mkdir -p "$development_apps_failure_bin" "$development_apps_failure_home"
+write_brew_bundle_stub "$development_apps_failure_bin/brew"
 
-if ! HOME="$ai_apps_failure_home" XDG_STATE_HOME="$ai_apps_failure_state" MACOS_BREW_LOG="$ai_apps_failure_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="stablyai/orca/orca" PATH="$ai_apps_failure_bin:/usr/bin:/bin" \
-  sh "$ai_apps_bootstrap_script" >"$tmp_dir/ai-apps-failure.out" 2>"$tmp_dir/ai-apps-failure.err"; then
+if ! HOME="$development_apps_failure_home" XDG_STATE_HOME="$development_apps_failure_state" MACOS_BREW_LOG="$development_apps_failure_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="stablyai/orca/orca" PATH="$development_apps_failure_bin:/usr/bin:/bin" \
+  sh "$development_apps_bootstrap_script" >"$tmp_dir/development-apps-failure.out" 2>"$tmp_dir/development-apps-failure.err"; then
   fail "Orca desktop app bundle failure does not block bootstrap script"
 fi
 
-ai_apps_failure_marker="$ai_apps_failure_state/terrapod/install-warnings/homebrew-desktop-apps"
-if [ ! -f "$ai_apps_failure_marker" ]; then
+development_apps_failure_marker="$development_apps_failure_state/terrapod/install-warnings/homebrew-desktop-apps"
+if [ ! -f "$development_apps_failure_marker" ]; then
   fail "Orca desktop app bundle failure records a homebrew-desktop-apps marker"
 fi
 pass "Orca desktop app bundle failure records a homebrew-desktop-apps marker"
 
-ai_apps_failure_marker_text="$(cat "$ai_apps_failure_marker")"
-assert_contains_text "$ai_apps_failure_marker_text" "failed casks: stablyai/orca/orca" "Orca failure attribution preserves its fully-qualified cask source"
-assert_contains_text "$ai_apps_failure_marker_text" "App Groups: ai-apps" "Orca failure attribution identifies the ai-apps group"
+development_apps_failure_marker_text="$(cat "$development_apps_failure_marker")"
+assert_contains_text "$development_apps_failure_marker_text" "failed casks: stablyai/orca/orca" "Orca failure attribution preserves its fully-qualified cask source"
+assert_contains_text "$development_apps_failure_marker_text" "App Groups: development-apps" "Orca failure attribution identifies the development-apps group"
 
 terminal_launcher_bootstrap_script="$tmp_dir/macos-terminal-launcher-bootstrap.sh"
 printf '%s\n' "$macos_terminal_launcher_apps_bootstrap" >"$terminal_launcher_bootstrap_script"
@@ -907,14 +901,14 @@ assert_contains_text \
   "terminal-apps group runs macOS Desktop App Stack installer"
 
 assert_contains_text \
-  "$macos_ai_apps_bootstrap" \
+  "$macos_development_apps_bootstrap" \
   "terrapod-macos-desktop-apps" \
-  "ai-apps group renders macOS Desktop App Stack Brewfile"
+  "development-apps group renders macOS Desktop App Stack Brewfile"
 
 assert_contains_text \
-  "$macos_ai_apps_bootstrap" \
+  "$macos_development_apps_bootstrap" \
   'run_desktop_app_bundle "$desktop_brewfile"' \
-  "ai-apps group runs macOS Desktop App Stack installer"
+  "development-apps group runs macOS Desktop App Stack installer"
 
 assert_not_contains_text \
   "$macos_development_workspace_bootstrap" \
@@ -942,14 +936,14 @@ assert_contains_text \
   "Karabiner opener tracks macOS Desktop App Stack Brewfile changes"
 
 assert_contains_text \
-  "$macos_ai_apps_karabiner_opener" \
+  "$macos_development_apps_karabiner_opener" \
   "macOS Desktop App Stack enabled: true" \
-  "Karabiner opener tracks enabled ai-apps Desktop App Stack state"
+  "Karabiner opener tracks enabled development-apps Desktop App Stack state"
 
 assert_contains_text \
-  "$macos_ai_apps_karabiner_opener" \
+  "$macos_development_apps_karabiner_opener" \
   "macOS Desktop App Stack Brewfile checksum" \
-  "Karabiner opener tracks ai-apps Desktop App Stack Brewfile changes"
+  "Karabiner opener tracks development-apps Desktop App Stack Brewfile changes"
 
 assert_texts_differ \
   "$macos_terminal_apps_karabiner_opener" \
@@ -1070,9 +1064,9 @@ fi
 pass "legacy Antigravity app-bundle PATH snippet is no longer managed"
 
 assert_managed_paths_exclude_prefix \
-  "$macos_ai_apps_managed" \
+  "$macos_development_apps_managed" \
   "dot_config/zsh/path.d/antigravity.zsh.tmpl" \
-  "macOS ai-apps group does not restore legacy Antigravity PATH snippet"
+  "macOS development-apps group does not restore legacy Antigravity PATH snippet"
 
 assert_managed_paths_include_prefix \
   "$editor_stack_managed" \

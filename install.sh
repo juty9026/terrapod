@@ -731,7 +731,7 @@ managed_setup_keys() {
     enableMacosAppGroupAutomation \
     enableMacosAppGroupLauncher \
     enableMacosAppGroupMonitoring \
-    enableMacosAppGroupAiApps
+    enableMacosAppGroupDevelopmentApps
 }
 
 config_data_value() {
