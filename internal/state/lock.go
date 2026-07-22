@@ -97,6 +97,10 @@ func acquireStateLock(dir, command string, staleObserved func()) (*Lock, error) 
 }
 
 func (l *Lock) Release() error {
+	return l.releaseWithTombstoneHook(nil)
+}
+
+func (l *Lock) releaseWithTombstoneHook(afterTombstone func()) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.done {
@@ -105,26 +109,64 @@ func (l *Lock) Release() error {
 	if err := requireRootDirectory(l.root, "lock"); err != nil {
 		return fmt.Errorf("unsafe lock during release: %w", err)
 	}
-	owner, err := readLockOwner(l.root, "lock/owner.json")
+	claimSuffix, err := randomHex(16)
 	if err != nil {
-		return fmt.Errorf("verify lock ownership: %w", err)
+		return fmt.Errorf("generate release claim: %w", err)
+	}
+	claimName := ".release-claim-" + claimSuffix + ".json"
+	claimPath := "lock/" + claimName
+	if _, err := l.root.Lstat(claimPath); err == nil {
+		return errors.New("release claim destination already exists")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect release claim destination: %w", err)
+	}
+	if err := l.root.Rename("lock/owner.json", claimPath); err != nil {
+		return fmt.Errorf("claim lock for release: %w", err)
+	}
+	owner, err := readLockOwner(l.root, claimPath)
+	if err != nil {
+		return failClaim(l.root, claimPath, fmt.Errorf("verify release claim: %w", err))
 	}
 	if owner.Nonce != l.owner.Nonce || owner.PID != l.owner.PID {
-		return errors.New("lock ownership changed before release")
+		return failClaim(l.root, claimPath, errors.New("lock ownership changed before release"))
 	}
-	if err := l.root.Remove("lock/owner.json"); err != nil {
-		return fmt.Errorf("remove lock owner: %w", err)
+	tombstoneSuffix, err := randomHex(16)
+	if err != nil {
+		return failClaim(l.root, claimPath, fmt.Errorf("generate release tombstone: %w", err))
 	}
-	if err := l.root.Remove("lock"); err != nil {
-		return fmt.Errorf("remove lock directory: %w", err)
+	tombstone := ".released-lock-" + time.Now().UTC().Format("20060102T150405.000000000Z") + fmt.Sprintf("-%d-%s", owner.PID, tombstoneSuffix)
+	if err := l.root.Mkdir(tombstone, 0o700); err != nil {
+		return failClaim(l.root, claimPath, fmt.Errorf("reserve release tombstone: %w", err))
 	}
-	syncErr := syncRootDirectory(l.root, ".")
+	tombstonedLock := tombstone + "/lock"
+	if err := l.root.Rename("lock", tombstonedLock); err != nil {
+		_ = l.root.Remove(tombstone)
+		return failClaim(l.root, claimPath, fmt.Errorf("move lock to release tombstone: %w", err))
+	}
+	linearizeErr := syncRootDirectory(l.root, ".")
+	if afterTombstone != nil {
+		afterTombstone()
+	}
+	cleanupErr := removeLockTombstone(l.root, tombstone, tombstonedLock+"/"+claimName)
 	closeErr := l.root.Close()
 	l.done = true
-	if err := errors.Join(syncErr, closeErr); err != nil {
+	if err := errors.Join(linearizeErr, cleanupErr, closeErr); err != nil {
 		return fmt.Errorf("finish lock release: %w", err)
 	}
 	return nil
+}
+
+func removeLockTombstone(root *os.Root, tombstone, claimPath string) error {
+	if err := root.Remove(claimPath); err != nil {
+		return fmt.Errorf("remove tombstoned owner: %w", err)
+	}
+	if err := root.Remove(tombstone + "/lock"); err != nil {
+		return fmt.Errorf("remove tombstoned lock: %w", err)
+	}
+	if err := root.Remove(tombstone); err != nil {
+		return fmt.Errorf("remove release tombstone: %w", err)
+	}
+	return syncRootDirectory(root, ".")
 }
 
 func createLock(root *os.Root, owner lockOwner) (*Lock, error) {
@@ -213,6 +255,11 @@ func claimAndArchiveStaleLock(root *os.Root, observed lockOwner) error {
 	}
 	claimName := ".owner-claim-" + claimSuffix + ".json"
 	claimPath := "lock/" + claimName
+	if _, err := root.Lstat(claimPath); err == nil {
+		return errors.New("stale claim destination already exists")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect stale claim destination: %w", err)
+	}
 	if err := root.Rename("lock/owner.json", claimPath); err != nil {
 		return fmt.Errorf("state lock is busy: claim stale owner: %w", err)
 	}
@@ -233,15 +280,30 @@ func claimAndArchiveStaleLock(root *os.Root, observed lockOwner) error {
 	}
 	archiveName := time.Now().UTC().Format("20060102T150405.000000000Z") + fmt.Sprintf("-%d-%s", observed.PID, archiveSuffix)
 	archivePath := "stale-locks/" + archiveName
+	reservation := "stale-locks/.reserve-" + archiveName
+	reserved, err := root.OpenFile(reservation, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return failClaim(root, claimPath, fmt.Errorf("reserve stale archive name: %w", err))
+	}
+	if err := reserved.Close(); err != nil {
+		_ = root.Remove(reservation)
+		return failClaim(root, claimPath, fmt.Errorf("close stale archive reservation: %w", err))
+	}
+	defer root.Remove(reservation)
+	if _, err := root.Lstat(archivePath); err == nil {
+		return failClaim(root, claimPath, errors.New("stale archive destination already exists"))
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return failClaim(root, claimPath, fmt.Errorf("inspect stale archive destination: %w", err))
+	}
 	if err := root.Rename("lock", archivePath); err != nil {
 		return failClaim(root, claimPath, fmt.Errorf("archive claimed stale lock: %w", err))
 	}
-	if err := root.Rename(archivePath+"/"+claimName, archivePath+"/owner.json"); err != nil {
-		return fmt.Errorf("restore archived owner name: %w", err)
+	if err := normalizeArchivedOwner(root, archivePath, claimName, observed, func() error {
+		return root.Rename(archivePath+"/"+claimName, archivePath+"/owner.json")
+	}); err != nil {
+		return err
 	}
-	if err := syncRootDirectory(root, archivePath); err != nil {
-		return fmt.Errorf("sync archived lock: %w", err)
-	}
+	_ = root.Remove(reservation)
 	if err := syncRootDirectory(root, "stale-locks"); err != nil {
 		return fmt.Errorf("sync stale lock directory: %w", err)
 	}
@@ -249,6 +311,19 @@ func claimAndArchiveStaleLock(root *os.Root, observed lockOwner) error {
 		return fmt.Errorf("sync lock parent: %w", err)
 	}
 	return nil
+}
+
+func normalizeArchivedOwner(root *os.Root, archivePath, claimName string, observed lockOwner, renameClaim func() error) error {
+	if err := renameClaim(); err == nil {
+		if err := syncRootDirectory(root, archivePath); err == nil {
+			return nil
+		}
+	}
+	if err := writeJSONAtomicRoot(root, archivePath+"/owner.json", observed); err != nil {
+		return fmt.Errorf("preserve archived owner after normalization failure: %w", err)
+	}
+	_ = root.Remove(archivePath + "/" + claimName)
+	return syncRootDirectory(root, archivePath)
 }
 
 func failClaim(root *os.Root, claimPath string, cause error) error {

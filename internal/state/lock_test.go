@@ -3,9 +3,11 @@ package state
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -284,6 +286,129 @@ func TestReleaseRejectsSwappedExternalLockSymlink(t *testing.T) {
 	}
 	if err := lock.Release(); err != nil {
 		t.Fatalf("release restored lock: %v", err)
+	}
+}
+
+func TestReleaseTombstoneDoesNotRemoveReplacementWinner(t *testing.T) {
+	dir := t.TempDir()
+	lock, err := Acquire(dir, "tpod apply")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var replacement *Lock
+	var replacementErr error
+	err = lock.releaseWithTombstoneHook(func() {
+		replacement, replacementErr = Acquire(dir, "tpod update")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replacementErr != nil {
+		t.Fatalf("replacement did not acquire after release linearized: %v", replacementErr)
+	}
+	t.Cleanup(func() { _ = replacement.Release() })
+
+	current, err := os.ReadFile(filepath.Join(dir, "lock", "owner.json"))
+	if err != nil {
+		t.Fatalf("Release removed replacement winner: %v", err)
+	}
+	if !bytes.Contains(current, []byte(replacement.owner.Nonce)) {
+		t.Fatalf("current owner does not belong to replacement winner: %s", current)
+	}
+}
+
+func TestReleaseCleanupFailureDoesNotBlockReplacement(t *testing.T) {
+	dir := t.TempDir()
+	lock, err := Acquire(dir, "tpod apply")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var replacement *Lock
+	var replacementErr error
+	var blocker string
+	err = lock.releaseWithTombstoneHook(func() {
+		entries, readErr := os.ReadDir(dir)
+		if readErr != nil {
+			replacementErr = readErr
+			return
+		}
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), ".released-lock-") {
+				blocker = filepath.Join(dir, entry.Name(), "lock", "cleanup-blocker")
+				break
+			}
+		}
+		if blocker == "" {
+			replacementErr = errors.New("release tombstone not found")
+			return
+		}
+		if writeErr := os.WriteFile(blocker, []byte("block cleanup"), 0o600); writeErr != nil {
+			replacementErr = writeErr
+			return
+		}
+		replacement, replacementErr = Acquire(dir, "tpod update")
+	})
+	if err == nil {
+		t.Fatal("Release did not report tombstone cleanup failure")
+	}
+	if replacementErr != nil {
+		t.Fatalf("replacement did not acquire despite isolated cleanup failure: %v", replacementErr)
+	}
+	if replacement == nil {
+		t.Fatal("replacement lock is nil")
+	}
+	if err := replacement.Release(); err != nil {
+		t.Fatalf("release replacement: %v", err)
+	}
+	if err := os.Remove(blocker); err != nil {
+		t.Fatal(err)
+	}
+	tombstonedLock := filepath.Dir(blocker)
+	if err := os.Remove(tombstonedLock); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Dir(tombstonedLock)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNormalizeArchivedOwnerFallsBackToAtomicWrite(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "stale-locks", "archive"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = root.Close() })
+	owner := lockOwner{
+		PID:       1 << 30,
+		Command:   "tpod apply",
+		StartedAt: time.Date(2026, 7, 21, 1, 2, 3, 0, time.UTC),
+		Nonce:     "0123456789abcdef0123456789abcdef",
+	}
+	if err := writeJSONAtomicRoot(root, "stale-locks/archive/claim.json", owner); err != nil {
+		t.Fatal(err)
+	}
+
+	err = normalizeArchivedOwner(root, "stale-locks/archive", "claim.json", owner, func() error {
+		return errors.New("injected rename failure")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := readLockOwner(root, "stale-locks/archive/owner.json")
+	if err != nil {
+		t.Fatalf("fallback did not preserve strict owner.json: %v", err)
+	}
+	if got != owner {
+		t.Fatalf("archived owner=%#v, want %#v", got, owner)
+	}
+	if _, err := root.Lstat("stale-locks/archive/claim.json"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("claim was not cleaned after fallback: %v", err)
 	}
 }
 
