@@ -356,6 +356,8 @@ printf '%s\n' "$macos_mise_tools_installer" |
   sed \
     -e "s#/opt/homebrew/bin/brew#$tmp_dir/missing-opt-homebrew-brew#g" \
     -e "s#/usr/local/bin/brew#$tmp_dir/missing-usr-local-brew#g" \
+    -e "s#/opt/homebrew/bin/mise#$tmp_dir/missing-opt-homebrew-mise#g" \
+    -e "s#/usr/local/bin/mise#$tmp_dir/missing-usr-local-mise#g" \
     >"$macos_mise_missing_script"
 sh -n "$macos_mise_missing_script" || fail "macOS mise tool installer missing-mise test script should be valid sh"
 pass "macOS mise tool installer missing-mise test script is valid sh"
@@ -846,10 +848,10 @@ pass "macOS mise tool installer exits 0 when missing mise is covered by a homebr
 if [ ! -f "$mise_missing_with_core_state/terrapod/install-warnings/homebrew-core" ]; then
   fail "macOS mise tool installer keeps the existing homebrew-core marker"
 fi
-if [ -e "$mise_missing_with_core_state/terrapod/install-warnings/mise-tools" ]; then
-  fail "macOS mise tool installer avoids duplicate mise-tools marker when homebrew-core is already actionable"
+if [ ! -f "$mise_missing_with_core_state/terrapod/install-warnings/mise-tools" ]; then
+  fail "macOS mise tool installer records its own warning when standard Homebrew mise is missing"
 fi
-pass "macOS mise tool installer leaves homebrew-core as the only actionable missing-mise marker"
+pass "macOS mise tool installer records missing standard Homebrew mise independently"
 
 assert_managed_paths_exclude_prefix \
   "$macos_managed_targets" \
@@ -1395,6 +1397,10 @@ pass "cross-profile Brewfile declares migrated Neovim and GitHub CLI"
 mise_tools_installer="$(render_template "$ubuntu_data" ".chezmoiscripts/run_onchange_after_20-install-mise-tools.sh.tmpl")"
 mise_tools_retry="$(render_template "$ubuntu_data" ".chezmoiscripts/run_after_21-retry-mise-tools.sh.tmpl")"
 
+assert_contains_text "$mise_tools_installer" 'mise_bin="$(standard_mise_path || true)"' "mise installer resolves mise from a standard Homebrew prefix"
+assert_contains_text "$mise_tools_installer" '"$mise_bin" install --yes -C "$HOME"' "Ubuntu runtime install invokes the resolved Homebrew mise"
+assert_not_contains_text "$mise_tools_installer" '/usr/bin/mise' "Ubuntu runtime install never falls back to APT mise"
+
 if ! printf '%s\n' "$mise_tools_installer" |
   grep -E '^# mise-config-sha256=[0-9a-f]{64}$' >/dev/null; then
   fail "mise tool installer tracks rendered mise config changes"
@@ -1403,12 +1409,16 @@ fi
 pass "mise tool installer tracks rendered mise config changes"
 
 mise_tools_installer_script="$tmp_dir/mise-tools-installer.sh"
-printf '%s\n' "$mise_tools_installer" >"$mise_tools_installer_script"
+printf '%s\n' "$mise_tools_installer" |
+  sed "s#/home/linuxbrew/.linuxbrew/bin/mise#$tmp_dir/mise-tools-bin/mise#g" \
+  >"$mise_tools_installer_script"
 sh -n "$mise_tools_installer_script" || fail "mise tool installer script should be valid sh"
 pass "mise tool installer script should be valid sh"
 
 mise_tools_retry_script="$tmp_dir/mise-tools-retry.sh"
-printf '%s\n' "$mise_tools_retry" >"$mise_tools_retry_script"
+printf '%s\n' "$mise_tools_retry" |
+  sed "s#/home/linuxbrew/.linuxbrew/bin/mise#$tmp_dir/mise-tools-bin/mise#g" \
+  >"$mise_tools_retry_script"
 sh -n "$mise_tools_retry_script" || fail "mise tool retry script should be valid sh"
 pass "mise tool retry script should be valid sh"
 
@@ -1418,7 +1428,7 @@ mise_tools_home="$tmp_dir/mise-tools-home"
 mise_tools_log="$tmp_dir/mise-tools.log"
 mkdir -p "$mise_tools_bin" "$mise_tools_home"
 write_stub "$mise_tools_bin/mise" \
-  'printf "%s\n" "mise args:$*" >>"$MISE_TOOLS_LOG"' \
+  'printf "%s\n" "/home/linuxbrew/.linuxbrew/bin/mise args:$*" >>"$MISE_TOOLS_LOG"' \
   'case "$1" in' \
   '  install)' \
   '    exit "${MISE_TOOLS_INSTALL_STATUS:-0}"' \
@@ -1466,7 +1476,8 @@ assert_contains_text "$mise_tools_marker_text" "Failed step(s): mise install" "m
 assert_contains_text "$mise_tools_marker_text" "GITHUB_TOKEN" "mise install failure marker suggests GitHub token recovery"
 assert_contains_text "$mise_tools_marker_text" "gh auth login" "mise install failure marker suggests GitHub auth recovery"
 mise_tools_log_text="$(cat "$mise_tools_log")"
-assert_contains_text "$mise_tools_log_text" "mise args:install --yes -C $mise_tools_home" "mise install failure still attempts mise install"
+assert_contains_text "$mise_tools_log_text" "/home/linuxbrew/.linuxbrew/bin/mise args:install --yes -C $mise_tools_home" "Ubuntu runtime install uses Linuxbrew mise"
+assert_not_contains_text "$mise_tools_log_text" "/usr/bin/mise" "Ubuntu runtime install never falls back to APT mise"
 assert_contains_text "$mise_tools_log_text" "mise args:exec --yes -C $mise_tools_home -- sh -c command -v corepack" "mise install failure still checks corepack availability"
 assert_contains_text "$mise_tools_log_text" "mise args:exec --yes -C $mise_tools_home -- corepack enable" "mise install failure still attempts corepack enable"
 

@@ -18,6 +18,27 @@ pass() {
   printf '%s\n' "ok - $1"
 }
 
+assert_contains() {
+  haystack="$1"
+  needle="$2"
+  message="$3"
+  printf '%s\n' "$haystack" | grep -F "$needle" >/dev/null || fail "$message"
+  pass "$message"
+}
+
+assert_order() {
+  haystack="$1"
+  first="$2"
+  second="$3"
+  message="$4"
+  printf '%s\n' "$haystack" | awk -v first="$first" -v second="$second" '
+    first_line == 0 && index($0, first) { first_line = NR }
+    second_line == 0 && index($0, second) { second_line = NR }
+    END { exit !(first_line > 0 && second_line > first_line) }
+  ' || fail "$message"
+  pass "$message"
+}
+
 render_zshenv() {
   data="$1"
 
@@ -48,11 +69,11 @@ assert_lookup_success() {
 
   render_zshenv "$data"
 
-  if ! lookup_command chezmoi; then
-    fail "$message; expected ~/.local/bin/chezmoi in PATH"
+  if ! lookup_command terrapod-local-test-command; then
+    fail "$message; expected ~/.local/bin/terrapod-local-test-command in PATH"
   fi
 
-  expected="$tmp_dir/home/.local/bin/chezmoi"
+  expected="$tmp_dir/home/.local/bin/terrapod-local-test-command"
   actual="$(cat "$tmp_dir/lookup.out")"
 
   if [ "$actual" != "$expected" ]; then
@@ -105,11 +126,6 @@ assert_linuxbrew_shellenv_rendering() {
     if ! grep -F '/home/linuxbrew/.linuxbrew/bin/brew shellenv' "$tmp_dir/home/.zshenv" >/dev/null; then
       fail "$message; expected persistent Linuxbrew shellenv setup"
     fi
-    linuxbrew_line="$(grep -n -F '/home/linuxbrew/.linuxbrew/bin/brew shellenv' "$tmp_dir/home/.zshenv" | cut -d: -f1)"
-    user_local_line="$(grep -n -F '# User-local binaries.' "$tmp_dir/home/.zshenv" | cut -d: -f1)"
-    if [ "$linuxbrew_line" -ge "$user_local_line" ]; then
-      fail "$message; Linuxbrew must load before user-local PATH is prepended for shadow diagnostics"
-    fi
   elif grep -F '/home/linuxbrew/.linuxbrew/bin/brew shellenv' "$tmp_dir/home/.zshenv" >/dev/null; then
     fail "$message; Linuxbrew shellenv setup should be absent"
   fi
@@ -122,11 +138,21 @@ chezmoi_bin="$(command -v chezmoi)" || fail "chezmoi is required to render templ
 mkdir -p "$tmp_dir/home/.local/bin"
 : >"$tmp_dir/chezmoi.toml"
 
-cat >"$tmp_dir/home/.local/bin/chezmoi" <<'STUB'
+cat >"$tmp_dir/home/.local/bin/terrapod-local-test-command" <<'STUB'
 #!/bin/sh
 exit 0
 STUB
-chmod +x "$tmp_dir/home/.local/bin/chezmoi"
+chmod +x "$tmp_dir/home/.local/bin/terrapod-local-test-command"
+
+render_zshenv '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}}}'
+rendered_linux_zshenv="$(cat "$tmp_dir/home/.zshenv")"
+render_zshenv '{"chezmoi":{"os":"darwin"}}'
+rendered_macos_zshenv="$(cat "$tmp_dir/home/.zshenv")"
+
+assert_order "$rendered_linux_zshenv" 'path=("$HOME/.local/bin" $path)' 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' "Linuxbrew is placed ahead of user-local legacy commands"
+assert_order "$rendered_linux_zshenv" 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' 'source "$path_snippet"' "explicit path snippets run after the managed Homebrew default"
+assert_contains "$rendered_macos_zshenv" '/opt/homebrew/bin/brew shellenv' "macOS zshenv configures Apple Silicon Homebrew"
+assert_contains "$rendered_macos_zshenv" '/usr/local/bin/brew shellenv' "macOS zshenv configures Intel Homebrew"
 
 assert_lookup_success \
   '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}}}' \
@@ -147,8 +173,8 @@ assert_linuxbrew_shellenv_rendering \
 
 assert_linuxbrew_shellenv_rendering \
   '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableAiCliTools":false,"enableDevelopmentWorkspace":false}' \
-  absent \
-  "Ubuntu without the Optional AI Tool Stack does not add Linuxbrew shell setup"
+  present \
+  "Ubuntu without the Optional AI Tool Stack persists mandatory Linuxbrew shell setup"
 
 assert_linuxbrew_shellenv_rendering \
   '{"chezmoi":{"os":"darwin"},"enableAiCliTools":true,"enableDevelopmentWorkspace":false}' \

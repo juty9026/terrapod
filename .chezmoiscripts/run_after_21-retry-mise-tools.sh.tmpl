@@ -68,49 +68,30 @@ finish_mise_tools() {
   clear_install_warning mise-tools
 }
 
-setup_mise() {
-  if command -v mise >/dev/null 2>&1; then
-    return
-  fi
+standard_mise_path() {
+  case "{{ .chezmoi.os }}:$(uname -m)" in
+    darwin:arm64) printf '%s\n' /opt/homebrew/bin/mise ;;
+    darwin:x86_64) printf '%s\n' /usr/local/bin/mise ;;
+    linux:x86_64|linux:aarch64|linux:arm64) printf '%s\n' /home/linuxbrew/.linuxbrew/bin/mise ;;
+    *) return 1 ;;
+  esac
+}
 
-{{ if eq .chezmoi.os "darwin" }}
-  if [ -x /opt/homebrew/bin/brew ]; then
-    eval "$(/opt/homebrew/bin/brew shellenv)"
-  fi
-
-  if command -v mise >/dev/null 2>&1; then
-    return
-  fi
-
-  if [ -x /usr/local/bin/brew ]; then
-    eval "$(/usr/local/bin/brew shellenv)"
-  fi
-
-  if ! command -v mise >/dev/null 2>&1; then
-    echo "mise is required. Run the Homebrew Brewfile bundle first." >&2
-    mark_install_warning \
-      mise-tools \
-      "mise tool install needs attention" \
-      "Run the Homebrew Brewfile bundle or fix mise on PATH, then rerun tpod apply."
-    exit_after_install_warning
-  fi
-{{ else }}
-  echo "mise is required. The Ubuntu bootstrap script should install mise from the official APT repository." >&2
+mise_bin="$(standard_mise_path || true)"
+if [ -z "$mise_bin" ] || [ ! -x "$mise_bin" ]; then
   mark_install_warning \
     mise-tools \
     "mise tool install needs attention" \
-    "Run the Ubuntu bootstrap script or fix mise on PATH, then rerun tpod apply."
+    "Install the mandatory Homebrew core bundle, then rerun tpod apply."
   exit_after_install_warning
-{{ end }}
-}
+fi
 
-setup_mise
-if ! mise install --yes -C "$HOME"; then
+if ! "$mise_bin" install --yes -C "$HOME"; then
   append_failed_mise_step "mise install"
 fi
 
-if mise exec --yes -C "$HOME" -- sh -c 'command -v corepack' >/dev/null 2>&1; then
-  if ! mise exec --yes -C "$HOME" -- corepack enable; then
+if "$mise_bin" exec --yes -C "$HOME" -- sh -c 'command -v corepack' >/dev/null 2>&1; then
+  if ! "$mise_bin" exec --yes -C "$HOME" -- corepack enable; then
     append_failed_mise_step "corepack enable"
   fi
 fi
