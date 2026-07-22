@@ -1031,6 +1031,29 @@ done
 
 pass "user-scoped macOS app config remains managed regardless of app group selection"
 
+assert_managed_paths_include_prefix \
+  "$macos_managed" \
+  ".chezmoiscripts/run_after_70-apply-jetendard-settings.sh.tmpl" \
+  "macOS default applies Jetendard app settings"
+
+assert_managed_paths_include_prefix \
+  "$macos_development_apps_managed" \
+  ".chezmoiscripts/run_after_70-apply-jetendard-settings.sh.tmpl" \
+  "development-apps selection applies the same user-scoped Jetendard settings"
+
+assert_managed_paths_exclude_prefix \
+  "$ubuntu_managed" \
+  ".chezmoiscripts/run_after_70-apply-jetendard-settings.sh.tmpl" \
+  "Ubuntu excludes Jetendard app settings"
+
+ghostty_font_lines="$(grep -E '^[[:space:]]*font-family[[:space:]]*=' "$repo_root/dot_config/ghostty/config")"
+assert_text_equals "$ghostty_font_lines" 'font-family = "Jetendard"' \
+  "Ghostty uses Jetendard as its sole font family"
+assert_not_contains_text "$(cat "$repo_root/dot_config/ghostty/config")" "JetBrainsMono Nerd Font" \
+  "Ghostty no longer declares JetBrains Mono Nerd Font"
+assert_not_contains_text "$(cat "$repo_root/dot_config/ghostty/config")" "D2Coding" \
+  "Ghostty no longer declares D2Coding"
+
 cmux_fixture_source="$tmp_dir/cmux-fixture-source"
 mkdir -p "$cmux_fixture_source/dot_config/cmux"
 cp "$repo_root/.chezmoiignore" "$cmux_fixture_source/.chezmoiignore"

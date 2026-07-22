@@ -5,8 +5,7 @@
 theme = "Catppuccin Mocha"
 
 # Font
-font-family = "JetBrainsMono Nerd Font"
-font-family = "D2Coding"
+font-family = "Jetendard"
 
 # Window
 window-padding-x = 12

@@ -1,0 +1,28 @@
+{{ if eq .chezmoi.os "darwin" -}}
+#!/bin/sh
+set -u
+
+warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
+settings_helper="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/executable_jetendard-settings"
+. "$warnings_lib"
+
+if ! command -v python3 >/dev/null 2>&1; then
+  terrapod_install_warning_write jetendard-settings "Jetendard app settings need attention" "Restore Python, quit Orca, then rerun tpod apply." || exit 1
+  exit 0
+fi
+
+python3 "$settings_helper" apply
+settings_status="$?"
+case "$settings_status" in
+  0)
+    terrapod_install_warning_clear jetendard-settings
+    ;;
+  2)
+    terrapod_install_warning_write jetendard-settings "Jetendard Orca setting is deferred" "Quit Orca, then rerun tpod apply." || exit 1
+    ;;
+  *)
+    terrapod_install_warning_write jetendard-settings "Jetendard app settings need attention" "Repair the reported Zed or Orca settings file, quit Orca, then rerun tpod apply." || exit 1
+    ;;
+esac
+exit 0
+{{- end }}
