@@ -14,10 +14,23 @@ esac
 command_dir="${command_path%/*}"
 command_dir="$(CDPATH= cd -- "$command_dir" 2>/dev/null && pwd || printf '%s\n' ".")"
 install_warnings_lib="${TERRAPOD_INSTALL_WARNINGS_LIB:-$command_dir/../lib/terrapod/install-warnings.sh}"
+jetendard_font_helper="${TERRAPOD_JETENDARD_FONT_HELPER:-$command_dir/../lib/terrapod/jetendard-font}"
+jetendard_settings_helper="${TERRAPOD_JETENDARD_SETTINGS_HELPER:-$command_dir/../lib/terrapod/jetendard-settings}"
 TERRAPOD_INSTALL_WARNINGS_LOADED=
 if [ -f "$install_warnings_lib" ]; then
   . "$install_warnings_lib"
 fi
+
+run_jetendard_check() {
+  helper="$1"
+  command_name="$2"
+  shift 2
+  if [ ! -f "$helper" ] || ! command -v python3 >/dev/null 2>&1; then
+    printf '%s\n' "Jetendard checker is unavailable"
+    return 1
+  fi
+  python3 "$helper" "$command_name" "$@" 2>&1
+}
 
 supports_color() {
   [ -t 1 ] &&
@@ -1075,6 +1088,14 @@ print_key_tool_status() {
   esac
 }
 
+print_jetendard_status() {
+  if run_jetendard_check "$jetendard_font_helper" check >/dev/null; then
+    print_colon_state_line "Jetendard font" "installed"
+  else
+    print_colon_state_line "Jetendard font" "missing"
+  fi
+}
+
 status_key_tool_warnings() {
   profile="$1"
   config_file="$2"
@@ -1215,6 +1236,9 @@ run_status() {
   print_optional_setting_status "Optional Development Workspace" "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" "development Zellij layouts"
   print_macos_app_group_status "$config_file" "$profile"
   print_key_tool_status "$profile" "$config_file"
+  if [ "$profile" = "macos-terminal" ]; then
+    print_jetendard_status
+  fi
   print_status_warnings "$config_file" "$profile"
   print_install_warning_status
 }
@@ -1492,6 +1516,18 @@ doctor_check_command() {
   fi
 }
 
+doctor_check_jetendard_component() {
+  label="$1"
+  helper="$2"
+  command_name="$3"
+  if detail="$(run_jetendard_check "$helper" "$command_name")"; then
+    doctor_ok "$label: $detail"
+  else
+    doctor_warn "$label: $detail"
+    doctor_guidance "Run 'tpod apply' to restore Jetendard. Quit Orca first when an Orca profile is out of sync."
+  fi
+}
+
 doctor_check_optional_stack() {
   label="$1"
   enabled="$2"
@@ -1622,6 +1658,10 @@ run_doctor() {
   case "$profile" in
     macos-terminal)
       doctor_check_command brew
+      doctor_check_jetendard_component "Jetendard font files" "$jetendard_font_helper" check
+      doctor_check_jetendard_component "Ghostty font setting" "$jetendard_settings_helper" check-ghostty
+      doctor_check_jetendard_component "Zed font settings" "$jetendard_settings_helper" check-zed
+      doctor_check_jetendard_component "Orca font settings" "$jetendard_settings_helper" check-orca
       ;;
     vps-shell)
       doctor_check_command apt

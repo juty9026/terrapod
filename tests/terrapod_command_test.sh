@@ -618,6 +618,8 @@ write_no_gum_path "$no_gum_path" sh
 terrapod="$repo_root/dot_local/bin/executable_terrapod"
 tpod_source="$repo_root/dot_local/bin/symlink_tpod"
 install_warnings_lib="$repo_root/dot_local/lib/terrapod/install-warnings.sh"
+export TERRAPOD_JETENDARD_FONT_HELPER="$repo_root/dot_local/lib/terrapod/executable_jetendard-font"
+export TERRAPOD_JETENDARD_SETTINGS_HELPER="$repo_root/dot_local/lib/terrapod/executable_jetendard-settings"
 
 managed_targets="$(
   chezmoi \
@@ -1566,6 +1568,102 @@ TOML
 
 macos_status_path="$(status_doctor_path macos chezmoi git zsh mise brew nvim agy claude codex zellij ghostty op)"
 
+python3_path="$(PATH="$system_path" command -v python3 2>/dev/null || true)"
+if [ -z "$python3_path" ]; then
+  fail "Jetendard status/doctor tests require python3"
+fi
+ln -s "$python3_path" "$macos_status_path/python3"
+
+jetendard_home="$tmp_dir/jetendard-home"
+mkdir -p \
+  "$jetendard_home/.local/state/terrapod/jetendard" \
+  "$jetendard_home/Library/Fonts" \
+  "$jetendard_home/.config/ghostty" \
+  "$jetendard_home/.config/zed" \
+  "$jetendard_home/Library/Application Support/orca/profiles/primary" \
+  "$jetendard_home/Library/Application Support/orca/profiles/secondary"
+cat >"$jetendard_home/.local/state/terrapod/jetendard/manifest.json" <<'JSON'
+{
+  "tag": "v1.0.0",
+  "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "files": ["Jetendard-Regular.ttf"]
+}
+JSON
+printf '%s\n' "test font" >"$jetendard_home/Library/Fonts/Jetendard-Regular.ttf"
+printf '%s\n' "font-family = Jetendard" >"$jetendard_home/.config/ghostty/config"
+cat >"$jetendard_home/.config/zed/settings.json" <<'JSONC'
+{
+  // Keep JSONC comments while validating both settings.
+  "buffer_font_family": "Jetendard",
+  "terminal": {
+    "font_family": "Jetendard",
+  },
+}
+JSONC
+cat >"$jetendard_home/Library/Application Support/orca/profiles/primary/orca-data.json" <<'JSON'
+{
+  "settings": {
+    "terminalFontFamily": "Jetendard"
+  }
+}
+JSON
+cat >"$jetendard_home/Library/Application Support/orca/profiles/secondary/orca-data.json" <<'JSON'
+{
+  "settings": {
+    "terminalFontFamily": "Jetendard"
+  }
+}
+JSON
+
+if ! jetendard_status_output="$(
+  HOME="$jetendard_home" TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$status_config" PATH="$macos_status_path" \
+    /bin/sh "$terrapod" status
+)"; then
+  fail "Terrapod status succeeds when Jetendard is installed"
+fi
+assert_contains "$jetendard_status_output" "Jetendard font                : installed" "Terrapod status reports installed Jetendard font files"
+
+if ! jetendard_doctor_output="$(
+  HOME="$jetendard_home" TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$status_config" PATH="$macos_status_path" \
+    /bin/sh "$terrapod" doctor
+)"; then
+  fail "Terrapod doctor succeeds when Jetendard files and app settings are ready"
+fi
+assert_contains "$jetendard_doctor_output" "ok - Jetendard font files: Jetendard v1.0.0 is installed (1 TTF files)." "Terrapod doctor validates Jetendard manifest-owned font files"
+assert_contains "$jetendard_doctor_output" "ok - Ghostty font setting: Ghostty uses Jetendard." "Terrapod doctor validates the Ghostty font setting"
+assert_contains "$jetendard_doctor_output" "ok - Zed font settings: Zed buffer and terminal use Jetendard." "Terrapod doctor validates the Zed font settings"
+assert_contains "$jetendard_doctor_output" "ok - Orca font settings: Orca profiles use Jetendard." "Terrapod doctor validates all Orca profile font settings"
+
+rm "$jetendard_home/Library/Fonts/Jetendard-Regular.ttf"
+missing_jetendard_status_output="$(
+  HOME="$jetendard_home" TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$status_config" PATH="$macos_status_path" \
+    /bin/sh "$terrapod" status
+)"
+assert_contains "$missing_jetendard_status_output" "Jetendard font                : missing" "Terrapod status reports a missing manifest-owned Jetendard font"
+
+if HOME="$jetendard_home" TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$status_config" PATH="$macos_status_path" \
+  /bin/sh "$terrapod" doctor >"$tmp_dir/doctor-jetendard-missing.out" 2>"$tmp_dir/doctor-jetendard-missing.err"; then
+  fail "Terrapod doctor fails when a manifest-owned Jetendard font is missing"
+fi
+missing_jetendard_doctor_output="$(cat "$tmp_dir/doctor-jetendard-missing.out")"
+assert_contains "$missing_jetendard_doctor_output" "warn - Jetendard font files: Jetendard font: Jetendard manifest-owned font files are missing: Jetendard-Regular.ttf" "Terrapod doctor reports the missing manifest-owned Jetendard font"
+assert_contains "$missing_jetendard_doctor_output" "Run 'tpod apply' to restore Jetendard." "Terrapod doctor guides Jetendard restoration"
+
+printf '%s\n' "test font" >"$jetendard_home/Library/Fonts/Jetendard-Regular.ttf"
+cat >"$jetendard_home/Library/Application Support/orca/profiles/secondary/orca-data.json" <<'JSON'
+{
+  "settings": {
+    "terminalFontFamily": "Menlo"
+  }
+}
+JSON
+if HOME="$jetendard_home" TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$status_config" PATH="$macos_status_path" \
+  /bin/sh "$terrapod" doctor >"$tmp_dir/doctor-orca-mismatch.out" 2>"$tmp_dir/doctor-orca-mismatch.err"; then
+  fail "Terrapod doctor fails when an Orca profile font is mismatched"
+fi
+orca_mismatch_doctor_output="$(cat "$tmp_dir/doctor-orca-mismatch.out")"
+assert_contains "$orca_mismatch_doctor_output" "$jetendard_home/Library/Application Support/orca/profiles/secondary/orca-data.json" "Terrapod doctor names the mismatched Orca profile"
+
 macos_status_output="$(
   TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$status_config" PATH="$macos_status_path" \
     /bin/sh "$terrapod" status
@@ -1691,6 +1789,7 @@ assert_not_contains "$ubuntu_status_output" "Warning:" "Terrapod status emits no
 assert_not_contains "$ubuntu_status_output" "brew                          : missing" "disabled Ubuntu Optional AI Tool Stack does not require Homebrew"
 assert_not_contains "$ubuntu_status_output" "missing tools: nvim" "Terrapod status distinguishes disabled Optional Editor Stack from missing tools"
 assert_not_contains "$ubuntu_status_output" "missing tools: agy" "Terrapod status distinguishes disabled Optional AI Tool Stack from missing tools"
+assert_not_contains "$ubuntu_status_output" "Jetendard" "Terrapod status excludes Jetendard validation from the VPS Shell Profile"
 
 status_incomplete_vps_config="$tmp_dir/status-incomplete-vps.toml"
 cat >"$status_incomplete_vps_config" <<'TOML'
@@ -1923,6 +2022,7 @@ assert_contains "$doctor_ok_output" "ok - Optional AI Tool Stack is disabled" "T
 assert_not_contains "$doctor_ok_output" "brew is missing" "disabled Ubuntu Optional AI Tool Stack doctor does not require Homebrew"
 assert_contains "$doctor_ok_output" "ok - Optional Development Workspace is disabled" "Terrapod doctor treats disabled Optional Development Workspace as valid"
 assert_contains "$doctor_ok_output" "Guidance: none" "Terrapod doctor prints no guidance when checks pass"
+assert_not_contains "$doctor_ok_output" "Jetendard" "Terrapod doctor excludes Jetendard validation from the VPS Shell Profile"
 assert_no_ansi_escape "$doctor_ok_output" "captured Terrapod doctor is plain without ANSI escapes"
 assert_no_routine_emoji "$doctor_ok_output" "captured Terrapod doctor has no routine emoji"
 
@@ -2113,7 +2213,7 @@ pass "Terrapod doctor does not execute PATH fake install warning helpers"
 doctor_broad_upgrade_calls="$tmp_dir/doctor-broad-upgrade.calls"
 rm -f "$doctor_broad_upgrade_calls"
 doctor_broad_upgrade_path="$(status_doctor_path doctor-broad-upgrade chezmoi git zsh nvim agy claude codex zellij)"
-for command_name in brew apt sudo mise npm; do
+for command_name in brew apt sudo mise npm curl; do
   write_failing_command_stub "$doctor_broad_upgrade_path/$command_name" "$doctor_broad_upgrade_calls"
 done
 write_stub "$doctor_broad_upgrade_path/uname" 'printf "%s\n" "Darwin"'
@@ -2131,10 +2231,10 @@ fi
 if [ -e "$doctor_broad_upgrade_calls" ]; then
   printf '%s\n' "unexpected broad upgrade command calls from status/doctor:" >&2
   sed 's/^/  /' "$doctor_broad_upgrade_calls" >&2
-  fail "Terrapod status and doctor do not call brew, apt, sudo, mise, or npm upgrade flows"
+  fail "Terrapod status and doctor do not call brew, apt, sudo, mise, npm, or curl"
 fi
 
-pass "Terrapod status and doctor do not call brew, apt, sudo, mise, or npm upgrade flows"
+pass "Terrapod status and doctor do not call brew, apt, sudo, mise, npm, or curl"
 
 export CHEZMOI_CALL_FILE="$tmp_dir/chezmoi-update.args"
 export CHEZMOI_INVOKED_FILE="$tmp_dir/chezmoi-update.invoked"
