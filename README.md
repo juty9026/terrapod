@@ -139,6 +139,8 @@ sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/ins
 
 On macOS, the initial apply also runs setup scripts under `.chezmoiscripts` for the initial terminal environment:
 
+On Apple Silicon, Homebrew installs at `/opt/homebrew`; on Intel Macs, it installs at `/usr/local`.
+
 - Standard-prefix Homebrew and the shared 20-formula `Brewfile` bundle
 - Core Shell Stack CLIs such as ripgrep, neovim, zellij, lazygit, GitHub CLI (`gh`), starship, and mise through Homebrew
 - Terminal font casks

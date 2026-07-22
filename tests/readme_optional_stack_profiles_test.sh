@@ -181,6 +181,8 @@ assert_contains 'Homebrew is the Modern CLI Provider for the Core Shell Stack on
   "README names Homebrew as the cross-profile Modern CLI Provider"
 assert_contains 'mise is the Development Runtime Manager for Bun, Node.js, Python, and uv.' \
   "README limits mise to development runtimes"
+assert_contains 'On Apple Silicon, Homebrew installs at `/opt/homebrew`; on Intel Macs, it installs at `/usr/local`.' \
+  "README documents macOS architecture-to-prefix mapping"
 assert_contains 'Ubuntu 24.04 installs Homebrew at `/home/linuxbrew/.linuxbrew` for every Preset.' \
   "README documents mandatory Linuxbrew"
 assert_contains 'The first-run installer installs `chezmoi` and `gum` through Homebrew before Terrapod Setup.' \

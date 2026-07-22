@@ -136,6 +136,8 @@ sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/ins
 
 macOS에서는 initial apply가 초기 terminal environment를 위해 `.chezmoiscripts` 아래 setup script도 실행합니다.
 
+Apple Silicon에서는 Homebrew를 `/opt/homebrew`에 설치하고, Intel Mac에서는 `/usr/local`에 설치합니다.
+
 - standard-prefix Homebrew와 shared 20-formula `Brewfile` bundle
 - Homebrew를 통한 ripgrep, neovim, zellij, lazygit, GitHub CLI (`gh`), starship, mise 같은 Core Shell Stack CLI
 - Terminal font cask

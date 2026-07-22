@@ -135,6 +135,8 @@ assert_contains "$korean_readme" 'Homebrew는 지원되는 두 profile 모두에
   "README.ko.md names Homebrew as the cross-profile Modern CLI Provider"
 assert_contains "$korean_readme" 'mise는 Bun, Node.js, Python, uv의 Development Runtime Manager입니다.' \
   "README.ko.md limits mise to development runtimes"
+assert_contains "$korean_readme" 'Apple Silicon에서는 Homebrew를 `/opt/homebrew`에 설치하고, Intel Mac에서는 `/usr/local`에 설치합니다.' \
+  "README.ko.md documents macOS architecture-to-prefix mapping"
 assert_contains "$korean_readme" 'Ubuntu 24.04는 모든 Preset에서 `/home/linuxbrew/.linuxbrew`에 Homebrew를 설치합니다.' \
   "README.ko.md documents mandatory Linuxbrew"
 assert_contains "$korean_readme" 'first-run installer는 Terrapod Setup 전에 Homebrew로 `chezmoi`와 `gum`을 설치합니다.' \
