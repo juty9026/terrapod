@@ -128,6 +128,8 @@ type Operation struct {
 	ID                string
 	ResourceID        ResourceID
 	Kind              OperationKind
+	Provider          string `json:"provider"`
+	Package           string `json:"package"`
 	RequiresPrivilege bool
 	Removes           []string
 	Detail            string
