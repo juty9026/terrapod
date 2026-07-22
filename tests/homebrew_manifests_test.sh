@@ -41,6 +41,16 @@ if ! cmp -s "$expected_formulae" "$actual_formulae"; then
 fi
 pass "root Brewfile declares exactly the mandatory cross-profile CLI formulae"
 
+records="$tmp_dir/records"
+TERRAPOD_PRINT_HOMEBREW_CLI_RECORDS=1 "$repo_root/dot_local/bin/executable_terrapod" >"$records"
+cut -f1 "$records" | LC_ALL=C sort >"$tmp_dir/record-formulae"
+sed 's/^brew "//; s/"$//' "$expected_formulae" >"$tmp_dir/expected-record-formulae"
+if ! cmp -s "$tmp_dir/expected-record-formulae" "$tmp_dir/record-formulae"; then
+  diff -u "$tmp_dir/expected-record-formulae" "$tmp_dir/record-formulae" >&2 || true
+  fail "doctor command ownership records stay synchronized with Brewfile"
+fi
+pass "doctor command ownership records stay synchronized with Brewfile"
+
 expected_macos="$tmp_dir/expected-macos"
 actual_macos="$tmp_dir/actual-macos"
 printf '%s\n' \
