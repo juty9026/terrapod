@@ -324,7 +324,7 @@ func (h *homebrewHandler) inspect(ctx context.Context, desired model.Resource, d
 	if err != nil {
 		return Receipt{}, fmt.Errorf("legacy: list Homebrew-owned files for %q: %w", declaration.Package, err)
 	}
-	commandCandidates := make(map[string][]string, len(desired.Commands))
+	ownedResolvedPaths := make(map[string]struct{})
 	for _, line := range strings.Split(strings.TrimSuffix(string(list.Stdout), "\n"), "\n") {
 		if line == "" || !cleanAbsolute(line) {
 			return Receipt{}, errors.New("legacy: invalid Homebrew file receipt")
@@ -333,19 +333,32 @@ func (h *homebrewHandler) inspect(ctx context.Context, desired model.Resource, d
 		if resolveErr != nil || !cleanAbsolute(resolved) || !pathWithin(resolved, h.prefix) {
 			return Receipt{}, errors.New("legacy: Homebrew file receipt escapes trusted prefix")
 		}
-		for _, command := range desired.Commands {
-			if line == filepath.Join(h.prefix, "bin", command) || line == filepath.Join(h.prefix, "sbin", command) {
-				commandCandidates[command] = append(commandCandidates[command], line)
-			}
-		}
+		ownedResolvedPaths[resolved] = struct{}{}
 	}
 	paths := make(map[string]string, len(desired.Commands))
 	for _, command := range desired.Commands {
-		if len(commandCandidates[command]) > 1 {
+		var candidates []string
+		for _, directory := range []string{"bin", "sbin"} {
+			candidate := filepath.Join(h.prefix, directory, command)
+			if !cleanAbsolute(candidate) {
+				return Receipt{}, errors.New("legacy: invalid Homebrew command candidate")
+			}
+			resolved, resolveErr := h.paths.EvalSymlinks(candidate)
+			if errors.Is(resolveErr, os.ErrNotExist) {
+				continue
+			}
+			if resolveErr != nil || !cleanAbsolute(resolved) || !pathWithin(resolved, h.prefix) {
+				return Receipt{}, errors.New("legacy: Homebrew command candidate escapes trusted prefix")
+			}
+			if _, owned := ownedResolvedPaths[resolved]; owned {
+				candidates = append(candidates, candidate)
+			}
+		}
+		if len(candidates) > 1 {
 			return Receipt{}, errors.New("legacy: ambiguous Homebrew command receipt")
 		}
-		if len(commandCandidates[command]) == 1 {
-			paths[command] = commandCandidates[command][0]
+		if len(candidates) == 1 {
+			paths[command] = candidates[0]
 		}
 	}
 	return Receipt{Present: true, Prefixes: []string{h.prefix}, Paths: paths}, nil

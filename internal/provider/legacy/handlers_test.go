@@ -272,9 +272,11 @@ func TestHomebrewReceiptDoesNotTrustUnrelatedExecutable(t *testing.T) {
 func TestHomebrewReceiptIgnoresDuplicateCompletionBasename(t *testing.T) {
 	runner := &queueRunner{results: []execx.Result{
 		{Stdout: []byte("{\"formulae\":[{\"name\":\"ripgrep\",\"full_name\":\"ripgrep\",\"installed\":[{\"version\":\"14.1.1\"}]}],\"casks\":[]}\n")},
-		{Stdout: []byte("/custom/homebrew/bin/rg\n/custom/homebrew/share/bash-completion/completions/rg\n")},
+		{Stdout: []byte("/custom/homebrew/Cellar/ripgrep/14.1.1/bin/rg\n/custom/homebrew/share/bash-completion/completions/rg\n")},
 	}}
-	paths := fakePaths{resolved: map[string]string{"/custom/homebrew/bin/rg": "/custom/homebrew/Cellar/ripgrep/14.1.1/bin/rg"}}
+	paths := fakePaths{resolved: map[string]string{
+		"/custom/homebrew/bin/rg": "/custom/homebrew/Cellar/ripgrep/14.1.1/bin/rg",
+	}}
 	handler, err := newHomebrewHandler("/custom/homebrew/bin/brew", runner, paths)
 	if err != nil {
 		t.Fatal(err)
@@ -286,6 +288,61 @@ func TestHomebrewReceiptIgnoresDuplicateCompletionBasename(t *testing.T) {
 	}
 	if got := receipt.Paths["rg"]; got != "/custom/homebrew/bin/rg" {
 		t.Fatalf("command path=%q", got)
+	}
+}
+
+func TestHomebrewReceiptDoesNotJoinUnrelatedCommandTarget(t *testing.T) {
+	runner := &queueRunner{results: []execx.Result{
+		{Stdout: []byte("{\"formulae\":[{\"name\":\"ripgrep\",\"full_name\":\"ripgrep\",\"installed\":[{\"version\":\"14.1.1\"}]}],\"casks\":[]}\n")},
+		{Stdout: []byte("/custom/homebrew/Cellar/ripgrep/14.1.1/bin/not-rg\n")},
+	}}
+	paths := fakePaths{resolved: map[string]string{
+		"/custom/homebrew/bin/rg": "/custom/homebrew/Cellar/unrelated/1.0/bin/rg",
+	}}
+	handler, err := newHomebrewHandler("/custom/homebrew/bin/brew", runner, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := handler.inspect(context.Background(), resource(map[string]string{"legacy.homebrew.package": "ripgrep"}), Declaration{Kind: Homebrew, Package: "ripgrep"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(receipt.Paths) != 0 {
+		t.Fatalf("unrelated command target trusted: %#v", receipt)
+	}
+}
+
+func TestHomebrewReceiptRejectsCommandSymlinkEscapingPrefix(t *testing.T) {
+	runner := &queueRunner{results: []execx.Result{
+		{Stdout: []byte("{\"formulae\":[{\"name\":\"ripgrep\",\"full_name\":\"ripgrep\",\"installed\":[{\"version\":\"14.1.1\"}]}],\"casks\":[]}\n")},
+		{Stdout: []byte("/custom/homebrew/Cellar/ripgrep/14.1.1/bin/rg\n")},
+	}}
+	paths := fakePaths{resolved: map[string]string{"/custom/homebrew/bin/rg": "/tmp/rg"}}
+	handler, err := newHomebrewHandler("/custom/homebrew/bin/brew", runner, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := handler.inspect(context.Background(), resource(map[string]string{"legacy.homebrew.package": "ripgrep"}), Declaration{Kind: Homebrew, Package: "ripgrep"}); err == nil {
+		t.Fatal("accepted command symlink escaping trusted prefix")
+	}
+}
+
+func TestHomebrewReceiptRejectsAmbiguousBinAndSbinLinks(t *testing.T) {
+	owned := "/custom/homebrew/Cellar/ripgrep/14.1.1/bin/rg"
+	runner := &queueRunner{results: []execx.Result{
+		{Stdout: []byte("{\"formulae\":[{\"name\":\"ripgrep\",\"full_name\":\"ripgrep\",\"installed\":[{\"version\":\"14.1.1\"}]}],\"casks\":[]}\n")},
+		{Stdout: []byte(owned + "\n")},
+	}}
+	paths := fakePaths{resolved: map[string]string{
+		"/custom/homebrew/bin/rg":  owned,
+		"/custom/homebrew/sbin/rg": owned,
+	}}
+	handler, err := newHomebrewHandler("/custom/homebrew/bin/brew", runner, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := handler.inspect(context.Background(), resource(map[string]string{"legacy.homebrew.package": "ripgrep"}), Declaration{Kind: Homebrew, Package: "ripgrep"}); err == nil {
+		t.Fatal("accepted ambiguous bin and sbin command links")
 	}
 }
 
