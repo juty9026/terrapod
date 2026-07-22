@@ -31,6 +31,26 @@ type fixtureAdapter struct {
 	boundResources               []model.Resource
 }
 
+func TestEnginePersistsArchiveManifestPaths(t *testing.T) {
+	store, err := state.Open(filepath.Join(t.TempDir(), "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := Engine{State: store, CatalogDigest: "signed"}
+	item := model.Resource{ID: "font.jetendard", Type: model.ResourceArchive, Provider: "jetendard", Package: "jetendard"}
+	paths := map[string]string{"/home/me/Library/Fonts/Jetendard-Regular.ttf": "sha256:" + strings.Repeat("a", 64)}
+	if err := engine.own(item, model.Observation{Paths: paths}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := store.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(snapshot.Ownership[item.ID].Paths, paths) {
+		t.Fatalf("Paths = %#v, want %#v", snapshot.Ownership[item.ID].Paths, paths)
+	}
+}
+
 func (f *fixtureAdapter) event(value string) {
 	f.events = append(f.events, value)
 	if f.shared != nil {

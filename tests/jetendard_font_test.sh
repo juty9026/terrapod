@@ -11,6 +11,25 @@ trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 fail() { printf '%s\n' "not ok - $1" >&2; exit 1; }
 pass() { printf '%s\n' "ok - $1"; }
 
+python3 - "$repo_root/catalog/v1/resources.json" <<'PY'
+import json
+import pathlib
+import sys
+
+catalog = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+resources = [resource for resource in catalog["resources"] if resource["id"] == "font.jetendard"]
+assert len(resources) == 1
+resource = resources[0]
+assert resource["type"] == "archive"
+assert resource["provider"] == "jetendard"
+assert resource["profiles"] == ["macos-terminal"]
+assert resource["versionPolicy"] == "pinned"
+assert resource["metadata"]["asset.url"].startswith("https://")
+assert len(resource["metadata"]["asset.sha256"]) == 64
+assert resource["metadata"]["font.destination"] == "Library/Fonts"
+PY
+pass "signed catalog pins the Jetendard asset used by manager apply"
+
 home_dir="$tmp_dir/home"
 state_dir="$tmp_dir/state"
 fixture_dir="$tmp_dir/fixture"

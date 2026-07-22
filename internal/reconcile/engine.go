@@ -831,7 +831,7 @@ func validResult(operation model.Operation, result model.OperationResult) error 
 
 func (e *Engine) own(item model.Resource, observed model.Observation) error {
 	paths := make(map[string]string)
-	if item.Type == model.ResourceManagedFiles || item.Type == model.ResourceGitCheckout {
+	if item.Type == model.ResourceManagedFiles || item.Type == model.ResourceGitCheckout || item.Type == model.ResourceArchive {
 		for path, digest := range observed.Paths {
 			paths[path] = digest
 		}
