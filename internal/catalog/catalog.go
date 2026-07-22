@@ -76,9 +76,12 @@ func LoadVerified(path string, signatures SignatureSet) (Verified, error) {
 	if len(publicKey) != ed25519.PublicKeySize {
 		return Verified{}, fmt.Errorf("signature key %q has length %d, want %d", envelope.KeyID, len(publicKey), ed25519.PublicKeySize)
 	}
-	signature, err := base64.StdEncoding.DecodeString(envelope.Signature)
+	signature, err := base64.StdEncoding.Strict().DecodeString(envelope.Signature)
 	if err != nil {
 		return Verified{}, fmt.Errorf("decode signature: %w", err)
+	}
+	if base64.StdEncoding.EncodeToString(signature) != envelope.Signature {
+		return Verified{}, errors.New("non-canonical signature encoding")
 	}
 	if len(signature) != ed25519.SignatureSize {
 		return Verified{}, fmt.Errorf("signature length is %d, want %d", len(signature), ed25519.SignatureSize)

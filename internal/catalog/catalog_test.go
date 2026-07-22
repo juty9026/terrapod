@@ -8,8 +8,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/juty9026/terrapod/internal/model"
 )
 
 const testKeyID = "test-2026"
@@ -49,8 +52,19 @@ func TestSeedCatalogHasCurrentConfigSchemaAndNoResources(t *testing.T) {
 	if len(got.Catalog.Resources) != 0 {
 		t.Fatalf("Resources = %#v, want none", got.Catalog.Resources)
 	}
-	if len(got.Catalog.Config.Fields) != 9 {
-		t.Fatalf("Config.Fields count = %d, want 9 current setup fields", len(got.Catalog.Config.Fields))
+	wantFields := []model.ConfigField{
+		{ID: "profile", Kind: "string", Required: true},
+		{ID: "enableEditorStack", Kind: "bool", Default: false},
+		{ID: "enableAiCliTools", Kind: "bool", Default: false},
+		{ID: "enableDevelopmentWorkspace", Kind: "bool", Default: false},
+		{ID: "enableMacosAppGroupTerminalApps", Kind: "bool", Default: false},
+		{ID: "enableMacosAppGroupAutomation", Kind: "bool", Default: false},
+		{ID: "enableMacosAppGroupLauncher", Kind: "bool", Default: false},
+		{ID: "enableMacosAppGroupMonitoring", Kind: "bool", Default: false},
+		{ID: "enableMacosAppGroupDevelopmentApps", Kind: "bool", Default: false},
+	}
+	if !reflect.DeepEqual(got.Catalog.Config.Fields, wantFields) {
+		t.Fatalf("Config.Fields = %#v, want %#v", got.Catalog.Config.Fields, wantFields)
 	}
 }
 
@@ -92,6 +106,22 @@ func TestLoadVerifiedRejectsUntrustedBytes(t *testing.T) {
 				return envelopeJSON(t, testKeyID, "ed25519", base64.StdEncoding.EncodeToString([]byte("short")), "")
 			},
 			want: "signature length",
+		},
+		{
+			name: "embedded newline in base64",
+			envelope: func(signature []byte) []byte {
+				encoded := base64.StdEncoding.EncodeToString(signature)
+				encoded = encoded[:20] + "\n" + encoded[20:]
+				return envelopeJSON(t, testKeyID, "ed25519", encoded, "")
+			},
+			want: "non-canonical signature encoding",
+		},
+		{
+			name: "noncanonical trailing bits",
+			envelope: func(signature []byte) []byte {
+				return envelopeJSON(t, testKeyID, "ed25519", noncanonicalBase64Alias(t, signature), "")
+			},
+			want: "decode signature",
 		},
 		{
 			name: "unknown envelope field",
@@ -222,6 +252,19 @@ func TestLoadVerifiedRejectsUnsafePackageIdentifiers(t *testing.T) {
 }
 
 func TestLoadVerifiedBoundsCatalogAndSignature(t *testing.T) {
+	t.Run("exact catalog limit", func(t *testing.T) {
+		contents := readFixture(t)
+		fixtureSize := len(contents)
+		contents = append(contents, make([]byte, 4*1024*1024-len(contents))...)
+		for i := fixtureSize; i < len(contents); i++ {
+			contents[i] = ' '
+		}
+		path, signatures := writeSignedCatalog(t, contents, testKeyID)
+		if _, err := LoadVerified(path, signatures); err != nil {
+			t.Fatalf("LoadVerified() error = %v at exact 4 MiB", err)
+		}
+	})
+
 	t.Run("catalog", func(t *testing.T) {
 		path, signatures := writeSignedCatalog(t, readFixture(t), testKeyID)
 		if err := os.WriteFile(path, make([]byte, 4*1024*1024+1), 0o600); err != nil {
@@ -243,6 +286,27 @@ func TestLoadVerifiedBoundsCatalogAndSignature(t *testing.T) {
 			t.Fatalf("LoadVerified() error = %v", err)
 		}
 	})
+}
+
+func noncanonicalBase64Alias(t *testing.T, contents []byte) string {
+	t.Helper()
+	encoded := base64.StdEncoding.EncodeToString(contents)
+	if len(contents)%3 != 1 || !strings.HasSuffix(encoded, "==") {
+		t.Fatalf("fixture length = %d, want base64 with two padding bytes", len(contents))
+	}
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	position := len(encoded) - 3
+	value := strings.IndexByte(alphabet, encoded[position])
+	if value < 0 || value&0x0f != 0 {
+		t.Fatalf("canonical final sextet = %q", encoded[position])
+	}
+	alias := []byte(encoded)
+	alias[position] = alphabet[value|1]
+	decoded, err := base64.StdEncoding.DecodeString(string(alias))
+	if err != nil || !reflect.DeepEqual(decoded, contents) {
+		t.Fatalf("constructed alias does not decode to original bytes: %v", err)
+	}
+	return string(alias)
 }
 
 func readFixture(t *testing.T) []byte {
