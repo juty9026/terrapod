@@ -515,7 +515,8 @@
         "asset.sha256": "399ab416895c01ddc1d43db509d7aa7cede4ad209f597ae8639c6d0194c2b133",
         "asset.format": "zip",
         "asset.tag": "v0.1.0",
-        "font.destination": "Library/Fonts"
+        "font.destination": "Library/Fonts",
+        "font.files": "{\"Jetendard-Bold.ttf\":\"330f8c4b6d80b13fa4c8eeded163b9169aa0a4a3d07edc52b2219d081932f6d7\",\"Jetendard-BoldItalic.ttf\":\"541e3baa879d21c6b4465e7c2de1ebc216ba9515e6f091ac693bf95a923536cc\",\"Jetendard-ExtraBold.ttf\":\"e0712ff5b600b8f9e6e28a11de73a73aadc93be91b2facb1deaba0bea7605940\",\"Jetendard-ExtraBoldItalic.ttf\":\"f34f68116656b21fe899867c01ea51fb4e7f42fa9bf72cbbbb22c7bfd11a0bb9\",\"Jetendard-ExtraLight.ttf\":\"7d961631ae788b4865a9112d206a1df08f13b74bd471f5e56ca63cd58faf6d97\",\"Jetendard-ExtraLightItalic.ttf\":\"157102c472ac9201162a2438a126baacd049a85db1583d38599fe41e7e71f1ec\",\"Jetendard-Italic.ttf\":\"e9fb1f7d644fe1c11f12d3686033ffc51d92fb4b9eb73c3d0e00373fb24ff72e\",\"Jetendard-Light.ttf\":\"ece351c6f076c57e40f6986ec13489cf97259f6d98592d4013b26d785a389552\",\"Jetendard-LightItalic.ttf\":\"ade8c9c225499ad6ce2a94d34881d0ec0287fa8be738700db5e393f7f3bdad6e\",\"Jetendard-Medium.ttf\":\"59a61620e2fa79944f04b01e11ac2073678644020f5090aa702c399a3a8ccfa8\",\"Jetendard-MediumItalic.ttf\":\"e9b6a39e55895dfe6bdd5c70c0d631efcc3601d6a74127da9c587964deab4d0e\",\"Jetendard-Regular.ttf\":\"2a9eb39d9013fbaf7b6474ae5e37af2de0b4c2a92827cb730ea3c9151dde69c9\",\"Jetendard-SemiBold.ttf\":\"f1585fadae0623c01b0a2c3c660ed033ea7e2621b63cda69704d4a6d35fc9e86\",\"Jetendard-SemiBoldItalic.ttf\":\"1ced772935513c40be8d369df0c496744b7d14c606e1c9cad654c4c885bac06a\",\"Jetendard-Thin.ttf\":\"560794bb320c390da93b7ea03fd0d216b84717c690b10f04c709bd429476920a\",\"Jetendard-ThinItalic.ttf\":\"b4e736571a125364b8542e04f063e865449530489d532dd5417fe913ab640d30\"}"
       }
     },
     {

@@ -27,6 +27,10 @@ assert resource["versionPolicy"] == "pinned"
 assert resource["metadata"]["asset.url"].startswith("https://")
 assert len(resource["metadata"]["asset.sha256"]) == 64
 assert resource["metadata"]["font.destination"] == "Library/Fonts"
+font_manifest = json.loads(resource["metadata"]["font.files"])
+assert len(font_manifest) == 16
+assert all(name.startswith("Jetendard-") and name.endswith(".ttf") for name in font_manifest)
+assert all(len(digest) == 64 for digest in font_manifest.values())
 PY
 pass "signed catalog pins the Jetendard asset used by manager apply"
 

@@ -245,6 +245,9 @@ func (a Adapter) extractZip(source, staging string) (Manifest, error) {
 		return Manifest{}, fmt.Errorf("archive: open zip: %w", err)
 	}
 	defer reader.Close()
+	if len(reader.File) > a.limits().Files {
+		return Manifest{}, errors.New("archive: entry count limit exceeded")
+	}
 	entries := make([]entry, 0, len(reader.File))
 	seen := make(map[string]bool)
 	for _, file := range reader.File {
@@ -277,6 +280,8 @@ func (a Adapter) extractTar(source, staging string) (Manifest, error) {
 	reader := tar.NewReader(bufio.NewReader(file))
 	entries := make([]entry, 0)
 	seen := make(map[string]bool)
+	limits := a.limits()
+	var declaredExpanded int64
 	// tar.Reader is streaming, so spool validated regular files privately before install.
 	spool, err := os.MkdirTemp(filepath.Dir(staging), ".tar-spool-*")
 	if err != nil {
@@ -290,6 +295,9 @@ func (a Adapter) extractTar(source, staging string) (Manifest, error) {
 		}
 		if err != nil {
 			return Manifest{}, fmt.Errorf("archive: read tar: %w", err)
+		}
+		if index >= limits.Files {
+			return Manifest{}, errors.New("archive: entry count limit exceeded")
 		}
 		name, err := validateName(header.Name)
 		if err != nil {
@@ -305,17 +313,24 @@ func (a Adapter) extractTar(source, staging string) (Manifest, error) {
 		if isDir {
 			continue
 		}
+		if header.Size < 0 || header.Size > limits.EntryBytes {
+			return Manifest{}, fmt.Errorf("archive: entry %q exceeds limit", name)
+		}
+		if declaredExpanded > limits.ExpandedBytes-header.Size {
+			return Manifest{}, fmt.Errorf("archive: expanded size limit exceeded at %q", name)
+		}
+		declaredExpanded += header.Size
 		spooled := filepath.Join(spool, fmt.Sprintf("%08d", index))
 		output, err := os.OpenFile(spooled, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err != nil {
 			return Manifest{}, err
 		}
-		written, copyErr := io.Copy(output, io.LimitReader(reader, a.limits().EntryBytes+1))
+		written, copyErr := io.Copy(output, io.LimitReader(reader, header.Size+1))
 		closeErr := output.Close()
 		if copyErr != nil || closeErr != nil {
 			return Manifest{}, errors.Join(copyErr, closeErr)
 		}
-		if written > a.limits().EntryBytes || written != header.Size {
+		if written != header.Size {
 			return Manifest{}, fmt.Errorf("archive: entry %q exceeds limit or is truncated", name)
 		}
 		pathCopy := spooled

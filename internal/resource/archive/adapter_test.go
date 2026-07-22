@@ -167,3 +167,40 @@ func TestExtractAtomicallyReplacesDirectory(t *testing.T) {
 		t.Fatalf("old remains: %v", err)
 	}
 }
+
+func TestTarRejectsEntryCountBeforeSpooling(t *testing.T) {
+	var output bytes.Buffer
+	w := tar.NewWriter(&output)
+	for index := 0; index < 4097; index++ {
+		if err := w.WriteHeader(&tar.Header{Name: fmt.Sprintf("directory-%04d/", index), Mode: 0o700, Typeflag: tar.TypeDir}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	server, asset := serve(t, output.Bytes())
+	defer server.Close()
+	asset.Format = "tar"
+	a := Adapter{HTTP: server.Client(), CacheDir: t.TempDir()}
+	if _, err := a.FetchAndExtract(context.Background(), asset, filepath.Join(t.TempDir(), "out")); err == nil || !strings.Contains(err.Error(), "entry count") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestTarRejectsDeclaredExpandedSizeBeforeReadingBody(t *testing.T) {
+	var output bytes.Buffer
+	w := tar.NewWriter(&output)
+	if err := w.WriteHeader(&tar.Header{Name: "huge.ttf", Mode: 0o600, Typeflag: tar.TypeReg, Size: defaultExpandedBytes + 1}); err != nil {
+		t.Fatal(err)
+	}
+	// Deliberately leave the body truncated: size validation must fail from the
+	// header before attempting to spool hundreds of MiB.
+	server, asset := serve(t, output.Bytes())
+	defer server.Close()
+	asset.Format = "tar"
+	a := Adapter{HTTP: server.Client(), CacheDir: t.TempDir(), Limits: Limits{EntryBytes: defaultExpandedBytes + 1}}
+	if _, err := a.FetchAndExtract(context.Background(), asset, filepath.Join(t.TempDir(), "out")); err == nil || !strings.Contains(err.Error(), "expanded size") {
+		t.Fatalf("err=%v", err)
+	}
+}

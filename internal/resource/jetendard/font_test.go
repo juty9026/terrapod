@@ -48,11 +48,134 @@ func fixture(t *testing.T, body []byte) (*Adapter, model.Resource, *state.Store,
 	if err != nil {
 		t.Fatal(err)
 	}
+	manifest := map[string]string{}
+	reader, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range reader.File {
+		name := filepath.Base(entry.Name)
+		if !fontPattern.MatchString(name) {
+			continue
+		}
+		stream, err := entry.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		contents, err := io.ReadAll(stream)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = stream.Close()
+		digest := sha256.Sum256(contents)
+		manifest[name] = fmt.Sprintf("%x", digest)
+	}
+	manifestJSON, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
 	item := model.Resource{ID: ResourceID, Type: model.ResourceArchive, Provider: Provider, Package: "jetendard", VersionPolicy: model.VersionPinned, Metadata: map[string]string{
 		MetadataURL: server.URL, MetadataSHA256: fmt.Sprintf("%x", digest), MetadataFormat: "zip", MetadataTag: "v1.0.0", MetadataDestination: "Library/Fonts",
+		MetadataFiles: string(manifestJSON),
 	}}
 	a := &Adapter{Archive: &archivepkg.Adapter{HTTP: server.Client(), CacheDir: filepath.Join(t.TempDir(), "cache")}, Home: home, State: store, Recovery: filepath.Join(t.TempDir(), "recovery")}
 	return a, item, store, filepath.Join(home, "Library", "Fonts"), &requests
+}
+
+func TestPlanDistinguishesInstallAdoptAndTakeover(t *testing.T) {
+	body := fontArchive(t, map[string]string{"Jetendard-Regular.ttf": "regular", "Jetendard-Bold.ttf": "bold"})
+	for _, tc := range []struct {
+		name  string
+		files map[string]string
+		want  model.OperationKind
+	}{
+		{"absent", nil, model.OperationInstall},
+		{"matching", map[string]string{"Jetendard-Regular.ttf": "regular", "Jetendard-Bold.ttf": "bold"}, model.OperationAdopt},
+		{"differing", map[string]string{"Jetendard-Regular.ttf": "mine", "Jetendard-Bold.ttf": "bold"}, model.OperationRestore},
+		{"mixed missing", map[string]string{"Jetendard-Regular.ttf": "regular"}, model.OperationRestore},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, item, _, fonts, requests := fixture(t, body)
+			if len(tc.files) > 0 {
+				if err := os.MkdirAll(fonts, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for name, contents := range tc.files {
+				if err := os.WriteFile(filepath.Join(fonts, name), []byte(contents), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			obs, err := a.Inspect(context.Background(), item)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ops, err := a.Plan(context.Background(), item, obs, model.Ownership{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(ops) != 1 || ops[0].Kind != tc.want {
+				t.Fatalf("ops=%#v", ops)
+			}
+			if tc.want == model.OperationRestore && !strings.Contains(ops[0].Detail, "take ownership") {
+				t.Fatalf("detail=%q", ops[0].Detail)
+			}
+			if *requests != 0 {
+				t.Fatalf("planning made %d HTTP requests", *requests)
+			}
+		})
+	}
+}
+
+func TestTakeoverBacksUpPreExistingFontAndBackupFailureAborts(t *testing.T) {
+	body := fontArchive(t, map[string]string{"Jetendard-Regular.ttf": "desired"})
+	t.Run("backup", func(t *testing.T) {
+		a, item, store, fonts, _ := fixture(t, body)
+		if err := os.MkdirAll(fonts, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(fonts, "Jetendard-Regular.ttf")
+		if err := os.WriteFile(path, []byte("mine"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		op := operation(item, model.OperationRestore)
+		if _, err := store.Begin(model.Plan{ID: "takeover", Operations: []model.Operation{op}}); err != nil {
+			t.Fatal(err)
+		}
+		if result := a.ExecuteResource(context.Background(), item, op); !result.Success {
+			t.Fatalf("result=%#v", result)
+		}
+		matches, err := filepath.Glob(filepath.Join(a.Recovery, "*", "preexisting", "Jetendard-Regular.ttf"))
+		if err != nil || len(matches) != 1 {
+			t.Fatalf("backups=%v err=%v", matches, err)
+		}
+		if got, _ := os.ReadFile(matches[0]); string(got) != "mine" {
+			t.Fatalf("backup=%q", got)
+		}
+	})
+	t.Run("failure", func(t *testing.T) {
+		a, item, store, fonts, _ := fixture(t, body)
+		if err := os.MkdirAll(fonts, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(fonts, "Jetendard-Regular.ttf")
+		if err := os.WriteFile(path, []byte("mine"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(a.Recovery, []byte("not a directory"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		op := operation(item, model.OperationRestore)
+		if _, err := store.Begin(model.Plan{ID: "takeover-fail", Operations: []model.Operation{op}}); err != nil {
+			t.Fatal(err)
+		}
+		if result := a.ExecuteResource(context.Background(), item, op); result.Success {
+			t.Fatal("expected backup failure")
+		}
+		if got, _ := os.ReadFile(path); string(got) != "mine" {
+			t.Fatalf("font mutated: %q", got)
+		}
+	})
 }
 
 func TestPlanAndApplyUsesResolvedMetadataWithoutLatestLookup(t *testing.T) {
@@ -208,8 +331,86 @@ func TestInstallErrorRollsBackAllFontsAndCleansRecovery(t *testing.T) {
 		}
 	}
 	entries, err := os.ReadDir(a.Recovery)
-	if err != nil || len(entries) != 0 {
+	if err != nil && !os.IsNotExist(err) || len(entries) != 0 {
 		t.Fatalf("recovery entries=%v err=%v", entries, err)
+	}
+}
+
+func TestInterruptedInstallRecoversAcrossAdapterRestart(t *testing.T) {
+	body := fontArchive(t, map[string]string{"Jetendard-Regular.ttf": "new", "Jetendard-Bold.ttf": "new-bold"})
+	a, item, store, fonts, _ := fixture(t, body)
+	if err := os.MkdirAll(fonts, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, contents := range map[string]string{"Jetendard-Regular.ttf": "old", "Jetendard-Bold.ttf": "old-bold"} {
+		if err := os.WriteFile(filepath.Join(fonts, name), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	op := operation(item, model.OperationRestore)
+	if _, err := store.Begin(model.Plan{ID: "crash", Operations: []model.Operation{op}}); err != nil {
+		t.Fatal(err)
+	}
+	published := 0
+	afterPublishFile = func(string) error {
+		published++
+		if published == 1 {
+			return errSimulatedCrash
+		}
+		return nil
+	}
+	t.Cleanup(func() { afterPublishFile = nil })
+	if result := a.ExecuteResource(context.Background(), item, op); result.Success || !strings.Contains(result.Detail, "simulated crash") {
+		t.Fatalf("result=%#v", result)
+	}
+	afterPublishFile = nil
+	fresh := &Adapter{Archive: a.Archive, Home: a.Home, State: a.State, Recovery: a.Recovery}
+	obs, err := fresh.Inspect(context.Background(), item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !obs.Healthy {
+		t.Fatalf("obs=%#v", obs)
+	}
+	for name, want := range map[string]string{"Jetendard-Regular.ttf": "new", "Jetendard-Bold.ttf": "new-bold"} {
+		got, err := os.ReadFile(filepath.Join(fonts, name))
+		if err != nil || string(got) != want {
+			t.Fatalf("%s=%q err=%v", name, got, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(fonts, transactionFilename)); !os.IsNotExist(err) {
+		t.Fatalf("transaction remains: %v", err)
+	}
+}
+
+func TestRestartAfterPublishBeforeOwnershipAdoptsWithoutRewrite(t *testing.T) {
+	body := fontArchive(t, map[string]string{"Jetendard-Regular.ttf": "new"})
+	a, item, store, _, requests := fixture(t, body)
+	op := operation(item, model.OperationInstall)
+	if _, err := store.Begin(model.Plan{ID: "receipt-boundary", Operations: []model.Operation{op}}); err != nil {
+		t.Fatal(err)
+	}
+	if result := a.ExecuteResource(context.Background(), item, op); !result.Success {
+		t.Fatalf("result=%#v", result)
+	}
+	fresh := &Adapter{Archive: a.Archive, Home: a.Home, State: a.State, Recovery: a.Recovery}
+	obs, err := fresh.Inspect(context.Background(), item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops, err := fresh.Plan(context.Background(), item, obs, model.Ownership{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ops) != 1 || ops[0].Kind != model.OperationAdopt {
+		t.Fatalf("ops=%#v", ops)
+	}
+	before := *requests
+	if result := fresh.ExecuteResource(context.Background(), item, ops[0]); !result.Success {
+		t.Fatalf("adopt result=%#v", result)
+	}
+	if *requests != before {
+		t.Fatalf("adopt downloaded asset: before=%d after=%d", before, *requests)
 	}
 }
 
@@ -228,5 +429,35 @@ func TestResolveLatestStableIsExplicitPreflight(t *testing.T) {
 	}
 	if resolved.Tag != "v2" || resolved.SHA256 != digest {
 		t.Fatalf("resolved=%#v", resolved)
+	}
+}
+
+func TestPruneRejectsSymlinkedFontsDirectoryWithoutDeletingExternalFile(t *testing.T) {
+	body := fontArchive(t, map[string]string{"Jetendard-Regular.ttf": "same"})
+	a, item, _, fonts, _ := fixture(t, body)
+	if err := os.MkdirAll(fonts, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	original := fonts + ".original"
+	if err := os.Rename(fonts, original); err != nil {
+		t.Fatal(err)
+	}
+	external := t.TempDir()
+	externalFont := filepath.Join(external, "Jetendard-Regular.ttf")
+	if err := os.WriteFile(externalFont, []byte("same"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, fonts); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte("same"))
+	receipt := model.Ownership{ResourceID: item.ID, Provider: item.Provider, Package: item.Package, Paths: map[string]string{filepath.Join(fonts, "Jetendard-Regular.ttf"): fmt.Sprintf("sha256:%x", digest)}}
+	op := operation(item, model.OperationPrune)
+	op.Removes = []string{item.Package}
+	if err := a.Prune(context.Background(), item, op, receipt); err == nil {
+		t.Fatal("expected symlink rejection")
+	}
+	if got, err := os.ReadFile(externalFont); err != nil || string(got) != "same" {
+		t.Fatalf("external=%q err=%v", got, err)
 	}
 }

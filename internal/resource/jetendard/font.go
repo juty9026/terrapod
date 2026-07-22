@@ -30,12 +30,17 @@ const (
 	MetadataFormat                       = "asset.format"
 	MetadataTag                          = "asset.tag"
 	MetadataDestination                  = "font.destination"
+	MetadataFiles                        = "font.files"
+	transactionDirname                   = ".terrapod-jetendard-transaction"
+	transactionFilename                  = "intent.json"
 )
 
 var fontPattern = regexp.MustCompile(`^Jetendard-[A-Za-z0-9]+\.ttf$`)
 var shaPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 var rawSHA256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var beforeInstallFile func(string) error
+var afterPublishFile func(string) error
+var errSimulatedCrash = errors.New("jetendard: simulated crash")
 
 type Adapter struct {
 	Archive   *archivepkg.Adapter
@@ -49,6 +54,23 @@ type Adapter struct {
 type declaration struct {
 	asset            archivepkg.Asset
 	tag, destination string
+	files            map[string]string
+}
+
+type fontSource struct{ name, source, digest string }
+
+type transaction struct {
+	Version int                `json:"version"`
+	Phase   string             `json:"phase"`
+	Entries []transactionEntry `json:"entries"`
+}
+
+type transactionEntry struct {
+	Name      string `json:"path"`
+	NewDigest string `json:"newDigest,omitempty"`
+	OldDigest string `json:"oldDigest,omitempty"`
+	Remove    bool   `json:"remove,omitempty"`
+	OldExists bool   `json:"oldExists,omitempty"`
 }
 
 type ResolvedAsset struct{ Tag, URL, SHA256 string }
@@ -117,12 +139,22 @@ func (a *Adapter) Inspect(_ context.Context, item model.Resource) (model.Observa
 	if err != nil {
 		return model.Observation{}, err
 	}
+	if _, err := validateFontTree(a.Home); err != nil {
+		return model.Observation{}, err
+	}
+	if err := a.recoverPending(d); err != nil {
+		return model.Observation{}, err
+	}
 	owned, err := a.ownership(item)
 	if err != nil {
 		return model.Observation{}, err
 	}
 	if len(owned.Paths) == 0 {
-		return model.Observation{Provider: item.Provider, Package: item.Package, Version: d.tag, Paths: map[string]string{}}, nil
+		paths, present, healthy, detail := inspectDeclared(a.Home, d)
+		return model.Observation{Present: present, Healthy: healthy, Provider: item.Provider, Package: item.Package, Version: d.tag, Paths: paths, Detail: detail}, nil
+	}
+	if err := validateOwnership(filepath.Join(a.Home, filepath.FromSlash(d.destination)), owned.Paths); err != nil {
+		return model.Observation{}, err
 	}
 	paths, healthy, detail := inspectPaths(owned.Paths)
 	return model.Observation{Present: len(paths) > 0, Healthy: healthy, Provider: item.Provider, Package: item.Package, Version: d.tag, Paths: paths, Detail: detail}, nil
@@ -148,11 +180,24 @@ func (a *Adapter) Verify(_ context.Context, item model.Resource) (model.Observat
 }
 
 func (a *Adapter) Plan(ctx context.Context, item model.Resource, _ model.Observation, owned model.Ownership) ([]model.Operation, error) {
-	if _, err := a.declaration(item); err != nil {
+	d, err := a.declaration(item)
+	if err != nil {
 		return nil, err
 	}
 	if len(owned.Paths) == 0 {
-		return []model.Operation{operation(item, model.OperationInstall)}, nil
+		_, present, healthy, _ := inspectDeclared(a.Home, d)
+		if !present {
+			return []model.Operation{operation(item, model.OperationInstall)}, nil
+		}
+		if healthy {
+			return []model.Operation{operation(item, model.OperationAdopt)}, nil
+		}
+		op := operation(item, model.OperationRestore)
+		op.Detail = "take ownership of pre-existing Jetendard fonts after recovery backup"
+		return []model.Operation{op}, nil
+	}
+	if err := validateOwnership(filepath.Join(a.Home, filepath.FromSlash(d.destination)), owned.Paths); err != nil {
+		return nil, err
 	}
 	_, healthy, _ := inspectPaths(owned.Paths)
 	if !healthy {
@@ -164,7 +209,8 @@ func (a *Adapter) Plan(ctx context.Context, item model.Resource, _ model.Observa
 }
 
 func (a *Adapter) PlanHistorical(_ context.Context, item model.Resource, _ model.Observation, owned model.Ownership) ([]model.Operation, error) {
-	if _, err := a.declaration(item); err != nil {
+	d, err := a.declaration(item)
+	if err != nil {
 		return nil, err
 	}
 	if owned.ResourceID != item.ID || owned.Provider != item.Provider || owned.Package != item.Package {
@@ -172,6 +218,9 @@ func (a *Adapter) PlanHistorical(_ context.Context, item model.Resource, _ model
 	}
 	if len(owned.Paths) == 0 {
 		return nil, errors.New("jetendard: historical ownership has no font manifest")
+	}
+	if err := validateOwnership(filepath.Join(a.Home, filepath.FromSlash(d.destination)), owned.Paths); err != nil {
+		return nil, err
 	}
 	if err := validateOwnedForInstall(owned.Paths); err != nil {
 		return nil, err
@@ -210,14 +259,34 @@ func (a *Adapter) execute(ctx context.Context, item model.Resource, op model.Ope
 	if op.Kind == model.OperationPrune {
 		return a.Prune(ctx, item, op, owned)
 	}
+	if op.Kind == model.OperationAdopt {
+		if exists, err := validateFontTree(a.Home); err != nil || !exists {
+			return errors.New("jetendard: Fonts path changed before adoption")
+		}
+		paths, present, healthy, _ := inspectDeclared(a.Home, d)
+		if !present || !healthy {
+			return errors.New("jetendard: pre-existing fonts changed before adoption")
+		}
+		a.setInstalled(item.ID, paths)
+		return nil
+	}
 	if op.Kind != model.OperationInstall && op.Kind != model.OperationUpgrade && op.Kind != model.OperationRestore {
 		return fmt.Errorf("jetendard: unsupported operation %q", op.Kind)
 	}
 	if len(op.Removes) != 0 {
 		return errors.New("jetendard: non-prune operation cannot remove packages")
 	}
+	if err := validateOwnership(filepath.Join(a.Home, filepath.FromSlash(d.destination)), owned.Paths); err != nil {
+		return err
+	}
 	if err := validateOwnedForInstall(owned.Paths); err != nil {
 		return err
+	}
+	takeover := op.Kind == model.OperationRestore && len(owned.Paths) == 0
+	if takeover {
+		if err := a.backupPreExisting(item, d); err != nil {
+			return err
+		}
 	}
 	return a.install(ctx, item, d, owned.Paths)
 }
@@ -239,8 +308,10 @@ func (a *Adapter) install(ctx context.Context, item model.Resource, d declaratio
 		return err
 	}
 	defer os.RemoveAll(extracted)
-	type selected struct{ name, source, digest string }
-	desired := make(map[string]selected)
+	if err := a.recoverPending(d); err != nil {
+		return err
+	}
+	desired := make(map[string]fontSource)
 	for _, file := range manifest.Files {
 		name := filepath.Base(filepath.FromSlash(file.Path))
 		if !fontPattern.MatchString(name) {
@@ -249,108 +320,332 @@ func (a *Adapter) install(ctx context.Context, item model.Resource, d declaratio
 		if _, duplicate := desired[name]; duplicate {
 			return fmt.Errorf("jetendard: duplicate font target %q", name)
 		}
-		desired[name] = selected{name: name, source: filepath.Join(extracted, filepath.FromSlash(file.Path)), digest: "sha256:" + file.SHA256}
+		desired[name] = fontSource{name: name, source: filepath.Join(extracted, filepath.FromSlash(file.Path)), digest: "sha256:" + file.SHA256}
 	}
 	if len(desired) == 0 {
 		return errors.New("jetendard: archive contains no Jetendard TTF files")
 	}
-	if err := ensurePrivateDirectory(a.Recovery); err != nil {
-		return err
+	if len(desired) != len(d.files) {
+		return errors.New("jetendard: archive font manifest differs from signed catalog")
 	}
-	transaction, err := os.MkdirTemp(a.Recovery, "font-rollback-*")
+	for name, font := range desired {
+		if d.files[name] != font.digest {
+			return fmt.Errorf("jetendard: font %q differs from signed catalog manifest", name)
+		}
+	}
+	txn, err := prepareTransaction(fonts, desired, owned)
 	if err != nil {
 		return err
 	}
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.RemoveAll(transaction)
-		}
-	}()
-	if err := os.Chmod(transaction, 0o700); err != nil {
-		return err
-	}
-	touched := make(map[string]bool)
-	backups := make(map[string]string)
-	stages := make(map[string]string)
-	defer func() {
-		for _, stage := range stages {
-			_ = os.Remove(stage)
-		}
-	}()
-	for name, font := range desired {
-		destination := filepath.Join(fonts, name)
-		if err := backupExisting(destination, transaction, backups); err != nil {
+	if err := publishTransaction(fonts, txn); err != nil {
+		if errors.Is(err, errSimulatedCrash) {
 			return err
 		}
-		stage, err := stageFile(font.source, fonts, name)
-		if err != nil {
-			return err
-		}
-		stages[destination] = stage
-		touched[destination] = true
-	}
-	for path := range owned {
-		if _, still := touched[path]; still {
-			continue
-		}
-		if err := validateOwnedPath(fonts, path); err != nil {
-			return err
-		}
-		if err := backupExisting(path, transaction, backups); err != nil {
-			return err
-		}
-		touched[path] = true
-	}
-	rollback := func(cause error) error {
-		var rollbackErr error
-		for destination := range touched {
-			_ = os.Remove(destination)
-			if backup := backups[destination]; backup != "" {
-				if err := copyAtomic(backup, destination); err != nil {
-					rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restore %s: %w", destination, err))
-				}
-			}
-		}
-		for _, stage := range stages {
-			_ = os.Remove(stage)
-		}
-		cleanup = rollbackErr == nil
-		return errors.Join(cause, rollbackErr)
-	}
-	for destination, stage := range stages {
-		if beforeInstallFile != nil {
-			if err := beforeInstallFile(destination); err != nil {
-				return rollback(err)
-			}
-		}
-		if err := os.Rename(stage, destination); err != nil {
-			return rollback(err)
-		}
-	}
-	for path := range owned {
-		if _, still := stages[path]; still {
-			continue
-		}
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return rollback(err)
-		}
+		return errors.Join(err, rollbackTransaction(fonts, txn))
 	}
 	installed := make(map[string]string, len(desired))
 	for _, font := range desired {
 		installed[filepath.Join(fonts, font.name)] = font.digest
 	}
 	if _, healthy, detail := inspectPaths(installed); !healthy {
-		return rollback(fmt.Errorf("jetendard: installed manifest verification failed: %s", detail))
+		return errors.Join(fmt.Errorf("jetendard: installed manifest verification failed: %s", detail), rollbackTransaction(fonts, txn))
 	}
-	a.mu.Lock()
-	if a.installed == nil {
-		a.installed = make(map[model.ResourceID]map[string]string)
+	if err := cleanupTransaction(fonts, txn); err != nil {
+		return err
 	}
-	a.installed[item.ID] = clonePaths(installed)
-	a.mu.Unlock()
-	cleanup = true
+	a.setInstalled(item.ID, installed)
 	return nil
+}
+
+func prepareTransaction(fonts string, desired map[string]fontSource, owned map[string]string) (transaction, error) {
+	directory := filepath.Join(fonts, transactionDirname)
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		return transaction{}, fmt.Errorf("jetendard: create transaction: %w", err)
+	}
+	prepared := false
+	defer func() {
+		if !prepared {
+			_ = cleanupTransactionFiles(directory)
+		}
+	}()
+	names := make([]string, 0, len(desired))
+	for name := range desired {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	txn := transaction{Version: 1, Phase: "prepared"}
+	covered := make(map[string]bool)
+	for _, name := range names {
+		font := desired[name]
+		entry := transactionEntry{Name: name, NewDigest: font.digest}
+		if err := prepareOld(fonts, directory, &entry); err != nil {
+			return transaction{}, err
+		}
+		if err := copyFile(font.source, filepath.Join(directory, stageName(entry)), 0o600); err != nil {
+			return transaction{}, err
+		}
+		if digest, err := digestFile(filepath.Join(directory, stageName(entry))); err != nil || digest != entry.NewDigest {
+			return transaction{}, fmt.Errorf("jetendard: staged font verification failed: %s", name)
+		}
+		txn.Entries = append(txn.Entries, entry)
+		covered[filepath.Join(fonts, name)] = true
+	}
+	var obsolete []string
+	for ownedPath := range owned {
+		if !covered[ownedPath] {
+			obsolete = append(obsolete, ownedPath)
+		}
+	}
+	sort.Strings(obsolete)
+	for _, ownedPath := range obsolete {
+		if err := validateOwnedPath(fonts, ownedPath); err != nil {
+			return transaction{}, err
+		}
+		name := filepath.Base(ownedPath)
+		entry := transactionEntry{Name: name, Remove: true}
+		if err := prepareOld(fonts, directory, &entry); err != nil {
+			return transaction{}, err
+		}
+		txn.Entries = append(txn.Entries, entry)
+	}
+	if err := writeTransaction(directory, txn); err != nil {
+		return transaction{}, err
+	}
+	if err := syncDirectory(directory); err != nil {
+		return transaction{}, err
+	}
+	if err := syncDirectory(fonts); err != nil {
+		return transaction{}, err
+	}
+	prepared = true
+	return txn, nil
+}
+
+func prepareOld(fonts, directory string, entry *transactionEntry) error {
+	destination := filepath.Join(fonts, entry.Name)
+	info, err := os.Lstat(destination)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("jetendard: target is not a regular file: %s", destination)
+	}
+	entry.OldExists = true
+	entry.OldDigest, err = digestFile(destination)
+	if err != nil {
+		return err
+	}
+	return copyFile(destination, filepath.Join(directory, backupName(*entry)), 0o600)
+}
+
+func writeTransaction(directory string, txn transaction) error {
+	temporary := filepath.Join(directory, ".intent.tmp")
+	if err := os.Remove(temporary); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	file, err := os.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+	encodeErr := encoder.Encode(txn)
+	err = errors.Join(encodeErr, file.Sync(), file.Close())
+	if err != nil {
+		return err
+	}
+	return os.Rename(temporary, filepath.Join(directory, transactionFilename))
+}
+
+func publishTransaction(fonts string, txn transaction) error {
+	directory := filepath.Join(fonts, transactionDirname)
+	for _, entry := range txn.Entries {
+		destination := filepath.Join(fonts, entry.Name)
+		if beforeInstallFile != nil {
+			if err := beforeInstallFile(destination); err != nil {
+				return err
+			}
+		}
+		if entry.Remove {
+			if err := os.Remove(destination); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		} else if _, err := os.Lstat(filepath.Join(directory, stageName(entry))); err == nil {
+			if err := os.Rename(filepath.Join(directory, stageName(entry)), destination); err != nil {
+				return err
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		} else if digest, digestErr := digestFile(destination); digestErr != nil || digest != entry.NewDigest {
+			return fmt.Errorf("jetendard: published font is incomplete: %s", entry.Name)
+		}
+		if afterPublishFile != nil {
+			if err := afterPublishFile(destination); err != nil {
+				return err
+			}
+		}
+	}
+	if err := syncDirectory(fonts); err != nil {
+		return err
+	}
+	txn.Phase = "published"
+	if err := writeTransaction(filepath.Join(fonts, transactionDirname), txn); err != nil {
+		return err
+	}
+	return syncDirectory(filepath.Join(fonts, transactionDirname))
+}
+
+func rollbackTransaction(fonts string, txn transaction) error {
+	directory := filepath.Join(fonts, transactionDirname)
+	var result error
+	for _, entry := range txn.Entries {
+		destination := filepath.Join(fonts, entry.Name)
+		_ = os.Remove(destination)
+		if entry.OldExists {
+			if digest, err := digestFile(filepath.Join(directory, backupName(entry))); err != nil || digest != entry.OldDigest {
+				result = errors.Join(result, fmt.Errorf("jetendard: rollback backup invalid: %s", entry.Name))
+				continue
+			}
+			if err := copyAtomic(filepath.Join(directory, backupName(entry)), destination); err != nil {
+				result = errors.Join(result, err)
+			}
+		}
+	}
+	if result == nil {
+		result = cleanupTransaction(fonts, txn)
+	}
+	return result
+}
+
+func cleanupTransaction(fonts string, txn transaction) error {
+	directory := filepath.Join(fonts, transactionDirname)
+	for _, entry := range txn.Entries {
+		for _, name := range []string{stageName(entry), backupName(entry)} {
+			if name != "" {
+				if err := os.Remove(filepath.Join(directory, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return err
+				}
+			}
+		}
+	}
+	if err := os.Remove(filepath.Join(directory, transactionFilename)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.Remove(filepath.Join(directory, ".intent.tmp")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.Remove(directory); err != nil {
+		return err
+	}
+	return syncDirectory(fonts)
+}
+
+func stageName(entry transactionEntry) string  { return "new-" + entry.Name }
+func backupName(entry transactionEntry) string { return "old-" + entry.Name }
+
+func cleanupTransactionFiles(directory string) error {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return err
+	}
+	if len(entries) > 8193 {
+		return errors.New("jetendard: transaction cleanup is unbounded")
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+			return errors.New("jetendard: unsafe transaction artifact")
+		}
+		if err := os.Remove(filepath.Join(directory, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return os.Remove(directory)
+}
+
+func readTransaction(directory string) (transaction, error) {
+	file, err := os.Open(filepath.Join(directory, transactionFilename))
+	if err != nil {
+		return transaction{}, err
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(io.LimitReader(file, 1<<20))
+	decoder.DisallowUnknownFields()
+	var txn transaction
+	if err := decoder.Decode(&txn); err != nil {
+		return transaction{}, err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return transaction{}, errors.New("jetendard: trailing transaction data")
+	}
+	if txn.Version != 1 || (txn.Phase != "prepared" && txn.Phase != "published") || len(txn.Entries) == 0 || len(txn.Entries) > 4096 {
+		return transaction{}, errors.New("jetendard: invalid transaction intent")
+	}
+	seen := map[string]bool{}
+	for _, entry := range txn.Entries {
+		if !fontPattern.MatchString(entry.Name) || seen[entry.Name] || (entry.Remove && entry.NewDigest != "") || (!entry.Remove && !shaPattern.MatchString(entry.NewDigest)) || (entry.OldExists && !shaPattern.MatchString(entry.OldDigest)) || (!entry.OldExists && entry.OldDigest != "") {
+			return transaction{}, errors.New("jetendard: invalid transaction entry")
+		}
+		seen[entry.Name] = true
+	}
+	return txn, nil
+}
+
+func (a *Adapter) recoverPending(d declaration) error {
+	fonts := filepath.Join(a.Home, filepath.FromSlash(d.destination))
+	exists, err := validateFontTree(a.Home)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	directory := filepath.Join(fonts, transactionDirname)
+	info, err := os.Lstat(directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("jetendard: transaction path is unsafe")
+	}
+	if err := ensureRealDirectory(fonts); err != nil {
+		return err
+	}
+	txn, err := readTransaction(directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return cleanupTransactionFiles(directory)
+	}
+	if err != nil {
+		return err
+	}
+	if err := publishTransaction(fonts, txn); err != nil {
+		return err
+	}
+	expected := make(map[string]string)
+	for _, entry := range txn.Entries {
+		if !entry.Remove {
+			expected[filepath.Join(fonts, entry.Name)] = entry.NewDigest
+		}
+	}
+	if _, healthy, detail := inspectPaths(expected); !healthy {
+		return fmt.Errorf("jetendard: recovered transaction failed verification: %s", detail)
+	}
+	return cleanupTransaction(fonts, txn)
+}
+
+func syncDirectory(path string) error {
+	directory, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
 }
 
 func (a *Adapter) Prune(_ context.Context, item model.Resource, op model.Operation, owned model.Ownership) error {
@@ -362,6 +657,16 @@ func (a *Adapter) Prune(_ context.Context, item model.Resource, op model.Operati
 		return errors.New("jetendard: prune authority mismatch")
 	}
 	fonts := filepath.Join(a.Home, filepath.FromSlash(d.destination))
+	if err := a.recoverPending(d); err != nil {
+		return err
+	}
+	exists, err := validateFontTree(a.Home)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
 	for path, expected := range owned.Paths {
 		if err := validateOwnedPath(fonts, path); err != nil {
 			return err
@@ -375,6 +680,15 @@ func (a *Adapter) Prune(_ context.Context, item model.Resource, op model.Operati
 		}
 	}
 	for path := range owned.Paths {
+		// Revalidate the complete Home/Library/Fonts chain immediately before
+		// every destructive syscall; a persistent symlink state must fail closed.
+		exists, err := validateFontTree(a.Home)
+		if err != nil || !exists {
+			if err == nil {
+				err = errors.New("jetendard: Fonts directory disappeared before prune")
+			}
+			return err
+		}
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -400,7 +714,112 @@ func (a *Adapter) declaration(item model.Resource) (declaration, error) {
 	if d.destination != "Library/Fonts" {
 		return declaration{}, errors.New("jetendard: destination must be Library/Fonts")
 	}
+	if len(item.Metadata[MetadataFiles]) == 0 || len(item.Metadata[MetadataFiles]) > 64<<10 {
+		return declaration{}, errors.New("jetendard: signed font manifest is missing or too large")
+	}
+	decoder := json.NewDecoder(strings.NewReader(item.Metadata[MetadataFiles]))
+	if err := decoder.Decode(&d.files); err != nil || len(d.files) == 0 || len(d.files) > 64 {
+		return declaration{}, errors.New("jetendard: invalid signed font manifest")
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return declaration{}, errors.New("jetendard: trailing signed font manifest data")
+	}
+	for name, digest := range d.files {
+		if !fontPattern.MatchString(name) || !rawSHA256Pattern.MatchString(digest) {
+			return declaration{}, errors.New("jetendard: invalid signed font manifest entry")
+		}
+		d.files[name] = "sha256:" + digest
+	}
 	return d, nil
+}
+
+func inspectDeclared(home string, d declaration) (map[string]string, bool, bool, string) {
+	paths := make(map[string]string, len(d.files))
+	present := false
+	healthy := true
+	var details []string
+	fonts := filepath.Join(home, filepath.FromSlash(d.destination))
+	for name, expected := range d.files {
+		path := filepath.Join(fonts, name)
+		actual, err := digestFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			healthy = false
+			details = append(details, "missing: "+path)
+			continue
+		}
+		present = true
+		if err != nil {
+			healthy = false
+			details = append(details, fmt.Sprintf("%s: %v", path, err))
+			continue
+		}
+		paths[path] = actual
+		if actual != expected {
+			healthy = false
+			details = append(details, "digest mismatch: "+path)
+		}
+	}
+	sort.Strings(details)
+	return paths, present, healthy, strings.Join(details, "; ")
+}
+
+func (a *Adapter) backupPreExisting(item model.Resource, d declaration) error {
+	if err := ensurePrivateDirectory(a.Recovery); err != nil {
+		return err
+	}
+	snapshot, err := a.State.Snapshot()
+	if err != nil || snapshot.ActiveJournal == nil {
+		return errors.New("jetendard: active journal is required for takeover backup")
+	}
+	root := filepath.Join(a.Recovery, snapshot.ActiveJournal.ID, "preexisting")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return fmt.Errorf("jetendard: create takeover backup: %w", err)
+	}
+	if err := os.Chmod(root, 0o700); err != nil {
+		return err
+	}
+	fonts := filepath.Join(a.Home, filepath.FromSlash(d.destination))
+	names := make([]string, 0, len(d.files))
+	for name := range d.files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		source := filepath.Join(fonts, name)
+		info, err := os.Lstat(source)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("jetendard: pre-existing font is not a regular file: %s", source)
+		}
+		destination := filepath.Join(root, name)
+		if existing, err := digestFile(destination); err == nil {
+			current, currentErr := digestFile(source)
+			if currentErr != nil || current != existing {
+				return fmt.Errorf("jetendard: takeover backup differs: %s", name)
+			}
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err := copyFile(source, destination, 0o600); err != nil {
+			return fmt.Errorf("jetendard: backup pre-existing font: %w", err)
+		}
+	}
+	return syncDirectory(root)
+}
+
+func (a *Adapter) setInstalled(id model.ResourceID, paths map[string]string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.installed == nil {
+		a.installed = make(map[model.ResourceID]map[string]string)
+	}
+	a.installed[id] = clonePaths(paths)
 }
 
 func (a *Adapter) ownership(item model.Resource) (model.Ownership, error) {
@@ -496,6 +915,27 @@ func ensureRealDirectory(path string) error {
 	return nil
 }
 
+func validateFontTree(home string) (bool, error) {
+	if err := requireRealDirectory(home); err != nil {
+		return false, fmt.Errorf("jetendard: unsafe home: %w", err)
+	}
+	current := home
+	for _, component := range []string{"Library", "Fonts"} {
+		current = filepath.Join(current, component)
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return false, fmt.Errorf("jetendard: path must be a real directory: %s", current)
+		}
+	}
+	return true, nil
+}
+
 func requireRealDirectory(path string) error {
 	info, err := os.Lstat(path)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
@@ -515,28 +955,21 @@ func ensurePrivateDirectory(path string) error {
 }
 func validateOwnedPath(fonts, path string) error {
 	relative, err := filepath.Rel(fonts, path)
-	if err != nil || relative == "." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) || !fontPattern.MatchString(filepath.Base(path)) {
+	if err != nil || filepath.Dir(relative) != "." || !fontPattern.MatchString(relative) {
 		return fmt.Errorf("jetendard: unsafe owned font path %q", path)
 	}
 	return nil
 }
-func backupExisting(path, transaction string, backups map[string]string) error {
-	info, err := os.Lstat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		backups[path] = ""
-		return nil
+
+func validateOwnership(fonts string, paths map[string]string) error {
+	for path, digest := range paths {
+		if err := validateOwnedPath(fonts, path); err != nil {
+			return err
+		}
+		if !shaPattern.MatchString(digest) {
+			return fmt.Errorf("jetendard: invalid owned font digest for %q", path)
+		}
 	}
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("jetendard: target is not a regular file: %s", path)
-	}
-	backup := filepath.Join(transaction, fmt.Sprintf("%x", sha256.Sum256([]byte(path))))
-	if err := copyFile(path, backup, 0o600); err != nil {
-		return err
-	}
-	backups[path] = backup
 	return nil
 }
 func stageFile(source, fonts, name string) (string, error) {
