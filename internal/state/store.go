@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -23,6 +22,9 @@ const (
 
 var journalIDPattern = regexp.MustCompile(`^\d{8}T\d{6}\.\d{9}Z-[0-9a-f]{32}$`)
 
+// Store persists state for one caller. Mutating methods are serialized only for
+// concurrent use of this Store; callers must hold a Lock acquired with Acquire
+// to serialize mutations across Store instances or processes.
 type Store struct {
 	dir string
 	mu  sync.Mutex
@@ -309,18 +311,7 @@ func readJSONFile(path string, target any) error {
 		return err
 	}
 	defer f.Close()
-	decoder := json.NewDecoder(f)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		return err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err == nil {
-		return errors.New("trailing JSON value")
-	} else if !errors.Is(err, io.EOF) {
-		return err
-	}
-	return nil
+	return decodeJSON(f, target)
 }
 
 func writeJSONAtomic(path string, value any) error {

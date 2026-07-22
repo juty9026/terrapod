@@ -1,9 +1,12 @@
 package state
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sync"
 	"testing"
 	"time"
 )
@@ -45,8 +48,122 @@ func TestAcquireRecoversStalePID(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("stale lock count=%d, want 1", len(entries))
 	}
+	wantArchiveName := regexp.MustCompile(`^\d{8}T\d{6}\.\d{9}Z-1073741824-[0-9a-f]{32}$`)
+	if !wantArchiveName.MatchString(entries[0].Name()) {
+		t.Fatalf("stale archive name %q has no random suffix", entries[0].Name())
+	}
 	if _, err := os.Stat(filepath.Join(dir, "stale-locks", entries[0].Name(), "owner.json")); err != nil {
 		t.Fatalf("archived owner is missing: %v", err)
+	}
+}
+
+func TestConcurrentStaleRecoveryHasSingleWinner(t *testing.T) {
+	dir := t.TempDir()
+	writeTestOwner(t, dir, lockOwner{
+		PID:       1 << 30,
+		Command:   "tpod apply",
+		StartedAt: time.Date(2026, 7, 21, 1, 2, 3, 0, time.UTC),
+		Nonce:     "0123456789abcdef0123456789abcdef",
+	})
+
+	const contenders = 32
+	start := make(chan struct{})
+	results := make(chan *Lock, contenders)
+	var workers sync.WaitGroup
+	for range contenders {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			lock, _ := Acquire(dir, "tpod update")
+			results <- lock
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(results)
+
+	var winner *Lock
+	for lock := range results {
+		if lock == nil {
+			continue
+		}
+		if winner != nil {
+			t.Fatal("more than one stale-lock contender acquired the lock")
+		}
+		winner = lock
+	}
+	if winner == nil {
+		t.Fatal("no stale-lock contender acquired the lock")
+	}
+	t.Cleanup(func() { _ = winner.Release() })
+
+	current, err := os.ReadFile(filepath.Join(dir, "lock", "owner.json"))
+	if err != nil {
+		t.Fatalf("live winner lock was moved: %v", err)
+	}
+	if !bytes.Contains(current, []byte(winner.owner.Nonce)) {
+		t.Fatalf("current owner does not belong to winner: %s", current)
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, "stale-locks"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("archived stale lock count=%d, want 1", len(entries))
+	}
+}
+
+func TestDelayedStaleContenderDoesNotClaimLiveWinner(t *testing.T) {
+	dir := t.TempDir()
+	writeTestOwner(t, dir, lockOwner{
+		PID:       1 << 30,
+		Command:   "tpod apply",
+		StartedAt: time.Date(2026, 7, 21, 1, 2, 3, 0, time.UTC),
+		Nonce:     "0123456789abcdef0123456789abcdef",
+	})
+
+	firstObserved := make(chan struct{})
+	secondObserved := make(chan struct{})
+	firstAcquired := make(chan struct{})
+	type acquireResult struct {
+		lock *Lock
+		err  error
+	}
+	firstResult := make(chan acquireResult, 1)
+	secondResult := make(chan acquireResult, 1)
+	go func() {
+		lock, err := acquireStateLock(dir, "tpod update", func() {
+			close(firstObserved)
+			<-secondObserved
+		})
+		firstResult <- acquireResult{lock: lock, err: err}
+		close(firstAcquired)
+	}()
+	go func() {
+		lock, err := acquireStateLock(dir, "tpod update", func() {
+			close(secondObserved)
+			<-firstObserved
+			<-firstAcquired
+		})
+		secondResult <- acquireResult{lock: lock, err: err}
+	}()
+
+	first := <-firstResult
+	if first.err != nil {
+		t.Fatalf("first contender did not acquire stale lock: %v", first.err)
+	}
+	t.Cleanup(func() { _ = first.lock.Release() })
+	second := <-secondResult
+	if second.err == nil || second.lock != nil {
+		t.Fatal("delayed stale contender acquired a live winner lock")
+	}
+	current, err := os.ReadFile(filepath.Join(dir, "lock", "owner.json"))
+	if err != nil {
+		t.Fatalf("delayed contender removed live winner owner: %v", err)
+	}
+	if !bytes.Contains(current, []byte(first.lock.owner.Nonce)) {
+		t.Fatalf("current owner does not belong to live winner: %s", current)
 	}
 }
 
@@ -121,6 +238,52 @@ func TestReleaseOnlyRemovesOwnedLock(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "lock")); err != nil {
 		t.Fatalf("replacement lock was removed: %v", err)
+	}
+}
+
+func TestReleaseRejectsSwappedExternalLockSymlink(t *testing.T) {
+	dir := t.TempDir()
+	lock, err := Acquire(dir, "tpod apply")
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalLock := filepath.Join(dir, "original-lock")
+	if err := os.Rename(filepath.Join(dir, "lock"), originalLock); err != nil {
+		t.Fatal(err)
+	}
+
+	external := t.TempDir()
+	b, err := json.Marshal(lock.owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	externalOwner := filepath.Join(external, "owner.json")
+	if err := os.WriteFile(externalOwner, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(dir, "lock")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := lock.Release(); err == nil {
+		t.Fatal("Release followed a swapped external lock symlink")
+	}
+	got, err := os.ReadFile(externalOwner)
+	if err != nil {
+		t.Fatalf("Release deleted external owner: %v", err)
+	}
+	if !bytes.Equal(got, b) {
+		t.Fatalf("Release mutated external owner: got %s want %s", got, b)
+	}
+
+	if err := os.Remove(filepath.Join(dir, "lock")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(originalLock, filepath.Join(dir, "lock")); err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Release(); err != nil {
+		t.Fatalf("release restored lock: %v", err)
 	}
 }
 

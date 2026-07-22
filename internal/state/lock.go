@@ -3,10 +3,12 @@ package state
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
-	"path/filepath"
+	"path"
 	"strings"
 	"sync"
 	"syscall"
@@ -25,34 +27,53 @@ type lockOwner struct {
 }
 
 type Lock struct {
-	dir   string
+	root  *os.Root
 	owner lockOwner
 	mu    sync.Mutex
 	done  bool
 }
 
 func Acquire(dir, command string) (*Lock, error) {
+	return acquireStateLock(dir, command, nil)
+}
+
+func acquireStateLock(dir, command string, staleObserved func()) (*Lock, error) {
 	if err := validateCommandLabel(command); err != nil {
 		return nil, err
 	}
 	if err := ensurePrivateDir(dir); err != nil {
 		return nil, fmt.Errorf("create lock parent: %w", err)
 	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, fmt.Errorf("open lock root: %w", err)
+	}
+	keepRoot := false
+	defer func() {
+		if !keepRoot {
+			_ = root.Close()
+		}
+	}()
+
 	owner, err := newLockOwner(command)
 	if err != nil {
 		return nil, err
 	}
-	lock, err := createLock(dir, owner)
+	lock, err := createLock(root, owner)
 	if err == nil {
+		keepRoot = true
 		return lock, nil
 	}
 	if !errors.Is(err, os.ErrExist) {
 		return nil, err
 	}
+	if err := requireRootDirectory(root, "lock"); err != nil {
+		return nil, fmt.Errorf("unsafe existing lock: %w", err)
+	}
 
-	existing, err := readLockOwner(filepath.Join(dir, "lock", "owner.json"))
+	existing, err := readLockOwner(root, "lock/owner.json")
 	if err != nil {
-		return nil, fmt.Errorf("inspect existing lock: %w", err)
+		return nil, fmt.Errorf("state lock is busy: inspect existing owner: %w", err)
 	}
 	alive, err := processAlive(existing.PID)
 	if err != nil {
@@ -61,13 +82,17 @@ func Acquire(dir, command string) (*Lock, error) {
 	if alive {
 		return nil, fmt.Errorf("state is locked by PID %d (%s)", existing.PID, existing.Command)
 	}
-	if err := archiveStaleLock(dir, existing); err != nil {
+	if staleObserved != nil {
+		staleObserved()
+	}
+	if err := claimAndArchiveStaleLock(root, existing); err != nil {
 		return nil, err
 	}
-	lock, err = createLock(dir, owner)
+	lock, err = createLock(root, owner)
 	if err != nil {
 		return nil, fmt.Errorf("acquire lock after stale recovery: %w", err)
 	}
+	keepRoot = true
 	return lock, nil
 }
 
@@ -77,65 +102,64 @@ func (l *Lock) Release() error {
 	if l.done {
 		return nil
 	}
-	ownerPath := filepath.Join(l.dir, "lock", "owner.json")
-	owner, err := readLockOwner(ownerPath)
+	if err := requireRootDirectory(l.root, "lock"); err != nil {
+		return fmt.Errorf("unsafe lock during release: %w", err)
+	}
+	owner, err := readLockOwner(l.root, "lock/owner.json")
 	if err != nil {
 		return fmt.Errorf("verify lock ownership: %w", err)
 	}
 	if owner.Nonce != l.owner.Nonce || owner.PID != l.owner.PID {
 		return errors.New("lock ownership changed before release")
 	}
-	if err := os.Remove(ownerPath); err != nil {
+	if err := l.root.Remove("lock/owner.json"); err != nil {
 		return fmt.Errorf("remove lock owner: %w", err)
 	}
-	if err := os.Remove(filepath.Join(l.dir, "lock")); err != nil {
+	if err := l.root.Remove("lock"); err != nil {
 		return fmt.Errorf("remove lock directory: %w", err)
 	}
-	if err := syncDirectory(l.dir); err != nil {
-		return fmt.Errorf("sync lock parent: %w", err)
-	}
+	syncErr := syncRootDirectory(l.root, ".")
+	closeErr := l.root.Close()
 	l.done = true
+	if err := errors.Join(syncErr, closeErr); err != nil {
+		return fmt.Errorf("finish lock release: %w", err)
+	}
 	return nil
 }
 
-func createLock(dir string, owner lockOwner) (*Lock, error) {
-	lockDir := filepath.Join(dir, "lock")
-	if err := os.Mkdir(lockDir, 0o700); err != nil {
+func createLock(root *os.Root, owner lockOwner) (*Lock, error) {
+	if err := root.Mkdir("lock", 0o700); err != nil {
 		return nil, err
 	}
-	if err := os.Chmod(lockDir, 0o700); err != nil {
-		_ = os.Remove(lockDir)
-		return nil, err
-	}
-	if err := writeJSONAtomic(filepath.Join(lockDir, "owner.json"), owner); err != nil {
-		_ = os.Remove(filepath.Join(lockDir, "owner.json"))
-		_ = os.Remove(lockDir)
+	if err := writeJSONAtomicRoot(root, "lock/owner.json", owner); err != nil {
+		_ = root.Remove("lock/owner.json")
+		_ = root.Remove("lock")
 		return nil, fmt.Errorf("write lock owner: %w", err)
 	}
-	if err := syncDirectory(dir); err != nil {
-		_ = os.Remove(filepath.Join(lockDir, "owner.json"))
-		_ = os.Remove(lockDir)
+	if err := syncRootDirectory(root, "."); err != nil {
+		_ = root.Remove("lock/owner.json")
+		_ = root.Remove("lock")
 		return nil, fmt.Errorf("sync lock parent: %w", err)
 	}
-	return &Lock{dir: dir, owner: owner}, nil
+	return &Lock{root: root, owner: owner}, nil
 }
 
 func newLockOwner(command string) (lockOwner, error) {
-	random := make([]byte, 16)
-	if _, err := rand.Read(random); err != nil {
+	nonce, err := randomHex(16)
+	if err != nil {
 		return lockOwner{}, fmt.Errorf("generate lock owner nonce: %w", err)
 	}
 	return lockOwner{
 		PID:       os.Getpid(),
 		Command:   command,
 		StartedAt: time.Now().UTC(),
-		Nonce:     hex.EncodeToString(random),
+		Nonce:     nonce,
 	}, nil
 }
 
-func readLockOwner(path string) (lockOwner, error) {
+func readLockOwner(root *os.Root, name string) (lockOwner, error) {
 	var owner lockOwner
-	if err := readJSONFile(path, &owner); err != nil {
+	if err := readJSONRoot(root, name, &owner); err != nil {
 		return lockOwner{}, err
 	}
 	if owner.PID <= 0 {
@@ -182,21 +206,174 @@ func processAlive(pid int) (bool, error) {
 	}
 }
 
-func archiveStaleLock(dir string, owner lockOwner) error {
-	staleDir := filepath.Join(dir, "stale-locks")
-	if err := ensurePrivateDir(staleDir); err != nil {
-		return fmt.Errorf("create stale lock directory: %w", err)
+func claimAndArchiveStaleLock(root *os.Root, observed lockOwner) error {
+	claimSuffix, err := randomHex(16)
+	if err != nil {
+		return fmt.Errorf("generate stale lock claim: %w", err)
 	}
-	name := time.Now().UTC().Format("20060102T150405.000000000Z") + fmt.Sprintf("-%d", owner.PID)
-	destination := filepath.Join(staleDir, name)
-	if err := os.Rename(filepath.Join(dir, "lock"), destination); err != nil {
-		return fmt.Errorf("archive stale lock: %w", err)
+	claimName := ".owner-claim-" + claimSuffix + ".json"
+	claimPath := "lock/" + claimName
+	if err := root.Rename("lock/owner.json", claimPath); err != nil {
+		return fmt.Errorf("state lock is busy: claim stale owner: %w", err)
 	}
-	if err := syncDirectory(staleDir); err != nil {
+	claimed, err := readLockOwner(root, claimPath)
+	if err != nil {
+		restoreErr := restoreClaimedOwner(root, claimPath)
+		return fmt.Errorf("verify claimed stale owner: %w", errors.Join(err, restoreErr))
+	}
+	if claimed != observed {
+		return failClaim(root, claimPath, errors.New("claimed stale owner changed before archive"))
+	}
+	if err := ensurePrivateRootDir(root, "stale-locks"); err != nil {
+		return failClaim(root, claimPath, fmt.Errorf("create stale lock directory: %w", err))
+	}
+	archiveSuffix, err := randomHex(16)
+	if err != nil {
+		return failClaim(root, claimPath, fmt.Errorf("generate stale archive name: %w", err))
+	}
+	archiveName := time.Now().UTC().Format("20060102T150405.000000000Z") + fmt.Sprintf("-%d-%s", observed.PID, archiveSuffix)
+	archivePath := "stale-locks/" + archiveName
+	if err := root.Rename("lock", archivePath); err != nil {
+		return failClaim(root, claimPath, fmt.Errorf("archive claimed stale lock: %w", err))
+	}
+	if err := root.Rename(archivePath+"/"+claimName, archivePath+"/owner.json"); err != nil {
+		return fmt.Errorf("restore archived owner name: %w", err)
+	}
+	if err := syncRootDirectory(root, archivePath); err != nil {
+		return fmt.Errorf("sync archived lock: %w", err)
+	}
+	if err := syncRootDirectory(root, "stale-locks"); err != nil {
 		return fmt.Errorf("sync stale lock directory: %w", err)
 	}
-	if err := syncDirectory(dir); err != nil {
+	if err := syncRootDirectory(root, "."); err != nil {
 		return fmt.Errorf("sync lock parent: %w", err)
 	}
 	return nil
+}
+
+func failClaim(root *os.Root, claimPath string, cause error) error {
+	return errors.Join(cause, restoreClaimedOwner(root, claimPath))
+}
+
+func restoreClaimedOwner(root *os.Root, claimPath string) error {
+	if _, err := root.Lstat("lock/owner.json"); err == nil {
+		return errors.New("cannot restore claim over an existing owner")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect owner before claim restore: %w", err)
+	}
+	if err := root.Rename(claimPath, "lock/owner.json"); err != nil {
+		return fmt.Errorf("restore claimed owner: %w", err)
+	}
+	return syncRootDirectory(root, "lock")
+}
+
+func requireRootDirectory(root *os.Root, name string) error {
+	info, err := root.Lstat(name)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", name)
+	}
+	return nil
+}
+
+func ensurePrivateRootDir(root *os.Root, name string) error {
+	if err := root.MkdirAll(name, 0o700); err != nil {
+		return err
+	}
+	if err := requireRootDirectory(root, name); err != nil {
+		return err
+	}
+	dir, err := root.Open(name)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Chmod(0o700)
+}
+
+func readJSONRoot(root *os.Root, name string, target any) error {
+	info, err := root.Lstat(name)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", name)
+	}
+	f, err := root.Open(name)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return decodeJSON(f, target)
+}
+
+func writeJSONAtomicRoot(root *os.Root, name string, value any) error {
+	b, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	tmpSuffix, err := randomHex(16)
+	if err != nil {
+		return err
+	}
+	tmpName := path.Join(path.Dir(name), ".tmp-"+tmpSuffix)
+	tmp, err := root.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	defer root.Remove(tmpName)
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := root.Rename(tmpName, name); err != nil {
+		return err
+	}
+	return syncRootDirectory(root, path.Dir(name))
+}
+
+func syncRootDirectory(root *os.Root, name string) error {
+	dir, err := root.Open(name)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
+
+func decodeJSON(reader io.Reader, target any) error {
+	decoder := json.NewDecoder(reader)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err == nil {
+		return errors.New("trailing JSON value")
+	} else if !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
+}
+
+func randomHex(byteCount int) (string, error) {
+	random := make([]byte, byteCount)
+	if _, err := rand.Read(random); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(random), nil
 }
