@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"github.com/juty9026/terrapod/internal/paths"
 	"github.com/juty9026/terrapod/internal/planner"
 	"github.com/juty9026/terrapod/internal/reconcile"
+	"github.com/juty9026/terrapod/internal/resolve"
 	"github.com/juty9026/terrapod/internal/resource"
 	"github.com/juty9026/terrapod/internal/state"
 )
@@ -31,8 +33,8 @@ func TestHelpDescribesShadowCommandSurfaceWithoutDependencies(t *testing.T) {
 		"Personal Development Environment Manager",
 		"plan", "status", "doctor", "diff",
 		"apply      Reconcile package resources",
+		"resolve    Confirm unmanaged blockers for one resource",
 		"update (unavailable until activation)",
-		"resolve (unavailable until activation)",
 		"setup (unavailable until activation)",
 		"configure (unavailable until activation)",
 		"chezmoi (unavailable until activation)",
@@ -62,6 +64,37 @@ func TestManagerCommandsRejectRootBeforeCommandDispatch(t *testing.T) {
 	}
 }
 
+func TestResolveRequiresExactlyOneResourceAndDelegatesPromptIO(t *testing.T) {
+	called := false
+	deps := Dependencies{
+		Geteuid: func() int { return 501 },
+		Stdin:   strings.NewReader("yes\n"),
+		Resolve: func(_ context.Context, id model.ResourceID, input io.Reader, output io.Writer) (resolve.Result, error) {
+			called = true
+			if id != "core.alpha" {
+				t.Fatalf("id = %q", id)
+			}
+			answer, _ := io.ReadAll(input)
+			if string(answer) != "yes\n" {
+				t.Fatalf("input = %q", answer)
+			}
+			fmt.Fprint(output, "resolved")
+			return resolve.Result{Proceeded: true, Summary: reconcile.Summary{Ready: []model.ResourceID{"core.alpha"}, Unavailable: map[model.ResourceID]string{}}}, nil
+		},
+	}
+	code, stdout, stderr := run(t, []string{"resolve", "core.alpha"}, deps)
+	if code != 0 || !called || stdout != "resolved\nReady:\n  core.alpha\nUnavailable:\n  (none)\n" || stderr != "" {
+		t.Fatalf("Run(resolve) = %d, called=%v stdout=%q stderr=%q", code, called, stdout, stderr)
+	}
+	for _, args := range [][]string{{"resolve"}, {"resolve", "core.alpha", "core.beta"}} {
+		called = false
+		code, stdout, stderr = run(t, args, deps)
+		if code != exitUsage || called || stdout != "" || stderr != "usage: tpod resolve <resource>\n" {
+			t.Fatalf("Run(%v) = %d, called=%v stdout=%q stderr=%q", args, code, called, stdout, stderr)
+		}
+	}
+}
+
 func TestCommandsRejectInvalidArgumentsBeforeRendering(t *testing.T) {
 	tests := []struct {
 		name string
@@ -75,7 +108,7 @@ func TestCommandsRejectInvalidArgumentsBeforeRendering(t *testing.T) {
 		{"diff", []string{"diff", "unexpected"}},
 		{"apply", []string{"apply", "unexpected"}},
 		{"update", []string{"update", "unexpected"}},
-		{"resolve", []string{"resolve", "unexpected"}},
+		{"resolve", []string{"resolve", "unexpected", "extra"}},
 		{"setup", []string{"setup", "unexpected"}},
 		{"configure", []string{"configure", "unexpected"}},
 		{"chezmoi", []string{"chezmoi", "unexpected"}},
@@ -456,7 +489,7 @@ func TestDiffReturnsShadowModeExitCode(t *testing.T) {
 }
 
 func TestMutationCommandsAreNotDispatched(t *testing.T) {
-	for _, command := range []string{"update", "resolve", "setup", "configure", "chezmoi"} {
+	for _, command := range []string{"update", "setup", "configure", "chezmoi"} {
 		t.Run(command, func(t *testing.T) {
 			deps := Dependencies{Geteuid: func() int { return 501 }}
 			code, _, stderr := run(t, []string{command}, deps)

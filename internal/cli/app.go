@@ -22,6 +22,7 @@ import (
 	"github.com/juty9026/terrapod/internal/paths"
 	"github.com/juty9026/terrapod/internal/planner"
 	"github.com/juty9026/terrapod/internal/reconcile"
+	"github.com/juty9026/terrapod/internal/resolve"
 	"github.com/juty9026/terrapod/internal/state"
 )
 
@@ -34,6 +35,7 @@ const (
 var beforeOpenLockOwner = func() {}
 
 type Dependencies struct {
+	Stdin          io.Reader
 	Stdout         io.Writer
 	Stderr         io.Writer
 	Geteuid        func() int
@@ -44,6 +46,7 @@ type Dependencies struct {
 	Planner        *planner.Planner
 	LoadHistorical func() (map[string]model.Catalog, error)
 	Apply          func(context.Context, reconcile.ApplyInput) (reconcile.Summary, error)
+	Resolve        func(context.Context, model.ResourceID, io.Reader, io.Writer) (resolve.Result, error)
 }
 
 type reconciliation struct {
@@ -103,13 +106,33 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	if !ok {
 		return exitUsage
 	}
-	if isMutationCommand(command) && command != "apply" {
+	if isMutationCommand(command) && command != "apply" && command != "resolve" {
 		fmt.Fprintf(stderr, "%s is unavailable until activation\n", command)
 		return exitUnavailable
 	}
 	if command == "diff" {
 		fmt.Fprintln(stderr, "shadow mode: managed-file adapter is not active")
 		return exitUnavailable
+	}
+	if command == "resolve" {
+		if deps.Resolve == nil {
+			fmt.Fprintln(stderr, "internal error: conflict resolver is not configured")
+			return exitFailure
+		}
+		input := deps.Stdin
+		if input == nil {
+			input = strings.NewReader("")
+		}
+		result, resolveErr := deps.Resolve(ctx, model.ResourceID(args[1]), input, stdout)
+		if resolveErr != nil {
+			fmt.Fprintln(stderr, resolveErr)
+			return exitUnavailable
+		}
+		renderResolveResult(stdout, result)
+		if len(result.Summary.Unavailable) != 0 {
+			return exitUnavailable
+		}
+		return 0
 	}
 
 	snapshot, err := buildReconciliation(ctx, deps, upgrade)
@@ -151,6 +174,13 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 }
 
 func parseManagerArgs(command string, args []string, stderr io.Writer) (bool, bool) {
+	if command == "resolve" {
+		if len(args) == 1 {
+			return false, true
+		}
+		fmt.Fprintln(stderr, "usage: tpod resolve <resource>")
+		return false, false
+	}
 	if len(args) == 0 {
 		return false, true
 	}

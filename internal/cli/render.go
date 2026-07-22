@@ -8,6 +8,7 @@ import (
 
 	"github.com/juty9026/terrapod/internal/model"
 	"github.com/juty9026/terrapod/internal/reconcile"
+	"github.com/juty9026/terrapod/internal/resolve"
 )
 
 func renderHelp(output io.Writer) {
@@ -15,6 +16,7 @@ func renderHelp(output io.Writer) {
 	fmt.Fprintln(output)
 	fmt.Fprintln(output, "Commands:")
 	fmt.Fprintln(output, "  apply      Reconcile package resources")
+	fmt.Fprintln(output, "  resolve    Confirm unmanaged blockers for one resource")
 	fmt.Fprintln(output, "  plan       Show deterministic reconciliation operations")
 	fmt.Fprintln(output, "  status     Show Ready and Unavailable resources")
 	fmt.Fprintln(output, "  doctor     Check whether enabled resources are available")
@@ -22,9 +24,17 @@ func renderHelp(output io.Writer) {
 	fmt.Fprintln(output, "  version    Show the development version")
 	fmt.Fprintln(output)
 	fmt.Fprintln(output, "Mutation commands:")
-	for _, command := range []string{"update", "resolve", "setup", "configure", "chezmoi"} {
+	for _, command := range []string{"update", "setup", "configure", "chezmoi"} {
 		fmt.Fprintf(output, "  %s (unavailable until activation)\n", command)
 	}
+}
+
+func renderResolveResult(output io.Writer, result resolve.Result) {
+	if !result.Proceeded {
+		return
+	}
+	fmt.Fprintln(output)
+	renderApplySummary(output, result.Summary)
 }
 
 func renderApplySummary(output io.Writer, summary reconcile.Summary) {
