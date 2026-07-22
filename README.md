@@ -135,11 +135,13 @@ On macOS, the initial apply also runs setup scripts under `.chezmoiscripts` for 
 - mise
 - CLI tools such as ripgrep, neovim, zellij, lazygit, GitHub CLI (`gh`), and starship via mise
 - btop via Homebrew, because its mise-managed release assets do not support macOS arm64
-- Terminal font casks
+- Jetendard terminal font from the latest stable GitHub release
 - Oh My Zsh, zinit, and SCM Breeze
 - Bun, Python, uv/uvx, and Node.js via `~/.config/mise/config.toml`
 - pnpm through Node.js Corepack
 - Optional AI Tool Stack casks through Homebrew when that stack is enabled
+
+Terrapod installs every TTF in that Jetendard release and verifies the asset digest published by GitHub. Terrapod checks the latest Jetendard release only when its managed font installer source changes or a failed install is retried. It sets only the font-family keys used by Ghostty, Zed buffers and terminals, and Orca terminals. Quit Orca before rerunning `tpod apply` when Jetendard settings are deferred. Terrapod does not uninstall existing JetBrains Mono Nerd Font or D2Coding copies. Restart Ghostty, Zed, or Orca if an existing window still uses a cached font.
 
 macOS desktop applications are split into opt-in App Groups controlled by
 machine-local data keys. During Homebrew bootstrap, chezmoi renders selected

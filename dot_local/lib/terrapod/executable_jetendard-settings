@@ -1,0 +1,309 @@
+#!/usr/bin/env python3
+import argparse
+from dataclasses import dataclass
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import tempfile
+
+FONT = "Jetendard"
+
+
+class ArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        raise ValueError(message)
+
+
+@dataclass
+class Token:
+    kind: str
+    start: int
+    end: int
+    value: object = None
+
+
+@dataclass
+class Node:
+    kind: str
+    start: int
+    end: int
+    members: dict[str, tuple[Token, "Node"]] | None = None
+
+
+def tokens(text: str) -> list[Token]:
+    result = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char.isspace():
+            index += 1
+            continue
+        if text.startswith("//", index):
+            newline = text.find("\n", index + 2)
+            index = len(text) if newline < 0 else newline
+            continue
+        if text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            if end < 0:
+                raise ValueError("unterminated JSONC block comment")
+            index = end + 2
+            continue
+        if char in "{}[],:":
+            result.append(Token(char, index, index + 1, char))
+            index += 1
+            continue
+        if char == '"':
+            end = index + 1
+            escaped = False
+            while end < len(text):
+                current = text[end]
+                if current == '"' and not escaped:
+                    end += 1
+                    break
+                if current == "\\" and not escaped:
+                    escaped = True
+                else:
+                    escaped = False
+                end += 1
+            else:
+                raise ValueError("unterminated JSONC string")
+            raw = text[index:end]
+            result.append(Token("string", index, end, json.loads(raw)))
+            index = end
+            continue
+        end = index
+        while end < len(text) and not text[end].isspace() and text[end] not in "{}[],:/":
+            end += 1
+        if end == index:
+            raise ValueError(f"unexpected JSONC character at byte {index}")
+        result.append(Token("literal", index, end, text[index:end]))
+        index = end
+    return result
+
+
+def parse_value(stream: list[Token], index: int) -> tuple[Node, int]:
+    token = stream[index]
+    if token.kind == "{":
+        members = {}
+        cursor = index + 1
+        while stream[cursor].kind != "}":
+            key = stream[cursor]
+            if key.kind != "string" or stream[cursor + 1].kind != ":":
+                raise ValueError("invalid JSONC object member")
+            value, cursor = parse_value(stream, cursor + 2)
+            members[str(key.value)] = (key, value)
+            if stream[cursor].kind == ",":
+                cursor += 1
+                if stream[cursor].kind == "}":
+                    break
+            elif stream[cursor].kind != "}":
+                raise ValueError("missing JSONC object comma")
+        return Node("object", token.start, stream[cursor].end, members), cursor + 1
+    if token.kind == "[":
+        cursor = index + 1
+        while stream[cursor].kind != "]":
+            _, cursor = parse_value(stream, cursor)
+            if stream[cursor].kind == ",":
+                cursor += 1
+                if stream[cursor].kind == "]":
+                    break
+            elif stream[cursor].kind != "]":
+                raise ValueError("missing JSONC array comma")
+        return Node("array", token.start, stream[cursor].end), cursor + 1
+    if token.kind in {"string", "literal"}:
+        return Node(token.kind, token.start, token.end), index + 1
+    raise ValueError("invalid JSONC value")
+
+
+def root_node(text: str) -> Node:
+    stream = tokens(text)
+    if not stream:
+        raise ValueError("empty JSONC document")
+    root, cursor = parse_value(stream, 0)
+    if root.kind != "object" or cursor != len(stream):
+        raise ValueError("Zed settings must contain one JSONC object")
+    return root
+
+
+def line_indent(text: str, position: int) -> str:
+    start = text.rfind("\n", 0, position) + 1
+    return re.match(r"[ \t]*", text[start:position]).group(0)
+
+
+def insert_member(text: str, obj: Node, key: str, value_text: str) -> str:
+    close = obj.end - 1
+    closing_line = text.rfind("\n", 0, close) + 1
+    closing_indent = line_indent(text, close)
+    closing_on_own_line = not text[closing_line:close].strip()
+    child_indent = closing_indent + "  "
+    rendered = f'{child_indent}{json.dumps(key)}: {value_text},\n'
+    members = obj.members or {}
+    if not members:
+        if closing_line == close:
+            return text[:closing_line] + rendered + text[closing_line:]
+        return text[:close] + "\n" + rendered + closing_indent + text[close:]
+    last = max((value for _, value in members.values()), key=lambda node: node.end)
+    between = text[last.end:close]
+    if not any(token.kind == "," for token in tokens(between)):
+        text = text[:last.end] + "," + text[last.end:]
+        close += 1
+        if closing_on_own_line:
+            closing_line += 1
+    if not closing_on_own_line:
+        return text[:close] + "\n" + rendered + closing_indent + text[close:]
+    return text[:closing_line] + rendered + text[closing_line:]
+
+
+def set_jsonc_string(text: str, path: tuple[str, ...], value: str) -> str:
+    root = root_node(text)
+    current = root
+    for depth, key in enumerate(path):
+        final = depth == len(path) - 1
+        member = (current.members or {}).get(key)
+        if final:
+            if member:
+                node = member[1]
+                return text[:node.start] + json.dumps(value) + text[node.end:]
+            return insert_member(text, current, key, json.dumps(value))
+        if member and member[1].kind == "object":
+            current = member[1]
+            continue
+        if member:
+            raise ValueError(f"Zed setting {'.'.join(path[:depth + 1])} must be an object")
+        nested = "{\n" + line_indent(text, current.end - 1) + "    " + json.dumps(path[depth + 1]) + ": " + json.dumps(value) + ",\n" + line_indent(text, current.end - 1) + "  }"
+        return insert_member(text, current, key, nested)
+    return text
+
+
+def jsonc_string(text: str, path: tuple[str, ...]) -> str | None:
+    current = root_node(text)
+    for depth, key in enumerate(path):
+        member = (current.members or {}).get(key)
+        if not member:
+            return None
+        current = member[1]
+        if depth < len(path) - 1 and current.kind != "object":
+            raise ValueError(f"Zed setting {'.'.join(path[:depth + 1])} must be an object")
+    if current.kind != "string":
+        return None
+    return json.loads(text[current.start:current.end])
+
+
+def atomic_write(path: Path, content: str, default_mode: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mode = path.stat().st_mode & 0o777 if path.exists() else default_mode
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(content)
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def apply_zed(home: Path) -> None:
+    path = home / ".config" / "zed" / "settings.json"
+    text = path.read_text(encoding="utf-8") if path.exists() else "{\n}\n"
+    changed = set_jsonc_string(text, ("buffer_font_family",), FONT)
+    changed = set_jsonc_string(changed, ("terminal", "font_family"), FONT)
+    root_node(changed)
+    if changed != text:
+        atomic_write(path, changed, 0o600)
+
+
+def orca_running() -> bool:
+    override = os.environ.get("TERRAPOD_ORCA_RUNNING")
+    if override is not None:
+        return override == "1"
+    return subprocess.run(["pgrep", "-f", "/Applications/Orca.app/Contents/MacOS/Orca"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+
+def orca_profiles(home: Path) -> list[Path]:
+    return sorted((home / "Library" / "Application Support" / "orca" / "profiles").glob("*/orca-data.json"))
+
+
+def apply_orca(home: Path) -> bool:
+    profiles = orca_profiles(home)
+    if not profiles:
+        return True
+    pending = []
+    for path in profiles:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        settings = data.get("settings")
+        if not isinstance(settings, dict):
+            raise ValueError(f"Orca settings is not an object: {path}")
+        if settings.get("terminalFontFamily") != FONT:
+            pending.append((path, data))
+    if not pending:
+        return True
+    if orca_running():
+        return False
+    for path, data in pending:
+        data["settings"]["terminalFontFamily"] = FONT
+        atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n", 0o600)
+    return True
+
+
+def check_ghostty(home: Path) -> str:
+    path = home / ".config" / "ghostty" / "config"
+    families = []
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            match = re.match(r"\s*font-family\s*=\s*[\"']?([^\"']+?)[\"']?\s*$", line)
+            if match:
+                families.append(match.group(1))
+    if families != [FONT]:
+        raise ValueError(f"Ghostty font-family must be exactly {FONT}: {path}")
+    return "Ghostty uses Jetendard."
+
+
+def check_zed(home: Path) -> str:
+    path = home / ".config" / "zed" / "settings.json"
+    if not path.is_file():
+        raise ValueError(f"Zed settings is missing: {path}")
+    text = path.read_text(encoding="utf-8")
+    if jsonc_string(text, ("buffer_font_family",)) != FONT or jsonc_string(text, ("terminal", "font_family")) != FONT:
+        raise ValueError(f"Zed buffer and terminal fonts must be {FONT}: {path}")
+    return "Zed buffer and terminal use Jetendard."
+
+
+def check_orca(home: Path) -> str:
+    mismatches = []
+    profiles = orca_profiles(home)
+    for path in profiles:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("settings", {}).get("terminalFontFamily") != FONT:
+            mismatches.append(str(path))
+    if mismatches:
+        raise ValueError("Orca terminal font must be Jetendard: " + ", ".join(mismatches))
+    return "Orca profiles use Jetendard." if profiles else "No initialized Orca profiles require validation."
+
+
+def main() -> int:
+    parser = ArgumentParser()
+    parser.add_argument("command", choices=["apply", "check-ghostty", "check-zed", "check-orca"])
+    parser.add_argument("--home")
+    try:
+        args = parser.parse_args()
+        home = Path(args.home or os.environ.get("HOME", str(Path.home())))
+        if args.command == "apply":
+            apply_zed(home)
+            if not apply_orca(home):
+                print("Orca is running; quit Orca and rerun tpod apply.")
+                return 2
+            print("Jetendard application settings are applied.")
+        else:
+            checker = {"check-ghostty": check_ghostty, "check-zed": check_zed, "check-orca": check_orca}[args.command]
+            print(checker(home))
+    except Exception as error:
+        print(f"Jetendard settings: {error}", file=__import__("sys").stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

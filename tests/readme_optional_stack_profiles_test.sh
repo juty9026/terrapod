@@ -201,6 +201,22 @@ assert_contains 'Optional Editor Stack and Optional AI Tool Stack' \
   "README documents development workspace included stacks"
 assert_contains 'macOS Desktop App Stack' \
   "README documents macOS Desktop App Stack"
+assert_not_contains 'Terminal font casks' \
+  "README no longer documents terminal font casks"
+assert_contains 'Jetendard terminal font from the latest stable GitHub release' \
+  "README documents the Jetendard release source"
+assert_contains 'Terrapod checks the latest Jetendard release only when its managed font installer source changes or a failed install is retried.' \
+  "README documents the Jetendard release-check trigger"
+assert_contains 'Terrapod installs every TTF in that Jetendard release and verifies the asset digest published by GitHub.' \
+  "README directly documents every-TTF installation and digest verification"
+assert_contains 'It sets only the font-family keys used by Ghostty, Zed buffers and terminals, and Orca terminals.' \
+  "README directly documents the app-key-only settings scope"
+assert_contains 'Restart Ghostty, Zed, or Orca if an existing window still uses a cached font.' \
+  "README directly documents cached-font restart guidance"
+assert_contains 'Terrapod does not uninstall existing JetBrains Mono Nerd Font or D2Coding copies.' \
+  "README documents non-destructive legacy font migration"
+assert_contains 'Quit Orca before rerunning `tpod apply` when Jetendard settings are deferred.' \
+  "README documents Orca font-setting recovery"
 assert_contains 'separate from `enableDevelopmentWorkspace`' \
   "README documents macOS Desktop App Stack separation from enableDevelopmentWorkspace"
 assert_contains 'casks can affect shared applications' \
