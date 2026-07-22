@@ -75,7 +75,8 @@ setup_brew_environment() {
     echo "Mandatory standard-prefix Homebrew is unavailable for the Optional AI Tool Stack." >&2
     return 1
   fi
-  eval "$("$brew_bin" shellenv)"
+  brew_shellenv="$("$brew_bin" shellenv)" || return 1
+  eval "$brew_shellenv"
 }
 
 install_ai_cli_bundle() {

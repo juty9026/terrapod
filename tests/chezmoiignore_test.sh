@@ -1616,7 +1616,7 @@ printf '%s\n' "$ai_cli_tools_installer" |
 printf '%s\n' "$macos_ai_cli_tools_installer" |
   sed \
     -e "s#/opt/homebrew/bin/brew#$tmp_dir/macos-ai-brew-bin/brew#g" \
-    -e "s#/usr/local/bin/brew#$tmp_dir/missing-usr-local-brew#g" \
+    -e "s#/usr/local/bin/brew#$tmp_dir/macos-intel-ai-brew-bin/brew#g" \
     >"$macos_ai_cli_tools_installer_script"
 sh -n "$ai_cli_tools_installer_script" || fail "enabled Optional AI Tool Stack installer script should be valid sh"
 sh -n "$macos_ai_cli_tools_installer_script" || fail "macOS Optional AI Tool Stack installer script should be valid sh"
@@ -1626,9 +1626,13 @@ write_ai_brew_stub() {
   path="$1"
   write_stub "$path" \
     'printf "%s\n" "brew args:$*" >>"$AI_BREW_LOG"' \
+    'printf "%s\n" "brew path:$0" >>"$AI_BREW_LOG"' \
     'printf "%s\n" "brew auto-update:${HOMEBREW_NO_AUTO_UPDATE:-}" >>"$AI_BREW_LOG"' \
     'case "$1" in' \
-    '  shellenv) printf "export PATH=\"%s:$PATH\"\n" "$AI_BREW_BIN" ;;' \
+    '  shellenv)' \
+    '    [ "${AI_BREW_SHELLENV_FAIL:-0}" = "0" ] || exit 41' \
+    '    printf "export PATH=\"%s:$PATH\"\n" "$AI_BREW_BIN"' \
+    '    ;;' \
     '  bundle)' \
     '    bundle_file=' \
     '    for arg do case "$arg" in --file=*) bundle_file="$(printf "%s" "$arg" | cut -d= -f2-)" ;; esac; done' \
@@ -1643,18 +1647,51 @@ write_ai_brew_stub() {
 }
 
 macos_ai_brew_bin="$tmp_dir/macos-ai-brew-bin"
+macos_intel_ai_brew_bin="$tmp_dir/macos-intel-ai-brew-bin"
+mkdir -p "$macos_ai_brew_bin" "$macos_intel_ai_brew_bin"
+write_ai_brew_stub "$macos_ai_brew_bin/brew"
+write_ai_brew_stub "$macos_intel_ai_brew_bin/brew"
+write_stub "$macos_ai_brew_bin/uname" 'printf "%s\n" "${AI_UNAME_ARCH:-arm64}"'
+
+run_macos_ai_arch_case() {
+  arch="$1"
+  expected_brew_bin="$2"
+  case_dir="$tmp_dir/macos-ai-$arch"
+  case_home="$case_dir/home"
+  case_state="$case_dir/state"
+  case_log="$case_dir/brew.log"
+  mkdir -p "$case_home"
+
+  HOME="$case_home" XDG_STATE_HOME="$case_state" \
+    AI_UNAME_ARCH="$arch" AI_BREW_BIN="$expected_brew_bin" AI_BREW_LOG="$case_log" AI_BREW_FAIL=0 \
+    PATH="$macos_ai_brew_bin:/usr/bin:/bin" sh "$macos_ai_cli_tools_installer_script"
+  case_log_text="$(cat "$case_log")"
+  assert_contains_text "$case_log_text" "brew path:$expected_brew_bin/brew" "macOS $arch Optional AI Tool Stack selects its standard Homebrew prefix"
+  assert_contains_text "$case_log_text" "brew args:shellenv" "macOS $arch Optional AI Tool Stack loads Homebrew shellenv"
+  assert_contains_text "$case_log_text" "brew args:bundle --no-upgrade --file=" "macOS $arch Optional AI Tool Stack installs the common no-upgrade bundle"
+  assert_contains_text "$case_log_text" "brew auto-update:1" "macOS $arch Optional AI Tool Stack disables Homebrew auto-update"
+}
+
+run_macos_ai_arch_case arm64 "$macos_ai_brew_bin"
+run_macos_ai_arch_case x86_64 "$macos_intel_ai_brew_bin"
+
 macos_ai_brew_home="$tmp_dir/macos-ai-brew-home"
 macos_ai_brew_state="$tmp_dir/macos-ai-brew-state"
 macos_ai_brew_log="$tmp_dir/macos-ai-brew.log"
-mkdir -p "$macos_ai_brew_bin" "$macos_ai_brew_home"
-write_ai_brew_stub "$macos_ai_brew_bin/brew"
+mkdir -p "$macos_ai_brew_home"
+
+ai_cli_shellenv_failure_status=0
 HOME="$macos_ai_brew_home" XDG_STATE_HOME="$macos_ai_brew_state" \
-  AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$macos_ai_brew_log" AI_BREW_FAIL=0 \
-  PATH="$macos_ai_brew_bin:/usr/bin:/bin" sh "$macos_ai_cli_tools_installer_script"
-macos_ai_brew_log_text="$(cat "$macos_ai_brew_log")"
-assert_contains_text "$macos_ai_brew_log_text" "brew args:shellenv" "macOS Optional AI Tool Stack loads Homebrew shellenv"
-assert_contains_text "$macos_ai_brew_log_text" "brew args:bundle --no-upgrade --file=" "macOS Optional AI Tool Stack installs the common no-upgrade bundle"
-assert_contains_text "$macos_ai_brew_log_text" "brew auto-update:1" "macOS Optional AI Tool Stack disables Homebrew auto-update"
+  AI_UNAME_ARCH=arm64 AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$macos_ai_brew_log" \
+  AI_BREW_FAIL=0 AI_BREW_SHELLENV_FAIL=1 PATH="$macos_ai_brew_bin:/usr/bin:/bin" \
+  sh "$macos_ai_cli_tools_installer_script" >/dev/null 2>&1 || ai_cli_shellenv_failure_status=$?
+if [ "$ai_cli_shellenv_failure_status" -eq 0 ]; then
+  fail "Optional AI Tool Stack propagates a failing Homebrew shellenv"
+fi
+if grep -F "brew args:bundle" "$macos_ai_brew_log" >/dev/null; then
+  fail "Optional AI Tool Stack stops before bundle when Homebrew shellenv fails"
+fi
+pass "Optional AI Tool Stack propagates a failing Homebrew shellenv before bundle"
 
 for vendor_url in \
   "https://antigravity.google/cli/install.sh" \
