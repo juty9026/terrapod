@@ -962,12 +962,6 @@ fi
 
 standard_homebrew_prefix() {
   profile="$1"
-
-  if [ -n "${TERRAPOD_STANDARD_HOMEBREW_PREFIX:-}" ]; then
-    printf '%s\n' "$TERRAPOD_STANDARD_HOMEBREW_PREFIX"
-    return 0
-  fi
-
   arch="${TERRAPOD_MACHINE_ARCH:-$(uname -m 2>/dev/null || true)}"
   case "$profile:$arch" in
     macos-terminal:arm64 | macos-terminal:aarch64)
@@ -976,7 +970,7 @@ standard_homebrew_prefix() {
     macos-terminal:x86_64)
       printf '%s\n' /usr/local
       ;;
-    vps-shell:x86_64 | vps-shell:aarch64 | vps-shell:arm64)
+    vps-shell:x86_64 | vps-shell:aarch64)
       printf '%s\n' /home/linuxbrew/.linuxbrew
       ;;
     *)
@@ -984,6 +978,13 @@ standard_homebrew_prefix() {
       ;;
   esac
 }
+
+if [ "${TERRAPOD_PRINT_STANDARD_HOMEBREW_PREFIX:-}" = "1" ]; then
+  if standard_homebrew_prefix "${TERRAPOD_PROFILE:-}"; then
+    exit 0
+  fi
+  exit 1
+fi
 
 path_is_under_prefix() {
   path="$1"
