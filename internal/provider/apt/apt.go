@@ -2,11 +2,13 @@ package apt
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"os/exec"
 	"reflect"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,8 +40,31 @@ type Runner interface {
 type Adapter struct {
 	runner Runner
 
-	refresh    sync.Once
-	refreshErr error
+	refresh      sync.Once
+	refreshErr   error
+	resolutionMu sync.Mutex
+	resolutions  map[[16]byte]resolutionState
+}
+
+// Resolution is an unforgeable, adapter-bound capability for one freshly
+// simulated APT removal conflict. Its fields are intentionally private.
+type Resolution struct {
+	adapter *Adapter
+	token   [16]byte
+}
+
+type ErrNoResolutionConflict struct{ Package string }
+
+func (e *ErrNoResolutionConflict) Error() string {
+	return fmt.Sprintf("apt: removal of %q has no unmanaged blockers", e.Package)
+}
+
+type resolutionState struct {
+	operation model.Operation
+	changes   provider.ChangeSet
+	blockers  []string
+	executing bool
+	executed  bool
 }
 
 func New(aptGetPath, dpkgQueryPath string, runner Runner) (*Adapter, error) {
@@ -52,7 +77,7 @@ func New(aptGetPath, dpkgQueryPath string, runner Runner) (*Adapter, error) {
 	if isNilInterface(runner) {
 		return nil, errors.New("apt: runner is required")
 	}
-	return &Adapter{runner: runner}, nil
+	return &Adapter{runner: runner, resolutions: make(map[[16]byte]resolutionState)}, nil
 }
 
 func (a *Adapter) Name() string { return "apt" }
@@ -134,6 +159,240 @@ func (a *Adapter) Simulate(ctx context.Context, operation model.Operation) (prov
 		return provider.ChangeSet{}, err
 	}
 	return changes, nil
+}
+
+// PrepareResolution performs the provider-native simulation used only by an
+// explicit resolve command. Normal Simulate continues to reject unmanaged
+// removals.
+func (a *Adapter) PrepareResolution(ctx context.Context, operation model.Operation) (*Resolution, provider.ChangeSet, error) {
+	changes, err := a.simulateResolution(ctx, operation)
+	if err != nil {
+		return nil, provider.ChangeSet{}, err
+	}
+	blockers := blockersFor(operation.Package, changes.Removes)
+	if len(blockers) == 0 {
+		return nil, provider.ChangeSet{}, &ErrNoResolutionConflict{Package: operation.Package}
+	}
+	capability := &Resolution{adapter: a}
+	if _, err := rand.Read(capability.token[:]); err != nil {
+		return nil, provider.ChangeSet{}, fmt.Errorf("apt: mint resolution capability: %w", err)
+	}
+	a.resolutionMu.Lock()
+	defer a.resolutionMu.Unlock()
+	if _, duplicate := a.resolutions[capability.token]; duplicate {
+		return nil, provider.ChangeSet{}, errors.New("apt: duplicate resolution capability")
+	}
+	a.resolutions[capability.token] = resolutionState{operation: operation, changes: cloneChangeSet(changes), blockers: append([]string(nil), blockers...)}
+	return capability, cloneChangeSet(changes), nil
+}
+
+func (a *Adapter) ExecuteResolution(ctx context.Context, capability *Resolution, confirmed []string) (retErr error) {
+	state, err := a.claimResolutionForExecution(capability)
+	if err != nil {
+		return err
+	}
+	revoke := true
+	defer func() {
+		if revoke {
+			a.revokeResolution(capability)
+		}
+	}()
+	if !exactStrings(confirmed, state.blockers) {
+		return errors.New("apt: confirmed blockers do not match prepared simulation")
+	}
+	fresh, err := a.simulateResolution(ctx, state.operation)
+	if err != nil {
+		return err
+	}
+	if !equalChangeSets(fresh, state.changes) {
+		return errors.New("apt: removal simulation changed after confirmation")
+	}
+	blockerChanges, err := a.simulateRemovalTargets(ctx, state.blockers)
+	if err != nil {
+		return err
+	}
+	if len(blockerChanges.Installs) != 0 || len(blockerChanges.Upgrades) != 0 || !exactStrings(blockerChanges.Removes, state.blockers) {
+		return errors.New("apt: blocker-only simulation proposed additional mutations")
+	}
+	args := []string{"remove", "-y", "--"}
+	args = append(args, state.blockers...)
+	if _, err := a.runner.Run(ctx, aptGetRequest(args, true)); err != nil {
+		return fmt.Errorf("apt: execute confirmed removal for %q: %w", state.operation.Package, err)
+	}
+	state.executed = true
+	state.executing = false
+	a.resolutionMu.Lock()
+	if _, live := a.resolutions[capability.token]; !live {
+		a.resolutionMu.Unlock()
+		return errors.New("apt: resolution capability was revoked during execution")
+	}
+	a.resolutions[capability.token] = state
+	a.resolutionMu.Unlock()
+	revoke = false
+	return nil
+}
+
+func (a *Adapter) VerifyResolutionAbsent(ctx context.Context, capability *Resolution) (retErr error) {
+	state, err := a.claimExecutedResolution(capability)
+	if err != nil {
+		return err
+	}
+	defer a.revokeResolution(capability)
+	for _, pkg := range state.blockers {
+		_, present, err := a.queryRecord(ctx, pkg)
+		if err != nil {
+			return fmt.Errorf("apt: verify confirmed removal %q: %w", pkg, err)
+		}
+		if present {
+			return fmt.Errorf("apt: confirmed removal %q remains installed", pkg)
+		}
+	}
+	return nil
+}
+
+func (a *Adapter) CancelResolution(capability *Resolution) error {
+	if capability == nil || capability.adapter != a {
+		return errors.New("apt: resolution capability belongs to another adapter")
+	}
+	a.revokeResolution(capability)
+	return nil
+}
+
+func (a *Adapter) simulateResolution(ctx context.Context, operation model.Operation) (provider.ChangeSet, error) {
+	if err := validateOperation(operation); err != nil {
+		return provider.ChangeSet{}, err
+	}
+	if operation.Kind != model.OperationPrune {
+		return provider.ChangeSet{}, fmt.Errorf("apt: resolution requires prune operation, got %q", operation.Kind)
+	}
+	changes, err := a.simulateRemovalTargets(ctx, []string{operation.Package})
+	if err != nil {
+		return provider.ChangeSet{}, err
+	}
+	if len(changes.Installs) != 0 || len(changes.Upgrades) != 0 || !contains(changes.Removes, operation.Package) {
+		return provider.ChangeSet{}, errors.New("apt: resolution simulation is not a pure target removal")
+	}
+	return changes, nil
+}
+
+func (a *Adapter) simulateRemovalTargets(ctx context.Context, targets []string) (provider.ChangeSet, error) {
+	if len(targets) == 0 {
+		return provider.ChangeSet{}, errors.New("apt: resolution removal target is empty")
+	}
+	for _, target := range targets {
+		if !binaryPackagePattern.MatchString(target) {
+			return provider.ChangeSet{}, fmt.Errorf("apt: unsafe resolution package token %q", target)
+		}
+	}
+	args := []string{"-s", "remove", "--"}
+	args = append(args, targets...)
+	result, err := a.runner.Run(ctx, aptGetRequest(args, false))
+	if err != nil {
+		return provider.ChangeSet{}, fmt.Errorf("apt: simulate resolution removal: %w", err)
+	}
+	changes, err := parsePlan(result.Stdout, targets[0])
+	if err != nil {
+		return provider.ChangeSet{}, fmt.Errorf("apt: parse resolution simulation: %w", err)
+	}
+	for _, pkg := range changes.Removes {
+		record, present, err := a.queryRecord(ctx, pkg)
+		if err != nil {
+			return provider.ChangeSet{}, err
+		}
+		if present && record.essential {
+			return provider.ChangeSet{}, fmt.Errorf("apt: refusing plan containing Essential package %q", pkg)
+		}
+	}
+	return changes, nil
+}
+
+func (a *Adapter) claimResolutionForExecution(capability *Resolution) (resolutionState, error) {
+	if capability == nil || capability.adapter != a {
+		return resolutionState{}, errors.New("apt: invalid resolution capability")
+	}
+	a.resolutionMu.Lock()
+	defer a.resolutionMu.Unlock()
+	state, ok := a.resolutions[capability.token]
+	if !ok || state.executed || state.executing {
+		return resolutionState{}, errors.New("apt: resolution capability is consumed or in the wrong phase")
+	}
+	state.executing = true
+	a.resolutions[capability.token] = state
+	return state, nil
+}
+
+func (a *Adapter) claimExecutedResolution(capability *Resolution) (resolutionState, error) {
+	if capability == nil || capability.adapter != a {
+		return resolutionState{}, errors.New("apt: invalid resolution capability")
+	}
+	a.resolutionMu.Lock()
+	defer a.resolutionMu.Unlock()
+	state, ok := a.resolutions[capability.token]
+	if !ok || !state.executed || state.executing {
+		return resolutionState{}, errors.New("apt: resolution capability is consumed or in the wrong phase")
+	}
+	return state, nil
+}
+
+func (a *Adapter) revokeResolution(capability *Resolution) {
+	if capability == nil || capability.adapter != a {
+		return
+	}
+	a.resolutionMu.Lock()
+	delete(a.resolutions, capability.token)
+	a.resolutionMu.Unlock()
+}
+
+func blockersFor(target string, removals []string) []string {
+	blockers := make([]string, 0, len(removals))
+	for _, pkg := range removals {
+		if pkg != target {
+			blockers = append(blockers, pkg)
+		}
+	}
+	sort.Strings(blockers)
+	return blockers
+}
+
+func contains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func exactStrings(actual, expected []string) bool {
+	if len(actual) != len(expected) {
+		return false
+	}
+	copyActual := append([]string(nil), actual...)
+	sort.Strings(copyActual)
+	for index := range copyActual {
+		if copyActual[index] != expected[index] || (index > 0 && copyActual[index] == copyActual[index-1]) {
+			return false
+		}
+	}
+	return true
+}
+
+func equalChangeSets(left, right provider.ChangeSet) bool {
+	return exactSet(left.Installs, right.Installs) && exactSet(left.Upgrades, right.Upgrades) && exactSet(left.Removes, right.Removes)
+}
+
+func exactSet(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	l, r := append([]string(nil), left...), append([]string(nil), right...)
+	sort.Strings(l)
+	sort.Strings(r)
+	return reflect.DeepEqual(l, r)
+}
+
+func cloneChangeSet(changes provider.ChangeSet) provider.ChangeSet {
+	return provider.ChangeSet{Installs: append([]string(nil), changes.Installs...), Upgrades: append([]string(nil), changes.Upgrades...), Removes: append([]string(nil), changes.Removes...)}
 }
 
 func (a *Adapter) Execute(ctx context.Context, operation model.Operation) error {

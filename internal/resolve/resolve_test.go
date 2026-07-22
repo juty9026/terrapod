@@ -13,6 +13,7 @@ import (
 	"github.com/juty9026/terrapod/internal/model"
 	"github.com/juty9026/terrapod/internal/provider"
 	"github.com/juty9026/terrapod/internal/reconcile"
+	"github.com/juty9026/terrapod/internal/state"
 )
 
 func TestResolveRejectsUnknownAndNonBlockedResource(t *testing.T) {
@@ -154,7 +155,7 @@ func TestResolveRejectsRootAndInvalidStableIDBeforePreparing(t *testing.T) {
 }
 
 type fakeBackend struct {
-	attempt        Attempt
+	details        attemptDetails
 	prepareErr     error
 	verifyErr      error
 	prepareCalls   int
@@ -170,18 +171,19 @@ func blockedBackend() *fakeBackend {
 	item := model.Resource{ID: "core.alpha", Type: model.ResourcePackage, Provider: "fixture", Package: "alpha", VersionPolicy: model.VersionTracked}
 	operation := model.Operation{ID: "transfer-alpha", ResourceID: item.ID, Kind: model.OperationTransfer, Provider: item.Provider, Package: item.Package, Removes: []string{"legacy-alpha"}, RequiresPrivilege: true}
 	input := reconcile.ApplyInput{Plan: model.Plan{ID: "plan", Operations: []model.Operation{operation}}, CurrentResources: []model.Resource{item}, EnabledIDs: []model.ResourceID{item.ID}, CatalogDigest: "signed-digest", Profile: model.ProfileVPSShell}
-	return &fakeBackend{attempt: Attempt{Input: input, Operation: operation, Changes: provider.ChangeSet{Installs: []string{"alpha"}, Removes: []string{"dependent-z", "legacy-alpha", "dependent-a", "dependent-z"}}}}
+	return &fakeBackend{details: attemptDetails{input: input, operation: operation, changes: provider.ChangeSet{Installs: []string{"alpha"}, Removes: []string{"dependent-z", "legacy-alpha", "dependent-a", "dependent-z"}}}}
 }
 
-func (f *fakeBackend) Prepare(_ context.Context, _ model.ResourceID) (Attempt, error) {
+func (f *fakeBackend) Prepare(_ context.Context, _ model.ResourceID, _ *state.Lock) (Attempt, error) {
 	f.prepareCalls++
 	f.events = append(f.events, "prepare")
 	if f.onPrepare != nil {
 		f.onPrepare()
 	}
-	return f.attempt, f.prepareErr
+	return Attempt{issuer: f, token: [16]byte{1}}, f.prepareErr
 }
-func (f *fakeBackend) AcquirePrivilege(context.Context) error {
+func (f *fakeBackend) Describe(Attempt) (attemptDetails, error) { return f.details, nil }
+func (f *fakeBackend) AcquirePrivilege(context.Context, Attempt) error {
 	f.events = append(f.events, "privilege")
 	return nil
 }
@@ -198,7 +200,7 @@ func (f *fakeBackend) VerifyBlockersAbsent(_ context.Context, _ Attempt, _ []str
 	f.events = append(f.events, "verify")
 	return f.verifyErr
 }
-func (f *fakeBackend) Reconcile(_ context.Context, _ Attempt) (reconcile.Summary, error) {
+func (f *fakeBackend) Reconcile(_ context.Context, _ Attempt, _ *state.Lock) (reconcile.Summary, error) {
 	f.reconcileCalls++
 	f.events = append(f.events, "reconcile")
 	return reconcile.Summary{Ready: []model.ResourceID{"core.alpha"}, Unavailable: map[model.ResourceID]string{}}, nil

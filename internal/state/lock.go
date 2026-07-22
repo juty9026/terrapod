@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -27,10 +28,12 @@ type lockOwner struct {
 }
 
 type Lock struct {
-	root  *os.Root
-	owner lockOwner
-	mu    sync.Mutex
-	done  bool
+	root     *os.Root
+	rootInfo os.FileInfo
+	dir      string
+	owner    lockOwner
+	mu       sync.Mutex
+	done     bool
 }
 
 func Acquire(dir, command string) (*Lock, error) {
@@ -38,6 +41,11 @@ func Acquire(dir, command string) (*Lock, error) {
 }
 
 func acquireStateLock(dir, command string, staleObserved func()) (*Lock, error) {
+	absoluteDir, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve lock directory: %w", err)
+	}
+	dir = filepath.Clean(absoluteDir)
 	if err := validateCommandLabel(command); err != nil {
 		return nil, err
 	}
@@ -61,6 +69,10 @@ func acquireStateLock(dir, command string, staleObserved func()) (*Lock, error) 
 	}
 	lock, err := createLock(root, owner)
 	if err == nil {
+		if err := bindLockDirectory(lock, dir); err != nil {
+			_ = lock.Release()
+			return nil, err
+		}
 		keepRoot = true
 		return lock, nil
 	}
@@ -92,8 +104,57 @@ func acquireStateLock(dir, command string, staleObserved func()) (*Lock, error) 
 	if err != nil {
 		return nil, fmt.Errorf("acquire lock after stale recovery: %w", err)
 	}
+	if err := bindLockDirectory(lock, dir); err != nil {
+		_ = lock.Release()
+		return nil, err
+	}
 	keepRoot = true
 	return lock, nil
+}
+
+func bindLockDirectory(lock *Lock, dir string) error {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return fmt.Errorf("inspect lock directory identity: %w", err)
+	}
+	lock.dir = dir
+	lock.rootInfo = info
+	return nil
+}
+
+// ValidateHeld proves that this live, unforgeable lock still owns the exact
+// lock directory. Callers may safely reuse it instead of acquiring again.
+func (l *Lock) ValidateHeld(dir string) error {
+	if l == nil {
+		return errors.New("state: held lock is nil")
+	}
+	absoluteDir, err := filepath.Abs(dir)
+	if err != nil {
+		return fmt.Errorf("state: resolve held lock directory: %w", err)
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.done || l.root == nil || l.rootInfo == nil {
+		return errors.New("state: held lock is released")
+	}
+	if filepath.Clean(absoluteDir) != l.dir {
+		return errors.New("state: held lock belongs to a different directory")
+	}
+	currentRoot, err := os.Stat(l.dir)
+	if err != nil || !os.SameFile(l.rootInfo, currentRoot) {
+		return errors.New("state: held lock directory identity changed")
+	}
+	if err := requireRootDirectory(l.root, "lock"); err != nil {
+		return fmt.Errorf("state: held lock directory is unsafe: %w", err)
+	}
+	owner, err := readLockOwner(l.root, "lock/owner.json")
+	if err != nil {
+		return fmt.Errorf("state: read held lock owner: %w", err)
+	}
+	if owner.PID != l.owner.PID || owner.Command != l.owner.Command || owner.Nonce != l.owner.Nonce || !owner.StartedAt.Equal(l.owner.StartedAt) {
+		return errors.New("state: held lock ownership changed")
+	}
+	return nil
 }
 
 func (l *Lock) Release() error {

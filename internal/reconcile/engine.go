@@ -68,14 +68,35 @@ type Engine struct {
 }
 
 func (e *Engine) ApplyInput(ctx context.Context, input ApplyInput) (Summary, error) {
+	copyEngine, err := e.withInput(input)
+	if err != nil {
+		return Summary{}, err
+	}
+	return copyEngine.apply(ctx, input.Plan, nil)
+}
+
+// ApplyInputHeld runs the ordinary reconciliation invariants while reusing an
+// exact live state lock held by a higher-level transaction such as resolve.
+func (e *Engine) ApplyInputHeld(ctx context.Context, input ApplyInput, lock *state.Lock) (Summary, error) {
+	if lock == nil {
+		return Summary{}, errors.New("reconcile: held state lock is required")
+	}
+	copyEngine, err := e.withInput(input)
+	if err != nil {
+		return Summary{}, err
+	}
+	return copyEngine.apply(ctx, input.Plan, lock)
+}
+
+func (e *Engine) withInput(input ApplyInput) (*Engine, error) {
 	if !input.Profile.Supported() {
-		return Summary{}, fmt.Errorf("reconcile: unsupported active profile %q", input.Profile)
+		return nil, fmt.Errorf("reconcile: unsupported active profile %q", input.Profile)
 	}
 	copyEngine := *e
 	copyEngine.Resources = make(map[model.ResourceID]model.Resource, len(input.CurrentResources)+len(input.HistoricalResources))
 	for _, item := range input.CurrentResources {
 		if _, duplicate := copyEngine.Resources[item.ID]; duplicate {
-			return Summary{}, fmt.Errorf("reconcile: duplicate current resource %q", item.ID)
+			return nil, fmt.Errorf("reconcile: duplicate current resource %q", item.ID)
 		}
 		copyEngine.Resources[item.ID] = item
 	}
@@ -87,20 +108,24 @@ func (e *Engine) ApplyInput(ctx context.Context, input ApplyInput) (Summary, err
 	}
 	for id, historical := range input.HistoricalResources {
 		if historical.Resource.ID != id {
-			return Summary{}, fmt.Errorf("reconcile: historical resource index mismatch for %q", id)
+			return nil, fmt.Errorf("reconcile: historical resource index mismatch for %q", id)
 		}
 		if _, current := enabled[id]; current {
-			return Summary{}, fmt.Errorf("reconcile: enabled resource %q also supplied as historical", id)
+			return nil, fmt.Errorf("reconcile: enabled resource %q also supplied as historical", id)
 		}
 		copyEngine.Resources[id] = historical.Resource
 		copyEngine.ResourceDigests[id] = historical.CatalogDigest
 	}
 	copyEngine.CatalogDigest = input.CatalogDigest
 	copyEngine.Profile = input.Profile
-	return copyEngine.Apply(ctx, input.Plan)
+	return &copyEngine, nil
 }
 
 func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, retErr error) {
+	return e.apply(ctx, plan, nil)
+}
+
+func (e *Engine) apply(ctx context.Context, plan model.Plan, held *state.Lock) (summary Summary, retErr error) {
 	summary.Unavailable = cloneUnavailable(plan.Unavailable)
 	if plan.ID == "" {
 		return summary, errors.New("reconcile: plan ID is empty")
@@ -132,11 +157,17 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 			return summary, fmt.Errorf("reconcile: enabled resource %q is not signed", id)
 		}
 	}
-	lock, err := state.Acquire(e.LockDir, "tpod apply")
-	if err != nil {
-		return summary, fmt.Errorf("reconcile: acquire state lock: %w", err)
+	lock := held
+	if lock == nil {
+		var err error
+		lock, err = state.Acquire(e.LockDir, "tpod apply")
+		if err != nil {
+			return summary, fmt.Errorf("reconcile: acquire state lock: %w", err)
+		}
+		defer func() { retErr = errors.Join(retErr, lock.Release()) }()
+	} else if err := lock.ValidateHeld(e.LockDir); err != nil {
+		return summary, fmt.Errorf("reconcile: validate held state lock: %w", err)
 	}
-	defer func() { retErr = errors.Join(retErr, lock.Release()) }()
 	persisted, err := e.State.Snapshot()
 	if err != nil {
 		return summary, fmt.Errorf("reconcile: read locked snapshot: %w", err)

@@ -17,13 +17,17 @@ import (
 	"github.com/juty9026/terrapod/internal/state"
 )
 
-// Attempt is an opaque-by-convention capability prepared from a freshly
-// rebuilt signed plan and provider simulation while the state lock is held.
-// Backend implementations must bind all methods to this exact attempt.
+// Attempt is an opaque backend-bound capability prepared while the exact state
+// lock is held.
 type Attempt struct {
-	Input     reconcile.ApplyInput
-	Operation model.Operation
-	Changes   provider.ChangeSet
+	issuer Backend
+	token  [16]byte
+}
+
+type attemptDetails struct {
+	input     reconcile.ApplyInput
+	operation model.Operation
+	changes   provider.ChangeSet
 }
 
 // Backend owns the typed provider capabilities and reconciliation engine used
@@ -31,11 +35,12 @@ type Attempt struct {
 // all called while Resolver holds the exclusive state lock. Reconcile must use
 // the held-lock engine entry point rather than acquiring a second lock.
 type Backend interface {
-	Prepare(context.Context, model.ResourceID) (Attempt, error)
-	AcquirePrivilege(context.Context) error
+	Prepare(context.Context, model.ResourceID, *state.Lock) (Attempt, error)
+	Describe(Attempt) (attemptDetails, error)
+	AcquirePrivilege(context.Context, Attempt) error
 	RemoveBlockers(context.Context, Attempt, []string) error
 	VerifyBlockersAbsent(context.Context, Attempt, []string) error
-	Reconcile(context.Context, Attempt) (reconcile.Summary, error)
+	Reconcile(context.Context, Attempt, *state.Lock) (reconcile.Summary, error)
 	Cancel(Attempt) error
 }
 
@@ -88,16 +93,20 @@ func (r *Resolver) Resolve(ctx context.Context, id model.ResourceID, input io.Re
 	}
 	defer func() { retErr = errors.Join(retErr, lock.Release()) }()
 
-	attempt, err := r.Backend.Prepare(ctx, id)
+	attempt, err := r.Backend.Prepare(ctx, id, lock)
 	if err != nil {
 		return result, err
 	}
 	defer func() { retErr = errors.Join(retErr, r.Backend.Cancel(attempt)) }()
-	item, err := validateAttempt(id, attempt)
+	details, err := r.Backend.Describe(attempt)
 	if err != nil {
 		return result, err
 	}
-	blockers, err := unmanagedBlockers(item, attempt)
+	item, err := validateAttempt(id, details)
+	if err != nil {
+		return result, err
+	}
+	blockers, err := unmanagedBlockers(item, details)
 	if err != nil {
 		return result, err
 	}
@@ -118,8 +127,8 @@ func (r *Resolver) Resolve(ctx context.Context, id model.ResourceID, input io.Re
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
-	if attempt.Operation.RequiresPrivilege {
-		if err := r.Backend.AcquirePrivilege(ctx); err != nil {
+	if details.operation.RequiresPrivilege {
+		if err := r.Backend.AcquirePrivilege(ctx, attempt); err != nil {
 			return result, fmt.Errorf("resolve: acquire privilege: %w", err)
 		}
 	}
@@ -132,7 +141,7 @@ func (r *Resolver) Resolve(ctx context.Context, id model.ResourceID, input io.Re
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
-	result.Summary, err = r.Backend.Reconcile(ctx, attempt)
+	result.Summary, err = r.Backend.Reconcile(ctx, attempt, lock)
 	if err != nil {
 		return result, fmt.Errorf("resolve: reconcile %q: %w", id, err)
 	}
@@ -148,8 +157,8 @@ func validateID(id model.ResourceID) error {
 	return nil
 }
 
-func validateAttempt(id model.ResourceID, attempt Attempt) (model.Resource, error) {
-	input, operation := attempt.Input, attempt.Operation
+func validateAttempt(id model.ResourceID, details attemptDetails) (model.Resource, error) {
+	input, operation := details.input, details.operation
 	if input.CatalogDigest == "" || input.Plan.ID == "" || !input.Profile.Supported() {
 		return model.Resource{}, errors.New("resolve: prepared attempt lacks verified reconciliation input")
 	}
@@ -199,8 +208,8 @@ func validateAttempt(id model.ResourceID, attempt Attempt) (model.Resource, erro
 	return item, nil
 }
 
-func unmanagedBlockers(item model.Resource, attempt Attempt) ([]string, error) {
-	err := provider.ValidateChangeSet(attempt.Changes, item, attempt.Operation.Removes)
+func unmanagedBlockers(item model.Resource, details attemptDetails) ([]string, error) {
+	err := provider.ValidateChangeSet(details.changes, item, details.operation.Removes)
 	if err == nil {
 		return nil, nil
 	}

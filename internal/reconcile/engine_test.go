@@ -209,6 +209,58 @@ func TestApplyInputComposesCurrentAndHistoricalFacts(t *testing.T) {
 	}
 }
 
+func TestApplyInputHeldReusesExactLiveLockAndPreservesOwnership(t *testing.T) {
+	item := pkg("core.alpha", "fixture")
+	adapter := &fixtureAdapter{fail: map[string]bool{}}
+	engine, store := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
+	input := ApplyInput{Plan: model.Plan{ID: "held", Operations: []model.Operation{op(item, "install", model.OperationInstall)}}, CurrentResources: []model.Resource{item}, EnabledIDs: []model.ResourceID{item.ID}, HistoricalResources: map[model.ResourceID]HistoricalResource{}, CatalogDigest: "held-digest", Profile: model.ProfileVPSShell}
+	lock, err := state.Acquire(engine.LockDir, "tpod resolve core.alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Release()
+
+	summary, err := engine.ApplyInputHeld(context.Background(), input, lock)
+	if err != nil || len(summary.Ready) != 1 {
+		t.Fatalf("ApplyInputHeld = %#v, %v", summary, err)
+	}
+	snapshot, err := store.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Ownership[item.ID].CatalogDigest != "held-digest" || snapshot.ActiveJournal != nil {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+}
+
+func TestApplyInputHeldRejectsNilForeignAndReleasedLock(t *testing.T) {
+	item := pkg("core.alpha", "fixture")
+	adapter := &fixtureAdapter{fail: map[string]bool{}}
+	engine, _ := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
+	input := ApplyInput{Plan: model.Plan{ID: "held"}, CurrentResources: []model.Resource{item}, EnabledIDs: []model.ResourceID{item.ID}, CatalogDigest: "held-digest", Profile: model.ProfileVPSShell}
+	if _, err := engine.ApplyInputHeld(context.Background(), input, nil); err == nil {
+		t.Fatal("nil held lock accepted")
+	}
+	foreign, err := state.Acquire(t.TempDir(), "tpod resolve core.alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer foreign.Release()
+	if _, err := engine.ApplyInputHeld(context.Background(), input, foreign); err == nil {
+		t.Fatal("foreign held lock accepted")
+	}
+	released, err := state.Acquire(engine.LockDir, "tpod resolve core.alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := released.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.ApplyInputHeld(context.Background(), input, released); err == nil {
+		t.Fatal("released held lock accepted")
+	}
+}
+
 func TestApplyTransferControlsSafePhaseOrder(t *testing.T) {
 	item := transferPkg()
 	adapter := &fixtureAdapter{legacy: true, fail: map[string]bool{}}

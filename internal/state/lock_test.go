@@ -28,6 +28,53 @@ func TestAcquireRejectsLiveLock(t *testing.T) {
 	assertMode(t, filepath.Join(dir, "lock", "owner.json"), 0o600)
 }
 
+func TestLockValidateHeldRejectsNilForeignReleasedAndReplacedOwner(t *testing.T) {
+	dir := t.TempDir()
+	var nilLock *Lock
+	if err := nilLock.ValidateHeld(dir); err == nil {
+		t.Fatal("nil lock validated")
+	}
+	lock, err := Acquire(dir, "tpod resolve core.alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.ValidateHeld(dir); err != nil {
+		t.Fatalf("live exact lock rejected: %v", err)
+	}
+	if err := lock.ValidateHeld(t.TempDir()); err == nil {
+		t.Fatal("foreign lock directory validated")
+	}
+	ownerPath := filepath.Join(dir, "lock", "owner.json")
+	original, err := os.ReadFile(ownerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeOwnerContentsForValidation(t, ownerPath, lockOwner{PID: os.Getpid(), Command: "tpod resolve core.alpha", StartedAt: time.Now().UTC(), Nonce: "abcdefabcdefabcdefabcdefabcdefab"})
+	if err := lock.ValidateHeld(dir); err == nil {
+		t.Fatal("replaced owner validated")
+	}
+	if err := os.WriteFile(ownerPath, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.ValidateHeld(dir); err == nil {
+		t.Fatal("released lock validated")
+	}
+}
+
+func writeOwnerContentsForValidation(t *testing.T, path string, owner lockOwner) {
+	t.Helper()
+	contents, err := json.Marshal(owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAcquireRecoversStalePID(t *testing.T) {
 	dir := t.TempDir()
 	stale := lockOwner{

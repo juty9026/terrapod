@@ -185,6 +185,189 @@ func TestExecuteSimulatesImmediatelyBeforeTargetedMutation(t *testing.T) {
 	}
 }
 
+func TestResolutionCapabilityBindsFreshSimulationExecutesExactConfirmedSetAndVerifies(t *testing.T) {
+	installed := map[string]bool{"mise": true, "dependent-a": true, "dependent-z": true}
+	var calls []execx.Request
+	a := newAdapter(t, runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+		calls = append(calls, request)
+		if request.Path == AptGetPath {
+			if len(request.Args) > 0 && request.Args[0] == "-s" {
+				if reflect.DeepEqual(request.Args, []string{"-s", "remove", "--", "dependent-a", "dependent-z"}) {
+					return execx.Result{Stdout: []byte("Remv dependent-a [1]\nRemv dependent-z [1]\n0 upgraded, 0 newly installed, 2 to remove and 0 not upgraded.\n")}, nil
+				}
+				return execx.Result{Stdout: []byte("Remv mise [1]\nRemv dependent-z [1]\nRemv dependent-a [1]\n0 upgraded, 0 newly installed, 3 to remove and 0 not upgraded.\n")}, nil
+			}
+			want := []string{"remove", "-y", "--", "dependent-a", "dependent-z"}
+			if !reflect.DeepEqual(request.Args, want) {
+				t.Fatalf("execution args = %v, want %v", request.Args, want)
+			}
+			installed["dependent-a"], installed["dependent-z"] = false, false
+			return execx.Result{}, nil
+		}
+		pkg := request.Args[len(request.Args)-1]
+		if !installed[pkg] {
+			return execx.Result{}, exitError(t, 1)
+		}
+		return execx.Result{Stdout: []byte(pkg + "\tii \t1\tno\n")}, nil
+	}))
+	op := aptOperation(model.OperationPrune, "mise")
+	capability, changes, err := a.PrepareResolution(context.Background(), op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(changes.Removes, []string{"mise", "dependent-z", "dependent-a"}) {
+		t.Fatalf("changes = %#v", changes)
+	}
+	confirmed := []string{"dependent-a", "dependent-z"}
+	if err := a.ExecuteResolution(context.Background(), capability, confirmed); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.VerifyResolutionAbsent(context.Background(), capability); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ExecuteResolution(context.Background(), capability, confirmed); err == nil {
+		t.Fatal("consumed capability replayed")
+	}
+	for _, request := range calls {
+		joined := strings.Join(request.Args, " ")
+		if strings.Contains(joined, "autoremove") || strings.Contains(joined, "--force") {
+			t.Fatalf("unsafe resolution request: %#v", request)
+		}
+		if len(request.Args) > 0 && request.Args[0] == "-s" && request.Privilege {
+			t.Fatalf("resolution simulation requested privilege: %#v", request)
+		}
+	}
+}
+
+func TestResolutionCapabilityRefusesEssentialAndSimulationTOCTOU(t *testing.T) {
+	t.Run("essential", func(t *testing.T) {
+		mutated := false
+		a := newAdapter(t, runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+			if request.Path == AptGetPath {
+				if len(request.Args) > 0 && request.Args[0] != "-s" {
+					mutated = true
+				}
+				return execx.Result{Stdout: []byte("Remv mise [1]\nRemv init [1]\n0 upgraded, 0 newly installed, 2 to remove and 0 not upgraded.\n")}, nil
+			}
+			pkg := request.Args[len(request.Args)-1]
+			essential := "no"
+			if pkg == "init" {
+				essential = "yes"
+			}
+			return execx.Result{Stdout: []byte(pkg + "\tii \t1\t" + essential + "\n")}, nil
+		}))
+		if _, _, err := a.PrepareResolution(context.Background(), aptOperation(model.OperationPrune, "mise")); err == nil || !strings.Contains(err.Error(), "Essential") {
+			t.Fatalf("PrepareResolution error = %v", err)
+		}
+		if mutated {
+			t.Fatal("essential plan mutated")
+		}
+	})
+
+	t.Run("changed simulation", func(t *testing.T) {
+		simulations := 0
+		mutated := false
+		a := newAdapter(t, runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+			if request.Path == DpkgQueryPath {
+				pkg := request.Args[len(request.Args)-1]
+				return execx.Result{Stdout: []byte(pkg + "\tii \t1\tno\n")}, nil
+			}
+			if request.Args[0] == "-s" {
+				simulations++
+				dependent := "dependent-a"
+				if simulations == 2 {
+					dependent = "dependent-b"
+				}
+				return execx.Result{Stdout: []byte("Remv mise [1]\nRemv " + dependent + " [1]\n0 upgraded, 0 newly installed, 2 to remove and 0 not upgraded.\n")}, nil
+			}
+			mutated = true
+			return execx.Result{}, nil
+		}))
+		capability, _, err := a.PrepareResolution(context.Background(), aptOperation(model.OperationPrune, "mise"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := a.ExecuteResolution(context.Background(), capability, []string{"dependent-a"}); err == nil || !strings.Contains(err.Error(), "changed") {
+			t.Fatalf("ExecuteResolution error = %v", err)
+		}
+		if mutated {
+			t.Fatal("changed simulation mutated")
+		}
+		if err := a.ExecuteResolution(context.Background(), capability, []string{"dependent-a"}); err == nil {
+			t.Fatal("failed capability replayed")
+		}
+	})
+}
+
+func TestResolutionCapabilityRejectsWrongConfirmationAndCancelRevokes(t *testing.T) {
+	a := newAdapter(t, runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+		if request.Path == DpkgQueryPath {
+			pkg := request.Args[len(request.Args)-1]
+			return execx.Result{Stdout: []byte(pkg + "\tii \t1\tno\n")}, nil
+		}
+		return execx.Result{Stdout: []byte("Remv mise [1]\nRemv dependent-a [1]\n0 upgraded, 0 newly installed, 2 to remove and 0 not upgraded.\n")}, nil
+	}))
+	capability, _, err := a.PrepareResolution(context.Background(), aptOperation(model.OperationPrune, "mise"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ExecuteResolution(context.Background(), capability, []string{"different"}); err == nil {
+		t.Fatal("wrong confirmation accepted")
+	}
+	if err := a.ExecuteResolution(context.Background(), capability, []string{"dependent-a"}); err == nil {
+		t.Fatal("failed confirmation capability replayed")
+	}
+	second, _, err := a.PrepareResolution(context.Background(), aptOperation(model.OperationPrune, "mise"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.CancelResolution(second); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ExecuteResolution(context.Background(), second, []string{"dependent-a"}); err == nil {
+		t.Fatal("canceled capability executed")
+	}
+}
+
+func TestPrepareResolutionReturnsTypedNoConflict(t *testing.T) {
+	a := newAdapter(t, runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+		if request.Path == DpkgQueryPath {
+			return execx.Result{Stdout: []byte("mise\tii \t1\tno\n")}, nil
+		}
+		return execx.Result{Stdout: []byte("Remv mise [1]\n0 upgraded, 0 newly installed, 1 to remove and 0 not upgraded.\n")}, nil
+	}))
+	_, _, err := a.PrepareResolution(context.Background(), aptOperation(model.OperationPrune, "mise"))
+	var noConflict *ErrNoResolutionConflict
+	if !errors.As(err, &noConflict) || noConflict.Package != "mise" {
+		t.Fatalf("PrepareResolution error = %v", err)
+	}
+}
+
+func TestResolutionCapabilityRejectsBlockerOnlyPlanThatAlsoRemovesLegacyRoot(t *testing.T) {
+	mutated := false
+	a := newAdapter(t, runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+		if request.Path == DpkgQueryPath {
+			pkg := request.Args[len(request.Args)-1]
+			return execx.Result{Stdout: []byte(pkg + "\tii \t1\tno\n")}, nil
+		}
+		if request.Args[0] != "-s" {
+			mutated = true
+			return execx.Result{}, nil
+		}
+		return execx.Result{Stdout: []byte("Remv mise [1]\nRemv dependent-a [1]\n0 upgraded, 0 newly installed, 2 to remove and 0 not upgraded.\n")}, nil
+	}))
+	capability, _, err := a.PrepareResolution(context.Background(), aptOperation(model.OperationPrune, "mise"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ExecuteResolution(context.Background(), capability, []string{"dependent-a"}); err == nil || !strings.Contains(err.Error(), "additional") {
+		t.Fatalf("ExecuteResolution error = %v", err)
+	}
+	if mutated {
+		t.Fatal("unsafe blocker-only plan mutated")
+	}
+}
+
 func TestRefreshMetadataCachesConcurrentSuccessAndError(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		t.Run(map[bool]string{false: "success", true: "error"}[fail], func(t *testing.T) {
