@@ -1,10 +1,12 @@
 package gitcheckout
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -65,6 +67,18 @@ type stagingRecord struct {
 
 var afterSnapshotValidated func()
 var beforeGitMetadataCommit func() error
+var beforeStagingQuarantine func(string)
+var afterMetadataOldRename func() error
+var afterMetadataNewRename func() error
+
+type metadataIntent struct {
+	Token, OldDigest, NewDigest string
+}
+
+type metadataPendingError struct{ err error }
+
+func (e metadataPendingError) Error() string { return e.err.Error() }
+func (e metadataPendingError) Unwrap() error { return e.err }
 
 type declaration struct {
 	remote, ref, commit, destination string
@@ -326,6 +340,9 @@ func (a *Adapter) execute(ctx context.Context, item model.Resource, op model.Ope
 	}
 	if len(op.Removes) != 0 {
 		return errors.New("git-checkout: non-prune operation cannot remove packages")
+	}
+	if err := a.recoverMetadataTransaction(d); err != nil {
+		return err
 	}
 	current, err := a.inspect(ctx, d) // close the plan/apply race
 	if err != nil {
@@ -600,38 +617,19 @@ func (a *Adapter) inspect(ctx context.Context, d declaration) (checkout, error) 
 	return current, nil
 }
 
-func (a *Adapter) git(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	home, relative, directoryInfo, err := a.validatedGitDir(dir)
-	if err != nil {
-		return nil, err
+func (a *Adapter) gitPrivate(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	info, err := os.Lstat(dir)
+	if err != nil || !info.IsDir() {
+		return nil, errors.New("git-checkout: private Git worktree is unavailable")
 	}
-	defer home.close()
 	common := []string{"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "credential.helper=", "-c", "protocol.file.allow=never", "-c", "protocol.ext.allow=never", "-c", "submodule.recurse=false"}
-	request := execx.Request{
-		Path: a.Git,
-		Dir:  dir,
-		Args: append(common, args...),
-		Env: map[string]string{
-			"GIT_ATTR_NOSYSTEM":   "1",
-			"GIT_CONFIG_GLOBAL":   "/dev/null",
-			"GIT_CONFIG_NOSYSTEM": "1",
-			"GIT_TERMINAL_PROMPT": "0",
-		},
-	}
-	_ = relative
-	result, err := a.Runner.Run(ctx, request)
+	result, err := a.Runner.Run(ctx, execx.Request{Path: a.Git, Dir: dir, Args: append(common, args...), Env: gitEnvironment()})
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(result.Stderr)))
 	}
-	if err := home.verify(); err != nil {
-		return nil, err
-	}
-	if _, err := home.validateDirectory(relative, false); err != nil {
-		return nil, err
-	}
-	current, err := home.root.Lstat(relative)
-	if err != nil || current.Mode() != directoryInfo.Mode() || !os.SameFile(current, directoryInfo) {
-		return nil, errors.New("git-checkout: Git directory inode changed during command")
+	current, statErr := os.Lstat(dir)
+	if statErr != nil || current.Mode() != info.Mode() || !os.SameFile(current, info) {
+		return nil, errors.New("git-checkout: private Git worktree identity changed")
 	}
 	return result.Stdout, nil
 }
@@ -641,7 +639,12 @@ type gitSnapshot struct {
 	decl    declaration
 	path    string
 	info    os.FileInfo
-	source  map[string]os.FileInfo
+	source  map[string]snapshotEntry
+}
+
+type snapshotEntry struct {
+	info   os.FileInfo
+	digest [sha256.Size]byte
 }
 
 func (a *Adapter) snapshotGitDir(d declaration) (*gitSnapshot, error) {
@@ -667,7 +670,7 @@ func (a *Adapter) snapshotGitDir(d declaration) (*gitSnapshot, error) {
 		_ = os.RemoveAll(temporary)
 		return nil, err
 	}
-	snapshot := &gitSnapshot{adapter: a, decl: d, path: temporary, source: map[string]os.FileInfo{}}
+	snapshot := &gitSnapshot{adapter: a, decl: d, path: temporary, source: map[string]snapshotEntry{}}
 	snapshot.info, err = os.Lstat(temporary)
 	if err != nil {
 		snapshot.cleanup()
@@ -684,12 +687,13 @@ func (a *Adapter) snapshotGitDir(d declaration) (*gitSnapshot, error) {
 		if info.Mode()&os.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular()) {
 			return fmt.Errorf("git-checkout: unsafe .git snapshot source %s", path)
 		}
-		snapshot.source[path] = info
 		if path == "." {
+			snapshot.source[path] = snapshotEntry{info: info}
 			return nil
 		}
 		destination := filepath.Join(temporary, path)
 		if info.IsDir() {
+			snapshot.source[path] = snapshotEntry{info: info}
 			return os.Mkdir(destination, info.Mode().Perm())
 		}
 		input, err := sourceRoot.OpenFile(path, os.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
@@ -701,8 +705,12 @@ func (a *Adapter) snapshotGitDir(d declaration) (*gitSnapshot, error) {
 			input.Close()
 			return err
 		}
-		_, copyErr := io.Copy(output, input)
+		digest := sha256.New()
+		_, copyErr := io.Copy(io.MultiWriter(output, digest), input)
 		syncErr := output.Sync()
+		var sum [sha256.Size]byte
+		copy(sum[:], digest.Sum(nil))
+		snapshot.source[path] = snapshotEntry{info: info, digest: sum}
 		return errors.Join(copyErr, syncErr, input.Close(), output.Close())
 	})
 	if err != nil {
@@ -748,8 +756,20 @@ func (s *gitSnapshot) verifySource() error {
 		if err != nil {
 			return err
 		}
-		if current.Mode() != expected.Mode() || !os.SameFile(current, expected) {
+		if current.Mode() != expected.info.Mode() || current.Size() != expected.info.Size() || !os.SameFile(current, expected.info) {
 			return errors.New("git-checkout: original .git inode changed after snapshot")
+		}
+		if current.Mode().IsRegular() {
+			file, err := root.OpenFile(path, os.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+			if err != nil {
+				return err
+			}
+			digest := sha256.New()
+			_, copyErr := io.Copy(digest, file)
+			closeErr := file.Close()
+			if copyErr != nil || closeErr != nil || !bytes.Equal(digest.Sum(nil), expected.digest[:]) {
+				return errors.New("git-checkout: original .git content changed after snapshot")
+			}
 		}
 		seen++
 		return nil
@@ -829,7 +849,14 @@ func (a *Adapter) materializeGitSnapshot(d declaration, snapshot *gitSnapshot) (
 	}
 	a.staging[cap.token] = stagingRecord{path: cap.path, info: info}
 	a.mu.Unlock()
-	if err := copyPhysicalTreeToRoot(snapshot.path, home.root, cap.path); err != nil {
+	stagingRoot, err := home.root.OpenRoot(cap.path)
+	if err != nil {
+		_ = a.removeStaging(cap)
+		return cap, err
+	}
+	copyErr := copyPhysicalTreeToRoot(snapshot.path, stagingRoot, ".")
+	closeErr := stagingRoot.Close()
+	if err := errors.Join(copyErr, closeErr); err != nil {
 		_ = a.removeStaging(cap)
 		return cap, err
 	}
@@ -840,9 +867,6 @@ func (a *Adapter) materializeGitSnapshot(d declaration, snapshot *gitSnapshot) (
 }
 
 func (a *Adapter) commitGitSnapshot(d declaration, snapshot *gitSnapshot, cap stagingCapability) error {
-	if err := a.verifyStaging(cap); err != nil {
-		return err
-	}
 	if err := snapshot.verifySource(); err != nil {
 		return err
 	}
@@ -853,27 +877,77 @@ func (a *Adapter) commitGitSnapshot(d declaration, snapshot *gitSnapshot, cap st
 	defer home.close()
 	destination := filepath.FromSlash(d.destination)
 	gitPath := filepath.Join(destination, ".git")
-	current, err := home.root.Lstat(gitPath)
-	expected := snapshot.source["."]
-	if err != nil || current.Mode() != expected.Mode() || !os.SameFile(current, expected) {
-		return errors.New("git-checkout: original .git inode changed before metadata commit")
-	}
 	oldPath := filepath.Join(destination, ".git.tpod-old-"+cap.token)
-	if _, err := home.root.Lstat(oldPath); !errors.Is(err, os.ErrNotExist) {
-		return errors.New("git-checkout: metadata recovery path already exists")
+	intentPath := filepath.Join(destination, ".git.tpod-transaction.json")
+	newPath, err := a.quarantineStaging(home, cap)
+	if err != nil {
+		return err
+	}
+	transactionStarted := false
+	defer func() {
+		if !transactionStarted {
+			_ = home.root.Rename(newPath, cap.path)
+		}
+	}()
+	oldDigest, err := digestRootTree(home.root, gitPath)
+	if err != nil {
+		return err
+	}
+	newDigest, err := digestRootTree(home.root, newPath)
+	if err != nil {
+		return err
+	}
+	intent := metadataIntent{Token: cap.token, OldDigest: oldDigest, NewDigest: newDigest}
+	if err := writeMetadataIntent(home.root, intentPath, intent); err != nil {
+		return err
+	}
+	transactionStarted = true
+	if err := syncRootDirectory(home.root, destination); err != nil {
+		return metadataPendingError{err}
 	}
 	if err := home.root.Rename(gitPath, oldPath); err != nil {
 		return err
 	}
-	if err := home.root.Rename(cap.path, gitPath); err != nil {
+	if digest, err := digestRootTree(home.root, oldPath); err != nil || digest != oldDigest {
 		_ = home.root.Rename(oldPath, gitPath)
-		return err
+		_ = home.root.Remove(intentPath)
+		transactionStarted = false
+		return errors.New("git-checkout: original .git changed during metadata quarantine")
+	}
+	if err := syncRootDirectory(home.root, destination); err != nil {
+		return metadataPendingError{err}
+	}
+	if afterMetadataOldRename != nil {
+		if err := afterMetadataOldRename(); err != nil {
+			return metadataPendingError{err}
+		}
+	}
+	if err := home.root.Rename(newPath, gitPath); err != nil {
+		return metadataPendingError{err}
+	}
+	if digest, err := digestRootTree(home.root, gitPath); err != nil || digest != newDigest {
+		_ = home.root.Rename(gitPath, newPath)
+		_ = home.root.Rename(oldPath, gitPath)
+		_ = home.root.Remove(intentPath)
+		transactionStarted = false
+		return errors.New("git-checkout: new .git changed during metadata commit")
 	}
 	a.mu.Lock()
 	delete(a.staging, cap.token)
 	a.mu.Unlock()
-	if err := home.root.RemoveAll(oldPath); err != nil {
-		return err
+	if err := syncRootDirectory(home.root, destination); err != nil {
+		return metadataPendingError{err}
+	}
+	if afterMetadataNewRename != nil {
+		if err := afterMetadataNewRename(); err != nil {
+			return metadataPendingError{err}
+		}
+	}
+	if err := removeTreeByDigest(home.root, oldPath, oldDigest, cap.token); err != nil {
+		return metadataPendingError{err}
+	}
+	if err := home.root.Remove(intentPath); err != nil {
+		return metadataPendingError{err}
 	}
 	if err := home.verify(); err != nil {
 		return err
@@ -919,6 +993,151 @@ func copyPhysicalTreeToRoot(source string, destination *os.Root, destinationBase
 	})
 }
 
+func digestRootTree(root *os.Root, path string) (string, error) {
+	tree, err := root.OpenRoot(path)
+	if err != nil {
+		return "", err
+	}
+	defer tree.Close()
+	digest := sha256.New()
+	err = fs.WalkDir(tree.FS(), ".", func(relative string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular()) {
+			return fmt.Errorf("git-checkout: unsafe transaction tree entry %s", relative)
+		}
+		fmt.Fprintf(digest, "%s\x00%d\x00%d\x00", relative, info.Mode(), info.Size())
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		file, err := tree.OpenFile(relative, os.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.Copy(digest, file)
+		return errors.Join(copyErr, file.Close())
+	})
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(digest.Sum(nil)), nil
+}
+
+func writeMetadataIntent(root *os.Root, path string, intent metadataIntent) error {
+	contents, err := json.Marshal(intent)
+	if err != nil {
+		return err
+	}
+	file, err := root.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return err
+	}
+	_, writeErr := file.Write(append(contents, '\n'))
+	return errors.Join(writeErr, file.Sync(), file.Close())
+}
+
+func readMetadataIntent(root *os.Root, path string) (metadataIntent, error) {
+	file, err := root.OpenFile(path, os.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return metadataIntent{}, err
+	}
+	contents, readErr := io.ReadAll(io.LimitReader(file, 4097))
+	closeErr := file.Close()
+	if readErr != nil || closeErr != nil || len(contents) > 4096 {
+		return metadataIntent{}, errors.Join(readErr, closeErr, errors.New("git-checkout: invalid metadata transaction intent"))
+	}
+	var intent metadataIntent
+	if err := json.Unmarshal(contents, &intent); err != nil || !regexp.MustCompile(`^[0-9a-f]{16}$`).MatchString(intent.Token) || len(intent.OldDigest) != 64 || len(intent.NewDigest) != 64 {
+		return metadataIntent{}, errors.New("git-checkout: invalid metadata transaction intent")
+	}
+	return intent, nil
+}
+
+func removeTreeByDigest(root *os.Root, path, expected, token string) error {
+	quarantine := path + ".garbage-" + token
+	if _, err := root.Lstat(quarantine); !errors.Is(err, os.ErrNotExist) {
+		return errors.New("git-checkout: metadata garbage path already exists")
+	}
+	if err := root.Rename(path, quarantine); err != nil {
+		return err
+	}
+	digest, err := digestRootTree(root, quarantine)
+	if err != nil || digest != expected {
+		_ = root.Rename(quarantine, path)
+		return errors.New("git-checkout: metadata garbage identity changed")
+	}
+	return root.RemoveAll(quarantine)
+}
+
+func (a *Adapter) recoverMetadataTransaction(d declaration) error {
+	home, err := a.openHome()
+	if err != nil {
+		return err
+	}
+	defer home.close()
+	destination := filepath.FromSlash(d.destination)
+	intentPath := filepath.Join(destination, ".git.tpod-transaction.json")
+	if _, err := home.root.Lstat(intentPath); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	intent, err := readMetadataIntent(home.root, intentPath)
+	if err != nil {
+		return err
+	}
+	gitPath := filepath.Join(destination, ".git")
+	oldPath := filepath.Join(destination, ".git.tpod-old-"+intent.Token)
+	newPath := filepath.Join(destination, ".git.tpod-new-"+intent.Token+".quarantine-"+intent.Token)
+	current, currentErr := digestRootTree(home.root, gitPath)
+	old, oldErr := digestRootTree(home.root, oldPath)
+	newDigest, newErr := digestRootTree(home.root, newPath)
+	exists := func(err error) bool { return err == nil }
+	switch {
+	case exists(currentErr) && current == intent.OldDigest && !exists(oldErr) && exists(newErr) && newDigest == intent.NewDigest:
+		if err := home.root.Rename(gitPath, oldPath); err != nil {
+			return err
+		}
+		fallthrough
+	case !exists(currentErr) && exists(oldErr) && old == intent.OldDigest && exists(newErr) && newDigest == intent.NewDigest:
+		if err := home.root.Rename(newPath, gitPath); err != nil {
+			return err
+		}
+		if committed, err := digestRootTree(home.root, gitPath); err != nil || committed != intent.NewDigest {
+			_ = home.root.Rename(gitPath, newPath)
+			_ = home.root.Rename(oldPath, gitPath)
+			return errors.New("git-checkout: recovered metadata identity changed")
+		}
+		if err := syncRootDirectory(home.root, destination); err != nil {
+			return err
+		}
+		current = intent.NewDigest
+		old = intent.OldDigest
+		currentErr, oldErr, newErr = nil, nil, os.ErrNotExist
+	}
+	if currentErr == nil && current == intent.NewDigest && errors.Is(oldErr, os.ErrNotExist) && errors.Is(newErr, os.ErrNotExist) {
+		if err := home.root.Remove(intentPath); err != nil {
+			return err
+		}
+		return syncRootDirectory(home.root, destination)
+	}
+	if currentErr != nil || current != intent.NewDigest || oldErr != nil || old != intent.OldDigest || !errors.Is(newErr, os.ErrNotExist) {
+		return errors.New("git-checkout: metadata transaction state is unsafe")
+	}
+	if err := removeTreeByDigest(home.root, oldPath, intent.OldDigest, intent.Token); err != nil {
+		return err
+	}
+	if err := home.root.Remove(intentPath); err != nil {
+		return err
+	}
+	return syncRootDirectory(home.root, destination)
+}
+
 func gitEnvironment() map[string]string {
 	return map[string]string{"GIT_ATTR_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
 }
@@ -937,6 +1156,36 @@ func syncPhysicalTree(root string) error {
 }
 
 func (a *Adapter) stage(ctx context.Context, d declaration) (cap stagingCapability, retErr error) {
+	private, err := os.MkdirTemp("", "tpod-git-stage-")
+	if err != nil {
+		return cap, err
+	}
+	defer os.RemoveAll(private)
+	if err := os.Chmod(private, 0o700); err != nil {
+		return cap, err
+	}
+	if _, err := a.gitPrivate(ctx, private, "init", "--quiet"); err != nil {
+		return cap, err
+	}
+	if _, err := a.gitPrivate(ctx, private, "remote", "add", "origin", d.remote); err != nil {
+		return cap, err
+	}
+	if _, err := a.gitPrivate(ctx, private, "fetch", "--no-tags", "--depth=1", "origin", d.commit); err != nil {
+		return cap, err
+	}
+	fetched, err := a.gitPrivate(ctx, private, "rev-parse", "FETCH_HEAD")
+	if err != nil {
+		return cap, err
+	}
+	if strings.TrimSpace(string(fetched)) != d.commit {
+		return cap, errors.New("git-checkout: fetched ref does not match signed commit")
+	}
+	if _, err := a.gitPrivate(ctx, private, "checkout", "--detach", "--force", d.commit); err != nil {
+		return cap, err
+	}
+	if err := ctx.Err(); err != nil {
+		return cap, err
+	}
 	home, err := a.openHome()
 	if err != nil {
 		return cap, err
@@ -974,45 +1223,16 @@ func (a *Adapter) stage(ctx context.Context, d declaration) (cap stagingCapabili
 	if err := home.verify(); err != nil {
 		return cap, err
 	}
-	physical := filepath.Join(a.Home, staging)
 	if err := a.verifyStaging(cap); err != nil {
 		return cap, err
 	}
-	if _, err := a.git(ctx, physical, "init", "--quiet"); err != nil {
-		return cap, err
-	}
-	if err := a.verifyStaging(cap); err != nil {
-		return cap, err
-	}
-	if _, err := a.git(ctx, physical, "remote", "add", "origin", d.remote); err != nil {
-		return cap, err
-	}
-	if err := a.verifyStaging(cap); err != nil {
-		return cap, err
-	}
-	if _, err := a.git(ctx, physical, "fetch", "--no-tags", "--depth=1", "origin", d.commit); err != nil {
-		return cap, err
-	}
-	if err := a.verifyStaging(cap); err != nil {
-		return cap, err
-	}
-	fetched, err := a.git(ctx, physical, "rev-parse", "FETCH_HEAD")
+	stagingRoot, err := home.root.OpenRoot(staging)
 	if err != nil {
 		return cap, err
 	}
-	if strings.TrimSpace(string(fetched)) != d.commit {
-		return cap, errors.New("git-checkout: fetched ref does not match signed commit")
-	}
-	if err := a.verifyStaging(cap); err != nil {
-		return cap, err
-	}
-	if _, err := a.git(ctx, physical, "checkout", "--detach", "--force", d.commit); err != nil {
-		return cap, err
-	}
-	if err := ctx.Err(); err != nil {
-		return cap, err
-	}
-	if err := a.verifyStaging(cap); err != nil {
+	copyErr := copyPhysicalTreeToRoot(private, stagingRoot, ".")
+	closeErr := stagingRoot.Close()
+	if err := errors.Join(copyErr, closeErr); err != nil {
 		return cap, err
 	}
 	if err := syncRootDirectory(home.root, staging); err != nil {
@@ -1022,23 +1242,28 @@ func (a *Adapter) stage(ctx context.Context, d declaration) (cap stagingCapabili
 }
 
 func (a *Adapter) commitStaging(d declaration, staging stagingCapability) error {
-	if err := a.verifyStaging(staging); err != nil {
-		return err
-	}
 	home, err := a.openHome()
 	if err != nil {
 		return err
 	}
 	defer home.close()
-	if _, err := home.validateDirectory(staging.path, false); err != nil {
+	quarantine, err := a.quarantineStaging(home, staging)
+	if err != nil {
 		return err
 	}
+	rollback := true
+	defer func() {
+		if rollback {
+			_ = home.root.Rename(quarantine, staging.path)
+		}
+	}()
 	if _, err := home.root.Lstat(filepath.FromSlash(d.destination)); !errors.Is(err, os.ErrNotExist) {
 		return errors.New("git-checkout: destination appeared before install")
 	}
-	if err := home.root.Rename(staging.path, filepath.FromSlash(d.destination)); err != nil {
+	if err := home.root.Rename(quarantine, filepath.FromSlash(d.destination)); err != nil {
 		return err
 	}
+	rollback = false
 	if err := home.verify(); err != nil {
 		return err
 	}
@@ -1049,18 +1274,16 @@ func (a *Adapter) commitStaging(d declaration, staging stagingCapability) error 
 }
 
 func (a *Adapter) removeStaging(staging stagingCapability) error {
-	if err := a.verifyStaging(staging); err != nil {
-		return err
-	}
 	home, err := a.openHome()
 	if err != nil {
 		return err
 	}
 	defer home.close()
-	if _, err := home.validateDirectory(staging.path, true); err != nil {
+	quarantine, err := a.quarantineStaging(home, staging)
+	if err != nil {
 		return err
 	}
-	if err := home.root.RemoveAll(staging.path); err != nil {
+	if err := home.root.RemoveAll(quarantine); err != nil {
 		return err
 	}
 	if err := home.verify(); err != nil {
@@ -1070,6 +1293,76 @@ func (a *Adapter) removeStaging(staging stagingCapability) error {
 	delete(a.staging, staging.token)
 	a.mu.Unlock()
 	return syncRootDirectory(home.root, filepath.Dir(staging.path))
+}
+
+func (a *Adapter) quarantineStaging(home *homeRoot, cap stagingCapability) (string, error) {
+	a.mu.Lock()
+	record, ok := a.staging[cap.token]
+	a.mu.Unlock()
+	if !ok || cap.token == "" || cap.path != record.path {
+		return "", errors.New("git-checkout: invalid or replayed staging capability")
+	}
+	if beforeStagingQuarantine != nil {
+		beforeStagingQuarantine(cap.path)
+	}
+	quarantine := cap.path + ".quarantine-" + cap.token
+	if _, err := home.root.Lstat(quarantine); !errors.Is(err, os.ErrNotExist) {
+		return "", errors.New("git-checkout: staging quarantine already exists")
+	}
+	if err := home.root.Rename(cap.path, quarantine); err != nil {
+		return "", err
+	}
+	current, err := home.root.Lstat(quarantine)
+	if err != nil || current.Mode() != record.info.Mode() || !os.SameFile(current, record.info) {
+		_ = home.root.Rename(quarantine, cap.path)
+		return "", errors.New("git-checkout: staging inode changed")
+	}
+	return quarantine, nil
+}
+
+func (a *Adapter) quarantineWorktree(d declaration) (string, func() error, error) {
+	home, err := a.openHome()
+	if err != nil {
+		return "", nil, err
+	}
+	destination := filepath.FromSlash(d.destination)
+	info, err := home.root.Lstat(destination)
+	if err != nil || !info.IsDir() {
+		home.close()
+		return "", nil, errors.New("git-checkout: worktree is unavailable for quarantine")
+	}
+	token := make([]byte, 8)
+	if _, err := rand.Read(token); err != nil {
+		home.close()
+		return "", nil, err
+	}
+	quarantine := destination + ".tpod-work-" + hex.EncodeToString(token)
+	if err := home.root.Rename(destination, quarantine); err != nil {
+		home.close()
+		return "", nil, err
+	}
+	current, err := home.root.Lstat(quarantine)
+	if err != nil || current.Mode() != info.Mode() || !os.SameFile(current, info) {
+		_ = home.root.Rename(quarantine, destination)
+		home.close()
+		return "", nil, errors.New("git-checkout: worktree changed during quarantine")
+	}
+	finished := false
+	restore := func() error {
+		if finished {
+			return nil
+		}
+		finished = true
+		defer home.close()
+		if _, err := home.root.Lstat(destination); !errors.Is(err, os.ErrNotExist) {
+			return errors.New("git-checkout: destination appeared during quarantined update")
+		}
+		if err := home.root.Rename(quarantine, destination); err != nil {
+			return err
+		}
+		return syncRootDirectory(home.root, filepath.Dir(destination))
+	}
+	return filepath.Join(a.Home, quarantine), restore, nil
 }
 
 func (a *Adapter) verifyStaging(cap stagingCapability) error {
@@ -1170,18 +1463,28 @@ func (a *Adapter) update(ctx context.Context, d declaration) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	quarantinedWorktree, restoreWorktree, err := a.quarantineWorktree(d)
+	if err != nil {
+		return err
+	}
+	restoredWorktree := false
+	defer func() {
+		if !restoredWorktree {
+			_ = restoreWorktree()
+		}
+	}()
 	if before.clean {
-		if _, err := a.gitSnapshot(ctx, snapshot, destination, "checkout", "--detach", d.commit); err != nil {
+		if _, err := a.gitSnapshot(ctx, snapshot, quarantinedWorktree, "checkout", "--detach", d.commit); err != nil {
 			return err
 		}
 	} else {
 		// A previous attempt may have updated the worktree but failed before
 		// committing its private Git metadata. Accept only that exact state.
-		if _, err := a.gitSnapshot(ctx, snapshot, destination, "reset", "--mixed", d.commit); err != nil {
+		if _, err := a.gitSnapshot(ctx, snapshot, quarantinedWorktree, "reset", "--mixed", d.commit); err != nil {
 			return err
 		}
 	}
-	status, err := a.gitSnapshot(ctx, snapshot, destination, "status", "--porcelain", "--untracked-files=no")
+	status, err := a.gitSnapshot(ctx, snapshot, quarantinedWorktree, "status", "--porcelain", "--untracked-files=no")
 	if err != nil || len(status) != 0 {
 		if !before.clean {
 			return errors.New("git-checkout: dirty worktree is neither current nor signed desired state")
@@ -1189,10 +1492,14 @@ func (a *Adapter) update(ctx context.Context, d declaration) error {
 		return errors.New("git-checkout: desired worktree verification failed")
 	}
 	if !before.clean {
-		if _, err := a.gitSnapshot(ctx, snapshot, destination, "checkout", "--detach", d.commit); err != nil {
+		if _, err := a.gitSnapshot(ctx, snapshot, quarantinedWorktree, "checkout", "--detach", d.commit); err != nil {
 			return err
 		}
 	}
+	if err := restoreWorktree(); err != nil {
+		return err
+	}
+	restoredWorktree = true
 	if err := snapshot.verifySource(); err != nil {
 		return err
 	}
@@ -1212,6 +1519,10 @@ func (a *Adapter) update(ctx context.Context, d declaration) error {
 		}
 	}
 	if err := a.commitGitSnapshot(d, snapshot, cap); err != nil {
+		var pending metadataPendingError
+		if errors.As(err, &pending) {
+			committed = true
+		}
 		return err
 	}
 	committed = true

@@ -30,6 +30,8 @@ func (f runnerFunc) Run(ctx context.Context, request execx.Request) (execx.Resul
 	return f(ctx, request)
 }
 
+func itemRemote() string { return "https://github.com/zdharma-continuum/zinit.git" }
+
 func resourceAt(destination string) model.Resource {
 	return model.Resource{
 		ID: "shell.zinit", Type: model.ResourceGitCheckout, Provider: "git", Package: "zinit",
@@ -396,24 +398,39 @@ func TestRejectsDestinationAncestorSwapDuringGitCommand(t *testing.T) {
 	}
 }
 
-func TestRejectsStagingDirectorySwapDuringGitCommand(t *testing.T) {
+func TestPrivateGitDoesNotMutateSwappedPublishedStaging(t *testing.T) {
 	swapped := false
+	foreignMarker := ""
+	var a *Adapter
 	a, item, store, destination := newFixture(t, func(_ context.Context, request execx.Request) (execx.Result, error) {
+		if strings.HasPrefix(request.Dir, a.Home+string(filepath.Separator)) {
+			return execx.Result{}, errors.New("Git received user-visible staging path")
+		}
 		args := strings.Join(request.Args, " ")
 		if strings.Contains(args, " init ") {
 			return execx.Result{}, os.MkdirAll(filepath.Join(request.Dir, ".git"), 0o700)
 		}
-		if !swapped && strings.Contains(args, " remote add ") {
-			if err := os.Rename(request.Dir, request.Dir+"-original"); err != nil {
-				return execx.Result{}, err
-			}
-			if err := os.MkdirAll(filepath.Join(request.Dir, ".git"), 0o700); err != nil {
-				return execx.Result{}, err
-			}
-			swapped = true
+		if strings.Contains(args, "rev-parse FETCH_HEAD") {
+			return execx.Result{Stdout: []byte(testCommit + "\n")}, nil
+		}
+		if strings.Contains(args, " checkout ") {
+			return execx.Result{}, os.WriteFile(filepath.Join(request.Dir, "zinit.zsh"), []byte("zinit"), 0o600)
 		}
 		return execx.Result{}, nil
 	})
+	beforeStagingQuarantine = func(relative string) {
+		beforeStagingQuarantine = nil
+		path := filepath.Join(a.Home, relative)
+		if err := os.Rename(path, path+"-original"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		foreignMarker = filepath.Join(path, "git-mutated")
+		swapped = true
+	}
+	defer func() { beforeStagingQuarantine = nil }()
 	op := operation(item, model.OperationInstall)
 	if _, err := store.Begin(model.Plan{ID: "staging-swap", Operations: []model.Operation{op}}); err != nil {
 		t.Fatal(err)
@@ -427,6 +444,95 @@ func TestRejectsStagingDirectorySwapDuringGitCommand(t *testing.T) {
 	}
 	if _, err := os.Lstat(destination); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("foreign staging committed: %v", err)
+	}
+	if _, err := os.Lstat(foreignMarker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("foreign staging mutated before rejection: %v", err)
+	}
+}
+
+func TestSnapshotDetectsSameInodeContentMutation(t *testing.T) {
+	a, item, _, destination := newFixture(t, gitInspector(t, itemRemote(), testCommit, ""))
+	if err := os.MkdirAll(filepath.Join(destination, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	head := filepath.Join(destination, ".git", "HEAD")
+	if err := os.WriteFile(head, []byte(testCommit+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(destination, "zinit.zsh"), []byte("zinit"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterSnapshotValidated = func() {
+		afterSnapshotValidated = nil
+		if err := os.WriteFile(head, []byte(strings.Repeat("f", 40)+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	defer func() { afterSnapshotValidated = nil }()
+	if _, err := a.Inspect(context.Background(), item); err == nil || !strings.Contains(err.Error(), "changed after snapshot") {
+		t.Fatalf("same-inode mutation err=%v", err)
+	}
+	after, err := os.Stat(head)
+	if err != nil || !os.SameFile(before, after) {
+		t.Fatalf("test replaced inode: before=%v after=%v err=%v", before, after, err)
+	}
+}
+
+func TestUpdateQuarantinesWorktreeBeforeGitMutation(t *testing.T) {
+	var destination string
+	foreignStayedClean := false
+	a, item, store, destination := newFixture(t, func(_ context.Context, request execx.Request) (execx.Result, error) {
+		args := strings.Join(request.Args, " ")
+		switch {
+		case strings.Contains(args, "remote get-url origin"):
+			return execx.Result{Stdout: []byte(itemRemote() + "\n")}, nil
+		case strings.Contains(args, "rev-parse FETCH_HEAD"):
+			return execx.Result{Stdout: []byte(testCommit + "\n")}, nil
+		case strings.Contains(args, "rev-parse HEAD"):
+			return execx.Result{Stdout: []byte(strings.Repeat("a", 40) + "\n")}, nil
+		case strings.Contains(args, "ls-files -z"):
+			return execx.Result{Stdout: []byte("zinit.zsh\x00")}, nil
+		case strings.Contains(args, " checkout "):
+			worktree := argumentValue(request.Args, "--work-tree=")
+			if worktree == "" || worktree == destination {
+				return execx.Result{}, errors.New("Git received mutable destination worktree")
+			}
+			if err := os.MkdirAll(destination, 0o700); err != nil {
+				return execx.Result{}, err
+			}
+			if err := os.WriteFile(filepath.Join(worktree, "git-mutated"), []byte("git"), 0o600); err != nil {
+				return execx.Result{}, err
+			}
+			_, markerErr := os.Lstat(filepath.Join(destination, "git-mutated"))
+			foreignStayedClean = errors.Is(markerErr, os.ErrNotExist)
+			if err := os.RemoveAll(destination); err != nil {
+				return execx.Result{}, err
+			}
+		}
+		return execx.Result{}, nil
+	})
+	if err := os.MkdirAll(filepath.Join(destination, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(destination, ".git", "HEAD"), []byte(strings.Repeat("a", 40)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(destination, "zinit.zsh"), []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	op := operation(item, model.OperationUpgrade)
+	if _, err := store.Begin(model.Plan{ID: "quarantined-update", Operations: []model.Operation{op}}); err != nil {
+		t.Fatal(err)
+	}
+	if result := a.ExecuteResource(context.Background(), item, op); !result.Success {
+		t.Fatalf("result=%#v", result)
+	}
+	if !foreignStayedClean {
+		t.Fatal("foreign destination was mutated by Git")
 	}
 }
 
@@ -581,6 +687,10 @@ func TestRealHomebrewGitInstallUpdateAndConfigIsolation(t *testing.T) {
 		t.Fatalf("HEAD=%s want old signed %s", got, first)
 	}
 	checkout := filepath.Join(home, prior.destination)
+	untracked := filepath.Join(checkout, "notes.txt")
+	if err := os.WriteFile(untracked, []byte("user"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	marker := filepath.Join(home, "filter-ran")
 	filter := filepath.Join(home, "filter.sh")
 	if err := os.WriteFile(filter, []byte("#!/bin/sh\ntouch \""+marker+"\"\ncat\n"), 0o700); err != nil {
@@ -629,11 +739,50 @@ func TestRealHomebrewGitInstallUpdateAndConfigIsolation(t *testing.T) {
 	if contents, err := os.ReadFile(filepath.Join(checkout, "zinit.zsh")); err != nil || string(contents) != "two" {
 		t.Fatalf("staged worktree=%q err=%v", contents, err)
 	}
-	if result := a.ExecuteResource(context.Background(), item, upgrade); !result.Success {
-		t.Fatalf("update retry=%#v", result)
+	afterMetadataOldRename = func() error { return errors.New("simulated crash after old rename") }
+	if result := a.ExecuteResource(context.Background(), item, upgrade); result.Success || !strings.Contains(result.Detail, "after old rename") {
+		t.Fatalf("old-rename crash=%#v", result)
 	}
+	afterMetadataOldRename = nil
+	defer func() { afterMetadataOldRename = nil }()
+	if _, err := os.Lstat(filepath.Join(checkout, ".git")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old-rename crash left current metadata: %v", err)
+	}
+	restarted := &Adapter{Runner: NewRunner(nil, func() int { return 501 }), Git: git, Home: home, State: store, Backup: a.Backup}
+	if result := restarted.ExecuteResource(context.Background(), item, upgrade); !result.Success {
+		t.Fatalf("old-rename restart recovery=%#v", result)
+	}
+	a = restarted
 	if err := store.Complete(journal.ID); err != nil {
 		t.Fatal(err)
+	}
+
+	// Start the same signed transition again to exercise a hard stop after the
+	// new metadata becomes current but before old metadata and intent cleanup.
+	runGitTest(t, git, "-C", checkout, "reset", "--hard", first)
+	journal, err = store.Begin(model.Plan{ID: "real-update-new-rename-crash", Operations: []model.Operation{upgrade}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterMetadataNewRename = func() error { return errors.New("simulated crash after new rename") }
+	if result := a.ExecuteResource(context.Background(), item, upgrade); result.Success || !strings.Contains(result.Detail, "after new rename") {
+		t.Fatalf("new-rename crash=%#v", result)
+	}
+	afterMetadataNewRename = nil
+	defer func() { afterMetadataNewRename = nil }()
+	if got := strings.TrimSpace(runGitTest(t, git, "-C", checkout, "rev-parse", "HEAD")); got != second {
+		t.Fatalf("new metadata was not current after crash: %s", got)
+	}
+	restarted = &Adapter{Runner: NewRunner(nil, func() int { return 501 }), Git: git, Home: home, State: store, Backup: a.Backup}
+	if result := restarted.ExecuteResource(context.Background(), item, upgrade); !result.Success {
+		t.Fatalf("new-rename restart recovery=%#v", result)
+	}
+	a = restarted
+	if err := store.Complete(journal.ID); err != nil {
+		t.Fatal(err)
+	}
+	if contents, err := os.ReadFile(untracked); err != nil || string(contents) != "user" {
+		t.Fatalf("untracked update content=%q err=%v", contents, err)
 	}
 	runGitTest(t, git, "-C", checkout, "config", "filter.evil.process", filter)
 	if _, err := a.Inspect(context.Background(), item); err == nil || !strings.Contains(err.Error(), "config") {
@@ -758,6 +907,15 @@ func containsSequence(values []string, sequence ...string) bool {
 		}
 	}
 	return false
+}
+
+func argumentValue(values []string, prefix string) string {
+	for _, value := range values {
+		if strings.HasPrefix(value, prefix) {
+			return strings.TrimPrefix(value, prefix)
+		}
+	}
+	return ""
 }
 
 func mapsClone(values map[string]string) map[string]string {
