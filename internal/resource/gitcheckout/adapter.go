@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -33,6 +34,14 @@ const (
 var commitPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 var refPattern = regexp.MustCompile(`^refs/(tags|heads)/[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 
+var requiredEnv = []string{"GIT_ATTR_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_TERMINAL_PROMPT"}
+
+func RequiredEnv() []string { return append([]string(nil), requiredEnv...) }
+
+func NewRunner(preflight func(context.Context) error, effectiveUID func() int) *execx.Runner {
+	return execx.NewRunner(RequiredEnv(), preflight, effectiveUID)
+}
+
 type Runner interface {
 	Run(context.Context, execx.Request) (execx.Result, error)
 }
@@ -55,6 +64,115 @@ type checkout struct {
 	paths              map[string]string
 }
 
+type homeRoot struct {
+	root *os.Root
+	path string
+	info os.FileInfo
+}
+
+func (a *Adapter) openHome() (*homeRoot, error) {
+	info, err := os.Lstat(a.Home)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, errors.New("git-checkout: home must be a real directory")
+	}
+	root, err := os.OpenRoot(a.Home)
+	if err != nil {
+		return nil, err
+	}
+	home := &homeRoot{root: root, path: a.Home, info: info}
+	if err := home.verify(); err != nil {
+		root.Close()
+		return nil, err
+	}
+	return home, nil
+}
+
+func (h *homeRoot) close() { _ = h.root.Close() }
+
+func (h *homeRoot) verify() error {
+	current, err := os.Lstat(h.path)
+	if err != nil || current.Mode()&os.ModeSymlink != 0 || !os.SameFile(h.info, current) {
+		return errors.New("git-checkout: home identity changed")
+	}
+	anchored, err := h.root.Stat(".")
+	if err != nil || !os.SameFile(h.info, anchored) {
+		return errors.New("git-checkout: anchored home identity changed")
+	}
+	return nil
+}
+
+func (h *homeRoot) validateDirectory(relative string, allowMissing bool) (bool, error) {
+	relative = filepath.Clean(filepath.FromSlash(relative))
+	if !safeRelative(filepath.ToSlash(relative)) {
+		return false, errors.New("git-checkout: unsafe home-relative directory")
+	}
+	current := ""
+	parts := strings.Split(relative, string(filepath.Separator))
+	for _, part := range parts {
+		current = filepath.Join(current, part)
+		info, err := h.root.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) && allowMissing {
+			return false, h.verify()
+		}
+		if err != nil {
+			return false, err
+		}
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return false, fmt.Errorf("git-checkout: directory component %q is not a real directory", current)
+		}
+	}
+	return true, h.verify()
+}
+
+func (a *Adapter) validatedGitDir(path string) (*homeRoot, string, error) {
+	relative, err := filepath.Rel(a.Home, path)
+	if err != nil || !safeRelative(filepath.ToSlash(relative)) {
+		return nil, "", errors.New("git-checkout: Git directory escapes home")
+	}
+	home, err := a.openHome()
+	if err != nil {
+		return nil, "", err
+	}
+	if _, err := home.validateDirectory(relative, false); err != nil {
+		home.close()
+		return nil, "", err
+	}
+	return home, relative, nil
+}
+
+func validateLocalConfig(contents []byte, remote string) error {
+	for _, entry := range splitNUL(contents) {
+		parts := strings.SplitN(entry, "\n", 2)
+		if len(parts) != 2 {
+			return errors.New("git-checkout: malformed local config")
+		}
+		key, value := parts[0], parts[1]
+		allowed := false
+		switch key {
+		case "core.repositoryformatversion":
+			allowed = value == "0"
+		case "core.filemode", "core.ignorecase", "core.precomposeunicode":
+			allowed = value == "true" || value == "false"
+		case "core.bare":
+			allowed = value == "false"
+		case "core.logallrefupdates":
+			allowed = value == "true"
+		case "remote.origin.url":
+			allowed = value == remote
+		case "remote.origin.fetch":
+			allowed = value == "+refs/heads/*:refs/remotes/origin/*"
+		default:
+			if strings.HasPrefix(key, "branch.") {
+				allowed = (strings.HasSuffix(key, ".remote") && value == "origin") || (strings.HasSuffix(key, ".merge") && refPattern.MatchString(value))
+			}
+		}
+		if !allowed {
+			return fmt.Errorf("git-checkout: unsafe or unknown local config key %q", key)
+		}
+	}
+	return nil
+}
+
 type fixedSpec struct {
 	remote, destination string
 	verify              []string
@@ -74,7 +192,10 @@ func (a *Adapter) Inspect(ctx context.Context, item model.Resource) (model.Obser
 	if owned, pruning, err := a.pruneOwnership(item); err != nil {
 		return model.Observation{}, err
 	} else if pruning {
-		return a.inspectOwned(item, owned)
+		if err := a.validateOwned(d, owned.Paths); err != nil {
+			return model.Observation{}, err
+		}
+		return a.inspectOwned(d, item, owned)
 	}
 	current, err := a.inspect(ctx, d)
 	if err != nil {
@@ -95,7 +216,7 @@ func (a *Adapter) PlanHistorical(_ context.Context, item model.Resource, _ model
 		return nil, err
 	}
 	for path, expected := range owned.Paths {
-		current, err := pathReceipt(path)
+		current, err := a.ownedReceipt(d, path)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
@@ -200,15 +321,35 @@ func (a *Adapter) execute(ctx context.Context, item model.Resource, op model.Ope
 		}
 		return nil
 	case model.OperationInstall, model.OperationRestore:
+		if a.observation(item, d, current).Healthy {
+			return nil
+		}
 		if current.exists && current.git {
 			return errors.New("git-checkout: existing Git checkout cannot be replaced as partial")
 		}
+		staging, err := a.stage(ctx, d)
+		if err != nil {
+			return err
+		}
+		committed := false
+		defer func() {
+			if !committed {
+				_ = a.removeStaging(staging)
+			}
+		}()
 		if current.exists {
-			if err := a.backupAndRemove(snapshot.ActiveJournal.ID, d); err != nil {
+			if err := a.backupAndRemove(ctx, snapshot.ActiveJournal.ID, d); err != nil {
 				return err
 			}
 		}
-		return a.install(ctx, d)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := a.commitStaging(d, staging); err != nil {
+			return err
+		}
+		committed = true
+		return nil
 	case model.OperationUpgrade:
 		if !current.exists || !current.git || !current.clean || current.remote != d.remote {
 			return errors.New("git-checkout: checkout changed before update")
@@ -254,13 +395,13 @@ func (a *Adapter) pruneOwnership(item model.Resource) (model.Ownership, bool, er
 	return model.Ownership{}, false, nil
 }
 
-func (a *Adapter) inspectOwned(item model.Resource, owned model.Ownership) (model.Observation, error) {
+func (a *Adapter) inspectOwned(d declaration, item model.Resource, owned model.Ownership) (model.Observation, error) {
 	if owned.ResourceID != item.ID || owned.Provider != item.Provider || owned.Package != item.Package {
 		return model.Observation{}, errors.New("git-checkout: prune journal does not match ownership")
 	}
 	present, healthy := false, true
 	for path, expected := range owned.Paths {
-		current, err := pathReceipt(path)
+		current, err := a.ownedReceipt(d, path)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
@@ -327,22 +468,79 @@ func allowedGit(path string) bool {
 
 func (a *Adapter) inspect(ctx context.Context, d declaration) (checkout, error) {
 	destination := filepath.Join(a.Home, filepath.FromSlash(d.destination))
-	info, err := os.Lstat(destination)
-	if errors.Is(err, os.ErrNotExist) {
-		return checkout{}, nil
-	}
+	home, err := a.openHome()
 	if err != nil {
 		return checkout{}, err
 	}
+	exists, err := home.validateDirectory(d.destination, true)
+	if err != nil {
+		home.close()
+		return checkout{}, err
+	}
+	if !exists {
+		home.close()
+		return checkout{}, nil
+	}
 	current := checkout{exists: true, clean: false, paths: map[string]string{}}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+	gitRelative := filepath.Join(filepath.FromSlash(d.destination), ".git")
+	gitInfo, err := home.root.Lstat(gitRelative)
+	if errors.Is(err, os.ErrNotExist) {
+		home.close()
 		return current, nil
 	}
-	gitInfo, err := os.Lstat(filepath.Join(destination, ".git"))
-	if err != nil || (!gitInfo.IsDir() && !gitInfo.Mode().IsRegular()) || gitInfo.Mode()&os.ModeSymlink != 0 {
-		return current, nil
+	if err != nil || !gitInfo.IsDir() || gitInfo.Mode()&os.ModeSymlink != 0 {
+		home.close()
+		return checkout{}, errors.New("git-checkout: .git must be a real directory")
 	}
+	for _, control := range []string{"config", "HEAD", "index"} {
+		info, err := home.root.Lstat(filepath.Join(gitRelative, control))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+			home.close()
+			return checkout{}, fmt.Errorf("git-checkout: unsafe .git control file %s", control)
+		}
+	}
+	for _, control := range []string{"hooks", "objects", "refs"} {
+		info, err := home.root.Lstat(filepath.Join(gitRelative, control))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			home.close()
+			return checkout{}, fmt.Errorf("git-checkout: unsafe .git control directory %s", control)
+		}
+	}
+	if err := fs.WalkDir(home.root.FS(), gitRelative, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular()) {
+			return fmt.Errorf("git-checkout: unsafe .git object %s", path)
+		}
+		return nil
+	}); err != nil {
+		home.close()
+		return checkout{}, err
+	}
+	if err := home.verify(); err != nil {
+		home.close()
+		return checkout{}, err
+	}
+	home.close()
 	current.git = true
+	config, err := a.git(ctx, destination, "config", "--local", "--null", "--list")
+	if err != nil {
+		return current, fmt.Errorf("git-checkout: inspect local config: %w", err)
+	}
+	if err := validateLocalConfig(config, d.remote); err != nil {
+		return current, err
+	}
 	remote, err := a.git(ctx, destination, "remote", "get-url", "origin")
 	if err != nil {
 		return current, fmt.Errorf("git-checkout: inspect origin: %w", err)
@@ -375,73 +573,170 @@ func (a *Adapter) inspect(ctx context.Context, d declaration) (checkout, error) 
 }
 
 func (a *Adapter) git(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	common := []string{"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "protocol.file.allow=never", "-c", "protocol.ext.allow=never", "-c", "submodule.recurse=false"}
+	home, relative, err := a.validatedGitDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer home.close()
+	common := []string{"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "credential.helper=", "-c", "protocol.file.allow=never", "-c", "protocol.ext.allow=never", "-c", "submodule.recurse=false"}
 	request := execx.Request{
 		Path: a.Git,
 		Dir:  dir,
 		Args: append(common, args...),
 		Env: map[string]string{
+			"GIT_ATTR_NOSYSTEM":   "1",
 			"GIT_CONFIG_GLOBAL":   "/dev/null",
 			"GIT_CONFIG_NOSYSTEM": "1",
 			"GIT_TERMINAL_PROMPT": "0",
 		},
 	}
+	_ = relative
 	result, err := a.Runner.Run(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(result.Stderr)))
 	}
+	if err := home.verify(); err != nil {
+		return nil, err
+	}
+	if _, err := home.validateDirectory(relative, false); err != nil {
+		return nil, err
+	}
 	return result.Stdout, nil
 }
 
-func (a *Adapter) install(ctx context.Context, d declaration) (retErr error) {
-	destination := filepath.Join(a.Home, filepath.FromSlash(d.destination))
-	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
-		return err
+func (a *Adapter) stage(ctx context.Context, d declaration) (string, error) {
+	home, err := a.openHome()
+	if err != nil {
+		return "", err
+	}
+	defer home.close()
+	parent := filepath.Dir(filepath.FromSlash(d.destination))
+	if err := home.ensureDirectory(parent); err != nil {
+		return "", err
 	}
 	token := make([]byte, 8)
 	if _, err := rand.Read(token); err != nil {
-		return err
+		return "", err
 	}
-	staging := destination + ".tpod-" + hex.EncodeToString(token)
-	if err := os.Mkdir(staging, 0o700); err != nil {
-		return err
+	staging := filepath.FromSlash(d.destination) + ".tpod-" + hex.EncodeToString(token)
+	if err := home.root.Mkdir(staging, 0o700); err != nil {
+		return "", err
 	}
-	defer func() {
-		if retErr != nil {
-			_ = removeTreeFiles(staging)
-		}
-	}()
-	if _, err := a.git(ctx, staging, "init", "--quiet"); err != nil {
-		return err
+	if err := home.verify(); err != nil {
+		return "", err
 	}
-	if _, err := a.git(ctx, staging, "remote", "add", "origin", d.remote); err != nil {
-		return err
+	physical := filepath.Join(a.Home, staging)
+	if _, err := a.git(ctx, physical, "init", "--quiet"); err != nil {
+		return "", err
 	}
-	if _, err := a.git(ctx, staging, "fetch", "--no-tags", "--depth=1", "origin", d.ref); err != nil {
-		return err
+	if _, err := a.git(ctx, physical, "remote", "add", "origin", d.remote); err != nil {
+		return "", err
 	}
-	fetched, err := a.git(ctx, staging, "rev-parse", "FETCH_HEAD")
+	if _, err := a.git(ctx, physical, "fetch", "--no-tags", "--depth=1", "origin", d.commit); err != nil {
+		return "", err
+	}
+	fetched, err := a.git(ctx, physical, "rev-parse", "FETCH_HEAD")
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(string(fetched)) != d.commit {
+		return "", errors.New("git-checkout: fetched ref does not match signed commit")
+	}
+	if _, err := a.git(ctx, physical, "checkout", "--detach", "--force", d.commit); err != nil {
+		return "", err
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if err := syncRootDirectory(home.root, staging); err != nil {
+		return "", err
+	}
+	return staging, nil
+}
+
+func (a *Adapter) commitStaging(d declaration, staging string) error {
+	home, err := a.openHome()
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(string(fetched)) != d.commit {
-		return errors.New("git-checkout: fetched ref does not match signed commit")
-	}
-	if _, err := a.git(ctx, staging, "checkout", "--detach", "--force", d.commit); err != nil {
+	defer home.close()
+	if _, err := home.validateDirectory(staging, false); err != nil {
 		return err
 	}
-	if _, err := os.Lstat(destination); !errors.Is(err, os.ErrNotExist) {
+	if _, err := home.root.Lstat(filepath.FromSlash(d.destination)); !errors.Is(err, os.ErrNotExist) {
 		return errors.New("git-checkout: destination appeared before install")
 	}
-	if err := os.Rename(staging, destination); err != nil {
+	if err := home.root.Rename(staging, filepath.FromSlash(d.destination)); err != nil {
 		return err
 	}
-	return nil
+	if err := home.verify(); err != nil {
+		return err
+	}
+	return syncRootDirectory(home.root, filepath.Dir(filepath.FromSlash(d.destination)))
+}
+
+func (a *Adapter) removeStaging(staging string) error {
+	home, err := a.openHome()
+	if err != nil {
+		return err
+	}
+	defer home.close()
+	if _, err := home.validateDirectory(staging, true); err != nil {
+		return err
+	}
+	if err := home.root.RemoveAll(staging); err != nil {
+		return err
+	}
+	if err := home.verify(); err != nil {
+		return err
+	}
+	return syncRootDirectory(home.root, filepath.Dir(staging))
+}
+
+func (h *homeRoot) ensureDirectory(relative string) error {
+	if relative == "." {
+		return h.verify()
+	}
+	relative = filepath.Clean(relative)
+	if !safeRelative(filepath.ToSlash(relative)) {
+		return errors.New("git-checkout: unsafe parent directory")
+	}
+	current := ""
+	for _, part := range strings.Split(relative, string(filepath.Separator)) {
+		current = filepath.Join(current, part)
+		info, err := h.root.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			if err := h.root.Mkdir(current, 0o700); err != nil {
+				return err
+			}
+			info, err = h.root.Lstat(current)
+		}
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("git-checkout: parent %q is not a real directory", current)
+		}
+	}
+	return h.verify()
+}
+
+func syncRootDirectory(root *os.Root, relative string) error {
+	if relative == "" {
+		relative = "."
+	}
+	directory, err := root.Open(relative)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
 }
 
 func (a *Adapter) update(ctx context.Context, d declaration) error {
 	destination := filepath.Join(a.Home, filepath.FromSlash(d.destination))
-	if _, err := a.git(ctx, destination, "fetch", "--no-tags", "--depth=1", "origin", d.ref); err != nil {
+	before, err := a.inspect(ctx, d)
+	if err != nil || !before.git || !before.clean || before.remote != d.remote {
+		return errors.New("git-checkout: checkout changed before fetch")
+	}
+	if _, err := a.git(ctx, destination, "fetch", "--no-tags", "--depth=1", "origin", d.commit); err != nil {
 		return err
 	}
 	fetched, err := a.git(ctx, destination, "rev-parse", "FETCH_HEAD")
@@ -460,25 +755,50 @@ func (a *Adapter) update(ctx context.Context, d declaration) error {
 	if !current.exists || !current.git || !current.clean || current.remote != d.remote {
 		return errors.New("git-checkout: checkout changed immediately before update")
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	_, err = a.git(ctx, destination, "checkout", "--detach", d.commit)
-	return err
+	if err != nil {
+		return err
+	}
+	home, openErr := a.openHome()
+	if openErr != nil {
+		return openErr
+	}
+	defer home.close()
+	return syncRootDirectory(home.root, filepath.FromSlash(d.destination))
 }
 
-func (a *Adapter) backupAndRemove(journal string, d declaration) error {
+func (a *Adapter) backupAndRemove(ctx context.Context, journal string, d declaration) error {
 	destination := filepath.Join(a.Home, filepath.FromSlash(d.destination))
+	home, err := a.openHome()
+	if err != nil {
+		return err
+	}
+	if _, err := home.validateDirectory(d.destination, false); err != nil {
+		home.close()
+		return err
+	}
+	checkout, err := home.root.OpenRoot(filepath.FromSlash(d.destination))
+	if err != nil {
+		home.close()
+		return err
+	}
 	var files []string
 	var directories []string
-	err := filepath.WalkDir(destination, func(path string, entry os.DirEntry, err error) error {
+	err = fs.WalkDir(checkout.FS(), ".", func(relative string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if path == destination {
+		if relative == "." {
 			return nil
 		}
-		info, err := os.Lstat(path)
+		info, err := entry.Info()
 		if err != nil {
 			return err
 		}
+		path := filepath.Join(destination, relative)
 		if info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
 			directories = append(directories, path)
 			return nil
@@ -489,11 +809,19 @@ func (a *Adapter) backupAndRemove(journal string, d declaration) error {
 		files = append(files, path)
 		return nil
 	})
+	_ = checkout.Close()
+	if verifyErr := home.verify(); err == nil {
+		err = verifyErr
+	}
+	home.close()
 	if err != nil {
 		return err
 	}
 	receipts := make(map[string]string, len(files))
 	for _, path := range files {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := a.Backup.Save(journal, path); err != nil {
 			return fmt.Errorf("git-checkout: backup partial checkout: %w", err)
 		}
@@ -503,7 +831,10 @@ func (a *Adapter) backupAndRemove(journal string, d declaration) error {
 		}
 		receipts[path] = receipt
 	}
-	return removeRecorded(destination, files, directories, func(path string) error {
+	return a.removeRecorded(destination, files, directories, func(path string) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		current, err := pathReceipt(path)
 		if err != nil || current != receipts[path] {
 			return errors.New("git-checkout: partial checkout changed immediately before replacement")
@@ -525,7 +856,7 @@ func (a *Adapter) prune(ctx context.Context, d declaration, owned map[string]str
 		return nil
 	}
 	for absolute, receipt := range owned {
-		fresh, err := pathReceipt(absolute)
+		fresh, err := a.ownedReceipt(d, absolute)
 		if err != nil || fresh != receipt {
 			return fmt.Errorf("git-checkout conflict: tracked path changed before prune: %s", absolute)
 		}
@@ -534,9 +865,15 @@ func (a *Adapter) prune(ctx context.Context, d declaration, owned map[string]str
 	for absolute := range owned {
 		files = append(files, absolute)
 	}
-	return removeRecorded(destination, files, nil, func(path string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return a.removeRecorded(destination, files, nil, func(path string) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		expected := owned[path]
-		got, err := pathReceipt(path)
+		got, err := a.ownedReceipt(d, path)
 		if err != nil || got != expected {
 			return errors.New("git-checkout: path changed immediately before removal")
 		}
@@ -553,6 +890,61 @@ func (a *Adapter) validateOwned(d declaration, owned map[string]string) error {
 		}
 	}
 	return nil
+}
+
+func (a *Adapter) ownedReceipt(d declaration, path string) (string, error) {
+	home, err := a.openHome()
+	if err != nil {
+		return "", err
+	}
+	defer home.close()
+	if _, err := home.validateDirectory(d.destination, false); err != nil {
+		return "", err
+	}
+	relative, err := filepath.Rel(a.Home, path)
+	if err != nil || !safeRelative(filepath.ToSlash(relative)) {
+		return "", errors.New("git-checkout: owned path escapes home")
+	}
+	if err := home.verify(); err != nil {
+		return "", err
+	}
+	return rootPathReceipt(home.root, relative)
+}
+
+func rootPathReceipt(root *os.Root, path string) (string, error) {
+	info, err := root.Lstat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := root.Readlink(path)
+		if err != nil {
+			return "", err
+		}
+		sum := sha256.Sum256([]byte(target))
+		return "link:" + hex.EncodeToString(sum[:]), nil
+	}
+	if !info.Mode().IsRegular() {
+		return "", errors.New("not a regular file or symlink")
+	}
+	file, err := root.OpenFile(path, os.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !os.SameFile(info, opened) {
+		return "", errors.New("path changed before hashing")
+	}
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	current, err := root.Lstat(path)
+	if err != nil || !os.SameFile(info, current) {
+		return "", errors.New("path changed during hashing")
+	}
+	return "file:" + hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func pathReceipt(path string) (string, error) {
@@ -595,12 +987,24 @@ func pathReceipt(path string) (string, error) {
 	return prefix + hex.EncodeToString(sum[:]), nil
 }
 
-func removeRecorded(root string, files, extraDirs []string, before func(string) error) error {
-	rootInfo, err := os.Lstat(root)
+func (a *Adapter) removeRecorded(root string, files, extraDirs []string, before func(string) error) error {
+	relativeRoot, err := filepath.Rel(a.Home, root)
+	if err != nil || !safeRelative(filepath.ToSlash(relativeRoot)) {
+		return errors.New("git-checkout: removal root escapes home")
+	}
+	home, err := a.openHome()
+	if err != nil {
+		return err
+	}
+	defer home.close()
+	if _, err := home.validateDirectory(relativeRoot, false); err != nil {
+		return err
+	}
+	rootInfo, err := home.root.Lstat(relativeRoot)
 	if err != nil || !rootInfo.IsDir() || rootInfo.Mode()&os.ModeSymlink != 0 {
 		return errors.New("git-checkout: removal root is not a real directory")
 	}
-	anchored, err := os.OpenRoot(root)
+	anchored, err := home.root.OpenRoot(relativeRoot)
 	if err != nil {
 		return err
 	}
@@ -646,7 +1050,10 @@ func removeRecorded(root string, files, extraDirs []string, before func(string) 
 			return err
 		}
 	}
-	currentRoot, err := os.Lstat(root)
+	if err := syncRootDirectory(anchored, "."); err != nil {
+		return err
+	}
+	currentRoot, err := home.root.Lstat(relativeRoot)
 	if err == nil && os.SameFile(rootInfo, currentRoot) {
 		directory, openErr := anchored.Open(".")
 		if openErr == nil {
@@ -654,31 +1061,18 @@ func removeRecorded(root string, files, extraDirs []string, before func(string) 
 			_ = directory.Close()
 			if readErr == io.EOF && len(entries) == 0 {
 				_ = anchored.Close()
-				if latest, statErr := os.Lstat(root); statErr == nil && os.SameFile(rootInfo, latest) {
-					if err := os.Remove(root); err != nil && !errors.Is(err, syscall.ENOTEMPTY) && !errors.Is(err, syscall.EEXIST) {
+				if latest, statErr := home.root.Lstat(relativeRoot); statErr == nil && os.SameFile(rootInfo, latest) {
+					if err := home.root.Remove(relativeRoot); err != nil && !errors.Is(err, syscall.ENOTEMPTY) && !errors.Is(err, syscall.EEXIST) {
 						return err
 					}
 				}
 			}
 		}
 	}
-	return nil
-}
-
-func removeTreeFiles(root string) error {
-	var files []string
-	var directories []string
-	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err == nil && path != root {
-			if entry.IsDir() {
-				directories = append(directories, path)
-			} else {
-				files = append(files, path)
-			}
-		}
-		return nil
-	})
-	return removeRecorded(root, files, directories, nil)
+	if err := home.verify(); err != nil {
+		return err
+	}
+	return syncRootDirectory(home.root, filepath.Dir(relativeRoot))
 }
 func splitNUL(data []byte) []string {
 	raw := strings.Split(string(data), "\x00")

@@ -183,14 +183,15 @@ func TestApplyInstallsVerifiesAndCommitsOwnership(t *testing.T) {
 }
 
 func TestDynamicObservationPathsRoundTripToHistoricalPrune(t *testing.T) {
-	item := pkg("core.alpha", "fixture")
-	adapter := &fixtureAdapter{fail: map[string]bool{}, observationPaths: map[string]string{"/home/me/.zshrc": "file:digest"}}
+	item := model.Resource{ID: "shell.test", Type: model.ResourceGitCheckout, Provider: "fixture", Package: "test", VersionPolicy: model.VersionPinned, Metadata: map[string]string{"git.destination": ".test"}}
+	paths := map[string]string{"/home/me/.test/tracked": "file:" + strings.Repeat("a", 64)}
+	adapter := &fixtureAdapter{fail: map[string]bool{}, observationPaths: paths}
 	engine, store := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
 	if _, err := engine.Apply(context.Background(), model.Plan{ID: "install", Operations: []model.Operation{op(item, "install", model.OperationInstall)}}); err != nil {
 		t.Fatal(err)
 	}
 	snapshot, _ := store.Snapshot()
-	if len(snapshot.Ownership[item.ID].Paths) != 0 {
+	if !reflect.DeepEqual(snapshot.Ownership[item.ID].Paths, paths) {
 		t.Fatalf("dynamic paths persisted=%#v", snapshot.Ownership[item.ID].Paths)
 	}
 	engine.Enabled = nil
@@ -199,6 +200,19 @@ func TestDynamicObservationPathsRoundTripToHistoricalPrune(t *testing.T) {
 	}
 	if adapter.present {
 		t.Fatal("historical prune failed")
+	}
+}
+
+func TestApplyRejectsMalformedVerifiedGitCheckoutPaths(t *testing.T) {
+	item := model.Resource{ID: "shell.test", Type: model.ResourceGitCheckout, Provider: "fixture", Package: "test", VersionPolicy: model.VersionPinned, Metadata: map[string]string{"git.destination": ".test"}}
+	adapter := &fixtureAdapter{fail: map[string]bool{}, observationPaths: map[string]string{"/tmp/outside": "file:" + strings.Repeat("a", 64)}}
+	engine, store := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
+	if _, err := engine.Apply(context.Background(), model.Plan{ID: "malformed-observation", Operations: []model.Operation{op(item, "install", model.OperationInstall)}}); err == nil || !strings.Contains(err.Error(), "verified git-checkout paths") {
+		t.Fatalf("err=%v", err)
+	}
+	snapshot, _ := store.Snapshot()
+	if _, exists := snapshot.Ownership[item.ID]; exists {
+		t.Fatal("malformed Git paths became ownership")
 	}
 }
 
@@ -697,6 +711,31 @@ func TestApplyRejectsStaleOrMismatchedHistoricalOwnership(t *testing.T) {
 	}
 	if adapter.present {
 		t.Fatal("valid historical resource was not pruned")
+	}
+}
+
+func TestApplyRejectsMalformedGitCheckoutHistoricalOwnership(t *testing.T) {
+	item := model.Resource{ID: "shell.test", Type: model.ResourceGitCheckout, Provider: "fixture", Package: "test", VersionPolicy: model.VersionPinned, Metadata: map[string]string{"git.destination": ".checkout"}}
+	validReceipt := "file:" + strings.Repeat("a", 64)
+	for name, paths := range map[string]map[string]string{
+		"outside destination": {"/home/me/other/file": validReceipt},
+		"bad receipt":         {"/home/me/.checkout/file": "file:digest"},
+		"split roots":         {"/home/one/.checkout/a": validReceipt, "/home/two/.checkout/b": validReceipt},
+	} {
+		t.Run(name, func(t *testing.T) {
+			adapter := &fixtureAdapter{present: true, fail: map[string]bool{}}
+			engine, store := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
+			engine.Enabled = nil
+			if err := store.PutOwnership(model.Ownership{ResourceID: item.ID, CatalogDigest: "signed", Provider: item.Provider, Package: item.Package, Paths: paths}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := engine.Apply(context.Background(), model.Plan{ID: "bad-git-ownership", Operations: []model.Operation{op(item, "prune", model.OperationPrune)}}); err == nil || !strings.Contains(err.Error(), "git-checkout ownership") {
+				t.Fatalf("err=%v", err)
+			}
+			if len(adapter.events) != 0 {
+				t.Fatalf("adapter touched=%v", adapter.events)
+			}
+		})
 	}
 }
 

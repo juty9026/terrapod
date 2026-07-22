@@ -9,6 +9,7 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -717,6 +718,12 @@ func validateHistoricalOwnership(item model.Resource, digest string, owned model
 		}
 		return nil
 	}
+	if item.Type == model.ResourceGitCheckout {
+		if !validGitCheckoutOwnership(item, owned.Paths) {
+			return fmt.Errorf("reconcile: historical git-checkout ownership for %q is malformed or outside signed destination", item.ID)
+		}
+		return nil
+	}
 	expected := make(map[string]string)
 	for key, value := range item.Metadata {
 		if strings.HasPrefix(key, "path.") {
@@ -732,6 +739,37 @@ func validateHistoricalOwnership(item model.Resource, digest string, owned model
 func signedManagedScope(item model.Resource) (string, bool) {
 	scope, ok := item.Metadata[model.ManagedFilesScopeMetadataKey]
 	return scope, ok && scope != "" && scope == pathpkg.Clean(scope) && !strings.HasPrefix(scope, "/") && scope != ".." && !strings.HasPrefix(scope, "../") && !strings.Contains(scope, "\\")
+}
+
+var gitReceiptPattern = regexp.MustCompile(`^(file|link):[0-9a-f]{64}$`)
+
+func validGitCheckoutOwnership(item model.Resource, paths map[string]string) bool {
+	destination := item.Metadata["git.destination"]
+	if destination == "" || destination != pathpkg.Clean(destination) || strings.HasPrefix(destination, "/") || destination == ".." || strings.HasPrefix(destination, "../") || strings.Contains(destination, "\\") || len(paths) == 0 {
+		return false
+	}
+	marker := string(filepath.Separator) + filepath.FromSlash(destination) + string(filepath.Separator)
+	root := ""
+	for path, receipt := range paths {
+		if !filepath.IsAbs(path) || filepath.Clean(path) != path || !gitReceiptPattern.MatchString(receipt) {
+			return false
+		}
+		index := strings.LastIndex(path, marker)
+		if index < 0 {
+			return false
+		}
+		candidateRoot := path[:index+len(marker)-1]
+		relative, err := filepath.Rel(candidateRoot, path)
+		if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return false
+		}
+		if root == "" {
+			root = candidateRoot
+		} else if root != candidateRoot {
+			return false
+		}
+	}
+	return true
 }
 
 func dependencyOrder(ids []model.ResourceID, resources map[model.ResourceID]model.Resource) []model.ResourceID {
@@ -793,9 +831,12 @@ func validResult(operation model.Operation, result model.OperationResult) error 
 
 func (e *Engine) own(item model.Resource, observed model.Observation) error {
 	paths := make(map[string]string)
-	if item.Type == model.ResourceManagedFiles {
+	if item.Type == model.ResourceManagedFiles || item.Type == model.ResourceGitCheckout {
 		for path, digest := range observed.Paths {
 			paths[path] = digest
+		}
+		if item.Type == model.ResourceGitCheckout && !validGitCheckoutOwnership(item, paths) {
+			return fmt.Errorf("reconcile: verified git-checkout paths for %q are malformed or outside signed destination", item.ID)
 		}
 	} else {
 		for key, value := range item.Metadata {

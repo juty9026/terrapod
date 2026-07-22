@@ -9,6 +9,7 @@ import (
 	"fmt"
 	pathpkg "path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -428,6 +429,12 @@ func historicalAuthority(historical map[string]model.Catalog, id model.ResourceI
 		}
 		return match, true
 	}
+	if match.Type == model.ResourceGitCheckout {
+		if !validGitCheckoutOwnership(match, ownership.Paths) {
+			return model.Resource{}, false
+		}
+		return match, true
+	}
 	paths := make(map[string]string)
 	for key, value := range match.Metadata {
 		if strings.HasPrefix(key, OwnedPathMetadataPrefix) {
@@ -438,6 +445,37 @@ func historicalAuthority(historical map[string]model.Catalog, id model.ResourceI
 		return model.Resource{}, false
 	}
 	return match, true
+}
+
+var gitReceiptPattern = regexp.MustCompile(`^(file|link):[0-9a-f]{64}$`)
+
+func validGitCheckoutOwnership(item model.Resource, paths map[string]string) bool {
+	destination := item.Metadata["git.destination"]
+	if destination == "" || destination != pathpkg.Clean(destination) || strings.HasPrefix(destination, "/") || destination == ".." || strings.HasPrefix(destination, "../") || strings.Contains(destination, "\\") || len(paths) == 0 {
+		return false
+	}
+	marker := string(filepath.Separator) + filepath.FromSlash(destination) + string(filepath.Separator)
+	root := ""
+	for path, receipt := range paths {
+		if !filepath.IsAbs(path) || filepath.Clean(path) != path || !gitReceiptPattern.MatchString(receipt) {
+			return false
+		}
+		index := strings.LastIndex(path, marker)
+		if index < 0 {
+			return false
+		}
+		candidateRoot := path[:index+len(marker)-1]
+		relative, err := filepath.Rel(candidateRoot, path)
+		if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return false
+		}
+		if root == "" {
+			root = candidateRoot
+		} else if root != candidateRoot {
+			return false
+		}
+	}
+	return true
 }
 
 func validateManagedAuthorities(input Input, current map[model.ResourceID]model.Resource) error {
