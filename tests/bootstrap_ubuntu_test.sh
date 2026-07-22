@@ -3,6 +3,7 @@ set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
+chezmoi_bin="$(command -v chezmoi)"
 
 cleanup() {
   rm -rf "$tmp_dir"
@@ -72,7 +73,7 @@ write_stub() {
 mkdir -p "$tmp_dir/bin" "$tmp_dir/home"
 
 rendered="$tmp_dir/bootstrap-ubuntu.sh"
-chezmoi execute-template \
+"$chezmoi_bin" execute-template \
   --source "$repo_root" \
   --override-data '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableAiCliTools":false,"enableDevelopmentWorkspace":false}' \
   --file "$repo_root/.chezmoiscripts/run_onchange_before_00-bootstrap-ubuntu.sh.tmpl" \
@@ -92,6 +93,9 @@ write_stub "$tmp_dir/bin/sudo" \
 
 write_stub "$tmp_dir/bin/apt-get" \
   'printf "%s\n" "apt-get args:$*" >>"$BOOTSTRAP_TEST_LOG"' \
+  'if [ "$1" = "install" ] && [ "${BOOTSTRAP_APT_INSTALL_STATUS:-0}" != "0" ]; then' \
+  '  exit "$BOOTSTRAP_APT_INSTALL_STATUS"' \
+  'fi' \
   'exit 0'
 
 write_stub "$tmp_dir/bin/install" \
@@ -200,3 +204,44 @@ pass "Ubuntu bootstrap does not write shell-integrations warnings for login shel
 
 ubuntu_bootstrap_marker_text="$(cat "$ubuntu_bootstrap_marker")"
 assert_contains "$ubuntu_bootstrap_marker_text" "guidance='Run chsh -s /usr/bin/zsh after fixing shell permission issues.'" "Ubuntu bootstrap marker preserves manual chsh guidance"
+
+rm -rf "$HOME/.local/state/terrapod/install-warnings"
+: >"$BOOTSTRAP_TEST_LOG"
+BOOTSTRAP_APT_INSTALL_STATUS=42
+export BOOTSTRAP_APT_INSTALL_STATUS
+if TERRAPOD_FIRST_RUN_APPLY=1 sh "$rendered" >"$tmp_dir/bootstrap-first-run-apt-failure.out" 2>"$tmp_dir/bootstrap-first-run-apt-failure.err"; then
+  unset BOOTSTRAP_APT_INSTALL_STATUS
+  fail "Ubuntu bootstrap should fail when first-run APT prerequisite install fails"
+fi
+unset BOOTSTRAP_APT_INSTALL_STATUS
+pass "Ubuntu bootstrap fails when first-run APT prerequisite install fails"
+
+if [ ! -f "$ubuntu_bootstrap_marker" ]; then
+  fail "Ubuntu bootstrap should keep an ubuntu-bootstrap warning when first-run APT prerequisite install fails"
+fi
+pass "Ubuntu bootstrap keeps an ubuntu-bootstrap warning when first-run APT prerequisite install fails"
+
+ubuntu_bootstrap_marker_text="$(cat "$ubuntu_bootstrap_marker")"
+assert_contains "$ubuntu_bootstrap_marker_text" "guidance='Review APT install output for system and Homebrew prerequisites, then rerun tpod apply.'" "Ubuntu bootstrap marker preserves APT prerequisite failure guidance"
+
+unsupported_rendered="$tmp_dir/bootstrap-ubuntu-unsupported.sh"
+"$chezmoi_bin" execute-template \
+  --source "$repo_root" \
+  --override-data '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"22.04"}},"enableAiCliTools":false,"enableDevelopmentWorkspace":false}' \
+  --file "$repo_root/.chezmoiscripts/run_onchange_before_00-bootstrap-ubuntu.sh.tmpl" \
+  >"$unsupported_rendered"
+
+rm -rf "$HOME/.local/state/terrapod/install-warnings"
+: >"$BOOTSTRAP_TEST_LOG"
+if TERRAPOD_FIRST_RUN_APPLY=1 sh "$unsupported_rendered" >"$tmp_dir/bootstrap-first-run-unsupported.out" 2>"$tmp_dir/bootstrap-first-run-unsupported.err"; then
+  fail "Ubuntu bootstrap should fail on an unsupported release during first-run apply"
+fi
+pass "Ubuntu bootstrap fails on an unsupported release during first-run apply"
+
+if [ ! -f "$ubuntu_bootstrap_marker" ]; then
+  fail "Ubuntu bootstrap should keep an ubuntu-bootstrap warning for an unsupported release during first-run apply"
+fi
+pass "Ubuntu bootstrap keeps an ubuntu-bootstrap warning for an unsupported release during first-run apply"
+
+ubuntu_bootstrap_marker_text="$(cat "$ubuntu_bootstrap_marker")"
+assert_contains "$ubuntu_bootstrap_marker_text" "guidance='Run Terrapod on Ubuntu 24.04, or use tpod doctor for current platform guidance.'" "Ubuntu bootstrap marker preserves unsupported release guidance"
