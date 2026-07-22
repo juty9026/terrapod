@@ -34,60 +34,7 @@ type Store struct {
 
 type persistedJournal struct {
 	model.Journal
-	SupersededBy              string            `json:"supersededBy,omitempty"`
-	TransactionAuthorizations map[string]string `json:"transactionAuthorizations,omitempty"`
-}
-
-func (s *Store) EnsureTransactionAuthorization(journalID, operationID string) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	journal, err := s.readJournal(journalID)
-	if err != nil {
-		return "", err
-	}
-	if journal.Status != "active" {
-		return "", errors.New("state: transaction journal is not active")
-	}
-	found := false
-	for _, operation := range journal.Plan.Operations {
-		if operation.ID == operationID {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return "", errors.New("state: transaction operation is not journaled")
-	}
-	if existing := journal.TransactionAuthorizations[operationID]; existing != "" {
-		return existing, nil
-	}
-	secret := make([]byte, 32)
-	if _, err := rand.Read(secret); err != nil {
-		return "", err
-	}
-	if journal.TransactionAuthorizations == nil {
-		journal.TransactionAuthorizations = make(map[string]string)
-	}
-	encoded := hex.EncodeToString(secret)
-	journal.TransactionAuthorizations[operationID] = encoded
-	if err := s.writeJournal(journal); err != nil {
-		return "", err
-	}
-	return encoded, nil
-}
-
-func (s *Store) TransactionAuthorization(journalID, operationID string) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	journal, err := s.readJournal(journalID)
-	if err != nil {
-		return "", err
-	}
-	secret := journal.TransactionAuthorizations[operationID]
-	if journal.Status != "active" || secret == "" {
-		return "", errors.New("state: transaction is not authorized")
-	}
-	return secret, nil
+	SupersededBy string `json:"supersededBy,omitempty"`
 }
 
 func Open(dir string) (*Store, error) {

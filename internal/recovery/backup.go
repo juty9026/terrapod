@@ -20,26 +20,17 @@ var afterBackupRootsOpened func()
 // Backup stores recovery copies under Root/<journal>/<path relative to Base>.
 type Backup struct{ Root, Base string }
 
-func (b Backup) Save(journal, path string) error {
-	return b.SaveAs(journal, path, path)
-}
-
-// SaveAs captures source while storing it under logicalPath relative to Base.
-func (b Backup) SaveAs(journal, source, logicalPath string) error {
+func (b Backup) Save(journal, path string) (retErr error) {
 	if !journalPattern.MatchString(journal) {
 		return fmt.Errorf("recovery: unsafe journal ID %q", journal)
 	}
 	basePath, rootPath := filepath.Clean(b.Base), filepath.Clean(b.Root)
-	if !filepath.IsAbs(basePath) || !filepath.IsAbs(rootPath) || !filepath.IsAbs(source) || !filepath.IsAbs(logicalPath) || strings.IndexByte(source, 0) >= 0 || strings.IndexByte(logicalPath, 0) >= 0 {
+	if !filepath.IsAbs(basePath) || !filepath.IsAbs(rootPath) || !filepath.IsAbs(path) || strings.IndexByte(path, 0) >= 0 {
 		return errors.New("recovery: base, root, and source must be clean absolute paths")
 	}
-	relative, err := filepath.Rel(basePath, filepath.Clean(source))
+	relative, err := filepath.Rel(basePath, filepath.Clean(path))
 	if err != nil || !safeRelative(relative) {
-		return fmt.Errorf("recovery: source %q escapes base", source)
-	}
-	logical, err := filepath.Rel(basePath, filepath.Clean(logicalPath))
-	if err != nil || !safeRelative(logical) {
-		return fmt.Errorf("recovery: logical path %q escapes base", logicalPath)
+		return fmt.Errorf("recovery: source %q escapes base", path)
 	}
 	if err := os.MkdirAll(rootPath, 0o700); err != nil {
 		return fmt.Errorf("recovery: create root: %w", err)
@@ -60,7 +51,7 @@ func (b Backup) SaveAs(journal, source, logicalPath string) error {
 	if err := verifyRealParents(base, relative); err != nil {
 		return fmt.Errorf("recovery: unsafe source parents: %w", err)
 	}
-	destination := filepath.Join(journal, logical)
+	destination := filepath.Join(journal, relative)
 	if err := ensureRealParents(root, filepath.Dir(destination)); err != nil {
 		return fmt.Errorf("recovery: create destination parents: %w", err)
 	}
@@ -86,6 +77,11 @@ func (b Backup) SaveAs(journal, source, logicalPath string) error {
 		return err
 	}
 	temporary := filepath.Join(filepath.Dir(destination), ".tpod-backup-"+hex.EncodeToString(token))
+	defer func() {
+		if retErr != nil {
+			_ = root.Remove(temporary)
+		}
+	}()
 	if sourceInfo.Mode()&os.ModeSymlink != 0 {
 		target, err := base.Readlink(relative)
 		if err != nil || target == "" || strings.IndexByte(target, 0) >= 0 {
