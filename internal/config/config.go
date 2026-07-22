@@ -45,7 +45,7 @@ func (e *ErrNeedsSetup) Error() string {
 }
 
 func Load(path string) (model.Config, error) {
-	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if errors.Is(err, os.ErrNotExist) {
 		return model.Config{}, &ErrMissing{Path: path}
 	}
