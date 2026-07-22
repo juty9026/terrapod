@@ -8,7 +8,7 @@ font_helper="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/executable_jetendar
 . "$warnings_lib"
 
 if command -v python3 >/dev/null 2>&1 && python3 "$font_helper" install; then
-  terrapod_install_warning_clear jetendard-font
+  terrapod_install_warning_clear jetendard-font || exit 1
   printf '%s\n' "Jetendard is ready. Restart Ghostty or Zed if an existing window still uses a cached font."
   exit 0
 fi

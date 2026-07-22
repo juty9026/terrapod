@@ -15,7 +15,7 @@ python3 "$settings_helper" apply
 settings_status="$?"
 case "$settings_status" in
   0)
-    terrapod_install_warning_clear jetendard-settings
+    terrapod_install_warning_clear jetendard-settings || exit 1
     ;;
   2)
     terrapod_install_warning_write jetendard-settings "Jetendard Orca setting is deferred" "Quit Orca, then rerun tpod apply." || exit 1

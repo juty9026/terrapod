@@ -123,7 +123,7 @@ PY
 )"
 
 if HOME="$home_dir" XDG_STATE_HOME="$state_dir" TERRAPOD_JETENDARD_RELEASE_API_URL="$bad_api_url" \
-  python3 "$helper" install; then
+  python3 "$helper" install 2>"$tmp_dir/digest.err"; then
   fail "installer rejects a digest mismatch"
 fi
 [ -e "$home_dir/Library/Fonts/Jetendard-Regular.ttf" ] || fail "failed replacement preserves working fonts"
@@ -163,9 +163,184 @@ PY
 )"
 
 if HOME="$home_dir" XDG_STATE_HOME="$state_dir" TERRAPOD_JETENDARD_RELEASE_API_URL="$corrupt_api_url" \
-  python3 "$helper" install; then
+  python3 "$helper" install 2>"$tmp_dir/corrupt.err"; then
   fail "installer rejects a corrupt archive"
 fi
 [ -e "$home_dir/Library/Fonts/Jetendard-Regular.ttf" ] || fail "corrupt archive preserves working fonts"
 python3 "$helper" check --home "$home_dir" --state-home "$state_dir" || fail "corrupt archive preserves the working manifest"
 pass "corrupt archive preserves the previous installation"
+
+transaction_fixture="$tmp_dir/transaction-fixture"
+mkdir -p "$transaction_fixture/ttf"
+for variant in Thin ThinItalic ExtraLight ExtraLightItalic Light LightItalic Regular Italic Medium MediumItalic SemiBold SemiBoldItalic Bold BoldItalic ExtraBold ExtraBoldItalic; do
+  printf 'replacement:%s\n' "$variant" >"$transaction_fixture/ttf/Jetendard-$variant.ttf"
+done
+python3 - "$transaction_fixture" <<'PY'
+import hashlib
+import json
+import pathlib
+import sys
+import zipfile
+
+root = pathlib.Path(sys.argv[1])
+archive_path = root / "Jetendard-TTF.zip"
+with zipfile.ZipFile(archive_path, "w") as archive:
+    for path in sorted((root / "ttf").glob("Jetendard-*.ttf")):
+        archive.write(path, f"ttf/{path.name}")
+digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+(root / "release.json").write_text(json.dumps({
+    "tag_name": "v10.0.0",
+    "draft": False,
+    "prerelease": False,
+    "assets": [{
+        "name": "Jetendard-TTF.zip",
+        "state": "uploaded",
+        "digest": f"sha256:{digest}",
+        "browser_download_url": archive_path.resolve().as_uri(),
+    }],
+}), encoding="utf-8")
+PY
+
+python3 - "$helper" "$home_dir" "$state_dir" "$transaction_fixture/release.json" "$tmp_dir" <<'PY'
+import importlib.util
+import importlib.machinery
+import json
+import os
+from pathlib import Path
+import shutil
+import sys
+
+helper_path, base_home_arg, base_state_arg, release_arg, temp_arg = sys.argv[1:]
+loader = importlib.machinery.SourceFileLoader("jetendard_font_helper", helper_path)
+spec = importlib.util.spec_from_loader(loader.name, loader)
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+base_home = Path(base_home_arg)
+base_state = Path(base_state_arg)
+release_url = Path(release_arg).resolve().as_uri()
+temp = Path(temp_arg)
+
+def scenario(name):
+    home = temp / f"{name}-home"
+    state = temp / f"{name}-state"
+    shutil.copytree(base_home, home)
+    shutil.copytree(base_state, state)
+    os.environ["XDG_STATE_HOME"] = str(state)
+    os.environ["TERRAPOD_JETENDARD_RELEASE_API_URL"] = release_url
+    return home, state
+
+def snapshot(home, state):
+    fonts = home / "Library" / "Fonts"
+    manifest = state / "terrapod" / "jetendard" / "manifest.json"
+    return ({path.name: path.read_bytes() for path in sorted(fonts.glob("Jetendard-*.ttf"))}, manifest.read_bytes() if manifest.exists() else None)
+
+def assert_snapshot(home, state, expected):
+    assert snapshot(home, state) == expected
+
+real_replace = module.os.replace
+
+home, state = scenario("late-replace")
+before = snapshot(home, state)
+replacement_count = 0
+failed = False
+def fail_late_replace(source, destination):
+    global replacement_count, failed
+    destination = Path(destination)
+    if destination.parent == home / "Library" / "Fonts" and destination.name.startswith("Jetendard-"):
+        replacement_count += 1
+        if replacement_count == 10 and not failed:
+            failed = True
+            raise OSError("injected late font replacement failure")
+    return real_replace(source, destination)
+module.os.replace = fail_late_replace
+try:
+    module.install(home)
+except OSError as error:
+    assert "injected late font replacement failure" in str(error)
+else:
+    raise AssertionError("late replacement failure was not injected")
+finally:
+    module.os.replace = real_replace
+assert_snapshot(home, state, before)
+module.install(home)
+assert (home / "Library" / "Fonts" / "Jetendard-Regular.ttf").read_text() == "replacement:Regular\n"
+module.check(home, str(state))
+
+home, state = scenario("manifest")
+before = snapshot(home, state)
+manifest = state / "terrapod" / "jetendard" / "manifest.json"
+failed = False
+def fail_manifest(source, destination):
+    global failed
+    if Path(destination) == manifest and not failed:
+        failed = True
+        raise OSError("injected manifest replacement failure")
+    return real_replace(source, destination)
+module.os.replace = fail_manifest
+try:
+    module.install(home)
+except OSError as error:
+    assert "injected manifest replacement failure" in str(error)
+else:
+    raise AssertionError("manifest failure was not injected")
+finally:
+    module.os.replace = real_replace
+assert_snapshot(home, state, before)
+module.install(home)
+module.check(home, str(state))
+
+home, state = scenario("obsolete")
+fonts = home / "Library" / "Fonts"
+manifest = state / "terrapod" / "jetendard" / "manifest.json"
+(fonts / "Jetendard-Legacy.ttf").write_text("legacy-owned\n")
+data = json.loads(manifest.read_text())
+data["files"].append("Jetendard-Legacy.ttf")
+manifest.write_text(json.dumps(data) + "\n")
+before = snapshot(home, state)
+real_unlink = module.os.unlink
+failed = False
+def fail_obsolete(path, *args, **kwargs):
+    global failed
+    candidate = Path(path)
+    if candidate.name == "Jetendard-Legacy.ttf" and not failed:
+        failed = True
+        raise OSError("injected obsolete cleanup failure")
+    return real_unlink(path, *args, **kwargs)
+module.os.unlink = fail_obsolete
+try:
+    module.install(home)
+except OSError as error:
+    assert "injected obsolete cleanup failure" in str(error)
+else:
+    raise AssertionError("obsolete cleanup failure was not injected")
+finally:
+    module.os.unlink = real_unlink
+assert_snapshot(home, state, before)
+module.install(home)
+assert not (fonts / "Jetendard-Legacy.ttf").exists()
+assert (fonts / "Jetendard-Manual.ttf").read_text() == "manual\n"
+module.check(home, str(state))
+
+home = temp / "first-install-home"
+state = temp / "first-install-state"
+(home / "Library" / "Fonts").mkdir(parents=True)
+state.mkdir()
+os.environ["XDG_STATE_HOME"] = str(state)
+before = snapshot(home, state)
+replacement_count = 0
+failed = False
+module.os.replace = fail_late_replace
+try:
+    module.install(home)
+except OSError:
+    pass
+else:
+    raise AssertionError("first-install failure was not injected")
+finally:
+    module.os.replace = real_replace
+assert_snapshot(home, state, before)
+module.install(home)
+module.check(home, str(state))
+PY
+pass "installer rolls back late replacement, manifest, cleanup, and first-install failures"

@@ -269,6 +269,7 @@ macos_terminal_apps_desktop_retry="$(render_template "$macos_terminal_apps_data"
 macos_mise_tools_installer="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_20-install-mise-tools.sh.tmpl")"
 macos_jetendard_installer="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_65-install-jetendard-font.sh.tmpl")"
 macos_jetendard_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_02-retry-jetendard-font.sh.tmpl")"
+macos_jetendard_settings="$(render_template "$macos_data" ".chezmoiscripts/run_after_70-apply-jetendard-settings.sh.tmpl")"
 macos_karabiner_opener="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 macos_terminal_apps_karabiner_opener="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 macos_automation_apps_karabiner_opener="$(render_template "$macos_automation_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
@@ -348,6 +349,70 @@ assert_contains_text \
   "$macos_jetendard_retry" \
   'python3 "$font_helper" install' \
   "Jetendard retry invokes the helper install command"
+
+jetendard_adapter_fixture="$tmp_dir/jetendard-adapter-fixture"
+mkdir -p "$jetendard_adapter_fixture"
+jetendard_adapter_log="$jetendard_adapter_fixture/actions.log"
+jetendard_warnings_stub="$jetendard_adapter_fixture/install-warnings.sh"
+jetendard_helper_stub="$jetendard_adapter_fixture/helper.py"
+cat >"$jetendard_warnings_stub" <<'SH'
+terrapod_install_warning_existing_path() {
+  printf '%s\n' marker-check >>"$JETENDARD_ADAPTER_LOG"
+  [ "${JETENDARD_MARKER_EXISTS:-0}" = 1 ]
+}
+terrapod_install_warning_clear() {
+  printf '%s\n' clear >>"$JETENDARD_ADAPTER_LOG"
+  [ "${JETENDARD_CLEAR_FAIL:-0}" != 1 ]
+}
+terrapod_install_warning_write() {
+  printf '%s\n' write >>"$JETENDARD_ADAPTER_LOG"
+  return 0
+}
+SH
+cat >"$jetendard_helper_stub" <<'PY'
+import os
+from pathlib import Path
+with Path(os.environ["JETENDARD_ADAPTER_LOG"]).open("a") as stream:
+    stream.write("helper\n")
+PY
+
+render_jetendard_adapter_fixture() {
+  rendered="$1"
+  destination="$2"
+  printf '%s\n' "$rendered" |
+    sed \
+      -e "s#^warnings_lib=.*#warnings_lib=\"$jetendard_warnings_stub\"#" \
+      -e "s#^font_helper=.*#font_helper=\"$jetendard_helper_stub\"#" \
+      -e "s#^settings_helper=.*#settings_helper=\"$jetendard_helper_stub\"#" \
+      >"$destination"
+}
+
+jetendard_installer_fixture="$jetendard_adapter_fixture/installer.sh"
+jetendard_retry_fixture="$jetendard_adapter_fixture/retry.sh"
+jetendard_settings_fixture="$jetendard_adapter_fixture/settings.sh"
+render_jetendard_adapter_fixture "$macos_jetendard_installer" "$jetendard_installer_fixture"
+render_jetendard_adapter_fixture "$macos_jetendard_retry" "$jetendard_retry_fixture"
+render_jetendard_adapter_fixture "$macos_jetendard_settings" "$jetendard_settings_fixture"
+
+for adapter in "$jetendard_installer_fixture" "$jetendard_retry_fixture" "$jetendard_settings_fixture"; do
+  : >"$jetendard_adapter_log"
+  if JETENDARD_ADAPTER_LOG="$jetendard_adapter_log" JETENDARD_MARKER_EXISTS=1 JETENDARD_CLEAR_FAIL=1 sh "$adapter" >/dev/null 2>&1; then
+    fail "successful Jetendard adapter blocks when warning clear fails: $adapter"
+  fi
+done
+pass "Jetendard adapters treat warning-clear failures as blocking"
+
+: >"$jetendard_adapter_log"
+JETENDARD_ADAPTER_LOG="$jetendard_adapter_log" JETENDARD_MARKER_EXISTS=0 JETENDARD_CLEAR_FAIL=0 sh "$jetendard_retry_fixture"
+assert_text_equals "$(cat "$jetendard_adapter_log")" 'marker-check' \
+  "Jetendard retry does not install without a warning marker"
+
+: >"$jetendard_adapter_log"
+JETENDARD_ADAPTER_LOG="$jetendard_adapter_log" JETENDARD_MARKER_EXISTS=1 JETENDARD_CLEAR_FAIL=0 sh "$jetendard_retry_fixture"
+assert_text_equals "$(cat "$jetendard_adapter_log")" 'marker-check
+helper
+clear' \
+  "Jetendard retry checks the marker before install and clear"
 
 macos_mise_missing_script="$tmp_dir/macos-mise-missing.sh"
 printf '%s\n' "$macos_mise_tools_installer" |

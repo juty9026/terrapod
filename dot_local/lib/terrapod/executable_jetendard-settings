@@ -11,6 +11,11 @@ import tempfile
 FONT = "Jetendard"
 
 
+class ArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        raise ValueError(message)
+
+
 @dataclass
 class Token:
     kind: str
@@ -165,21 +170,22 @@ def set_jsonc_string(text: str, path: tuple[str, ...], value: str) -> str:
         if member and member[1].kind == "object":
             current = member[1]
             continue
-        nested = "{\n" + line_indent(text, current.end - 1) + "    " + json.dumps(path[depth + 1]) + ": " + json.dumps(value) + ",\n" + line_indent(text, current.end - 1) + "  }"
         if member:
-            node = member[1]
-            return text[:node.start] + nested + text[node.end:]
+            raise ValueError(f"Zed setting {'.'.join(path[:depth + 1])} must be an object")
+        nested = "{\n" + line_indent(text, current.end - 1) + "    " + json.dumps(path[depth + 1]) + ": " + json.dumps(value) + ",\n" + line_indent(text, current.end - 1) + "  }"
         return insert_member(text, current, key, nested)
     return text
 
 
 def jsonc_string(text: str, path: tuple[str, ...]) -> str | None:
     current = root_node(text)
-    for key in path:
+    for depth, key in enumerate(path):
         member = (current.members or {}).get(key)
         if not member:
             return None
         current = member[1]
+        if depth < len(path) - 1 and current.kind != "object":
+            raise ValueError(f"Zed setting {'.'.join(path[:depth + 1])} must be an object")
     if current.kind != "string":
         return None
     return json.loads(text[current.start:current.end])
@@ -278,12 +284,12 @@ def check_orca(home: Path) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
+    parser = ArgumentParser()
     parser.add_argument("command", choices=["apply", "check-ghostty", "check-zed", "check-orca"])
     parser.add_argument("--home")
-    args = parser.parse_args()
-    home = Path(args.home or os.environ.get("HOME", str(Path.home())))
     try:
+        args = parser.parse_args()
+        home = Path(args.home or os.environ.get("HOME", str(Path.home())))
         if args.command == "apply":
             apply_zed(home)
             if not apply_orca(home):
