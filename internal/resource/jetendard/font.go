@@ -47,6 +47,7 @@ var rawSHA256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var beforeInstallFile func(string) error
 var afterPublishFile func(string) error
 var afterCleanupArtifact func(string) error
+var beforeRollbackCleanupSync func() error
 var errSimulatedCrash = errors.New("jetendard: simulated crash")
 
 type Adapter struct {
@@ -223,6 +224,15 @@ func (a *Adapter) Plan(ctx context.Context, item model.Resource, _ model.Observa
 	if err := validateOwnership(filepath.Join(a.Home, filepath.FromSlash(d.destination)), owned.Paths); err != nil {
 		return nil, err
 	}
+	collisions, err := takeoverNames(a.Home, d, owned.Paths)
+	if err != nil {
+		return nil, err
+	}
+	if len(collisions) != 0 {
+		op := operation(item, model.OperationRestore)
+		op.Detail = "take ownership of pre-existing Jetendard fonts after recovery backup"
+		return []model.Operation{op}, nil
+	}
 	_, healthy, _ := inspectPaths(owned.Paths)
 	if !healthy {
 		return []model.Operation{operation(item, model.OperationRestore)}, nil
@@ -306,9 +316,15 @@ func (a *Adapter) execute(ctx context.Context, item model.Resource, op model.Ope
 	if err := validateOwnedForInstall(owned.Paths); err != nil {
 		return err
 	}
-	takeover := op.Kind == model.OperationRestore && len(owned.Paths) == 0
-	if takeover {
-		if err := a.backupPreExisting(item, d); err != nil {
+	collisions, err := takeoverNames(a.Home, d, owned.Paths)
+	if err != nil {
+		return err
+	}
+	if len(collisions) != 0 {
+		if op.Kind != model.OperationRestore {
+			return errors.New("jetendard: pre-existing signed font requires takeover replan")
+		}
+		if err := a.backupPreExisting(item, d, collisions); err != nil {
 			return err
 		}
 	}
@@ -566,6 +582,14 @@ func rollbackTransaction(fonts string, txn transaction) error {
 		if err := verifyRolledBackState(fonts, txn); err != nil {
 			return err
 		}
+		if beforeRollbackCleanupSync != nil {
+			if err := beforeRollbackCleanupSync(); err != nil {
+				return err
+			}
+		}
+		if err := syncDirectory(fonts); err != nil {
+			return err
+		}
 		result = finishTransaction(fonts, txn, phaseRollbackCleanup)
 	}
 	return result
@@ -814,6 +838,38 @@ func validateTransactionArtifacts(fonts string, txn transaction) error {
 	return nil
 }
 
+func validateRollbackBackups(fonts string, txn transaction) error {
+	directory := filepath.Join(fonts, transactionDirname)
+	if err := validateAbsoluteDirectoryChain(directory); err != nil {
+		return err
+	}
+	for _, entry := range txn.Entries {
+		backup := filepath.Join(directory, backupName(entry))
+		if entry.OldExists {
+			if err := validateArtifact(backup, entry.OldDigest, entry.OldSize); err != nil {
+				return err
+			}
+		} else if _, err := os.Lstat(backup); err == nil || !errors.Is(err, os.ErrNotExist) {
+			return errors.New("jetendard: unexpected rollback artifact")
+		}
+		stage := filepath.Join(directory, stageName(entry))
+		if entry.Remove {
+			if _, err := os.Lstat(stage); err == nil || !errors.Is(err, os.ErrNotExist) {
+				return errors.New("jetendard: remove transaction has a stage artifact")
+			}
+			continue
+		}
+		if _, err := os.Lstat(stage); err == nil {
+			if err := validateArtifact(stage, entry.NewDigest, entry.NewSize); err != nil {
+				return err
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
 func validateTransactionEntry(fonts, directory string, entry transactionEntry) error {
 	if entry.OldExists {
 		if err := validateArtifact(filepath.Join(directory, backupName(entry)), entry.OldDigest, entry.OldSize); err != nil {
@@ -931,6 +987,15 @@ func (a *Adapter) recoverPending(item model.Resource, d declaration, owned model
 			return err
 		}
 		return cleanupTransaction(fonts, txn)
+	}
+	if err := verifyRolledBackState(fonts, txn); err == nil {
+		if err := validateRollbackBackups(fonts, txn); err != nil {
+			return err
+		}
+		if err := syncDirectory(fonts); err != nil {
+			return err
+		}
+		return finishTransaction(fonts, txn, phaseRollbackCleanup)
 	}
 	if err := validateTransactionArtifacts(fonts, txn); err != nil {
 		return err
@@ -1075,7 +1140,25 @@ func inspectDeclared(home string, d declaration) (map[string]string, bool, bool,
 	return paths, present, healthy, strings.Join(details, "; ")
 }
 
-func (a *Adapter) backupPreExisting(item model.Resource, d declaration) error {
+func takeoverNames(home string, d declaration, owned map[string]string) ([]string, error) {
+	fonts := filepath.Join(home, filepath.FromSlash(d.destination))
+	var names []string
+	for name := range d.files {
+		path := filepath.Join(fonts, name)
+		if _, ok := owned[path]; ok {
+			continue
+		}
+		if _, err := os.Lstat(path); err == nil {
+			names = append(names, name)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+func (a *Adapter) backupPreExisting(item model.Resource, d declaration, names []string) error {
 	exists, err := validateFontTree(a.Home)
 	if err != nil || !exists {
 		if err == nil {
@@ -1091,18 +1174,10 @@ func (a *Adapter) backupPreExisting(item model.Resource, d declaration) error {
 		return errors.New("jetendard: active journal is required for takeover backup")
 	}
 	root := filepath.Join(a.Recovery, snapshot.ActiveJournal.ID, "preexisting")
-	if err := os.MkdirAll(root, 0o700); err != nil {
+	if err := ensurePrivateDirectory(root); err != nil {
 		return fmt.Errorf("jetendard: create takeover backup: %w", err)
 	}
-	if err := os.Chmod(root, 0o700); err != nil {
-		return err
-	}
 	fonts := filepath.Join(a.Home, filepath.FromSlash(d.destination))
-	names := make([]string, 0, len(d.files))
-	for name := range d.files {
-		names = append(names, name)
-	}
-	sort.Strings(names)
 	for _, name := range names {
 		source := filepath.Join(fonts, name)
 		info, err := os.Lstat(source)
@@ -1341,13 +1416,51 @@ func requireRealDirectory(path string) error {
 }
 
 func ensurePrivateDirectory(path string) error {
-	if err := os.MkdirAll(path, 0o700); err != nil {
+	if err := ensureAbsoluteDirectoryChain(path, 0o700); err != nil {
 		return err
 	}
 	if err := requireRealDirectory(path); err != nil {
 		return fmt.Errorf("jetendard: unsafe recovery directory: %w", err)
 	}
-	return os.Chmod(path, 0o700)
+	if err := os.Chmod(path, 0o700); err != nil {
+		return err
+	}
+	return syncDirectory(path)
+}
+
+func ensureAbsoluteDirectoryChain(path string, mode os.FileMode) error {
+	clean := filepath.Clean(path)
+	if !filepath.IsAbs(clean) {
+		return errors.New("jetendard: directory chain must be absolute")
+	}
+	volume := filepath.VolumeName(clean)
+	root := volume + string(filepath.Separator)
+	relative := strings.TrimPrefix(strings.TrimPrefix(clean, volume), string(filepath.Separator))
+	current := root
+	if err := requireRealDirectory(current); err != nil {
+		return fmt.Errorf("jetendard: unsafe directory ancestor %q: %w", current, err)
+	}
+	for _, component := range strings.Split(relative, string(filepath.Separator)) {
+		if component == "" {
+			continue
+		}
+		current = filepath.Join(current, component)
+		created := false
+		if err := os.Mkdir(current, mode); err == nil {
+			created = true
+		} else if !errors.Is(err, os.ErrExist) {
+			return err
+		}
+		if err := requireRealDirectory(current); err != nil {
+			return fmt.Errorf("jetendard: unsafe directory ancestor %q: %w", current, err)
+		}
+		if created {
+			if err := syncDirectory(filepath.Dir(current)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 func validateOwnedPath(fonts, path string) error {
 	relative, err := filepath.Rel(fonts, path)

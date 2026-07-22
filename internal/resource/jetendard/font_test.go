@@ -81,7 +81,15 @@ func fixture(t *testing.T, body []byte) (*Adapter, model.Resource, *state.Store,
 		MetadataURL: server.URL, MetadataSHA256: fmt.Sprintf("%x", digest), MetadataFormat: "zip", MetadataTag: "v1.0.0", MetadataDestination: "Library/Fonts",
 		MetadataFiles: string(manifestJSON),
 	}}
-	a := &Adapter{Archive: &archivepkg.Adapter{HTTP: server.Client(), CacheDir: filepath.Join(t.TempDir(), "cache")}, Home: home, State: store, Recovery: filepath.Join(t.TempDir(), "recovery")}
+	cacheRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	recoveryRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Adapter{Archive: &archivepkg.Adapter{HTTP: server.Client(), CacheDir: filepath.Join(cacheRoot, "cache")}, Home: home, State: store, Recovery: filepath.Join(recoveryRoot, "recovery")}
 	return a, item, store, filepath.Join(home, "Library", "Fonts"), &requests
 }
 
@@ -827,5 +835,155 @@ func TestRollbackCleanupRecoversAfterFirstBackupDeletion(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(fonts, transactionDirname)); !os.IsNotExist(err) {
 		t.Fatalf("transaction remains: %v", err)
+	}
+}
+
+func TestRollbackSyncFailureKeepsBackupsAndFreshRecoveryCompletes(t *testing.T) {
+	body := fontArchive(t, map[string]string{"Jetendard-Regular.ttf": "new", "Jetendard-Bold.ttf": "new-bold"})
+	a, item, store, fonts, _ := fixture(t, body)
+	if err := os.MkdirAll(fonts, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	owned := model.Ownership{ResourceID: item.ID, Provider: item.Provider, Package: item.Package, Paths: map[string]string{}}
+	for name, contents := range map[string]string{"Jetendard-Regular.ttf": "old", "Jetendard-Bold.ttf": "old-bold"} {
+		path := filepath.Join(fonts, name)
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		owned.Paths[path] = digestString([]byte(contents))
+	}
+	if err := store.PutOwnership(owned); err != nil {
+		t.Fatal(err)
+	}
+	op := operation(item, model.OperationUpgrade)
+	if _, err := store.Begin(model.Plan{ID: "rollback-sync", Operations: []model.Operation{op}}); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	beforeInstallFile = func(string) error {
+		calls++
+		if calls == 2 {
+			return fmt.Errorf("injected publish failure")
+		}
+		return nil
+	}
+	beforeRollbackCleanupSync = func() error { return fmt.Errorf("injected directory sync failure") }
+	t.Cleanup(func() { beforeInstallFile = nil; beforeRollbackCleanupSync = nil })
+	if result := a.ExecuteResource(context.Background(), item, op); result.Success || !strings.Contains(result.Detail, "sync failure") {
+		t.Fatalf("result=%#v", result)
+	}
+	beforeInstallFile = nil
+	beforeRollbackCleanupSync = nil
+	directory := filepath.Join(fonts, transactionDirname)
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backups := 0
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "old-") {
+			backups++
+		}
+	}
+	if backups != 2 {
+		t.Fatalf("backups=%d entries=%v", backups, entries)
+	}
+	fresh := &Adapter{Archive: a.Archive, Home: a.Home, State: a.State, Recovery: a.Recovery}
+	obs, err := fresh.Inspect(context.Background(), item)
+	if err != nil || !obs.Healthy {
+		t.Fatalf("obs=%#v err=%v", obs, err)
+	}
+	if _, err := os.Stat(directory); !os.IsNotExist(err) {
+		t.Fatalf("transaction remains: %v", err)
+	}
+}
+
+func TestUpgradeNewSignedFilenameCollisionUsesDurableTakeoverBackup(t *testing.T) {
+	body := fontArchive(t, map[string]string{"Jetendard-Regular.ttf": "regular", "Jetendard-Bold.ttf": "desired-bold"})
+	a, item, store, fonts, _ := fixture(t, body)
+	if err := os.MkdirAll(fonts, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	regular := filepath.Join(fonts, "Jetendard-Regular.ttf")
+	collision := filepath.Join(fonts, "Jetendard-Bold.ttf")
+	manual := filepath.Join(fonts, "Manual.ttf")
+	for path, contents := range map[string]string{regular: "regular", collision: "user-bold", manual: "manual"} {
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	owned := model.Ownership{ResourceID: item.ID, Provider: item.Provider, Package: item.Package, Paths: map[string]string{regular: digestString([]byte("regular"))}}
+	if err := store.PutOwnership(owned); err != nil {
+		t.Fatal(err)
+	}
+	obs, err := a.Inspect(context.Background(), item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops, err := a.Plan(context.Background(), item, obs, owned)
+	if err != nil || len(ops) != 1 || ops[0].Kind != model.OperationRestore || !strings.Contains(ops[0].Detail, "take ownership") {
+		t.Fatalf("ops=%#v err=%v", ops, err)
+	}
+	if _, err := store.Begin(model.Plan{ID: "new-collision", Operations: ops}); err != nil {
+		t.Fatal(err)
+	}
+	if result := a.ExecuteResource(context.Background(), item, ops[0]); !result.Success {
+		t.Fatalf("result=%#v", result)
+	}
+	matches, err := filepath.Glob(filepath.Join(a.Recovery, "*", "preexisting", "Jetendard-Bold.ttf"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("backups=%v err=%v", matches, err)
+	}
+	if got, _ := os.ReadFile(matches[0]); string(got) != "user-bold" {
+		t.Fatalf("backup=%q", got)
+	}
+	if got, _ := os.ReadFile(collision); string(got) != "desired-bold" {
+		t.Fatalf("installed=%q", got)
+	}
+	if got, _ := os.ReadFile(manual); string(got) != "manual" {
+		t.Fatalf("manual=%q", got)
+	}
+}
+
+func TestRecoveryRootAncestorSymlinkAbortsTakeoverWithoutMutation(t *testing.T) {
+	body := fontArchive(t, map[string]string{"Jetendard-Regular.ttf": "desired"})
+	for _, depth := range []string{"parent", "grandparent"} {
+		t.Run(depth, func(t *testing.T) {
+			a, item, store, fonts, _ := fixture(t, body)
+			if err := os.MkdirAll(fonts, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			target := filepath.Join(fonts, "Jetendard-Regular.ttf")
+			if err := os.WriteFile(target, []byte("mine"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			base, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			real := filepath.Join(base, "real")
+			relative := "recovery"
+			if depth == "grandparent" {
+				relative = filepath.Join("nested", "recovery")
+			}
+			if err := os.MkdirAll(filepath.Join(real, relative), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			alias := filepath.Join(base, "alias")
+			if err := os.Symlink(real, alias); err != nil {
+				t.Fatal(err)
+			}
+			a.Recovery = filepath.Join(alias, relative)
+			op := operation(item, model.OperationRestore)
+			if _, err := store.Begin(model.Plan{ID: "recovery-symlink", Operations: []model.Operation{op}}); err != nil {
+				t.Fatal(err)
+			}
+			if result := a.ExecuteResource(context.Background(), item, op); result.Success {
+				t.Fatal("expected recovery ancestor rejection")
+			}
+			if got, _ := os.ReadFile(target); string(got) != "mine" {
+				t.Fatalf("target=%q", got)
+			}
+		})
 	}
 }

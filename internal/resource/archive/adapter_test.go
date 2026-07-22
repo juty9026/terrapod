@@ -73,11 +73,20 @@ func serve(t *testing.T, body []byte) (*httptest.Server, Asset) {
 	return server, Asset{URL: server.URL, SHA256: fmt.Sprintf("%x", digest)}
 }
 
+func realTempDir(t *testing.T) string {
+	t.Helper()
+	path, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestFetchRejectsChecksumMismatchAndOversize(t *testing.T) {
 	server, asset := serve(t, []byte("archive"))
 	defer server.Close()
 	asset.SHA256 = strings.Repeat("0", 64)
-	a := Adapter{HTTP: server.Client(), CacheDir: t.TempDir()}
+	a := Adapter{HTTP: server.Client(), CacheDir: realTempDir(t)}
 	if _, err := a.Fetch(context.Background(), asset); err == nil || !strings.Contains(err.Error(), "checksum") {
 		t.Fatalf("err=%v", err)
 	}
@@ -106,8 +115,8 @@ func TestExtractRejectsUnsafeZipAndTarEntries(t *testing.T) {
 			server, asset := serve(t, tc.body)
 			defer server.Close()
 			asset.Format = tc.format
-			destination := filepath.Join(t.TempDir(), "out")
-			a := Adapter{HTTP: server.Client(), CacheDir: t.TempDir()}
+			destination := filepath.Join(realTempDir(t), "out")
+			a := Adapter{HTTP: server.Client(), CacheDir: realTempDir(t)}
 			if _, err := a.FetchAndExtract(context.Background(), asset, destination); err == nil {
 				t.Fatal("expected unsafe archive rejection")
 			}
@@ -129,8 +138,8 @@ func TestExtractRejectsDuplicateAndPartialArchives(t *testing.T) {
 	server, asset := serve(t, output.Bytes())
 	defer server.Close()
 	asset.Format = "zip"
-	destination := filepath.Join(t.TempDir(), "out")
-	a := Adapter{HTTP: server.Client(), CacheDir: t.TempDir()}
+	destination := filepath.Join(realTempDir(t), "out")
+	a := Adapter{HTTP: server.Client(), CacheDir: realTempDir(t)}
 	if _, err := a.FetchAndExtract(context.Background(), asset, destination); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("err=%v", err)
 	}
@@ -144,7 +153,7 @@ func TestExtractAtomicallyReplacesDirectory(t *testing.T) {
 	server, asset := serve(t, body)
 	defer server.Close()
 	asset.Format = "zip"
-	parent := t.TempDir()
+	parent := realTempDir(t)
 	destination := filepath.Join(parent, "out")
 	if err := os.Mkdir(destination, 0o700); err != nil {
 		t.Fatal(err)
@@ -152,7 +161,7 @@ func TestExtractAtomicallyReplacesDirectory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(destination, "old"), []byte("old"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	a := Adapter{HTTP: server.Client(), CacheDir: t.TempDir()}
+	a := Adapter{HTTP: server.Client(), CacheDir: realTempDir(t)}
 	manifest, err := a.FetchAndExtract(context.Background(), asset, destination)
 	if err != nil {
 		t.Fatal(err)
@@ -182,8 +191,8 @@ func TestTarRejectsEntryCountBeforeSpooling(t *testing.T) {
 	server, asset := serve(t, output.Bytes())
 	defer server.Close()
 	asset.Format = "tar"
-	a := Adapter{HTTP: server.Client(), CacheDir: t.TempDir()}
-	if _, err := a.FetchAndExtract(context.Background(), asset, filepath.Join(t.TempDir(), "out")); err == nil || !strings.Contains(err.Error(), "entry count") {
+	a := Adapter{HTTP: server.Client(), CacheDir: realTempDir(t)}
+	if _, err := a.FetchAndExtract(context.Background(), asset, filepath.Join(realTempDir(t), "out")); err == nil || !strings.Contains(err.Error(), "entry count") {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -199,8 +208,56 @@ func TestTarRejectsDeclaredExpandedSizeBeforeReadingBody(t *testing.T) {
 	server, asset := serve(t, output.Bytes())
 	defer server.Close()
 	asset.Format = "tar"
-	a := Adapter{HTTP: server.Client(), CacheDir: t.TempDir(), Limits: Limits{EntryBytes: defaultExpandedBytes + 1}}
-	if _, err := a.FetchAndExtract(context.Background(), asset, filepath.Join(t.TempDir(), "out")); err == nil || !strings.Contains(err.Error(), "expanded size") {
+	a := Adapter{HTTP: server.Client(), CacheDir: realTempDir(t), Limits: Limits{EntryBytes: defaultExpandedBytes + 1}}
+	if _, err := a.FetchAndExtract(context.Background(), asset, filepath.Join(realTempDir(t), "out")); err == nil || !strings.Contains(err.Error(), "expanded size") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestCacheAndExtractionParentRejectAncestorSymlinks(t *testing.T) {
+	body := zipBytes(t, map[string]string{"font.ttf": "font"}, "")
+	for _, scope := range []string{"cache", "destination"} {
+		for _, depth := range []string{"parent", "grandparent"} {
+			t.Run(scope+"/"+depth, func(t *testing.T) {
+				server, asset := serve(t, body)
+				defer server.Close()
+				asset.Format = "zip"
+				base, err := filepath.EvalSymlinks(t.TempDir())
+				if err != nil {
+					t.Fatal(err)
+				}
+				real := filepath.Join(base, "real")
+				relative := "managed"
+				if depth == "grandparent" {
+					relative = filepath.Join("nested", "managed")
+				}
+				if err := os.MkdirAll(filepath.Join(real, relative), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				alias := filepath.Join(base, "alias")
+				if err := os.Symlink(real, alias); err != nil {
+					t.Fatal(err)
+				}
+				cache := realTempDir(t)
+				destination := filepath.Join(realTempDir(t), "out")
+				external := filepath.Join(real, relative)
+				if scope == "cache" {
+					cache = filepath.Join(alias, relative)
+				} else {
+					destination = filepath.Join(alias, relative, "out")
+				}
+				a := Adapter{HTTP: server.Client(), CacheDir: cache}
+				if _, err := a.FetchAndExtract(context.Background(), asset, destination); err == nil {
+					t.Fatal("expected ancestor symlink rejection")
+				}
+				entries, err := os.ReadDir(external)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(entries) != 0 {
+					t.Fatalf("external mutated: %v", entries)
+				}
+			})
+		}
 	}
 }

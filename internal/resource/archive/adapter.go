@@ -88,7 +88,7 @@ func (a Adapter) Fetch(ctx context.Context, asset Asset) (string, error) {
 	if !strings.HasPrefix(asset.URL, "https://") && !strings.HasPrefix(asset.URL, "http://127.0.0.1:") && !strings.HasPrefix(asset.URL, "http://[::1]:") {
 		return "", errors.New("archive: asset URL must use HTTPS")
 	}
-	if err := os.MkdirAll(a.CacheDir, 0o700); err != nil {
+	if err := ensureAbsoluteDirectoryChain(a.CacheDir, 0o700); err != nil {
 		return "", fmt.Errorf("archive: create cache: %w", err)
 	}
 	cachePath := filepath.Join(a.CacheDir, digest+".asset")
@@ -170,12 +170,8 @@ func (a Adapter) FetchAndExtract(ctx context.Context, asset Asset, destination s
 		return Manifest{}, err
 	}
 	parent := filepath.Dir(destination)
-	if err := os.MkdirAll(parent, 0o700); err != nil {
+	if err := ensureAbsoluteDirectoryChain(parent, 0o700); err != nil {
 		return Manifest{}, err
-	}
-	parentInfo, err := os.Lstat(parent)
-	if err != nil || !parentInfo.IsDir() || parentInfo.Mode()&os.ModeSymlink != 0 {
-		return Manifest{}, errors.New("archive: destination parent must be a real directory")
 	}
 	staging, err := os.MkdirTemp(parent, ".extract-*")
 	if err != nil {
@@ -220,6 +216,35 @@ func (a Adapter) FetchAndExtract(ctx context.Context, asset Asset, destination s
 		_ = os.RemoveAll(backup)
 	}
 	return manifest, nil
+}
+
+func ensureAbsoluteDirectoryChain(path string, mode os.FileMode) error {
+	clean := filepath.Clean(path)
+	if !filepath.IsAbs(clean) {
+		return errors.New("archive: directory chain must be absolute")
+	}
+	volume := filepath.VolumeName(clean)
+	root := volume + string(filepath.Separator)
+	relative := strings.TrimPrefix(strings.TrimPrefix(clean, volume), string(filepath.Separator))
+	current := root
+	rootInfo, err := os.Lstat(current)
+	if err != nil || !rootInfo.IsDir() || rootInfo.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("archive: unsafe directory ancestor %q", current)
+	}
+	for _, component := range strings.Split(relative, string(filepath.Separator)) {
+		if component == "" {
+			continue
+		}
+		current = filepath.Join(current, component)
+		if err := os.Mkdir(current, mode); err != nil && !errors.Is(err, os.ErrExist) {
+			return err
+		}
+		info, err := os.Lstat(current)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("archive: unsafe directory ancestor %q", current)
+		}
+	}
+	return nil
 }
 
 func (a Adapter) extract(source, format, staging string) (Manifest, error) {
