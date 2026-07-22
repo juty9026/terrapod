@@ -467,30 +467,33 @@ func (a *Adapter) installCaskWithAdoption(ctx context.Context, operation model.O
 	if !safeRecoveryChild(resourceChild) {
 		return fmt.Errorf("homebrew: unsafe recovery resource ID %q", resourceChild)
 	}
-	recoveryChild := filepath.Join(a.recoveryDir, resourceChild)
-	backup := filepath.Join(recoveryChild, filepath.Base(app.path))
-	if err := a.fs.MkdirAll(recoveryChild, 0o700); err != nil {
-		return fmt.Errorf("homebrew: create recovery directory: %w", err)
+	transaction, err := a.allocateReplacementTransaction(filepath.Join(a.recoveryDir, resourceChild), filepath.Base(app.path))
+	if err != nil {
+		return fmt.Errorf("homebrew: allocate replacement transaction: %w", err)
 	}
-	if _, err := a.fs.Lstat(backup); err == nil || !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("homebrew: refusing to overwrite recovery artifact %q", backup)
-	}
-	if err := a.fs.Rename(app.path, backup); err != nil {
+	if err := a.fs.Rename(app.path, transaction.backup); err != nil {
 		return fmt.Errorf("homebrew: stage declared app for recovery: %w", err)
 	}
 	restore := func(cause error) error {
 		var stageErr error
 		if _, statErr := a.fs.Lstat(app.path); statErr == nil {
-			failed, uniqueErr := a.uniqueFailedReplacementPath(recoveryChild, filepath.Base(app.path))
-			if uniqueErr != nil {
-				stageErr = fmt.Errorf("homebrew: allocate failed replacement recovery: %w", uniqueErr)
-			} else if moveErr := a.fs.Rename(app.path, failed); moveErr != nil {
-				stageErr = fmt.Errorf("homebrew: stage failed replacement: %w", moveErr)
+			moveErrors := make([]error, 0, len(transaction.failed))
+			staged := false
+			for _, failed := range transaction.failed {
+				if moveErr := a.fs.Rename(app.path, failed); moveErr != nil {
+					moveErrors = append(moveErrors, moveErr)
+					continue
+				}
+				staged = true
+				break
+			}
+			if !staged {
+				stageErr = fmt.Errorf("homebrew: stage failed replacement after %d attempts: %w", len(transaction.failed), errors.Join(moveErrors...))
 			}
 		} else if !errors.Is(statErr, os.ErrNotExist) {
 			stageErr = fmt.Errorf("homebrew: inspect failed replacement destination: %w", statErr)
 		}
-		if restoreErr := a.fs.Rename(backup, app.path); restoreErr != nil {
+		if restoreErr := a.fs.Rename(transaction.backup, app.path); restoreErr != nil {
 			return errors.Join(cause, stageErr, fmt.Errorf("homebrew: restore original app: %w", restoreErr))
 		}
 		return errors.Join(cause, stageErr)
@@ -504,22 +507,47 @@ func (a *Adapter) installCaskWithAdoption(ctx context.Context, operation model.O
 	return nil
 }
 
-func (a *Adapter) uniqueFailedReplacementPath(recoveryChild, appName string) (string, error) {
+type replacementTransaction struct {
+	backup string
+	failed []string
+}
+
+func (a *Adapter) allocateReplacementTransaction(recoveryChild, appName string) (replacementTransaction, error) {
+	if err := a.fs.MkdirAll(recoveryChild, 0o700); err != nil {
+		return replacementTransaction{}, fmt.Errorf("create resource recovery directory: %w", err)
+	}
+	var transactionDirectory string
 	for attempt := 0; attempt < 8; attempt++ {
 		var randomBytes [16]byte
 		if _, err := io.ReadFull(a.random, randomBytes[:]); err != nil {
-			return "", err
+			return replacementTransaction{}, err
 		}
-		directory := filepath.Join(recoveryChild, "failed-"+hex.EncodeToString(randomBytes[:]))
+		directory := filepath.Join(recoveryChild, "transaction-"+hex.EncodeToString(randomBytes[:]))
 		if err := a.fs.Mkdir(directory, 0o700); err != nil {
 			if errors.Is(err, os.ErrExist) {
 				continue
 			}
-			return "", err
+			return replacementTransaction{}, err
 		}
-		return filepath.Join(directory, appName), nil
+		transactionDirectory = directory
+		break
 	}
-	return "", errors.New("failed replacement recovery name collision limit reached")
+	if transactionDirectory == "" {
+		return replacementTransaction{}, errors.New("replacement transaction name collision limit reached")
+	}
+	backupDirectory := filepath.Join(transactionDirectory, "backup")
+	if err := a.fs.Mkdir(backupDirectory, 0o700); err != nil {
+		return replacementTransaction{}, fmt.Errorf("create transaction backup directory: %w", err)
+	}
+	transaction := replacementTransaction{backup: filepath.Join(backupDirectory, appName)}
+	for slot := 1; slot <= 4; slot++ {
+		failedDirectory := filepath.Join(transactionDirectory, fmt.Sprintf("failed-%d", slot))
+		if err := a.fs.Mkdir(failedDirectory, 0o700); err != nil {
+			return replacementTransaction{}, fmt.Errorf("create failed replacement slot %d: %w", slot, err)
+		}
+		transaction.failed = append(transaction.failed, filepath.Join(failedDirectory, appName))
+	}
+	return transaction, nil
 }
 
 func (a *Adapter) inspectedResource(packageName string) (model.Resource, bool) {
@@ -684,6 +712,12 @@ func decodeHomebrewEnvelope(contents []byte) ([]json.RawMessage, []json.RawMessa
 	if !formulaOK || !caskOK {
 		return nil, nil, errors.New("Homebrew JSON must contain formulae and casks")
 	}
+	if !rawJSONArray(formulaRaw) {
+		return nil, nil, errors.New("formulae must be a JSON array")
+	}
+	if !rawJSONArray(caskRaw) {
+		return nil, nil, errors.New("casks must be a JSON array")
+	}
 	var formulae, casks []json.RawMessage
 	if err := json.Unmarshal(formulaRaw, &formulae); err != nil {
 		return nil, nil, fmt.Errorf("formulae must be an array: %w", err)
@@ -692,6 +726,11 @@ func decodeHomebrewEnvelope(contents []byte) ([]json.RawMessage, []json.RawMessa
 		return nil, nil, fmt.Errorf("casks must be an array: %w", err)
 	}
 	return formulae, casks, nil
+}
+
+func rawJSONArray(contents json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(contents)
+	return len(trimmed) != 0 && trimmed[0] == '['
 }
 
 func rejectUnknownRecordFields(contents json.RawMessage, allowed map[string]struct{}) error {

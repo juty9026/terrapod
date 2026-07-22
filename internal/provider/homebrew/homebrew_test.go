@@ -3,6 +3,7 @@ package homebrew
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -139,6 +140,28 @@ func TestInspectRejectsUnknownCaskRecordField(t *testing.T) {
 	resource.Metadata = map[string]string{}
 	if _, err := adapter.Inspect(context.Background(), resource); err == nil || !strings.Contains(err.Error(), "unknown") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestInspectRejectsNullEnvelopeArrays(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		json string
+	}{
+		{name: "formulae", json: `{"formulae":null,"casks":[]}`},
+		{name: "casks", json: `{"formulae":[],"casks":null}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			adapter, err := New(Formula, "/opt/homebrew/bin/brew", t.TempDir(), runnerFunc(func(context.Context, execx.Request) (execx.Result, error) {
+				return execx.Result{Stdout: []byte(tc.json)}, nil
+			}), AppPolicy{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := adapter.Inspect(context.Background(), formulaResource("ripgrep")); err == nil || !strings.Contains(err.Error(), "array") {
+				t.Fatalf("error = %v", err)
+			}
+		})
 	}
 }
 
@@ -350,6 +373,19 @@ func TestSimulateRejectsUnknownOutdatedFields(t *testing.T) {
 	}
 	_, err = adapter.Simulate(context.Background(), model.Operation{Kind: model.OperationUpgrade, Provider: adapter.Name(), Package: "ripgrep"})
 	if err == nil || !strings.Contains(err.Error(), "unknown") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestSimulateRejectsNullOutdatedEnvelopeArrays(t *testing.T) {
+	adapter, err := New(Formula, "/opt/homebrew/bin/brew", t.TempDir(), runnerFunc(func(context.Context, execx.Request) (execx.Result, error) {
+		return execx.Result{Stdout: []byte(`{"formulae":null,"casks":[]}`)}, nil
+	}), AppPolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = adapter.Simulate(context.Background(), model.Operation{Kind: model.OperationUpgrade, Provider: adapter.Name(), Package: "ripgrep"})
+	if err == nil || !strings.Contains(err.Error(), "array") {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -574,7 +610,7 @@ func TestRollbackIgnoresPreexistingLegacyFailedArtifactAndRestoresOriginal(t *te
 	if err := os.MkdirAll(legacyFailed, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	adapter := replacementFailureAdapter(t, homeApps, artifact, recovery, nil)
+	adapter := replacementFailureAdapter(t, homeApps, artifact, recovery, nil, nil, nil)
 	resource := caskResource("vendor", artifact)
 	if _, err := adapter.Inspect(context.Background(), resource); err != nil {
 		t.Fatal(err)
@@ -601,18 +637,73 @@ func TestRollbackAttemptsOriginalRestoreAfterFailedReplacementMove(t *testing.T)
 		t.Fatal(err)
 	}
 	recovery := canonicalDir(t, t.TempDir())
-	fs := &failReplacementMoveFS{artifact: artifact}
-	adapter := replacementFailureAdapter(t, homeApps, artifact, recovery, fs)
+	fs := &failReplacementMoveFS{artifact: artifact, stageFailures: 1}
+	adapter := replacementFailureAdapter(t, homeApps, artifact, recovery, fs, nil, nil)
 	resource := caskResource("vendor", artifact)
 	if _, err := adapter.Inspect(context.Background(), resource); err != nil {
 		t.Fatal(err)
 	}
 	err := adapter.Execute(context.Background(), model.Operation{ResourceID: resource.ID, Kind: model.OperationInstall, Provider: adapter.Name(), Package: "vendor"})
-	if err == nil || !strings.Contains(err.Error(), "stage failed replacement") {
+	if err == nil || !strings.Contains(err.Error(), "verify replacement") {
 		t.Fatalf("error = %v", err)
 	}
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("original not restored after move failure: %v", err)
+	}
+	if len(fs.stageDestinations) != 2 || fs.stageDestinations[0] == fs.stageDestinations[1] {
+		t.Fatalf("stage destinations = %#v, want two distinct retries", fs.stageDestinations)
+	}
+}
+
+func TestRollbackRandomFailureLeavesOriginalUntouchedAndSkipsReplacementInstall(t *testing.T) {
+	homeApps := canonicalDir(t, filepath.Join(t.TempDir(), "Applications"))
+	artifact := filepath.Join(homeApps, "Vendor.app")
+	if err := os.MkdirAll(artifact, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(artifact, "original")
+	if err := os.WriteFile(marker, []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	installs := 0
+	adapter := replacementFailureAdapter(t, homeApps, artifact, canonicalDir(t, t.TempDir()), nil, errorReader{}, &installs)
+	resource := caskResource("vendor", artifact)
+	if _, err := adapter.Inspect(context.Background(), resource); err != nil {
+		t.Fatal(err)
+	}
+	err := adapter.Execute(context.Background(), model.Operation{ResourceID: resource.ID, Kind: model.OperationInstall, Provider: adapter.Name(), Package: "vendor"})
+	if err == nil || !strings.Contains(err.Error(), "random unavailable") {
+		t.Fatalf("error = %v", err)
+	}
+	if installs != 0 {
+		t.Fatalf("replacement installs = %d, want 0", installs)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("original changed before transaction allocation: %v", err)
+	}
+}
+
+func TestRollbackPersistentMoveErrorAttemptsRestoreAndReportsBoth(t *testing.T) {
+	homeApps := canonicalDir(t, filepath.Join(t.TempDir(), "Applications"))
+	artifact := filepath.Join(homeApps, "Vendor.app")
+	if err := os.MkdirAll(artifact, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(artifact, "original"), []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fs := &failReplacementMoveFS{artifact: artifact, persistent: true}
+	adapter := replacementFailureAdapter(t, homeApps, artifact, canonicalDir(t, t.TempDir()), fs, nil, nil)
+	resource := caskResource("vendor", artifact)
+	if _, err := adapter.Inspect(context.Background(), resource); err != nil {
+		t.Fatal(err)
+	}
+	err := adapter.Execute(context.Background(), model.Operation{ResourceID: resource.ID, Kind: model.OperationInstall, Provider: adapter.Name(), Package: "vendor"})
+	if err == nil || !strings.Contains(err.Error(), "stage failed replacement") || !strings.Contains(err.Error(), "restore original app") {
+		t.Fatalf("error = %v", err)
+	}
+	if len(fs.stageDestinations) < 2 || fs.restoreAttempts != 1 {
+		t.Fatalf("stage attempts = %d, restore attempts = %d", len(fs.stageDestinations), fs.restoreAttempts)
 	}
 }
 
@@ -759,7 +850,7 @@ func canonicalDir(t *testing.T, path string) string {
 	return canonicalPath(t, path)
 }
 
-func replacementFailureAdapter(t *testing.T, homeApps, artifact, recovery string, fs FileSystem) *Adapter {
+func replacementFailureAdapter(t *testing.T, homeApps, artifact, recovery string, fs FileSystem, random io.Reader, replacementInstalls *int) *Adapter {
 	t.Helper()
 	adapter, err := New(Cask, "/opt/homebrew/bin/brew", recovery, runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
 		switch strings.Join(request.Args, " ") {
@@ -770,6 +861,9 @@ func replacementFailureAdapter(t *testing.T, homeApps, artifact, recovery string
 		case "install --cask --adopt vendor":
 			return execx.Result{}, errors.New("adopt unsupported")
 		case "install --cask vendor":
+			if replacementInstalls != nil {
+				*replacementInstalls++
+			}
 			if err := os.MkdirAll(artifact, 0o755); err != nil {
 				return execx.Result{}, err
 			}
@@ -780,6 +874,7 @@ func replacementFailureAdapter(t *testing.T, homeApps, artifact, recovery string
 	}), AppPolicy{
 		HomeApplications: homeApps,
 		FS:               fs,
+		Random:           random,
 		Inspector: inspectorFunc(func(_ context.Context, path string) (AppIdentity, error) {
 			if _, err := os.Stat(filepath.Join(path, "original")); err == nil {
 				return AppIdentity{BundleID: "com.example.vendor", SigningID: "Developer ID Application: Vendor"}, nil
@@ -794,7 +889,13 @@ func replacementFailureAdapter(t *testing.T, homeApps, artifact, recovery string
 	return adapter
 }
 
-type failReplacementMoveFS struct{ artifact string }
+type failReplacementMoveFS struct {
+	artifact          string
+	stageFailures     int
+	persistent        bool
+	stageDestinations []string
+	restoreAttempts   int
+}
 
 func (f *failReplacementMoveFS) Lstat(path string) (os.FileInfo, error) { return os.Lstat(path) }
 func (f *failReplacementMoveFS) EvalSymlinks(path string) (string, error) {
@@ -809,14 +910,24 @@ func (f *failReplacementMoveFS) Mkdir(path string, mode os.FileMode) error {
 func (f *failReplacementMoveFS) Rename(oldPath, newPath string) error {
 	if oldPath == f.artifact {
 		if _, err := os.Stat(filepath.Join(oldPath, "original")); errors.Is(err, os.ErrNotExist) {
-			if removeErr := os.Remove(oldPath); removeErr != nil {
-				return removeErr
+			f.stageDestinations = append(f.stageDestinations, newPath)
+			if f.persistent || f.stageFailures > 0 {
+				if f.stageFailures > 0 {
+					f.stageFailures--
+				}
+				return errors.New("injected replacement move failure")
 			}
-			return errors.New("injected replacement move failure")
 		}
+	}
+	if strings.Contains(oldPath, string(filepath.Separator)+"backup"+string(filepath.Separator)) {
+		f.restoreAttempts++
 	}
 	return os.Rename(oldPath, newPath)
 }
+
+type errorReader struct{}
+
+func (errorReader) Read([]byte) (int, error) { return 0, errors.New("random unavailable") }
 
 type pointerRunner struct{}
 

@@ -237,20 +237,21 @@ func enabledByConfig(candidate model.Resource, config model.Config) bool {
 		return ok && enabled
 	}
 	hasAnyGate := false
+	anyEnabled := false
 	for key, declared := range candidate.Metadata {
 		if !strings.HasPrefix(key, EnabledByAnyConfigMetadataPrefix) {
 			continue
 		}
 		hasAnyGate = true
-		if declared != "true" {
-			continue
-		}
 		field := strings.TrimPrefix(key, EnabledByAnyConfigMetadataPrefix)
+		if field == "" || declared != "true" {
+			return false
+		}
 		if enabled, ok := config.Terrapod[field].(bool); ok && enabled {
-			return true
+			anyEnabled = true
 		}
 	}
-	return !hasAnyGate
+	return !hasAnyGate || anyEnabled
 }
 
 func validateConfigGateKinds(resources map[model.ResourceID]model.Resource) error {

@@ -274,6 +274,33 @@ func TestAnyConfigGateRequiresExactTrueMetadataValue(t *testing.T) {
 	}
 }
 
+func TestAnyConfigGateMalformedEntryDisablesEvenWhenAnotherGateIsTrue(t *testing.T) {
+	for _, malformed := range map[string]string{
+		"empty suffix": planner.EnabledByAnyConfigMetadataPrefix,
+		"wrong value":  planner.EnabledByAnyConfigMetadataPrefix + "enableEditorStack",
+	} {
+		t.Run(malformed, func(t *testing.T) {
+			registry, fixture := registryWithFixture(t)
+			fixture.Operations = map[model.ResourceID][]model.Operation{"core.ripgrep": {{ID: "install", Kind: model.OperationInstall}}}
+			r := resourceDef("core.ripgrep", nil)
+			r.Metadata = map[string]string{
+				planner.EnabledByAnyConfigMetadataPrefix + "enableAiCliTools": "true",
+				malformed: "false",
+			}
+			input := baseInput([]model.Resource{r})
+			input.Config.Terrapod["enableAiCliTools"] = true
+
+			plan, err := planner.New(registry).Build(context.Background(), input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(plan.Operations) != 0 {
+				t.Fatalf("malformed OR metadata enabled resource: %#v", plan.Operations)
+			}
+		})
+	}
+}
+
 func TestBuildRejectsDuplicateOperationIDs(t *testing.T) {
 	registry, fixture := registryWithFixture(t)
 	fixture.Operations = map[model.ResourceID][]model.Operation{
