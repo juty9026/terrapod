@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -41,7 +42,11 @@ func WithHomebrew(trustedPrefix string, runner Runner) Option {
 		if strings.HasPrefix(trustedPrefix, "/tmp/") || strings.HasPrefix(trustedPrefix, "/private/tmp/") || trustedPrefix == "/tmp" || trustedPrefix == "/private/tmp" {
 			return fmt.Errorf("legacy: temporary Homebrew prefix is not trusted: %q", trustedPrefix)
 		}
-		handler, err := newHomebrewHandler(filepath.Join(trustedPrefix, "bin", "brew"), runner, c.paths)
+		brewPath := filepath.Join(trustedPrefix, "bin", "brew")
+		if _, err := c.paths.EvalSymlinks(brewPath); errors.Is(err, os.ErrNotExist) {
+			return withHandler(Homebrew, absentHandler{})(c)
+		}
+		handler, err := newHomebrewHandler(brewPath, runner, c.paths)
 		if err != nil {
 			return err
 		}
@@ -65,8 +70,7 @@ func newMiseHandler(path, dataRoot string, runner Runner, paths PathResolver) (*
 	if !cleanAbsolute(dataRoot) || isNil(runner) || isNil(paths) {
 		return nil, errors.New("legacy: mise requires an absolute data root, runner, and path evaluator")
 	}
-	unsafeRoots := map[string]struct{}{"/": {}, "/usr": {}, "/usr/local": {}, "/opt": {}, "/home": {}, "/Users": {}, "/var": {}, "/tmp": {}, "/private/tmp": {}}
-	if _, unsafe := unsafeRoots[dataRoot]; unsafe || strings.HasPrefix(dataRoot, "/tmp/") || strings.HasPrefix(dataRoot, "/private/tmp/") {
+	if unsafeMiseRoot(dataRoot) {
 		return nil, fmt.Errorf("legacy: unsafe mise data root %q", dataRoot)
 	}
 	resolvedPath, err := paths.EvalSymlinks(path)
@@ -81,7 +85,16 @@ func newMiseHandler(path, dataRoot string, runner Runner, paths PathResolver) (*
 	if err != nil || !cleanAbsolute(resolvedData) {
 		return nil, fmt.Errorf("legacy: resolve mise data root %q", dataRoot)
 	}
+	if unsafeMiseRoot(resolvedData) {
+		return nil, fmt.Errorf("legacy: unsafe resolved mise data root %q", resolvedData)
+	}
 	return &miseHandler{path: path, resolvedDataRoot: resolvedData, runner: runner, paths: paths, versions: make(map[string][]string)}, nil
+}
+
+func unsafeMiseRoot(path string) bool {
+	unsafeRoots := map[string]struct{}{"/": {}, "/usr": {}, "/usr/local": {}, "/opt": {}, "/home": {}, "/Users": {}, "/var": {}, "/tmp": {}, "/private/tmp": {}}
+	_, unsafe := unsafeRoots[path]
+	return unsafe || strings.HasPrefix(path, "/tmp/") || strings.HasPrefix(path, "/private/tmp/")
 }
 
 func (h *miseHandler) inspect(ctx context.Context, desired model.Resource, declaration Declaration) (Receipt, error) {
@@ -119,7 +132,7 @@ func (h *miseHandler) inspect(ctx context.Context, desired model.Resource, decla
 		}
 		prefixes = append(prefixes, root)
 		for _, command := range commands {
-			which, whichErr := h.run(ctx, "exec", "--yes", qualified, "--", "/usr/bin/which", command)
+			which, whichErr := h.run(ctx, "which", command, "--tool="+qualified)
 			if whichErr != nil {
 				return Receipt{}, fmt.Errorf("legacy: locate mise command %q: %w", command, whichErr)
 			}
@@ -197,6 +210,9 @@ func (h *miseHandler) packageVersions(pkg string) []string {
 }
 
 func parseMiseInventory(contents []byte, target string) ([]string, bool, error) {
+	if err := rejectDuplicateJSONKeys(contents); err != nil {
+		return nil, false, fmt.Errorf("legacy: parse mise inventory: %w", err)
+	}
 	var document map[string][]struct {
 		Version   string `json:"version"`
 		Installed bool   `json:"installed"`
@@ -293,7 +309,7 @@ func (h *homebrewHandler) inspect(ctx context.Context, desired model.Resource, d
 	if err != nil {
 		return Receipt{}, err
 	}
-	result, err := h.run(ctx, "info", "--json=v2", declaration.Package)
+	result, err := h.run(ctx, "info", "--json=v2", "--"+string(kind), declaration.Package)
 	if err != nil {
 		return Receipt{}, fmt.Errorf("legacy: inspect Homebrew package %q: %w", declaration.Package, err)
 	}
@@ -338,6 +354,9 @@ func (h *homebrewHandler) simulateRemoval(_ context.Context, desired model.Resou
 	if _, err := homebrewKind(desired); err != nil {
 		return provider.ChangeSet{}, err
 	}
+	if desired.Provider == "homebrew-cask" {
+		return provider.ChangeSet{}, &ErrUnsupportedSource{Kind: Homebrew}
+	}
 	return provider.ChangeSet{Removes: []string{declaration.Package}}, nil
 }
 func (h *homebrewHandler) remove(ctx context.Context, desired model.Resource, declaration Declaration) error {
@@ -347,6 +366,9 @@ func (h *homebrewHandler) remove(ctx context.Context, desired model.Resource, de
 	kind, err := homebrewKind(desired)
 	if err != nil {
 		return err
+	}
+	if kind == brewCask {
+		return &ErrUnsupportedSource{Kind: Homebrew}
 	}
 	_, err = h.run(ctx, "uninstall", "--"+string(kind), declaration.Package)
 	if err != nil {
@@ -369,6 +391,9 @@ func (h *homebrewHandler) run(ctx context.Context, args ...string) (execx.Result
 }
 
 func parseBrewReceipt(contents []byte, kind homebrewPackageKind, target string) (bool, error) {
+	if err := rejectDuplicateJSONKeys(contents); err != nil {
+		return false, fmt.Errorf("legacy: parse Homebrew receipt: %w", err)
+	}
 	decoder := json.NewDecoder(bytes.NewReader(contents))
 	decoder.DisallowUnknownFields()
 	var envelope struct {
@@ -437,4 +462,73 @@ func parseBrewReceipt(contents []byte, kind homebrewPackageKind, target string) 
 		}
 	}
 	return true, nil
+}
+
+func rejectDuplicateJSONKeys(contents []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(contents))
+	if err := scanJSONValue(decoder); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("trailing JSON value")
+		}
+		return err
+	}
+	return nil
+}
+
+func scanJSONValue(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delimiter, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delimiter {
+	case '{':
+		seen := make(map[string]struct{})
+		for decoder.More() {
+			keyToken, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			key, ok := keyToken.(string)
+			if !ok {
+				return errors.New("invalid JSON object key")
+			}
+			if _, duplicate := seen[key]; duplicate {
+				return fmt.Errorf("duplicate JSON key %q", key)
+			}
+			seen[key] = struct{}{}
+			if err := scanJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+	case '[':
+		for decoder.More() {
+			if err := scanJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+	default:
+		return errors.New("invalid JSON delimiter")
+	}
+	closing, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	if closing != matchingJSONDelimiter(delimiter) {
+		return errors.New("mismatched JSON delimiter")
+	}
+	return nil
+}
+
+func matchingJSONDelimiter(open json.Delim) json.Delim {
+	if open == '{' {
+		return '}'
+	}
+	return ']'
 }

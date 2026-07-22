@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/juty9026/terrapod/internal/model"
@@ -49,10 +50,14 @@ func (f *fakeHandler) remove(context.Context, model.Resource, Declaration) error
 type fakePaths struct {
 	commands map[string]string
 	resolved map[string]string
+	errors   map[string]error
 }
 
 func (f fakePaths) ResolveCommand(command string) (string, error) { return f.commands[command], nil }
 func (f fakePaths) EvalSymlinks(path string) (string, error) {
+	if err := f.errors[path]; err != nil {
+		return "", err
+	}
 	if resolved, ok := f.resolved[path]; ok {
 		return resolved, nil
 	}
@@ -85,7 +90,7 @@ func TestDetectDesiredOnlyLegacyOnlyAndBoth(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			desired := model.Observation{Present: tt.desired, Provider: "homebrew-formula", Package: "ripgrep"}
+			desired := model.Observation{Present: tt.desired, Healthy: tt.desired, Provider: "homebrew-formula", Package: "ripgrep"}
 			if tt.desired {
 				desired.Paths = map[string]string{"rg": "/opt/homebrew/bin/rg"}
 			}
@@ -231,7 +236,7 @@ func TestParseDeclarationsRejectsUnknownVendorKind(t *testing.T) {
 }
 
 func TestDetectWithoutTypedVendorHandlerFailsClosed(t *testing.T) {
-	c, err := New(fakePaths{commands: map[string]string{"codex": "/Users/test/.local/bin/codex"}}, WithoutVendor())
+	c, err := New(fakePaths{commands: map[string]string{"codex": "/Users/test/.local/bin/codex"}}, withHandler(Vendor, absentHandler{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,12 +253,12 @@ func TestDetectWithoutTypedVendorHandlerFailsClosed(t *testing.T) {
 
 func TestDesiredOnlyDoesNotRequireAbsentOptionalLegacyHandler(t *testing.T) {
 	paths := fakePaths{commands: map[string]string{"codex": "/opt/homebrew/bin/codex"}}
-	c, err := New(paths, WithoutHomebrew(), WithoutVendor())
+	c, err := New(paths, withHandler(Homebrew, absentHandler{}), withHandler(Vendor, absentHandler{}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := model.Resource{ID: "optional-ai.codex", Type: model.ResourcePackage, Provider: "homebrew-cask", Package: "codex", Commands: []string{"codex"}, Metadata: map[string]string{"legacy.homebrew.package": "codex", "legacy.vendor.receipt": "codex-standalone", "legacy.vendor.uninstall": "codex-standalone"}}
-	inventory, err := c.Detect(context.Background(), model.ProfileMacOSTerminal, r, model.Observation{Present: true, Provider: "homebrew-cask", Package: "codex", Paths: map[string]string{"codex": "/opt/homebrew/bin/codex"}})
+	inventory, err := c.Detect(context.Background(), model.ProfileMacOSTerminal, r, model.Observation{Present: true, Healthy: true, Provider: "homebrew-cask", Package: "codex", Paths: map[string]string{"codex": "/opt/homebrew/bin/codex"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,12 +269,12 @@ func TestDesiredOnlyDoesNotRequireAbsentOptionalLegacyHandler(t *testing.T) {
 
 func TestMacOSDesiredOnlyDoesNotRequireVPSScopedAPTHandler(t *testing.T) {
 	paths := fakePaths{commands: map[string]string{"gum": "/opt/homebrew/bin/gum"}}
-	c, err := New(paths, WithoutHomebrew())
+	c, err := New(paths, withHandler(Homebrew, absentHandler{}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := model.Resource{ID: "core.gum", Type: model.ResourcePackage, Provider: "homebrew-formula", Package: "gum", Commands: []string{"gum"}, Metadata: map[string]string{"legacy.apt.package": "gum", "legacy.apt.profile": "vps-shell", "legacy.homebrew.package": "gum"}}
-	_, err = c.Detect(context.Background(), model.ProfileMacOSTerminal, r, model.Observation{Present: true, Provider: "homebrew-formula", Package: "gum", Paths: map[string]string{"gum": "/opt/homebrew/bin/gum"}})
+	_, err = c.Detect(context.Background(), model.ProfileMacOSTerminal, r, model.Observation{Present: true, Healthy: true, Provider: "homebrew-formula", Package: "gum", Paths: map[string]string{"gum": "/opt/homebrew/bin/gum"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,5 +431,125 @@ func TestRemovalCapabilityRejectsCrossCoordinatorAndTampering(t *testing.T) {
 	}
 	if h.simulateCalls != 0 || h.removeCalls != 0 {
 		t.Fatalf("simulate=%d remove=%d", h.simulateCalls, h.removeCalls)
+	}
+}
+
+func TestWithHomebrewAuthoritativelyRepresentsMissingCandidate(t *testing.T) {
+	prefix := "/custom/homebrew"
+	paths := fakePaths{
+		commands: map[string]string{"rg": "/opt/homebrew/bin/rg"},
+		errors:   map[string]error{filepath.Join(prefix, "bin", "brew"): os.ErrNotExist},
+	}
+	c, err := New(paths, WithHomebrew(prefix, &queueRunner{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := c.Detect(
+		context.Background(),
+		model.ProfileMacOSTerminal,
+		resource(map[string]string{"legacy.homebrew.package": "ripgrep"}),
+		model.Observation{Present: true, Healthy: true, Provider: "homebrew-formula", Package: "ripgrep", Paths: map[string]string{"rg": "/opt/homebrew/bin/rg"}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inventory.Legacy()) != 0 {
+		t.Fatalf("legacy=%#v", inventory.Legacy())
+	}
+}
+
+func TestDetectRejectsInvalidDesiredObservationBeforeLegacyInspection(t *testing.T) {
+	tests := []struct {
+		name    string
+		desired model.Observation
+	}{
+		{"provider mismatch", model.Observation{Provider: "apt"}},
+		{"package mismatch", model.Observation{Package: "fd"}},
+		{"unhealthy present", model.Observation{Present: true, Provider: "homebrew-formula", Package: "ripgrep", Paths: map[string]string{"rg": "/opt/homebrew/bin/rg"}}},
+		{"missing command", model.Observation{Present: true, Healthy: true, Provider: "homebrew-formula", Package: "ripgrep"}},
+		{"undeclared command", model.Observation{Present: true, Healthy: true, Provider: "homebrew-formula", Package: "ripgrep", Paths: map[string]string{"rg": "/opt/homebrew/bin/rg", "fd": "/opt/homebrew/bin/fd"}}},
+		{"outside provider root", model.Observation{Present: true, Healthy: true, Provider: "homebrew-formula", Package: "ripgrep", Paths: map[string]string{"rg": "/custom/bin/rg"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &fakeHandler{}
+			c, err := newCoordinatorForTest(map[Kind]handler{Homebrew: h}, fakePaths{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = c.Detect(context.Background(), model.ProfileMacOSTerminal, resource(map[string]string{"legacy.homebrew.package": "ripgrep"}), tt.desired)
+			var invalid *ErrInvalidDesiredObservation
+			if !errors.As(err, &invalid) {
+				t.Fatalf("error=%v, want ErrInvalidDesiredObservation", err)
+			}
+			if h.inspectCalls != 0 {
+				t.Fatalf("legacy inspected %d time(s)", h.inspectCalls)
+			}
+		})
+	}
+}
+
+func TestRemoveSerializesConcurrentReplay(t *testing.T) {
+	h := &fakeHandler{receipt: Receipt{Present: true}, changes: provider.ChangeSet{Removes: []string{"gum"}}}
+	c, err := newCoordinatorForTest(map[Kind]handler{APT: h}, fakePaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := model.Resource{ID: "core.gum", Type: model.ResourcePackage, Provider: "homebrew-formula", Package: "gum", Metadata: map[string]string{"legacy.apt.package": "gum", "legacy.apt.profile": "vps-shell"}}
+	inventory, err := c.Detect(context.Background(), model.ProfileVPSShell, r, model.Observation{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operations, err := c.RemovalOperations(inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan error, 2)
+	var workers sync.WaitGroup
+	workers.Add(2)
+	for range 2 {
+		go func() {
+			defer workers.Done()
+			results <- c.Remove(context.Background(), operations[0])
+		}()
+	}
+	workers.Wait()
+	close(results)
+	var succeeded, consumed int
+	for err := range results {
+		var replay *ErrConsumedOperation
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.As(err, &replay):
+			consumed++
+		default:
+			t.Fatalf("unexpected error=%v", err)
+		}
+	}
+	if succeeded != 1 || consumed != 1 || h.removeCalls != 1 {
+		t.Fatalf("succeeded=%d consumed=%d removeCalls=%d", succeeded, consumed, h.removeCalls)
+	}
+}
+
+func TestCoordinatorRejectsUseAfterClose(t *testing.T) {
+	c, err := New(fakePaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Detect(context.Background(), model.ProfileMacOSTerminal, resource(nil), model.Observation{}); err == nil {
+		t.Fatal("Detect succeeded after Close")
+	}
+	if _, err := c.RemovalOperations(Inventory{}); err == nil {
+		t.Fatal("RemovalOperations succeeded after Close")
+	}
+	if err := c.Remove(context.Background(), RemovalOperation{}); err == nil {
+		t.Fatal("Remove succeeded after Close")
 	}
 }

@@ -2,6 +2,7 @@ package legacy
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -104,6 +105,19 @@ func TestMiseHandlerUsesExactAllowlistedToolAndVersion(t *testing.T) {
 	if err := handler.remove(context.Background(), miseResource, d); err != nil {
 		t.Fatal(err)
 	}
+	for index, request := range runner.requests[:3] {
+		if len(request.Args) == 0 || request.Args[0] == "exec" {
+			t.Fatalf("inspection request[%d] may execute a tool: %v", index, request.Args)
+		}
+		for _, argument := range request.Args {
+			if argument == "--yes" || argument == "install" || argument == "uninstall" {
+				t.Fatalf("inspection request[%d] may mutate: %v", index, request.Args)
+			}
+		}
+	}
+	if got, want := runner.requests[2].Args, []string{"which", "rg", "--tool=aqua:BurntSushi/ripgrep@14.1.1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("which args=%v want=%v", got, want)
+	}
 	want := []string{"uninstall", "--yes", "aqua:BurntSushi/ripgrep@14.1.1"}
 	if got := runner.requests[3].Args; !reflect.DeepEqual(got, want) {
 		t.Fatalf("uninstall args=%v want=%v", got, want)
@@ -161,6 +175,9 @@ func TestLegacyHandlerRootsRejectBroadAndTemporaryLocations(t *testing.T) {
 	if err == nil || c != nil {
 		t.Fatal("accepted temporary Homebrew prefix")
 	}
+	if _, err := newMiseHandler("/opt/homebrew/bin/mise", "/safe/mise", &queueRunner{}, fakePaths{resolved: map[string]string{"/safe/mise": "/"}}); err == nil {
+		t.Fatal("accepted mise data root resolving to filesystem root")
+	}
 }
 
 func TestHomebrewHandlerRequiresPackageReceiptAndTargetsUninstall(t *testing.T) {
@@ -177,6 +194,12 @@ func TestHomebrewHandlerRequiresPackageReceiptAndTargetsUninstall(t *testing.T) 
 	}
 	if err := handler.remove(context.Background(), brewResource, d); err != nil {
 		t.Fatal(err)
+	}
+	if got, want := runner.requests[0].Args, []string{"info", "--json=v2", "--formula", "ripgrep"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("info args=%v want=%v", got, want)
+	}
+	if got, want := runner.requests[1].Args, []string{"list", "--verbose", "--formula", "ripgrep"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("list args=%v want=%v", got, want)
 	}
 	if got, want := runner.requests[2].Args, []string{"uninstall", "--formula", "ripgrep"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("args=%v want=%v", got, want)
@@ -209,8 +232,8 @@ func TestHomebrewReceiptDoesNotTrustUnrelatedExecutable(t *testing.T) {
 	}
 }
 
-func TestHomebrewHandlerTargetsCaskWithoutForceOrZap(t *testing.T) {
-	runner := &queueRunner{results: []execx.Result{{Stdout: []byte(`{"formulae":[],"casks":[{"token":"codex","full_token":"homebrew/cask/codex","installed":"1.2.3"}]}`)}, {Stdout: []byte("/custom/homebrew/Caskroom/codex/1.2.3/codex\n")}, {}}}
+func TestHomebrewHandlerDetectsCaskButRefusesSharedArtifactMutation(t *testing.T) {
+	runner := &queueRunner{results: []execx.Result{{Stdout: []byte(`{"formulae":[],"casks":[{"token":"codex","full_token":"homebrew/cask/codex","installed":"1.2.3"}]}`)}, {Stdout: []byte("/custom/homebrew/Caskroom/codex/1.2.3/codex\n")}}}
 	handler, err := newHomebrewHandler("/custom/homebrew/bin/brew", runner, fakePaths{})
 	if err != nil {
 		t.Fatal(err)
@@ -220,16 +243,40 @@ func TestHomebrewHandlerTargetsCaskWithoutForceOrZap(t *testing.T) {
 	if _, err := handler.inspect(context.Background(), r, d); err != nil {
 		t.Fatal(err)
 	}
-	if err := handler.remove(context.Background(), r, d); err != nil {
-		t.Fatal(err)
+	var unsupported *ErrUnsupportedSource
+	if _, err := handler.simulateRemoval(context.Background(), r, d); !errors.As(err, &unsupported) {
+		t.Fatalf("error=%v", err)
 	}
-	if got, want := runner.requests[2].Args, []string{"uninstall", "--cask", "codex"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("args=%v want=%v", got, want)
+	if len(runner.requests) != 2 {
+		t.Fatalf("unexpected mutation requests=%#v", runner.requests)
 	}
 }
 
 func TestHomebrewHandlerRejectsStandardPrefixAndUnsafeKind(t *testing.T) {
 	if _, err := newHomebrewHandler("/opt/homebrew/bin/brew", &queueRunner{}, fakePaths{}); err == nil {
 		t.Fatal("accepted standard Homebrew")
+	}
+}
+
+func TestStructuredReceiptsRejectDuplicateKeysAndTrailingValues(t *testing.T) {
+	miseCases := [][]byte{
+		[]byte("{\"aqua:BurntSushi/ripgrep\":[],\"aqua:BurntSushi/ripgrep\":[]}"),
+		[]byte("{\"aqua:BurntSushi/ripgrep\":[{\"version\":\"14\",\"version\":\"15\",\"installed\":true}]}"),
+		[]byte("{\"aqua:BurntSushi/ripgrep\":[]} {}"),
+	}
+	for _, contents := range miseCases {
+		if _, _, err := parseMiseInventory(contents, "aqua:BurntSushi/ripgrep"); err == nil {
+			t.Fatalf("accepted mise receipt %s", contents)
+		}
+	}
+	brewCases := [][]byte{
+		[]byte("{\"formulae\":[],\"formulae\":[],\"casks\":[]}"),
+		[]byte("{\"formulae\":[{\"name\":\"ripgrep\",\"name\":\"fd\",\"installed\":[{\"version\":\"14\"}]}],\"casks\":[]}"),
+		[]byte("{\"formulae\":[],\"casks\":[]} {}"),
+	}
+	for _, contents := range brewCases {
+		if _, err := parseBrewReceipt(contents, brewFormula, "ripgrep"); err == nil {
+			t.Fatalf("accepted Homebrew receipt %s", contents)
+		}
 	}
 }

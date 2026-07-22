@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/juty9026/terrapod/internal/execx"
 	"github.com/juty9026/terrapod/internal/legacydecl"
@@ -95,6 +96,16 @@ type ErrUnsupportedSource struct {
 	Kind Kind
 }
 
+type ErrConsumedOperation struct{}
+
+func (*ErrConsumedOperation) Error() string { return "legacy: removal operation was already consumed" }
+
+type ErrInvalidDesiredObservation struct{ Detail string }
+
+func (e *ErrInvalidDesiredObservation) Error() string {
+	return "legacy: invalid desired observation: " + e.Detail
+}
+
 func (e *ErrUnsupportedSource) Error() string {
 	return fmt.Sprintf("legacy: no typed handler for %q", e.Kind)
 }
@@ -104,9 +115,13 @@ func (e *ErrUnknownProvenance) Error() string {
 }
 
 type Coordinator struct {
-	handlers map[Kind]handler
-	paths    PathResolver
-	issuer   [32]byte
+	handlers  map[Kind]handler
+	paths     PathResolver
+	issuer    [32]byte
+	mu        sync.Mutex
+	closed    bool
+	completed map[[32]byte]struct{}
+	closers   []func() error
 }
 
 type Option func(*Coordinator) error
@@ -136,28 +151,39 @@ func (absentHandler) remove(context.Context, model.Resource, Declaration) error 
 	return errors.New("legacy: absent source cannot be removed")
 }
 
-func WithoutAPT() Option      { return withHandler(APT, absentHandler{}) }
-func WithoutMise() Option     { return withHandler(Mise, absentHandler{}) }
-func WithoutHomebrew() Option { return withHandler(Homebrew, absentHandler{}) }
-func WithoutVendor() Option   { return withHandler(Vendor, absentHandler{}) }
-
 func New(paths PathResolver, options ...Option) (*Coordinator, error) {
 	if isNil(paths) {
 		return nil, errors.New("legacy: path resolver is required")
 	}
-	c := &Coordinator{handlers: make(map[Kind]handler), paths: paths}
+	c := &Coordinator{handlers: make(map[Kind]handler), paths: paths, completed: make(map[[32]byte]struct{})}
 	if _, err := rand.Read(c.issuer[:]); err != nil {
 		return nil, fmt.Errorf("legacy: create coordinator identity: %w", err)
 	}
 	for _, option := range options {
 		if option == nil {
+			_ = c.Close()
 			return nil, errors.New("legacy: nil option")
 		}
 		if err := option(c); err != nil {
+			_ = c.Close()
 			return nil, err
 		}
 	}
 	return c, nil
+}
+
+func (c *Coordinator) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil
+	}
+	c.closed = true
+	var errs []error
+	for _, closeFn := range c.closers {
+		errs = append(errs, closeFn())
+	}
+	return errors.Join(errs...)
 }
 
 func ParseDeclarations(resource model.Resource) ([]Declaration, error) {
@@ -165,6 +191,14 @@ func ParseDeclarations(resource model.Resource) ([]Declaration, error) {
 }
 
 func (c *Coordinator) Detect(ctx context.Context, profile model.Profile, resource model.Resource, desired model.Observation) (Inventory, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return Inventory{}, errors.New("legacy: coordinator is closed")
+	}
+	if err := validateDesiredObservation(resource, desired, c.paths); err != nil {
+		return Inventory{}, err
+	}
 	inventory := Inventory{resource: cloneResource(resource), profile: profile, desired: cloneModelObservation(desired), issuer: c.issuer, valid: true}
 	declarations, err := ParseDeclarations(resource)
 	if err != nil {
@@ -198,6 +232,11 @@ func (c *Coordinator) Detect(ctx context.Context, profile model.Profile, resourc
 }
 
 func (c *Coordinator) RemovalOperations(inventory Inventory) ([]RemovalOperation, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil, errors.New("legacy: coordinator is closed")
+	}
 	if !inventory.valid || inventory.issuer != c.issuer {
 		return nil, errors.New("legacy: inventory was not issued by this coordinator")
 	}
@@ -244,6 +283,14 @@ func (c *Coordinator) RemovalOperations(inventory Inventory) ([]RemovalOperation
 }
 
 func (c *Coordinator) Remove(ctx context.Context, operation RemovalOperation) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return errors.New("legacy: coordinator is closed")
+	}
+	if _, done := c.completed[operation.digest]; done {
+		return &ErrConsumedOperation{}
+	}
 	if operation.issuer != c.issuer || operation.digest != operationDigest(operation) {
 		return errors.New("legacy: removal capability is invalid or belongs to another coordinator")
 	}
@@ -259,6 +306,7 @@ func (c *Coordinator) Remove(ctx context.Context, operation RemovalOperation) er
 		return fmt.Errorf("legacy: refresh receipt for %q: %w", operation.declaration.Package, err)
 	}
 	if !fresh.Present {
+		c.completed[operation.digest] = struct{}{}
 		return nil
 	}
 	freshObservation, err := observationFromReceipt(operation.declaration, fresh)
@@ -289,6 +337,7 @@ func (c *Coordinator) Remove(ctx context.Context, operation RemovalOperation) er
 	if receipt.Present {
 		return fmt.Errorf("legacy: %q remains present in %s after removal", operation.declaration.Package, operation.declaration.Kind)
 	}
+	c.completed[operation.digest] = struct{}{}
 	return nil
 }
 
@@ -299,6 +348,44 @@ func operationDigest(operation RemovalOperation) [32]byte {
 		Observation Observation
 	}{operation.resource, operation.declaration, operation.observation})
 	return sha256.Sum256(payload)
+}
+
+func validateDesiredObservation(resource model.Resource, desired model.Observation, paths PathResolver) error {
+	if desired.Provider != "" && desired.Provider != resource.Provider {
+		return &ErrInvalidDesiredObservation{Detail: "provider mismatch"}
+	}
+	if desired.Package != "" && desired.Package != resource.Package {
+		return &ErrInvalidDesiredObservation{Detail: "package mismatch"}
+	}
+	if !desired.Present {
+		return nil
+	}
+	if !desired.Healthy {
+		return &ErrInvalidDesiredObservation{Detail: "present resource is unhealthy"}
+	}
+	standard := []string{"/opt/homebrew", "/usr/local", "/home/linuxbrew/.linuxbrew"}
+	for _, command := range resource.Commands {
+		path := desired.Paths[command]
+		if path == "" {
+			return &ErrInvalidDesiredObservation{Detail: "missing command receipt"}
+		}
+		if !pathWithinAnyResolved(paths, path, standard) {
+			return &ErrInvalidDesiredObservation{Detail: "command receipt is outside desired provider roots"}
+		}
+	}
+	for command := range desired.Paths {
+		found := false
+		for _, declared := range resource.Commands {
+			if command == declared {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return &ErrInvalidDesiredObservation{Detail: "undeclared command receipt"}
+		}
+	}
+	return nil
 }
 
 func (c *Coordinator) validateCommandProvenance(resource model.Resource, desired model.Observation, legacy []Observation) error {

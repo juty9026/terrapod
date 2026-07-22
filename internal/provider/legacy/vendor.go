@@ -12,7 +12,10 @@ import (
 	"github.com/juty9026/terrapod/internal/provider"
 )
 
-type vendorHandler struct{ home string }
+type vendorHandler struct {
+	home string
+	root *os.Root
+}
 
 func WithVendor(home string) Option {
 	return func(c *Coordinator) error {
@@ -21,7 +24,36 @@ func WithVendor(home string) Option {
 		if !cleanAbsolute(home) || broad || strings.HasPrefix(home, "/tmp/") || strings.HasPrefix(home, "/private/tmp/") {
 			return fmt.Errorf("legacy: unsafe vendor home %q", home)
 		}
-		return withHandler(Vendor, &vendorHandler{home: home})(c)
+		return withVendorRoot(home)(c)
+	}
+}
+
+func withVendorRoot(home string) Option {
+	return func(c *Coordinator) error {
+		parent, err := os.OpenRoot(filepath.Dir(home))
+		if err != nil {
+			return fmt.Errorf("legacy: open vendor home parent: %w", err)
+		}
+		defer parent.Close()
+		base := filepath.Base(home)
+		info, err := parent.Lstat(base)
+		if err != nil {
+			return fmt.Errorf("legacy: inspect vendor home: %w", err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return errors.New("legacy: vendor home must be a real directory")
+		}
+		root, err := parent.OpenRoot(base)
+		if err != nil {
+			return fmt.Errorf("legacy: pin vendor home: %w", err)
+		}
+		handler := &vendorHandler{home: home, root: root}
+		if err := withHandler(Vendor, handler)(c); err != nil {
+			_ = root.Close()
+			return err
+		}
+		c.closers = append(c.closers, root.Close)
+		return nil
 	}
 }
 
@@ -33,12 +65,10 @@ func (h *vendorHandler) inspect(_ context.Context, resource model.Resource, decl
 	if err != nil {
 		return Receipt{}, err
 	}
-	root, err := os.OpenRoot(h.home)
-	if err != nil {
-		return Receipt{}, fmt.Errorf("legacy: open vendor home: %w", err)
+	if h.root == nil {
+		return Receipt{}, errors.New("legacy: vendor home is not pinned")
 	}
-	defer root.Close()
-	linkInfo, lstatErr := root.Lstat(rel)
+	linkInfo, lstatErr := h.root.Lstat(rel)
 	if errors.Is(lstatErr, os.ErrNotExist) {
 		return Receipt{}, nil
 	}
@@ -49,7 +79,7 @@ func (h *vendorHandler) inspect(_ context.Context, resource model.Resource, decl
 		if linkInfo.Mode()&os.ModeSymlink == 0 {
 			return Receipt{}, errors.New("legacy: Codex receipt is not a standalone symlink")
 		}
-		target, readErr := root.Readlink(rel)
+		target, readErr := h.root.Readlink(rel)
 		if readErr != nil {
 			return Receipt{}, readErr
 		}
@@ -62,7 +92,28 @@ func (h *vendorHandler) inspect(_ context.Context, resource model.Resource, decl
 			return Receipt{}, errors.New("legacy: Codex symlink does not target standalone payload")
 		}
 	}
-	info, err := root.Stat(rel)
+	if declaration.ReceiptKind == "claude-native" {
+		share, shareErr := h.root.Lstat(".local/share/claude")
+		if shareErr != nil || share.Mode()&os.ModeSymlink != 0 || !share.IsDir() {
+			return Receipt{}, errors.New("legacy: Claude payload root must be a real directory")
+		}
+		if linkInfo.Mode()&os.ModeSymlink == 0 {
+			return Receipt{}, errors.New("legacy: Claude command receipt must be a symlink")
+		}
+		target, readErr := h.root.Readlink(rel)
+		if readErr != nil {
+			return Receipt{}, readErr
+		}
+		absoluteTarget := target
+		if !filepath.IsAbs(target) {
+			absoluteTarget = filepath.Clean(filepath.Join(h.home, filepath.Dir(filepath.FromSlash(rel)), target))
+		}
+		shareRoot := filepath.Join(h.home, ".local/share/claude")
+		if !cleanAbsolute(absoluteTarget) || !pathWithin(absoluteTarget, shareRoot) {
+			return Receipt{}, errors.New("legacy: Claude command symlink escapes payload root")
+		}
+	}
+	info, err := h.root.Stat(rel)
 	if errors.Is(err, os.ErrNotExist) {
 		return Receipt{}, nil
 	}
@@ -72,23 +123,13 @@ func (h *vendorHandler) inspect(_ context.Context, resource model.Resource, decl
 	if info.IsDir() || info.Mode().Perm()&0o111 == 0 {
 		return Receipt{}, errors.New("legacy: vendor command receipt is not an executable")
 	}
-	if declaration.ReceiptKind == "claude-native" {
-		if share, shareErr := root.Lstat(".local/share/claude"); shareErr == nil && share.Mode()&os.ModeSymlink != 0 {
-			return Receipt{}, errors.New("legacy: Claude payload root is a symlink")
-		} else if shareErr != nil && !errors.Is(shareErr, os.ErrNotExist) {
-			return Receipt{}, shareErr
-		}
-	}
 	return Receipt{Present: true, Paths: map[string]string{command: filepath.Join(h.home, filepath.FromSlash(rel))}}, nil
 }
 func (h *vendorHandler) simulateRemoval(_ context.Context, resource model.Resource, declaration Declaration) (provider.ChangeSet, error) {
 	if !exactDeclaration(resource, declaration) {
 		return provider.ChangeSet{}, errors.New("legacy: vendor declaration is not authorized for resource")
 	}
-	if declaration.UninstallKind == "codex-standalone" {
-		return provider.ChangeSet{}, &ErrUnsupportedSource{Kind: Vendor}
-	}
-	return provider.ChangeSet{Removes: []string{declaration.Package}}, nil
+	return provider.ChangeSet{}, &ErrUnsupportedSource{Kind: Vendor}
 }
 func (h *vendorHandler) remove(_ context.Context, resource model.Resource, declaration Declaration) error {
 	if !exactDeclaration(resource, declaration) {
@@ -97,24 +138,11 @@ func (h *vendorHandler) remove(_ context.Context, resource model.Resource, decla
 	if declaration.UninstallKind == "codex-standalone" {
 		return &ErrUnsupportedSource{Kind: Vendor}
 	}
-	rel, _, err := vendorBinary(declaration.UninstallKind)
+	_, _, err := vendorBinary(declaration.UninstallKind)
 	if err != nil {
 		return err
 	}
-	root, err := os.OpenRoot(h.home)
-	if err != nil {
-		return err
-	}
-	defer root.Close()
-	if err := root.Remove(rel); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("legacy: remove vendor command: %w", err)
-	}
-	if declaration.UninstallKind == "claude-native" {
-		if err := root.RemoveAll(".local/share/claude"); err != nil {
-			return fmt.Errorf("legacy: remove Claude payload: %w", err)
-		}
-	}
-	return nil
+	return &ErrUnsupportedSource{Kind: Vendor}
 }
 func vendorBinary(kind string) (string, string, error) {
 	switch kind {
