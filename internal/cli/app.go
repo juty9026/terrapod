@@ -18,11 +18,13 @@ import (
 
 	"github.com/juty9026/terrapod/internal/catalog"
 	"github.com/juty9026/terrapod/internal/config"
+	"github.com/juty9026/terrapod/internal/execx"
 	"github.com/juty9026/terrapod/internal/model"
 	"github.com/juty9026/terrapod/internal/paths"
 	"github.com/juty9026/terrapod/internal/planner"
 	"github.com/juty9026/terrapod/internal/reconcile"
 	"github.com/juty9026/terrapod/internal/resolve"
+	"github.com/juty9026/terrapod/internal/resource"
 	"github.com/juty9026/terrapod/internal/state"
 )
 
@@ -48,6 +50,48 @@ type Dependencies struct {
 	Apply          func(context.Context, reconcile.ApplyInput) (reconcile.Summary, error)
 	Diff           func(context.Context) ([]byte, error)
 	Resolve        func(context.Context, model.ResourceID, io.Reader, io.Writer) (resolve.Result, error)
+	Chezmoi        func(context.Context, string, []string) (execx.Result, error)
+}
+
+// AdapterSet is the composition boundary for every typed provider introduced
+// by the package and managed-resource plans.
+type AdapterSet struct {
+	HomebrewFormula resource.Adapter
+	HomebrewCask    resource.Adapter
+	APT             resource.Adapter
+	Mise            resource.Adapter
+	ManagedFiles    resource.Adapter
+	GitCheckout     resource.Adapter
+	Jetendard       resource.Adapter
+	JSONFields      resource.Adapter
+	PlistFields     resource.Adapter
+	Karabiner       resource.Adapter
+}
+
+func ComposeRegistry(adapters AdapterSet) (resource.Registry, error) {
+	registry := resource.NewRegistry()
+	entries := []struct {
+		resourceType model.ResourceType
+		provider     string
+		adapter      resource.Adapter
+	}{
+		{model.ResourcePackage, "homebrew-formula", adapters.HomebrewFormula},
+		{model.ResourcePackage, "homebrew-cask", adapters.HomebrewCask},
+		{model.ResourcePackage, "apt", adapters.APT},
+		{model.ResourcePackage, "mise", adapters.Mise},
+		{model.ResourceManagedFiles, "chezmoi", adapters.ManagedFiles},
+		{model.ResourceGitCheckout, "git", adapters.GitCheckout},
+		{model.ResourceArchive, "jetendard", adapters.Jetendard},
+		{model.ResourceIntegration, "json-fields", adapters.JSONFields},
+		{model.ResourceIntegration, "plist-fields", adapters.PlistFields},
+		{model.ResourceIntegration, "karabiner", adapters.Karabiner},
+	}
+	for _, entry := range entries {
+		if err := registry.Register(entry.resourceType, entry.provider, entry.adapter); err != nil {
+			return resource.Registry{}, fmt.Errorf("compose %s/%s adapter: %w", entry.resourceType, entry.provider, err)
+		}
+	}
+	return registry, nil
 }
 
 type reconciliation struct {
@@ -102,6 +146,9 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	if deps.Geteuid() == 0 {
 		fmt.Fprintln(stderr, "Terrapod manager commands must run as a non-root user")
 		return exitFailure
+	}
+	if command == "chezmoi" {
+		return runChezmoi(ctx, args[1:], deps, stdout, stderr)
 	}
 	upgrade, ok := parseManagerArgs(command, args[1:], stderr)
 	if !ok {
@@ -182,6 +229,36 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 		if unavailable {
 			return exitFailure
 		}
+	}
+	return 0
+}
+
+func runChezmoi(ctx context.Context, args []string, deps Dependencies, stdout, stderr io.Writer) int {
+	if len(args) < 2 || args[0] != "--" || args[1] == "" {
+		fmt.Fprintln(stderr, "usage: tpod chezmoi -- <read-only-command> [args...]")
+		return exitUsage
+	}
+	if deps.Chezmoi == nil {
+		fmt.Fprintln(stderr, "internal error: constrained chezmoi client is not configured")
+		return exitFailure
+	}
+	result, err := deps.Chezmoi(ctx, args[1], args[2:])
+	if len(result.Stdout) != 0 {
+		if _, writeErr := stdout.Write(result.Stdout); writeErr != nil {
+			fmt.Fprintln(stderr, writeErr)
+			return exitFailure
+		}
+	}
+	if len(result.Stderr) != 0 {
+		if _, writeErr := stderr.Write(result.Stderr); writeErr != nil {
+			return exitFailure
+		}
+	}
+	if err != nil {
+		if len(result.Stderr) == 0 {
+			fmt.Fprintln(stderr, err)
+		}
+		return exitUnavailable
 	}
 	return 0
 }
@@ -489,7 +566,7 @@ func probeProcess(pid int) error {
 
 func isMutationCommand(command string) bool {
 	switch command {
-	case "apply", "update", "resolve", "setup", "configure", "chezmoi":
+	case "apply", "update", "resolve", "setup", "configure":
 		return true
 	default:
 		return false
@@ -497,5 +574,5 @@ func isMutationCommand(command string) bool {
 }
 
 func isManagerCommand(command string) bool {
-	return command == "plan" || command == "status" || command == "doctor" || command == "diff" || isMutationCommand(command)
+	return command == "plan" || command == "status" || command == "doctor" || command == "diff" || command == "chezmoi" || isMutationCommand(command)
 }

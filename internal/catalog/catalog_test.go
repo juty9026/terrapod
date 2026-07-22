@@ -52,8 +52,8 @@ func TestSeedCatalogHasCurrentConfigSchemaAndHomebrewResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Catalog.Resources) != 63 {
-		t.Fatalf("Resources count = %d, want 63", len(got.Catalog.Resources))
+	if len(got.Catalog.Resources) != 64 {
+		t.Fatalf("Resources count = %d, want 64", len(got.Catalog.Resources))
 	}
 	wantFields := []model.ConfigField{
 		{ID: "profile", Kind: "string", Required: true},

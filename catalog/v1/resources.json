@@ -507,6 +507,17 @@
       "metadata": {"bootstrapOnly": "true"}
     },
     {
+      "id": "dotfiles.home",
+      "type": "managed-files",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": ["core.chezmoi"],
+      "versionPolicy": "tracked",
+      "provider": "chezmoi",
+      "package": "home",
+      "commands": [],
+      "metadata": {"managedFiles.scope": "."}
+    },
+    {
       "id": "font.jetendard",
       "type": "archive", "profiles": ["macos-terminal"], "dependsOn": [],
       "versionPolicy": "pinned", "provider": "jetendard", "package": "jetendard", "commands": [],

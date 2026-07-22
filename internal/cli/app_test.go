@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/juty9026/terrapod/internal/catalog"
 	"github.com/juty9026/terrapod/internal/config"
+	"github.com/juty9026/terrapod/internal/execx"
 	"github.com/juty9026/terrapod/internal/model"
 	"github.com/juty9026/terrapod/internal/paths"
 	"github.com/juty9026/terrapod/internal/planner"
@@ -37,7 +39,7 @@ func TestHelpDescribesShadowCommandSurfaceWithoutDependencies(t *testing.T) {
 		"update (unavailable until activation)",
 		"setup (unavailable until activation)",
 		"configure (unavailable until activation)",
-		"chezmoi (unavailable until activation)",
+		"chezmoi    Run a constrained read-only chezmoi command",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("help does not contain %q:\n%s", want, stdout)
@@ -499,7 +501,7 @@ func TestDiffUsesManagedFileClientAndPreservesOutput(t *testing.T) {
 }
 
 func TestMutationCommandsAreNotDispatched(t *testing.T) {
-	for _, command := range []string{"update", "setup", "configure", "chezmoi"} {
+	for _, command := range []string{"update", "setup", "configure"} {
 		t.Run(command, func(t *testing.T) {
 			deps := Dependencies{Geteuid: func() int { return 501 }}
 			code, _, stderr := run(t, []string{command}, deps)
@@ -507,6 +509,76 @@ func TestMutationCommandsAreNotDispatched(t *testing.T) {
 				t.Fatalf("Run(%s) = %d, stderr=%q", command, code, stderr)
 			}
 		})
+	}
+}
+
+func TestChezmoiDispatchesOnlyExplicitReadOnlyPassthrough(t *testing.T) {
+	called := false
+	deps := Dependencies{
+		Geteuid: func() int { return 501 },
+		Chezmoi: func(_ context.Context, command string, operands []string) (execx.Result, error) {
+			called = true
+			if command != "status" || !reflect.DeepEqual(operands, []string{".zshrc"}) {
+				t.Fatalf("passthrough = %q %#v", command, operands)
+			}
+			return execx.Result{Stdout: []byte("clean\n"), Stderr: []byte("notice\n")}, nil
+		},
+	}
+	code, stdout, stderr := run(t, []string{"chezmoi", "--", "status", ".zshrc"}, deps)
+	if code != 0 || !called || stdout != "clean\n" || stderr != "notice\n" {
+		t.Fatalf("Run(chezmoi) = %d, called=%v stdout=%q stderr=%q", code, called, stdout, stderr)
+	}
+
+	for _, args := range [][]string{{"chezmoi"}, {"chezmoi", "status"}, {"chezmoi", "--"}} {
+		called = false
+		code, _, stderr = run(t, args, deps)
+		if code != exitUsage || called || stderr != "usage: tpod chezmoi -- <read-only-command> [args...]\n" {
+			t.Fatalf("Run(%v) = %d, called=%v stderr=%q", args, code, called, stderr)
+		}
+	}
+}
+
+func TestComposeRegistryRegistersEveryPlan02And03Adapter(t *testing.T) {
+	fixture := &resource.Fixture{}
+	registry, err := ComposeRegistry(AdapterSet{
+		HomebrewFormula: fixture,
+		HomebrewCask:    fixture,
+		APT:             fixture,
+		Mise:            fixture,
+		ManagedFiles:    fixture,
+		GitCheckout:     fixture,
+		Jetendard:       fixture,
+		JSONFields:      fixture,
+		PlistFields:     fixture,
+		Karabiner:       fixture,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []struct {
+		typeName model.ResourceType
+		provider string
+	}{
+		{model.ResourcePackage, "homebrew-formula"},
+		{model.ResourcePackage, "homebrew-cask"},
+		{model.ResourcePackage, "apt"},
+		{model.ResourcePackage, "mise"},
+		{model.ResourceManagedFiles, "chezmoi"},
+		{model.ResourceGitCheckout, "git"},
+		{model.ResourceArchive, "jetendard"},
+		{model.ResourceIntegration, "json-fields"},
+		{model.ResourceIntegration, "plist-fields"},
+		{model.ResourceIntegration, "karabiner"},
+	} {
+		if got, ok := registry.Lookup(key.typeName, key.provider); !ok || got != fixture {
+			t.Errorf("registry lookup (%q, %q) = %#v, %v", key.typeName, key.provider, got, ok)
+		}
+	}
+}
+
+func TestComposeRegistryRejectsMissingAdapter(t *testing.T) {
+	if _, err := ComposeRegistry(AdapterSet{}); err == nil || !strings.Contains(err.Error(), "homebrew-formula") {
+		t.Fatalf("ComposeRegistry error = %v", err)
 	}
 }
 

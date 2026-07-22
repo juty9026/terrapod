@@ -104,10 +104,22 @@ func TestClientCommandsAlwaysUseConstrainedGlobals(t *testing.T) {
 		if contains(call.Args, "--exclude") != wantExclude {
 			t.Fatalf("%s exclude mismatch: %#v", command, call.Args)
 		}
+		if wantExclude && indexOf(call.Args, "--exclude") < indexOf(call.Args, command) {
+			t.Fatalf("%s exclude must be a command flag: %#v", command, call.Args)
+		}
 		if command == "diff" && (!contains(call.Args, "--no-pager") || !contains(call.Args, "--use-builtin-diff")) {
 			t.Fatalf("diff is not pinned to builtin output: %#v", call.Args)
 		}
 	}
+}
+
+func indexOf(values []string, want string) int {
+	for index, value := range values {
+		if value == want {
+			return index
+		}
+	}
+	return -1
 }
 
 func TestTargetStateRejectsMissingFieldsAndDuplicateCleanPaths(t *testing.T) {
@@ -360,7 +372,7 @@ func TestClientRunsScriptFixtureWithoutAShell(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.TrimSpace(string(result.Stdout))
-	if !strings.Contains(got, "--exclude scripts") || !strings.Contains(got, "--refresh-externals=never") || !strings.HasSuffix(got, "status --") {
+	if !strings.Contains(got, "--exclude scripts") || !strings.Contains(got, "--refresh-externals=never") || !strings.HasSuffix(got, "status --exclude scripts --") {
 		t.Fatalf("stdout = %q", result.Stdout)
 	}
 }

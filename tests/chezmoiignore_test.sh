@@ -21,57 +21,75 @@ pass() {
   printf '%s\n' "ok - $1"
 }
 
+data_file_for() {
+  data="$1"
+  digest="$(printf '%s' "$data" | shasum -a 256 | awk '{print $1}')"
+  path="$tmp_dir/override-$digest.json"
+  if [ ! -f "$path" ]; then
+    printf '%s\n' "$data" >"$path"
+  fi
+  printf '%s\n' "$path"
+}
+
 managed_source_paths() {
   data="$1"
+  data_file="$(data_file_for "$data")"
   chezmoi \
     --config "$chezmoi_config" \
     --source "$repo_root" \
-    --override-data "$data" \
+    --override-data-file "$data_file" \
     managed \
+    --exclude scripts \
     --path-style source-relative
 }
 
 managed_target_paths() {
   data="$1"
+  data_file="$(data_file_for "$data")"
   chezmoi \
     --config "$chezmoi_config" \
     --source "$repo_root" \
-    --override-data "$data" \
-    managed
+    --override-data-file "$data_file" \
+    managed \
+    --exclude scripts
 }
 
 managed_target_paths_from_source() {
   data="$1"
   source="$2"
+  data_file="$(data_file_for "$data")"
 
   chezmoi \
     --config "$chezmoi_config" \
     --source "$source" \
-    --override-data "$data" \
-    managed
+    --override-data-file "$data_file" \
+    managed \
+    --exclude scripts
 }
 
 render_template() {
   data="$1"
   file="$2"
+  data_file="$(data_file_for "$data")"
 
   chezmoi \
     --config "$chezmoi_config" \
     --source "$repo_root" \
+    --override-data-file "$data_file" \
     execute-template \
-    --override-data "$data" \
     --file "$repo_root/$file"
 }
 
 render_managed_file() {
   data="$1"
   destination="$2"
+  data_file="$(data_file_for "$data")"
 
   chezmoi \
     --config "$chezmoi_config" \
     --source "$repo_root" \
     --destination "$tmp_dir/home" \
-    --override-data "$data" \
+    --override-data-file "$data_file" \
     cat "$tmp_dir/home/$destination"
 }
 
@@ -161,11 +179,16 @@ assert_managed_paths_include_prefix() {
   pass "$message"
 }
 
+baseline_data='{"chezmoi":{"os":"darwin"}}'
+baseline_data_file="$(data_file_for "$baseline_data")"
+
 managed_tests="$(
   chezmoi \
     --config "$chezmoi_config" \
     --source "$repo_root" \
+    --override-data-file "$baseline_data_file" \
     managed \
+    --exclude scripts \
     --path-style source-relative |
     grep '^tests/' || true
 )"
@@ -180,7 +203,9 @@ managed_repository_docs="$(
   chezmoi \
     --config "$chezmoi_config" \
     --source "$repo_root" \
+    --override-data-file "$baseline_data_file" \
     managed \
+    --exclude scripts \
     --path-style source-relative |
     grep -E '^(README(\.ko)?\.md|AGENTS\.md|CONTEXT\.md|docs/)' || true
 )"
@@ -226,8 +251,6 @@ assert_managed_paths_exclude_prefix \
   "Ubuntu does not manage the rendered AI CLI tools Brewfile"
 
 for entry in \
-  .chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl \
-  .chezmoiscripts/run_before_11-retry-homebrew-core.sh.tmpl \
   dot_local/lib/terrapod/homebrew-core-bundle.sh
 do
   printf '%s\n' "$ubuntu_managed" | grep -Fx "$entry" >/dev/null ||
@@ -236,10 +259,6 @@ done
 pass "Ubuntu manages cross-profile Homebrew core state"
 
 macos_only_entries="
-.chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl
-.chezmoiscripts/run_before_02-retry-jetendard-font.sh.tmpl
-.chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl
-.chezmoiscripts/run_onchange_after_65-install-jetendard-font.sh.tmpl
 dot_local/lib/terrapod/executable_jetendard-font
 dot_local/lib/terrapod/executable_jetendard-settings
 dot_config/ghostty
@@ -1374,15 +1393,15 @@ done
 
 pass "user-scoped macOS app config remains managed regardless of app group selection"
 
-assert_managed_paths_include_prefix \
+assert_managed_paths_exclude_prefix \
   "$macos_managed" \
   ".chezmoiscripts/run_after_70-apply-jetendard-settings.sh.tmpl" \
-  "macOS default applies Jetendard app settings"
+  "macOS manager excludes the legacy Jetendard settings script"
 
-assert_managed_paths_include_prefix \
+assert_managed_paths_exclude_prefix \
   "$macos_development_apps_managed" \
   ".chezmoiscripts/run_after_70-apply-jetendard-settings.sh.tmpl" \
-  "development-apps selection applies the same user-scoped Jetendard settings"
+  "development-apps manager excludes the legacy Jetendard settings script"
 
 assert_managed_paths_exclude_prefix \
   "$ubuntu_managed" \
@@ -1435,35 +1454,35 @@ assert_managed_paths_exclude_prefix \
   "dot_config/zellij/layouts/dev.kdl" \
   "Ubuntu VPS ignores Optional Development Workspace layout by default"
 
-assert_managed_paths_include_prefix \
+assert_managed_paths_exclude_prefix \
   "$ubuntu_managed" \
   ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
-  "Ubuntu VPS includes Optional AI Tool Stack warning cleanup by default"
+  "Ubuntu VPS manager excludes the legacy AI CLI script"
 
-assert_managed_paths_include_prefix \
+assert_managed_paths_exclude_prefix \
   "$ubuntu_managed" \
   ".chezmoiscripts/run_after_21-retry-mise-tools.sh.tmpl" \
-  "Ubuntu VPS includes marker-gated mise tool retry hook"
+  "Ubuntu VPS manager excludes the legacy mise retry script"
 
-assert_managed_paths_include_prefix \
+assert_managed_paths_exclude_prefix \
   "$ubuntu_managed" \
   ".chezmoiscripts/run_before_31-retry-shell-integrations.sh.tmpl" \
-  "Ubuntu VPS includes marker-gated shell integration retry hook"
+  "Ubuntu VPS manager excludes the legacy shell retry script"
 
 assert_managed_paths_exclude_prefix \
   "$macos_managed" \
   "dot_config/nvim" \
   "macOS ignores Optional Editor Stack entries by default"
 
-assert_managed_paths_include_prefix \
+assert_managed_paths_exclude_prefix \
   "$macos_managed" \
   ".chezmoiscripts/run_after_21-retry-mise-tools.sh.tmpl" \
-  "macOS includes marker-gated mise tool retry hook"
+  "macOS manager excludes the legacy mise retry script"
 
-assert_managed_paths_include_prefix \
+assert_managed_paths_exclude_prefix \
   "$macos_managed" \
   ".chezmoiscripts/run_before_31-retry-shell-integrations.sh.tmpl" \
-  "macOS includes marker-gated shell integration retry hook"
+  "macOS manager excludes the legacy shell retry script"
 
 if [ -e "$repo_root/dot_config/zsh/path.d/antigravity.zsh.tmpl" ]; then
   fail "legacy Antigravity app-bundle PATH snippet is no longer managed"
@@ -1501,15 +1520,15 @@ assert_managed_paths_include_prefix \
   "dot_config/zellij/layouts/dev.kdl" \
   "enableDevelopmentWorkspace includes Optional Development Workspace layout"
 
-assert_managed_paths_include_prefix \
+assert_managed_paths_exclude_prefix \
   "$ai_cli_tools_managed" \
   ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
-  "enableAiCliTools includes Optional AI Tool Stack installer"
+  "enableAiCliTools manager excludes the legacy AI CLI installer"
 
-assert_managed_paths_include_prefix \
+assert_managed_paths_exclude_prefix \
   "$development_workspace_managed" \
   ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
-  "enableDevelopmentWorkspace includes Optional AI Tool Stack installer"
+  "enableDevelopmentWorkspace manager excludes the legacy AI CLI installer"
 
 ubuntu_mise_config="$(render_template "$ubuntu_data" "dot_config/mise/config.toml.tmpl")"
 

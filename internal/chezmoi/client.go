@@ -251,15 +251,16 @@ func (c Client) applyTargets(ctx context.Context, targets []string, expected map
 		return err
 	}
 	defer os.RemoveAll(inv.root)
-	args := c.globalArgs(inv, "apply")
-	args = append(args, "apply", "--")
+	args := c.globalArgs(inv)
+	commandArgs := []string{"apply", "--exclude", "scripts", "--"}
 	staged := make([]string, 0, len(absolute))
 	for _, path := range absolute {
 		rel, _ := filepath.Rel(c.Destination, path)
 		stagedPath := filepath.Join(inv.destination, rel)
-		args = append(args, stagedPath)
+		commandArgs = append(commandArgs, stagedPath)
 		staged = append(staged, stagedPath)
 	}
+	args = append(args, commandArgs...)
 	result, runErr := c.Runner.Run(ctx, execx.Request{Path: inv.binary, Args: args, Env: map[string]string{"HOME": c.Destination}})
 	if err := commandError(result, runErr); err != nil {
 		return err
@@ -401,8 +402,8 @@ func (c Client) runRead(ctx context.Context, command string, args []string) (exe
 	}
 	defer os.RemoveAll(inv.root)
 	inv.destination = c.Destination
-	requestArgs := c.globalArgs(inv, command)
-	requestArgs = append(requestArgs, args...)
+	requestArgs := c.globalArgs(inv)
+	requestArgs = append(requestArgs, constrainedCommandArgs(command, args)...)
 	result, runErr := c.Runner.Run(ctx, execx.Request{Path: inv.binary, Args: requestArgs, Env: map[string]string{"HOME": c.Destination}})
 	if err := commandError(result, runErr); err != nil {
 		return result, err
@@ -413,14 +414,17 @@ func (c Client) runRead(ctx context.Context, command string, args []string) (exe
 	return result, nil
 }
 
-func (c Client) globalArgs(inv invocation, command string) []string {
-	args := []string{"--source", inv.source, "--override-data-file", inv.config, "--destination", inv.destination, "--config", inv.cliConfig, "--config-format=toml", "--cache", inv.cache, "--persistent-state", inv.state, "--refresh-externals=never", "--no-tty", "--color=false", "--progress=false"}
+func (c Client) globalArgs(inv invocation) []string {
+	return []string{"--source", inv.source, "--override-data-file", inv.config, "--destination", inv.destination, "--config", inv.cliConfig, "--config-format=toml", "--cache", inv.cache, "--persistent-state", inv.state, "--refresh-externals=never", "--no-tty", "--color=false", "--progress=false"}
+}
+
+func constrainedCommandArgs(command string, args []string) []string {
 	switch command {
 	case "managed", "status", "diff", "dump", "apply":
-		args = append(args, "--exclude", "scripts")
+		args = append([]string{args[0], "--exclude", "scripts"}, args[1:]...)
 	}
 	if command == "diff" {
-		args = append(args, "--no-pager", "--use-builtin-diff")
+		args = append([]string{args[0], "--no-pager", "--use-builtin-diff"}, args[1:]...)
 	}
 	return args
 }
