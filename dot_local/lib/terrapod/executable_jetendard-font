@@ -114,7 +114,19 @@ def backup_path(source: Path, destination: Path) -> None:
     shutil.copy2(source, destination, follow_symlinks=False)
 
 
-def rollback_install(fonts_dir: Path, manifest: Path, touched: list[str], font_backups: Path, manifest_backup: Path, had_manifest: bool) -> None:
+def preserve_recovery_backups(recovery_root: Path, font_backups: Path, manifest_backup: Path) -> Path:
+    recovery_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    recovery_root.chmod(0o700)
+    recovery = Path(tempfile.mkdtemp(prefix="rollback-", dir=recovery_root))
+    recovery.chmod(0o700)
+    for backup in sorted(font_backups.glob("*")):
+        backup_path(backup, recovery / "fonts" / backup.name)
+    if manifest_backup.is_file() or manifest_backup.is_symlink():
+        backup_path(manifest_backup, recovery / "manifest.json")
+    return recovery
+
+
+def rollback_install(fonts_dir: Path, manifest: Path, touched: list[str], font_backups: Path, manifest_backup: Path, had_manifest: bool, recovery_root: Path) -> tuple[list[OSError], Path | None]:
     errors = []
     for basename in touched:
         candidate = fonts_dir / basename
@@ -138,8 +150,8 @@ def rollback_install(fonts_dir: Path, manifest: Path, touched: list[str], font_b
             os.replace(manifest_backup, manifest)
     except OSError as error:
         errors.append(error)
-    if errors:
-        raise RuntimeError("Jetendard install rollback failed: " + "; ".join(str(error) for error in errors))
+    recovery = preserve_recovery_backups(recovery_root, font_backups, manifest_backup) if errors else None
+    return errors, recovery
 
 
 def install(home: Path) -> None:
@@ -187,8 +199,21 @@ def install(home: Path) -> None:
                     candidate = fonts_dir / basename
                     if candidate.is_file() or candidate.is_symlink():
                         candidate.unlink()
-        except BaseException:
-            rollback_install(fonts_dir, manifest, touched, font_backups, manifest_backup, had_manifest)
+        except BaseException as forward_error:
+            rollback_errors, recovery = rollback_install(
+                fonts_dir,
+                manifest,
+                touched,
+                font_backups,
+                manifest_backup,
+                had_manifest,
+                state_root(home) / "recovery",
+            )
+            if rollback_errors:
+                rollback_detail = "; ".join(str(error) for error in rollback_errors)
+                raise RuntimeError(
+                    f"install failed: {forward_error}; rollback failed: {rollback_detail}; recovery backups: {recovery}"
+                ) from forward_error
             raise
     print(f"Installed Jetendard {tag} ({len(new_files)} TTF files).")
 

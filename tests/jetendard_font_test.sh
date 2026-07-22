@@ -204,6 +204,8 @@ PY
 python3 - "$helper" "$home_dir" "$state_dir" "$transaction_fixture/release.json" "$tmp_dir" <<'PY'
 import importlib.util
 import importlib.machinery
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -263,6 +265,7 @@ else:
 finally:
     module.os.replace = real_replace
 assert_snapshot(home, state, before)
+assert not (state / "terrapod" / "jetendard" / "recovery").exists()
 module.install(home)
 assert (home / "Library" / "Fonts" / "Jetendard-Regular.ttf").read_text() == "replacement:Regular\n"
 module.check(home, str(state))
@@ -287,6 +290,7 @@ else:
 finally:
     module.os.replace = real_replace
 assert_snapshot(home, state, before)
+assert not (state / "terrapod" / "jetendard" / "recovery").exists()
 module.install(home)
 module.check(home, str(state))
 
@@ -317,6 +321,7 @@ else:
 finally:
     module.os.unlink = real_unlink
 assert_snapshot(home, state, before)
+assert not (state / "terrapod" / "jetendard" / "recovery").exists()
 module.install(home)
 assert not (fonts / "Jetendard-Legacy.ttf").exists()
 assert (fonts / "Jetendard-Manual.ttf").read_text() == "manual\n"
@@ -342,5 +347,99 @@ finally:
 assert_snapshot(home, state, before)
 module.install(home)
 module.check(home, str(state))
+
+def cli_install(home):
+    old_argv = sys.argv
+    old_home = os.environ.get("HOME")
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    sys.argv = [helper_path, "install"]
+    os.environ["HOME"] = str(home)
+    try:
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            result = module.main()
+    finally:
+        sys.argv = old_argv
+        if old_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = old_home
+    return result, stdout.getvalue(), stderr.getvalue()
+
+home, state = scenario("font-restore")
+before = snapshot(home, state)
+replacement_count = 0
+forward_failed = False
+restore_failed = False
+def fail_forward_and_font_restore(source, destination):
+    global replacement_count, forward_failed, restore_failed
+    source_path = Path(source)
+    destination_path = Path(destination)
+    if destination_path.parent == home / "Library" / "Fonts" and destination_path.name.startswith("Jetendard-") and "backup" not in source_path.parts:
+        replacement_count += 1
+        if replacement_count == 10 and not forward_failed:
+            forward_failed = True
+            raise OSError("injected forward replacement failure")
+    if forward_failed and "backup" in source_path.parts and destination_path.name == "Jetendard-Regular.ttf" and not restore_failed:
+        restore_failed = True
+        raise OSError("injected font restore failure")
+    return real_replace(source, destination)
+module.os.replace = fail_forward_and_font_restore
+try:
+    result, stdout, stderr = cli_install(home)
+finally:
+    module.os.replace = real_replace
+assert result == 1 and not stdout
+assert stderr.count("\n") == 1
+assert "injected forward replacement failure" in stderr
+assert "injected font restore failure" in stderr
+marker = "recovery backups: "
+assert marker in stderr
+recovery = Path(stderr.split(marker, 1)[1].strip())
+assert recovery.parent == state / "terrapod" / "jetendard" / "recovery"
+assert recovery.stat().st_mode & 0o777 == 0o700
+assert (recovery / "fonts" / "Jetendard-Regular.ttf").read_bytes() == before[0]["Jetendard-Regular.ttf"]
+assert (home / "Library" / "Fonts" / "Jetendard-Manual.ttf").read_text() == "manual\n"
+
+home, state = scenario("manifest-restore")
+fonts = home / "Library" / "Fonts"
+manifest = state / "terrapod" / "jetendard" / "manifest.json"
+(fonts / "Jetendard-Legacy.ttf").write_text("legacy-owned\n")
+data = json.loads(manifest.read_text())
+data["files"].append("Jetendard-Legacy.ttf")
+manifest.write_text(json.dumps(data) + "\n")
+before = snapshot(home, state)
+real_unlink = module.os.unlink
+forward_failed = False
+restore_failed = False
+def fail_cleanup(path, *args, **kwargs):
+    global forward_failed
+    if Path(path).name == "Jetendard-Legacy.ttf" and not forward_failed:
+        forward_failed = True
+        raise OSError("injected forward cleanup failure")
+    return real_unlink(path, *args, **kwargs)
+def fail_manifest_restore(source, destination):
+    global restore_failed
+    source_path = Path(source)
+    if forward_failed and "backup" in source_path.parts and Path(destination) == manifest and not restore_failed:
+        restore_failed = True
+        raise OSError("injected manifest restore failure")
+    return real_replace(source, destination)
+module.os.unlink = fail_cleanup
+module.os.replace = fail_manifest_restore
+try:
+    result, stdout, stderr = cli_install(home)
+finally:
+    module.os.unlink = real_unlink
+    module.os.replace = real_replace
+assert result == 1 and not stdout
+assert stderr.count("\n") == 1
+assert "injected forward cleanup failure" in stderr
+assert "injected manifest restore failure" in stderr
+assert marker in stderr
+recovery = Path(stderr.split(marker, 1)[1].strip())
+assert recovery.parent == state / "terrapod" / "jetendard" / "recovery"
+assert (recovery / "manifest.json").read_bytes() == before[1]
+assert (fonts / "Jetendard-Manual.ttf").read_text() == "manual\n"
 PY
-pass "installer rolls back late replacement, manifest, cleanup, and first-install failures"
+pass "installer rolls back failures and preserves backups when restore fails"
