@@ -155,9 +155,6 @@ func (r *ManagedFiles) Resolve(ctx context.Context, id model.ResourceID, input i
 			return result, err
 		}
 	}
-	if _, err := capability.Verify(ctx, item); err != nil {
-		return result, fmt.Errorf("resolve: verify managed-files resolution: %w", err)
-	}
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
@@ -224,7 +221,7 @@ func managedAuthorization(input reconcile.ApplyInput, item model.Resource, histo
 		historicalCatalog = historicalDigest(item.ID, input)
 	}
 	return model.ManagedFileAuthorization{
-		Version:          1,
+		Version:          2,
 		CatalogDigest:    input.CatalogDigest,
 		HistoricalDigest: historicalCatalog,
 		Mode:             mode,
@@ -234,7 +231,7 @@ func managedAuthorization(input reconcile.ApplyInput, item model.Resource, histo
 }
 
 func managedPlanFromAuthorization(authorization model.ManagedFileAuthorization, release string) model.Plan {
-	kind, removes := model.OperationVerify, []string(nil)
+	kind, removes := model.OperationUpgrade, []string(nil)
 	if authorization.Mode == "historical" {
 		kind, removes = model.OperationPrune, []string{authorization.Resource.Package}
 	}
@@ -283,7 +280,7 @@ func activeManagedAuthorization(journal *model.Journal, id model.ResourceID, cap
 		return nil, true, errors.New("resolve: active managed-files journal is malformed")
 	}
 	authorization := *operation.ManagedFileAuthorization
-	if authorization.Version != 1 || authorization.CatalogDigest == "" || authorization.Resource.ID != id || authorization.Resource.Type != model.ResourceManagedFiles || authorization.Resource.Provider != "chezmoi" ||
+	if authorization.Version != 2 || authorization.CatalogDigest == "" || authorization.Resource.ID != id || authorization.Resource.Type != model.ResourceManagedFiles || authorization.Resource.Provider != "chezmoi" ||
 		(authorization.Mode != "current" && authorization.Mode != "historical") ||
 		(authorization.Mode == "current" && authorization.HistoricalDigest != "") ||
 		(authorization.Mode == "historical" && authorization.HistoricalDigest == "") {

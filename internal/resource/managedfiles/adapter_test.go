@@ -81,11 +81,11 @@ func operation(item model.Resource, kind model.OperationKind) model.Operation {
 
 func beginConflictResolution(t *testing.T, store *state.Store, item model.Resource, approved []Conflict) string {
 	t.Helper()
-	authorization := &model.ManagedFileAuthorization{Version: 1, CatalogDigest: "signed", Mode: "current", Resource: item, Conflicts: approved}
+	authorization := &model.ManagedFileAuthorization{Version: 2, CatalogDigest: "signed", Mode: "current", Resource: item, Conflicts: approved}
 	journal, err := store.Begin(model.Plan{ID: "resolve-test", Operations: []model.Operation{{
 		ID:                       "resolve-managed-files-" + string(item.ID),
 		ResourceID:               item.ID,
-		Kind:                     model.OperationVerify,
+		Kind:                     model.OperationUpgrade,
 		Provider:                 item.Provider,
 		Package:                  item.Package,
 		ManagedFileAuthorization: authorization,

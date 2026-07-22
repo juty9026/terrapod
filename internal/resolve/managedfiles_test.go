@@ -233,6 +233,10 @@ func TestManagedFilesResolveCrashRetryUsesExactActiveJournalWithoutReprompt(t *t
 	if snapshot.ActiveJournal == nil {
 		t.Fatal("crash did not preserve active journal")
 	}
+	operation := snapshot.ActiveJournal.Plan.Operations[0]
+	if operation.Kind != model.OperationUpgrade || operation.ManagedFileAuthorization == nil || operation.ManagedFileAuthorization.Version != 2 {
+		t.Fatalf("current resolution operation=%#v", operation)
+	}
 	afterManagedFilesMutation = nil
 	var second bytes.Buffer
 	result, err := fixture.service.Resolve(context.Background(), fixture.item.ID, strings.NewReader(""), &second)
@@ -426,5 +430,128 @@ func TestManagedFilesResolveDesiredCatalogChangeRepromptsAndSupersedes(t *testin
 		if strings.Contains(backup, oldJournal.ID) {
 			t.Fatalf("superseded plan reused old journal backup: %v", backups)
 		}
+	}
+}
+
+func TestManagedFilesResolveConflictThenConvergesAbsentDesiredTarget(t *testing.T) {
+	fixture := newManagedResolveFixture(t)
+	conflict := filepath.Join(fixture.home, "conflict")
+	absent := filepath.Join(fixture.home, "absent")
+	if err := os.WriteFile(conflict, []byte("local"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fixture.client.targets = []chezmoi.Target{fixture.target(conflict, "desired-a"), fixture.target(absent, "desired-b")}
+	fixture.own(t, map[string]string{conflict: "file:" + managedfiles.Digest("file", []byte("old"))}, "signed-v1")
+
+	var output bytes.Buffer
+	result, err := fixture.service.Resolve(context.Background(), fixture.item.ID, strings.NewReader("yes\n"), &output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotConflict, _ := os.ReadFile(conflict)
+	gotAbsent, _ := os.ReadFile(absent)
+	snapshot, _ := fixture.store.Snapshot()
+	owned := snapshot.Ownership[fixture.item.ID]
+	if !result.Proceeded || string(gotConflict) != "desired-a" || string(gotAbsent) != "desired-b" || len(owned.Paths) != 2 || output.Len() == 0 {
+		t.Fatalf("result=%#v conflict=%q absent=%q ownership=%#v prompt=%q", result, gotConflict, gotAbsent, owned, output.String())
+	}
+	backups, _ := filepath.Glob(filepath.Join(fixture.recovery, "*", "*"))
+	if len(backups) != 1 || filepath.Base(backups[0]) != "conflict" {
+		t.Fatalf("only explicit conflict should be backed up: %v", backups)
+	}
+}
+
+func TestManagedFilesResolveConflictThenPrunesSafeObsoleteTarget(t *testing.T) {
+	fixture := newManagedResolveFixture(t)
+	conflict := filepath.Join(fixture.home, "conflict")
+	obsolete := filepath.Join(fixture.home, "obsolete")
+	if err := os.WriteFile(conflict, []byte("local"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(obsolete, []byte("owned"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fixture.client.targets = []chezmoi.Target{fixture.target(conflict, "desired")}
+	fixture.own(t, map[string]string{
+		conflict: "file:" + managedfiles.Digest("file", []byte("old")),
+		obsolete: "file:" + managedfiles.Digest("file", []byte("owned")),
+	}, "signed-v1")
+
+	if _, err := fixture.service.Resolve(context.Background(), fixture.item.ID, strings.NewReader("yes\n"), &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(obsolete); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("safe obsolete target remains: %v", err)
+	}
+	snapshot, _ := fixture.store.Snapshot()
+	if len(snapshot.Ownership[fixture.item.ID].Paths) != 1 || snapshot.Ownership[fixture.item.ID].Paths[conflict] == "" {
+		t.Fatalf("ownership=%#v", snapshot.Ownership[fixture.item.ID])
+	}
+}
+
+func TestManagedFilesResolveCrashResumeConvergesSafeDriftWithoutReprompt(t *testing.T) {
+	for _, state := range []string{"absent", "exact-owned"} {
+		t.Run(state, func(t *testing.T) {
+			fixture := newManagedResolveFixture(t)
+			conflict := filepath.Join(fixture.home, "conflict")
+			additional := filepath.Join(fixture.home, "additional")
+			if err := os.WriteFile(conflict, []byte("local"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			fixture.client.targets = []chezmoi.Target{fixture.target(conflict, "desired-a"), fixture.target(additional, "desired-b")}
+			fixture.own(t, map[string]string{conflict: "file:" + managedfiles.Digest("file", []byte("owned"))}, "signed-v1")
+			afterManagedFilesMutation = func() error { return errors.New("simulated crash") }
+			t.Cleanup(func() { afterManagedFilesMutation = nil })
+			if _, err := fixture.service.Resolve(context.Background(), fixture.item.ID, strings.NewReader("yes\n"), &bytes.Buffer{}); err == nil {
+				t.Fatal("first resolution did not crash")
+			}
+			afterManagedFilesMutation = nil
+			if state == "absent" {
+				if err := os.Remove(conflict); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(conflict, []byte("owned"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var output bytes.Buffer
+			result, err := fixture.service.Resolve(context.Background(), fixture.item.ID, strings.NewReader(""), &output)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gotConflict, _ := os.ReadFile(conflict)
+			gotAdditional, _ := os.ReadFile(additional)
+			if !result.Proceeded || output.Len() != 0 || string(gotConflict) != "desired-a" || string(gotAdditional) != "desired-b" {
+				t.Fatalf("result=%#v prompt=%q conflict=%q additional=%q", result, output.String(), gotConflict, gotAdditional)
+			}
+		})
+	}
+}
+
+func TestManagedFilesResolveDoesNotResumeVersionOneVerifyAuthorization(t *testing.T) {
+	fixture := newManagedResolveFixture(t)
+	path := filepath.Join(fixture.home, "conflict")
+	if err := os.WriteFile(path, []byte("local"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fixture.client.targets = []chezmoi.Target{fixture.target(path, "desired")}
+	fixture.own(t, map[string]string{path: "file:" + managedfiles.Digest("file", []byte("old"))}, "signed-v1")
+	snapshot, _ := fixture.store.Snapshot()
+	conflicts, _ := fixture.adapter.Conflicts(context.Background(), fixture.item, snapshot.Ownership[fixture.item.ID])
+	authorization := &model.ManagedFileAuthorization{Version: 1, CatalogDigest: fixture.input.CatalogDigest, Mode: "current", Resource: fixture.item, Conflicts: conflicts}
+	if _, err := fixture.store.Begin(model.Plan{ID: "resolve-managed-files-old", Release: fixture.input.Plan.Release, Operations: []model.Operation{{
+		ID:                       "resolve-managed-files-" + string(fixture.item.ID),
+		ResourceID:               fixture.item.ID,
+		Kind:                     model.OperationVerify,
+		Provider:                 fixture.item.Provider,
+		Package:                  fixture.item.Package,
+		ManagedFileAuthorization: authorization,
+	}}, Unavailable: map[model.ResourceID]string{}}); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	_, err := fixture.service.Resolve(context.Background(), fixture.item.ID, strings.NewReader("yes\n"), &output)
+	got, _ := os.ReadFile(path)
+	if err == nil || output.Len() != 0 || string(got) != "local" {
+		t.Fatalf("version-one Verify resumed: err=%v prompt=%q content=%q", err, output.String(), got)
 	}
 }

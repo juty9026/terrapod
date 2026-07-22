@@ -484,12 +484,12 @@ func validateActiveConflictAuthorization(snapshot model.Snapshot, desired model.
 	}
 	operation := snapshot.ActiveJournal.Plan.Operations[0]
 	authorization := operation.ManagedFileAuthorization
-	if authorization == nil || authorization.Version != 1 || !reflect.DeepEqual(authorization.Resource, desired) || !reflect.DeepEqual(authorization.Conflicts, approved) ||
+	if authorization == nil || authorization.Version != 2 || !reflect.DeepEqual(authorization.Resource, desired) || !reflect.DeepEqual(authorization.Conflicts, approved) ||
 		operation.ID != "resolve-managed-files-"+string(desired.ID) || operation.ResourceID != desired.ID || operation.Provider != desired.Provider || operation.Package != desired.Package {
 		return errors.New("managed-files: active journal does not authorize the conflict baseline")
 	}
 	if authorization.Mode == "current" {
-		if operation.Kind != model.OperationVerify || len(operation.Removes) != 0 {
+		if operation.Kind != model.OperationUpgrade || len(operation.Removes) != 0 {
 			return errors.New("managed-files: active journal has invalid current resolution semantics")
 		}
 	} else if authorization.Mode == "historical" {
