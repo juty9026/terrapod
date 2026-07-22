@@ -177,16 +177,30 @@ assert_contains '<Preset>` is not a plain fallback for Terrapod Setup.' \
   "README states configure is not a Setup fallback"
 assert_contains 'terminal environment and rerun `terrapod setup`.' \
   "README documents missing-gum Setup recovery guidance"
-assert_contains 'Before Terrapod Setup, the first-run installer prepares `gum` as the required' \
-  "README documents first-run gum bootstrap before setup on macOS"
-assert_contains 'Bootstrap UI Dependency with Homebrew when `gum` is missing.' \
-  "README documents macOS bootstrap UI dependency preparation path"
-assert_contains 'bootstrap is limited to `gum`; it does not run broad Homebrew upgrades.' \
-  "README documents macOS bootstrap UI dependency scope excludes broad Homebrew upgrades"
-assert_contains 'Bootstrap UI Dependency from APT with the Charm APT repository when `gum` is' \
-  "README documents Ubuntu bootstrap UI dependency preparation path"
-assert_contains 'That setup UI bootstrap is limited to `gum`; it does not run broad APT' \
-  "README documents Ubuntu bootstrap UI dependency scope excludes broad APT upgrades"
+assert_contains 'Homebrew is the Modern CLI Provider for the Core Shell Stack on both supported profiles.' \
+  "README names Homebrew as the cross-profile Modern CLI Provider"
+assert_contains 'mise is the Development Runtime Manager for Bun, Node.js, Python, and uv.' \
+  "README limits mise to development runtimes"
+assert_contains 'On Apple Silicon, Homebrew installs at `/opt/homebrew`; on Intel Macs, it installs at `/usr/local`.' \
+  "README documents macOS architecture-to-prefix mapping"
+assert_contains 'Ubuntu 24.04 installs Homebrew at `/home/linuxbrew/.linuxbrew` for every Preset.' \
+  "README documents mandatory Linuxbrew"
+assert_contains 'The first-run installer installs `chezmoi` and `gum` through Homebrew before Terrapod Setup.' \
+  "README documents cross-profile Setup bootstrap"
+assert_contains '1 vCPU, 1 GiB RAM, and at least 3 GiB of free disk space before installation' \
+  "README documents the recommended VPS floor"
+assert_contains '`x86_64` and `aarch64`' \
+  "README documents supported Ubuntu architectures"
+assert_not_contains 'get.chezmoi.io' \
+  "README removes the standalone chezmoi installer"
+assert_not_contains 'Charm APT' \
+  "README removes the Charm APT trust boundary"
+assert_not_contains 'mise from the official mise APT repository' \
+  "README removes mise APT ownership"
+assert_contains 'HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade' \
+  "README documents restore-only apply semantics"
+assert_contains 'Existing mise, APT, and vendor-installed payloads are not removed automatically.' \
+  "README documents non-destructive migration"
 assert_contains '## What Terrapod Leaves Alone' \
   "README documents product boundaries near the top"
 assert_contains '## Daily Commands' \
@@ -225,14 +239,10 @@ assert_contains '`terrapod update` refreshes the Terrapod Source Repository thro
   "README documents Terrapod update as source maintenance"
 assert_contains 'Terrapod does not run broad Homebrew, APT, or mise upgrades.' \
   "README states Terrapod does not run broad package or tool upgrades"
-assert_contains 'Homebrew also owns the three cross-profile Optional AI Tool Stack casks.' \
-  "README documents the narrow cross-profile Homebrew ownership exception"
-assert_contains 'mise is the Modern CLI Provider for shared command-line tools and development runtimes.' \
-  "README preserves Modern CLI Provider boundary"
 assert_contains 'Use OS package managers directly only when intentionally updating OS-managed packages.' \
   "README keeps OS package upgrades outside Terrapod"
-assert_contains 'Use mise directly when intentionally updating modern CLI tools or development runtimes.' \
-  "README keeps Modern CLI Provider upgrades outside Terrapod"
+assert_contains 'Use mise directly when intentionally updating development runtimes.' \
+  "README keeps Development Runtime Manager upgrades outside Terrapod"
 assert_raycast_restore_contains '`enableMacosAppGroupLauncher`' \
   "README Raycast restore procedure mentions launcher App Group"
 assert_contains 'Opting out of an optional stack excludes its files from chezmoi management; it does not remove files already present on a machine.' \

@@ -85,6 +85,91 @@ detect_profile() {
   esac
 }
 
+machine_arch() {
+  if [ -n "${TERRAPOD_MACHINE_ARCH:-}" ]; then
+    printf '%s\n' "$TERRAPOD_MACHINE_ARCH"
+  else
+    uname -m
+  fi
+}
+
+darwin_hardware_arch() {
+  process_arch="$1"
+  if [ "$process_arch" = x86_64 ] &&
+    [ "$(sysctl -in sysctl.proc_translated 2>/dev/null || true)" = "1" ]; then
+    printf '%s\n' arm64
+  else
+    printf '%s\n' "$process_arch"
+  fi
+}
+
+expected_homebrew_path() {
+  profile="$1"
+  arch="$2"
+
+  if [ -n "${TERRAPOD_EXPECTED_HOMEBREW_PATH:-}" ]; then
+    printf '%s\n' "$TERRAPOD_EXPECTED_HOMEBREW_PATH"
+    return 0
+  fi
+
+  if [ "$profile" = macos-terminal ]; then
+    arch="$(darwin_hardware_arch "$arch")"
+  fi
+
+  case "$profile:$arch" in
+    vps-shell:x86_64|vps-shell:aarch64)
+      printf '%s\n' /home/linuxbrew/.linuxbrew/bin/brew
+      ;;
+    macos-terminal:arm64|macos-terminal:aarch64)
+      printf '%s\n' /opt/homebrew/bin/brew
+      ;;
+    macos-terminal:x86_64)
+      printf '%s\n' /usr/local/bin/brew
+      ;;
+    vps-shell:*)
+      fatal "Unsupported CPU architecture: $arch. Supported architectures: x86_64, aarch64."
+      ;;
+    *)
+      fatal "Unsupported CPU architecture: $arch for profile $profile."
+      ;;
+  esac
+}
+
+reject_nonstandard_homebrew() {
+  expected_brew="$1"
+  discovered_brew=""
+
+  # The installer invokes the standard brew by absolute path. A legacy brew on
+  # PATH must not make a valid standard-prefix installation look unsupported.
+  if [ "${TERRAPOD_TEST_BREW_ABSENT:-0}" != 1 ] && [ -x "$expected_brew" ]; then
+    return 0
+  fi
+
+  if command -v brew >/dev/null 2>&1; then
+    discovered_brew="$(command -v brew)"
+  elif [ -n "${TERRAPOD_HOMEBREW_CANDIDATE_PATHS:-}" ]; then
+    old_ifs="$IFS"
+    IFS=:
+    for candidate in $TERRAPOD_HOMEBREW_CANDIDATE_PATHS; do
+      if [ -x "$candidate" ]; then
+        discovered_brew="$candidate"
+        break
+      fi
+    done
+    IFS="$old_ifs"
+  fi
+
+  if [ -n "$discovered_brew" ] && [ "$discovered_brew" != "$expected_brew" ]; then
+    fatal "Homebrew exists outside the supported prefix: $discovered_brew. Move or uninstall that Homebrew before installing the supported prefix at ${expected_brew%/bin/brew}."
+  fi
+}
+
+require_non_root_linux_user() {
+  if [ "$1" = "vps-shell" ] && [ "$(id -u)" -eq 0 ]; then
+    fatal "Run the Terrapod installer as the non-root management user with sudo access; Homebrew does not support installation as root."
+  fi
+}
+
 ensure_user_local_bin() {
   bin_dir="$1"
 
@@ -360,106 +445,63 @@ print_already_installed_guidance() {
   printf '%s\n' "  $local_bin_dir/tpod help"
 }
 
-install_chezmoi_if_needed() {
-  local_bin_dir="$1"
-  chezmoi_path="$local_bin_dir/chezmoi"
-
-  if [ -x "$chezmoi_path" ]; then
-    printf '%s\n' "$chezmoi_path"
-    return 0
-  fi
-
-  if ! installer_script="$(curl -fsLS get.chezmoi.io)"; then
-    fatal "failed to download chezmoi installer"
-  fi
-
-  if ! sh -c "$installer_script" -- -b "$local_bin_dir" </dev/null >&2; then
-    fatal "failed to install chezmoi"
-  fi
-
-  if [ ! -x "$chezmoi_path" ]; then
-    fatal "chezmoi installer did not create executable: $chezmoi_path"
-  fi
-
-  printf '%s\n' "$chezmoi_path"
-}
-
 vps_sudo_cmd() {
-  if [ "$(id -u)" -eq 0 ]; then
-    printf '%s\n' ""
-  elif command -v sudo >/dev/null 2>&1; then
+  if command -v sudo >/dev/null 2>&1; then
     printf '%s\n' "sudo"
   else
-    fatal "Ubuntu bootstrap prerequisites are required before Terrapod Setup. Install sudo so Terrapod can prepare git and gum with apt-get, or install git and gum manually before rerunning the installer."
+    fatal "Ubuntu Homebrew prerequisites are required before Terrapod Setup. Install sudo so Terrapod can prepare Homebrew with apt-get, then rerun the installer."
   fi
 }
 
-ensure_charm_apt_repository() {
-  sudo_cmd="$1"
-
-  if ! $sudo_cmd install -dm 755 /etc/apt/keyrings; then
-    fatal "failed to create the APT keyring directory for the Charm repository. Check sudo permissions and rerun the Terrapod installer before Terrapod Setup."
+warn_low_linuxbrew_disk_space() {
+  [ "$1" = "vps-shell" ] || return 0
+  if [ -n "${TERRAPOD_AVAILABLE_KB:-}" ]; then
+    available_kb="$TERRAPOD_AVAILABLE_KB"
+  else
+    available_kb="$(df -Pk /home | awk 'NR == 2 { print $4 }')"
   fi
-
-  if ! charm_key_file="$(mktemp "${TMPDIR:-/tmp}/terrapod-charm-key.XXXXXX")"; then
-    fatal "failed to create a temporary file for the Charm APT signing key. Check temporary directory permissions and rerun the Terrapod installer before Terrapod Setup."
-  fi
-
-  if ! curl -fsSL https://repo.charm.sh/apt/gpg.key -o "$charm_key_file"; then
-    rm -f "$charm_key_file"
-    fatal "failed to fetch the Charm APT signing key for gum. Check network access to https://repo.charm.sh/apt/gpg.key and rerun the Terrapod installer before Terrapod Setup."
-  fi
-
-  if ! $sudo_cmd gpg --dearmor --yes -o /etc/apt/keyrings/charm.gpg "$charm_key_file"; then
-    rm -f "$charm_key_file"
-    fatal "failed to install the Charm APT signing key for gum. Check APT keyring permissions and rerun the Terrapod installer before Terrapod Setup."
-  fi
-  rm -f "$charm_key_file"
-
-  if ! printf '%s\n' "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | $sudo_cmd tee /etc/apt/sources.list.d/charm.list >/dev/null; then
-    fatal "failed to write the Charm APT repository for gum. Check sudo permissions and rerun the Terrapod installer before Terrapod Setup."
-  fi
-
-  if ! $sudo_cmd apt-get update -y; then
-    fatal "failed to update APT metadata after adding the Charm APT repository for gum. Check APT connectivity and rerun the Terrapod installer before Terrapod Setup."
+  case "$available_kb" in *[!0-9]*|'') return 0 ;; esac
+  if [ "$available_kb" -lt 3145728 ]; then
+    printf '%s\n' "terrapod installer: warning: less than 3 GiB is available for Linuxbrew; installation will continue and may need additional free space." >&2
   fi
 }
 
 ensure_source_repo_prerequisites() {
   profile="$1"
-
-  if [ "$profile" != "vps-shell" ]; then
-    return 0
-  fi
-
-  if command -v git >/dev/null 2>&1 && command -v gum >/dev/null 2>&1; then
-    return 0
-  fi
-
+  [ "$profile" = "vps-shell" ] || return 0
   sudo_cmd="$(vps_sudo_cmd)"
-  bootstrap_packages="ca-certificates curl"
-  if ! command -v git >/dev/null 2>&1; then
-    bootstrap_packages="$bootstrap_packages git"
-  fi
-  bootstrap_packages="$bootstrap_packages gpg"
+  $sudo_cmd apt-get update -y || fatal "failed to update APT metadata before Homebrew bootstrap"
+  $sudo_cmd apt-get install -y build-essential ca-certificates curl file git procps ||
+    fatal "failed to install Ubuntu Homebrew prerequisites: build-essential, ca-certificates, curl, file, git, procps"
+}
 
-  if ! $sudo_cmd apt-get update -y; then
-    fatal "failed to update APT metadata before installing Ubuntu bootstrap prerequisites. Check sudo permissions and rerun the Terrapod installer before Terrapod Setup, or install git and gum manually before rerunning the installer."
+ensure_homebrew() {
+  profile="$1"
+  expected_brew="$(expected_homebrew_path "$profile" "$(machine_arch)")"
+  reject_nonstandard_homebrew "$expected_brew"
+  if [ ! -x "$expected_brew" ]; then
+    installer="$(mktemp "${TMPDIR:-/tmp}/terrapod-homebrew-install.XXXXXX")" || fatal "failed to create Homebrew installer temporary file"
+    if ! curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "$installer"; then
+      rm -f "$installer"
+      fatal "failed to download the official Homebrew installer"
+    fi
+    if ! NONINTERACTIVE=1 /bin/bash "$installer" >&2; then
+      rm -f "$installer"
+      fatal "official Homebrew installer failed before Terrapod Setup"
+    fi
+    rm -f "$installer"
   fi
+  [ -x "$expected_brew" ] || fatal "Homebrew install finished, but brew was not found at $expected_brew"
+  printf '%s\n' "$expected_brew"
+}
 
-  if ! $sudo_cmd apt-get install -y $bootstrap_packages; then
-    fatal "failed to install Ubuntu bootstrap prerequisites before Terrapod Setup. Install ca-certificates, curl, git, and gpg, then rerun the Terrapod installer."
-  fi
-
-  if command -v gum >/dev/null 2>&1; then
-    return 0
-  fi
-
-  ensure_charm_apt_repository "$sudo_cmd"
-
-  if ! $sudo_cmd apt-get install -y gum; then
-    fatal "failed to install gum from the Charm APT repository. Check APT output, fix repository/package access, and rerun the Terrapod installer before Terrapod Setup."
-  fi
+prepare_brew_bootstrap_tools() {
+  brew_bin="$1"
+  HOMEBREW_NO_AUTO_UPDATE=1 "$brew_bin" install chezmoi gum >&2 ||
+    fatal "failed to install chezmoi and gum with Homebrew before Terrapod Setup"
+  chezmoi_bin="${brew_bin%/brew}/chezmoi"
+  [ -x "$chezmoi_bin" ] || fatal "Homebrew did not install chezmoi at $chezmoi_bin"
+  command -v gum >/dev/null 2>&1 || fatal "Homebrew did not make gum available before Terrapod Setup"
 }
 
 initialize_source_repository() {
@@ -1008,79 +1050,6 @@ install_warning_markers_changed_since_snapshot() {
   [ "$changed" = "true" ]
 }
 
-print_setup_ui_dependency_recovery() {
-  profile="$1"
-  source_dir="$2"
-  chezmoi_bin="$3"
-  brew_bin="$4"
-  reason="$5"
-
-  mark_install_warning_from_source \
-    "$source_dir" \
-    homebrew-core \
-    "Homebrew core install needs attention" \
-    "Prepare gum with Homebrew, then resume Terrapod Setup and initial apply."
-
-  printf '%s\n' "terrapod installer: gum is required before Terrapod Setup can run." >&2
-  printf '%s\n' "terrapod installer: Failed to prepare the macOS setup UI dependency with Homebrew: $reason" >&2
-  if [ -n "$brew_bin" ]; then
-    printf '%s\n' "terrapod installer: Prepare gum with Homebrew:" >&2
-    printf '%s\n' "terrapod installer:   eval \"\$(\"$brew_bin\" shellenv)\" && HOMEBREW_NO_AUTO_UPDATE=1 \"$brew_bin\" install gum" >&2
-  else
-    printf '%s\n' "terrapod installer: Install Homebrew from https://brew.sh, follow its shellenv instructions, then run: HOMEBREW_NO_AUTO_UPDATE=1 brew install gum" >&2
-  fi
-  printf '%s\n' "terrapod installer: The source repository is already checked out. After gum is available, resume Terrapod Setup and continue the initial apply:" >&2
-  if [ -n "$brew_bin" ]; then
-    printf '%s\n' "terrapod installer:   cd \"$source_dir\" && eval \"\$(\"$brew_bin\" shellenv)\" && TERRAPOD_PROFILE=\"$profile\" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup && \"$chezmoi_bin\" apply" >&2
-  else
-    printf '%s\n' "terrapod installer:   cd \"$source_dir\" && TERRAPOD_PROFILE=\"$profile\" TERRAPOD_CHEZMOI_CONFIG= ./dot_local/bin/executable_terrapod setup && \"$chezmoi_bin\" apply" >&2
-  fi
-}
-
-prepare_setup_ui_dependency() {
-  profile="$1"
-  source_dir="$2"
-  chezmoi_bin="$3"
-
-  if [ "$profile" != "macos-terminal" ]; then
-    return 0
-  fi
-
-  if command -v gum >/dev/null 2>&1; then
-    return 0
-  fi
-
-  brew_bin="$(find_homebrew || true)"
-
-  if [ -z "$brew_bin" ]; then
-    print_setup_ui_dependency_recovery "$profile" "$source_dir" "$chezmoi_bin" "" "Homebrew was not found"
-    return 1
-  fi
-
-  if ! brew_shellenv="$("$brew_bin" shellenv)"; then
-    print_setup_ui_dependency_recovery "$profile" "$source_dir" "$chezmoi_bin" "$brew_bin" "failed to evaluate brew shellenv"
-    return 1
-  fi
-  eval "$brew_shellenv"
-
-  if command -v gum >/dev/null 2>&1; then
-    return 0
-  fi
-
-  if ! HOMEBREW_NO_AUTO_UPDATE=1 "$brew_bin" install gum; then
-    print_setup_ui_dependency_recovery "$profile" "$source_dir" "$chezmoi_bin" "$brew_bin" "failed to install gum"
-    return 1
-  fi
-
-  if command -v gum >/dev/null 2>&1; then
-    clear_install_warning_from_source "$source_dir" homebrew-core
-    return 0
-  fi
-
-  print_setup_ui_dependency_recovery "$profile" "$source_dir" "$chezmoi_bin" "$brew_bin" "brew install gum finished, but gum was not found"
-  return 1
-}
-
 run_terrapod_setup() {
   profile="$1"
   source_dir="$2"
@@ -1108,7 +1077,6 @@ ensure_first_run_setup() {
     return 0
   fi
 
-  prepare_setup_ui_dependency "$profile" "$source_dir" "$chezmoi_bin"
   run_terrapod_setup "$profile" "$source_dir"
 }
 
@@ -1321,6 +1289,10 @@ print_first_run_warning_completion() {
 
 main() {
   profile="$(detect_profile)"
+  if [ "${TERRAPOD_PRINT_EXPECTED_HOMEBREW_PATH:-}" = 1 ]; then
+    expected_homebrew_path "$profile" "$(machine_arch)"
+    return
+  fi
   label="$(profile_label "$profile")"
   local_bin_dir="$(user_local_bin_dir)"
   source_dir="$(default_source_dir)"
@@ -1343,8 +1315,16 @@ main() {
     return 0
   fi
 
-  chezmoi_bin="$(install_chezmoi_if_needed "$local_bin_dir")"
+  require_non_root_linux_user "$profile"
   ensure_source_repo_prerequisites "$profile"
+  warn_low_linuxbrew_disk_space "$profile"
+  brew_bin="$(ensure_homebrew "$profile")"
+  if ! brew_shellenv="$("$brew_bin" shellenv)"; then
+    fatal "failed to evaluate Homebrew shellenv"
+  fi
+  eval "$brew_shellenv" || fatal "failed to evaluate Homebrew shellenv"
+  prepare_brew_bootstrap_tools "$brew_bin"
+  chezmoi_bin="${brew_bin%/brew}/chezmoi"
   if [ "$source_already_present" = "false" ]; then
     initialize_source_repository "$chezmoi_bin"
   fi

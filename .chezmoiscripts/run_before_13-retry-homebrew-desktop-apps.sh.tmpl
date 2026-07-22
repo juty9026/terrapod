@@ -9,6 +9,8 @@
 #!/bin/sh
 set -eu
 
+{{ include "dot_local/lib/terrapod/homebrew-prefix.sh" }}
+
 install_warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
 TERRAPOD_INSTALL_WARNINGS_LOADED=
 if [ -f "$install_warnings_lib" ]; then
@@ -94,7 +96,7 @@ run_desktop_app_bundle() {
   brewfile="$1"
   desktop_app_failure_guidance_text="Review Homebrew desktop app bundle output, fix app installation access, then rerun tpod apply."
 
-  if brew bundle --no-upgrade --file="$brewfile"; then
+  if HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="$brewfile"; then
     return 0
   fi
 
@@ -134,7 +136,7 @@ run_desktop_app_bundle() {
       return 1
     fi
 
-    if ! brew bundle --no-upgrade --file="$single_cask_brewfile"; then
+    if ! HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="$single_cask_brewfile"; then
       if ! printf '%s\n' "$cask" >>"$failed_casks_file"; then
         cleanup_desktop_app_bundle_temps
         return 1
@@ -174,22 +176,9 @@ run_desktop_app_bundle() {
 }
 
 find_brew() {
-  if command -v brew >/dev/null 2>&1; then
-    command -v brew
-    return
-  fi
-
-  if [ -x /opt/homebrew/bin/brew ]; then
-    printf '%s\n' /opt/homebrew/bin/brew
-    return
-  fi
-
-  if [ -x /usr/local/bin/brew ]; then
-    printf '%s\n' /usr/local/bin/brew
-    return
-  fi
-
-  return 1
+  brew_path="$(terrapod_standard_homebrew_brew_path darwin || true)"
+  [ -n "$brew_path" ] && [ -x "$brew_path" ] || return 1
+  printf '%s\n' "$brew_path"
 }
 
 brew_bin="$(find_brew || true)"
@@ -210,7 +199,14 @@ if ! brew_shellenv="$("$brew_bin" shellenv)"; then
     exit 1
   exit 0
 fi
-eval "$brew_shellenv"
+if ! eval "$brew_shellenv"; then
+  mark_install_warning \
+    homebrew-desktop-apps \
+    "Homebrew desktop app install needs attention" \
+    "Fix Homebrew shellenv, then rerun tpod apply." ||
+    exit 1
+  exit 0
+fi
 brew analytics off >/dev/null 2>&1 || true
 
 desktop_brewfile="$(mktemp "${TMPDIR:-/tmp}/terrapod-macos-desktop-apps.XXXXXX")"

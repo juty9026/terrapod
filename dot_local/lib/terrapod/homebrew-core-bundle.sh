@@ -97,7 +97,7 @@ terrapod_homebrew_core_run_bundle() {
   brewfile="$1"
   TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT="Review Homebrew core bundle output, fix package access, then rerun tpod apply."
 
-  if brew bundle --no-upgrade --file="$brewfile"; then
+  if HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="$brewfile"; then
     return 0
   fi
 
@@ -143,7 +143,7 @@ terrapod_homebrew_core_run_bundle() {
           terrapod_homebrew_core_cleanup_temps
           return 1
         }
-        if ! brew bundle --no-upgrade --file="$single_core_brewfile"; then
+        if ! HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="$single_core_brewfile"; then
           printf '%s\n' "$item_name" >>"$failed_formulae_file" || {
             terrapod_homebrew_core_cleanup_temps
             return 1
@@ -155,7 +155,7 @@ terrapod_homebrew_core_run_bundle() {
           terrapod_homebrew_core_cleanup_temps
           return 1
         }
-        if ! brew bundle --no-upgrade --file="$single_core_brewfile"; then
+        if ! HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="$single_core_brewfile"; then
           printf '%s\n' "$item_name" >>"$failed_casks_file" || {
             terrapod_homebrew_core_cleanup_temps
             return 1

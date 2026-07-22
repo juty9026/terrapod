@@ -131,16 +131,30 @@ assert_contains "$korean_readme" 'Terrapod Setup이 `gum` 또는 interactive ter
   "README.ko.md documents missing-gum Setup recovery start"
 assert_contains "$korean_readme" '`gum` 또는 terminal environment를 고친 뒤 `terrapod setup`을 다시 실행합니다.' \
   "README.ko.md documents missing-gum Setup recovery"
-assert_contains "$korean_readme" 'Terrapod Setup 실행 전, first-run installer는 `gum` 누락 시 Homebrew로 `gum`을' \
-  "README.ko.md documents macOS bootstrap UI dependency setup before setup"
-assert_contains "$korean_readme" '`gum` 설치에만 해당되며 broad Homebrew upgrade는 실행하지 않습니다.' \
-  "README.ko.md verifies macOS bootstrap UI dependency scope excludes broad Homebrew upgrades"
-assert_contains "$korean_readme" 'Terrapod Setup 실행 전, first-run installer는 `gum` 누락 시 Charm APT' \
-  "README.ko.md documents Ubuntu bootstrap UI dependency setup before setup"
-assert_contains "$korean_readme" 'repository를 등록하고 APT로 `gum`을 설치해 Bootstrap UI Dependency를' \
-  "README.ko.md documents Ubuntu Bootstrap UI Dependency boundary"
-assert_contains "$korean_readme" '준비합니다. 이 Bootstrap UI bootstrap은 `gum` 설치에만 해당되며 broad APT upgrade는 실행하지 않습니다.' \
-  "README.ko.md verifies Ubuntu bootstrap UI dependency scope excludes broad APT upgrades"
+assert_contains "$korean_readme" 'Homebrew는 지원되는 두 profile 모두에서 Core Shell Stack의 Modern CLI Provider입니다.' \
+  "README.ko.md names Homebrew as the cross-profile Modern CLI Provider"
+assert_contains "$korean_readme" 'mise는 Bun, Node.js, Python, uv의 Development Runtime Manager입니다.' \
+  "README.ko.md limits mise to development runtimes"
+assert_contains "$korean_readme" 'Apple Silicon에서는 Homebrew를 `/opt/homebrew`에 설치하고, Intel Mac에서는 `/usr/local`에 설치합니다.' \
+  "README.ko.md documents macOS architecture-to-prefix mapping"
+assert_contains "$korean_readme" 'Ubuntu 24.04는 모든 Preset에서 `/home/linuxbrew/.linuxbrew`에 Homebrew를 설치합니다.' \
+  "README.ko.md documents mandatory Linuxbrew"
+assert_contains "$korean_readme" 'first-run installer는 Terrapod Setup 전에 Homebrew로 `chezmoi`와 `gum`을 설치합니다.' \
+  "README.ko.md documents cross-profile Setup bootstrap"
+assert_contains "$korean_readme" '설치 전에 1 vCPU, 1 GiB RAM, 최소 3 GiB의 여유 disk space를 권장' \
+  "README.ko.md documents the recommended VPS floor"
+assert_contains "$korean_readme" '`x86_64`와 `aarch64`' \
+  "README.ko.md documents supported Ubuntu architectures"
+assert_not_contains "$korean_readme" 'get.chezmoi.io' \
+  "README.ko.md removes the standalone chezmoi installer"
+assert_not_contains "$korean_readme" 'Charm APT' \
+  "README.ko.md removes the Charm APT trust boundary"
+assert_not_contains "$korean_readme" '공식 mise APT repository' \
+  "README.ko.md removes mise APT ownership"
+assert_contains "$korean_readme" 'HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade' \
+  "README.ko.md documents restore-only apply semantics"
+assert_contains "$korean_readme" '기존 mise, APT, vendor-installed payload는 자동으로 제거하지 않습니다.' \
+  "README.ko.md documents non-destructive migration"
 assert_contains "$korean_readme" '`development-apps`: Zed와 Orca ADE(`stablyai/orca/orca`).' \
   "README.ko.md documents Zed and Orca ADE in the development-apps inventory"
 assert_contains "$korean_readme" '| `enableMacosAppGroupDevelopmentApps` | `false` | development-apps macOS App Group인 Zed와 Orca ADE(`stablyai/orca/orca`)를 설치합니다. |' \

@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 
+export PYTHONDONTWRITEBYTECODE=1
+
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 helper="$repo_root/dot_local/lib/terrapod/executable_jetendard-font"
 tmp_dir="$(mktemp -d)"

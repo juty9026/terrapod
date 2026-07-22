@@ -225,15 +225,23 @@ assert_managed_paths_exclude_prefix \
   "Brewfile.ai-cli-tools.tmpl" \
   "Ubuntu does not manage the rendered AI CLI tools Brewfile"
 
+for entry in \
+  .chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl \
+  .chezmoiscripts/run_before_11-retry-homebrew-core.sh.tmpl \
+  dot_local/lib/terrapod/homebrew-core-bundle.sh
+do
+  printf '%s\n' "$ubuntu_managed" | grep -Fx "$entry" >/dev/null ||
+    fail "Ubuntu manages cross-profile Homebrew entry: $entry"
+done
+pass "Ubuntu manages cross-profile Homebrew core state"
+
 macos_only_entries="
-.chezmoiscripts/run_before_01-retry-homebrew-core.sh.tmpl
-.chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl
+.chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl
 .chezmoiscripts/run_before_02-retry-jetendard-font.sh.tmpl
 .chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl
 .chezmoiscripts/run_onchange_after_65-install-jetendard-font.sh.tmpl
-.chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl
 dot_local/lib/terrapod/executable_jetendard-font
-dot_local/lib/terrapod/homebrew-core-bundle.sh
+dot_local/lib/terrapod/executable_jetendard-settings
 dot_config/ghostty
 dot_config/private_karabiner
 dot_hammerspoon
@@ -258,14 +266,16 @@ automation_apps_brewfile="$(render_template "$macos_automation_apps_data" "Brewf
 launcher_apps_brewfile="$(render_template "$macos_launcher_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 monitoring_apps_brewfile="$(render_template "$macos_monitoring_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 development_apps_brewfile="$(render_template "$macos_development_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
-macos_bootstrap="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
-macos_terminal_apps_bootstrap="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
-macos_terminal_launcher_apps_bootstrap="$(render_template "$macos_terminal_launcher_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
-macos_development_apps_bootstrap="$(render_template "$macos_development_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
-macos_development_workspace_bootstrap="$(render_template "$macos_development_workspace_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
-macos_core_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_01-retry-homebrew-core.sh.tmpl")"
-macos_desktop_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl")"
-macos_terminal_apps_desktop_retry="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl")"
+ubuntu_homebrew_bootstrap="$(render_template "$ubuntu_data" ".chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl")"
+macos_bootstrap="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl")"
+macos_terminal_apps_bootstrap="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl")"
+macos_terminal_launcher_apps_bootstrap="$(render_template "$macos_terminal_launcher_apps_data" ".chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl")"
+macos_development_apps_bootstrap="$(render_template "$macos_development_apps_data" ".chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl")"
+macos_development_workspace_bootstrap="$(render_template "$macos_development_workspace_data" ".chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl")"
+macos_core_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_11-retry-homebrew-core.sh.tmpl")"
+ubuntu_core_retry="$(render_template "$ubuntu_data" ".chezmoiscripts/run_before_11-retry-homebrew-core.sh.tmpl")"
+macos_desktop_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl")"
+macos_terminal_apps_desktop_retry="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl")"
 macos_mise_tools_installer="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_20-install-mise-tools.sh.tmpl")"
 macos_jetendard_installer="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_65-install-jetendard-font.sh.tmpl")"
 macos_jetendard_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_02-retry-jetendard-font.sh.tmpl")"
@@ -279,6 +289,24 @@ assert_contains_text \
   "$macos_bootstrap" \
   'terrapod_homebrew_core_run_bundle "$core_brewfile"' \
   "macOS bootstrap always runs the core Brewfile through the core bundle helper"
+
+assert_contains_text "$ubuntu_homebrew_bootstrap" 'core_brewfile="' "Ubuntu renders the mandatory CLI bundle"
+assert_contains_text "$ubuntu_homebrew_bootstrap" 'HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade' "Ubuntu bundle apply disables automatic updates"
+assert_not_contains_text "$ubuntu_homebrew_bootstrap" 'linux:arm64' "Ubuntu Homebrew bootstrap rejects the arm64 identifier"
+assert_not_contains_text "$ubuntu_core_retry" 'linux:arm64' "Ubuntu Homebrew retry rejects the arm64 identifier"
+assert_contains_text "$ubuntu_core_retry" 'linux:x86_64|linux:aarch64)' "Ubuntu Homebrew retry accepts exactly the supported Linux architecture identifiers"
+
+for bundle_source in \
+  "$repo_root/.chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl" \
+  "$repo_root/.chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl" \
+  "$repo_root/dot_local/lib/terrapod/homebrew-core-bundle.sh"
+do
+  unguarded_bundle_calls="$(grep 'brew bundle --no-upgrade' "$bundle_source" | grep -v 'HOMEBREW_NO_AUTO_UPDATE=1' || true)"
+  if [ -n "$unguarded_bundle_calls" ]; then
+    fail "every Homebrew bundle call disables automatic updates: $bundle_source"
+  fi
+done
+pass "every Homebrew bundle call disables automatic updates"
 
 assert_not_contains_text \
   "$macos_bootstrap" \
@@ -419,6 +447,8 @@ printf '%s\n' "$macos_mise_tools_installer" |
   sed \
     -e "s#/opt/homebrew/bin/brew#$tmp_dir/missing-opt-homebrew-brew#g" \
     -e "s#/usr/local/bin/brew#$tmp_dir/missing-usr-local-brew#g" \
+    -e "s#/opt/homebrew/bin/mise#$tmp_dir/missing-opt-homebrew-mise#g" \
+    -e "s#/usr/local/bin/mise#$tmp_dir/missing-usr-local-mise#g" \
     >"$macos_mise_missing_script"
 sh -n "$macos_mise_missing_script" || fail "macOS mise tool installer missing-mise test script should be valid sh"
 pass "macOS mise tool installer missing-mise test script is valid sh"
@@ -429,7 +459,13 @@ mkdir -p "$macos_brew_bin"
 write_stub "$macos_brew_bin/brew" \
   'printf "%s\n" "brew args:$*" >>"$MACOS_BREW_LOG"' \
   'case "$1" in' \
-  '  shellenv) printf "%s\n" ":" ;;' \
+  '  shellenv)' \
+  '    case "${MACOS_BREW_SHELLENV_MODE:-success}" in' \
+  '      command-failure) exit 41 ;;' \
+  '      eval-failure) printf "%s\n" "false" ;;' \
+  '      *) printf "%s\n" ":" ;;' \
+  '    esac' \
+  '    ;;' \
   '  analytics) exit 0 ;;' \
   '  bundle) exit 0 ;;' \
   '  *) exit 64 ;;' \
@@ -448,7 +484,13 @@ write_brew_bundle_stub() {
     'done' \
     'case "$1" in' \
     '  --prefix) printf "%s\n" "${MACOS_BREW_PREFIX:-/opt/homebrew}"; exit 0 ;;' \
-    '  shellenv) printf "%s\n" ":" ;;' \
+    '  shellenv)' \
+    '    case "${MACOS_BREW_SHELLENV_MODE:-success}" in' \
+    '      command-failure) exit 41 ;;' \
+    '      eval-failure) printf "%s\n" "false" ;;' \
+    '      *) printf "%s\n" ":" ;;' \
+    '    esac' \
+    '    ;;' \
     '  analytics) exit 0 ;;' \
     '  bundle)' \
     '    if [ "${MACOS_BREW_ECHO_OUTPUT:-}" = "1" ]; then' \
@@ -479,6 +521,138 @@ write_brew_bundle_stub() {
     'esac'
 }
 
+run_linux_homebrew_arch_case() {
+  arch="$1"
+  expected_status="$2"
+  case_dir="$tmp_dir/linux-homebrew-arch-$arch"
+  case_bin="$case_dir/bin"
+  case_script="$case_dir/bootstrap.sh"
+  case_log="$case_dir/commands.log"
+  case_state="$case_dir/state"
+  case_home="$case_dir/home"
+  mkdir -p "$case_bin" "$case_home"
+
+  write_stub "$case_bin/uname" "printf '%s\\n' '$arch'"
+  write_stub "$case_bin/curl" \
+    'printf "%s\n" "curl args:$*" >>"$LINUX_HOMEBREW_ARCH_LOG"' \
+    'exit 97'
+  write_stub "$case_bin/brew" \
+    'printf "%s\n" "brew args:$*" >>"$LINUX_HOMEBREW_ARCH_LOG"' \
+    'case "$1" in' \
+    '  shellenv) printf "%s\n" ":" ;;' \
+    '  analytics|bundle) exit 0 ;;' \
+    '  --prefix) printf "%s\n" "$LINUX_HOMEBREW_ARCH_PREFIX" ;;' \
+    '  *) exit 64 ;;' \
+    'esac'
+
+  printf '%s\n' "$ubuntu_homebrew_bootstrap" |
+    sed "s#/home/linuxbrew/.linuxbrew/bin/brew#$case_bin/brew#g" >"$case_script"
+  sh -n "$case_script" || fail "Ubuntu Homebrew $arch bootstrap test script is valid sh"
+
+  case_status=0
+  HOME="$case_home" \
+    XDG_STATE_HOME="$case_state" \
+    TERRAPOD_FIRST_RUN_APPLY=1 \
+    LINUX_HOMEBREW_ARCH_LOG="$case_log" \
+    LINUX_HOMEBREW_ARCH_PREFIX="$case_dir/prefix" \
+    PATH="$case_bin:/usr/bin:/bin" \
+    sh "$case_script" >"$case_dir/stdout" 2>"$case_dir/stderr" || case_status=$?
+
+  if [ "$expected_status" = success ]; then
+    if [ "$case_status" -ne 0 ]; then
+      sed 's/^/stdout: /' "$case_dir/stdout" >&2
+      sed 's/^/stderr: /' "$case_dir/stderr" >&2
+      fail "Ubuntu Homebrew bootstrap accepts $arch"
+    fi
+  elif [ "$case_status" -eq 0 ]; then
+    fail "Ubuntu Homebrew bootstrap rejects $arch"
+  fi
+
+  if [ -f "$case_log" ] && grep -F 'raw.githubusercontent.com/Homebrew/install' "$case_log" >/dev/null; then
+    fail "Ubuntu Homebrew $arch architecture check runs before the installer download"
+  fi
+  pass "Ubuntu Homebrew bootstrap handles $arch before installer download"
+}
+
+run_linux_homebrew_arch_case x86_64 success
+run_linux_homebrew_arch_case aarch64 success
+run_linux_homebrew_arch_case arm64 failure
+run_linux_homebrew_arch_case i686 failure
+run_linux_homebrew_arch_case unknown failure
+
+run_linux_homebrew_space_case() {
+  available_kb="$1"
+  expected_warning="$2"
+  case_name="$3"
+  case_dir="$tmp_dir/linux-homebrew-space-$case_name"
+  case_bin="$case_dir/bin"
+  case_script="$case_dir/bootstrap.sh"
+  case_log="$case_dir/commands.log"
+  case_state="$case_dir/state"
+  case_home="$case_dir/home"
+  mkdir -p "$case_bin" "$case_home"
+
+  write_stub "$case_bin/uname" 'printf "%s\n" x86_64'
+  write_stub "$case_bin/df" \
+    'printf "%s\n" "df args:$*" >>"$LINUX_HOMEBREW_SPACE_LOG"' \
+    'printf "%s\n" "Filesystem 1024-blocks Used Available Capacity Mounted on"' \
+    'printf "%s\n" "/dev/test 9999999 1 $LINUX_HOMEBREW_AVAILABLE_KB 1% /"'
+  write_stub "$case_bin/curl" \
+    'printf "%s\n" "curl args:$*" >>"$LINUX_HOMEBREW_SPACE_LOG"' \
+    'exit 97'
+
+  printf '%s\n' "$ubuntu_homebrew_bootstrap" |
+    sed "s#/home/linuxbrew/.linuxbrew/bin/brew#$case_dir/missing-brew#g" >"$case_script"
+  sh -n "$case_script" || fail "Ubuntu Homebrew $case_name space test script is valid sh"
+
+  case_status=0
+  HOME="$case_home" \
+    XDG_STATE_HOME="$case_state" \
+    TERRAPOD_FIRST_RUN_APPLY=1 \
+    LINUX_HOMEBREW_SPACE_LOG="$case_log" \
+    LINUX_HOMEBREW_AVAILABLE_KB="$available_kb" \
+    PATH="$case_bin:/usr/bin:/bin" \
+    sh "$case_script" >"$case_dir/stdout" 2>"$case_dir/stderr" || case_status=$?
+
+  if [ "$case_status" -eq 0 ]; then
+    fail "Ubuntu Homebrew $case_name space case reaches the intentionally failing installer download"
+  fi
+  if ! grep -F 'raw.githubusercontent.com/Homebrew/install' "$case_log" >/dev/null; then
+    fail "Ubuntu Homebrew $case_name space check continues to the installer download"
+  fi
+
+  if [ "$expected_warning" = yes ]; then
+    if ! grep -F 'Warning: less than 3 GiB is available for /home/linuxbrew; Homebrew installation will continue.' "$case_dir/stderr" >/dev/null; then
+      fail "Ubuntu Homebrew warns when available space is below 3 GiB"
+    fi
+  elif grep -F 'Warning: less than 3 GiB is available for /home/linuxbrew' "$case_dir/stderr" >/dev/null; then
+    fail "Ubuntu Homebrew does not warn when available space is at least 3 GiB"
+  fi
+  pass "Ubuntu Homebrew handles $case_name available space without blocking installation"
+}
+
+run_linux_homebrew_space_case 3145727 yes low
+run_linux_homebrew_space_case 3145728 no sufficient
+
+replace_standard_brew_path() {
+  input_file="$1"
+  output_file="$2"
+  replacement="$3"
+
+  sed \
+    -e "s#/opt/homebrew/bin/brew#$replacement#g" \
+    -e "s#/usr/local/bin/brew#$replacement#g" \
+    "$input_file" >"$output_file"
+}
+
+macos_bootstrap_with_stub="$tmp_dir/macos-bootstrap-default-with-stub.sh"
+replace_standard_brew_path "$macos_bootstrap_script" "$macos_bootstrap_with_stub" "$macos_brew_bin/brew"
+macos_bootstrap_script="$macos_bootstrap_with_stub"
+
+macos_core_retry_with_stub="$tmp_dir/macos-core-retry-with-stub.sh"
+replace_standard_brew_path "$macos_core_retry_script" "$macos_core_retry_with_stub" "$macos_brew_bin/brew"
+macos_core_retry_script="$macos_core_retry_with_stub"
+
 macos_marker_state="$tmp_dir/macos-marker-state"
 macos_marker_home="$tmp_dir/macos-marker-home"
 mkdir -p "$macos_marker_home"
@@ -497,10 +671,10 @@ fi
 pass "macOS bootstrap default cleanup clears stale homebrew-desktop-apps marker"
 
 homebrew_installer_failure_script="$tmp_dir/macos-bootstrap-homebrew-installer-failure.sh"
-sed \
+printf '%s\n' "$macos_bootstrap" | sed \
   -e "s#/opt/homebrew/bin/brew#$tmp_dir/missing-opt-homebrew-brew#g" \
   -e "s#/usr/local/bin/brew#$tmp_dir/missing-usr-local-brew#g" \
-  "$macos_bootstrap_script" >"$homebrew_installer_failure_script"
+  >"$homebrew_installer_failure_script"
 sh -n "$homebrew_installer_failure_script" || fail "macOS bootstrap no-Homebrew test script should be valid sh"
 
 homebrew_installer_failure_bin="$tmp_dir/homebrew-installer-failure-bin"
@@ -546,16 +720,58 @@ homebrew_first_run_failure_home="$tmp_dir/homebrew-first-run-failure-home"
 homebrew_first_run_failure_log="$tmp_dir/homebrew-first-run-failure.log"
 mkdir -p "$homebrew_first_run_failure_home"
 
-if ! HOME="$homebrew_first_run_failure_home" XDG_STATE_HOME="$homebrew_first_run_failure_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_first_run_failure_log" PATH="$homebrew_installer_failure_bin:/usr/bin:/bin" \
+if HOME="$homebrew_first_run_failure_home" XDG_STATE_HOME="$homebrew_first_run_failure_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_first_run_failure_log" PATH="$homebrew_installer_failure_bin:/usr/bin:/bin" \
   TERRAPOD_FIRST_RUN_APPLY=1 sh "$homebrew_installer_failure_script" >"$tmp_dir/homebrew-first-run-failure.out" 2>"$tmp_dir/homebrew-first-run-failure.err"; then
-  fail "first-run macOS bootstrap continues when the Homebrew installer warning is recorded"
+  fail "first-run macOS bootstrap hard-fails when the Homebrew installer command fails"
 fi
+pass "first-run macOS bootstrap hard-fails when the Homebrew installer command fails"
 
 homebrew_first_run_failure_marker="$homebrew_first_run_failure_state/terrapod/install-warnings/homebrew-core"
 if [ ! -f "$homebrew_first_run_failure_marker" ]; then
   fail "first-run macOS bootstrap records homebrew-core marker when the Homebrew installer command fails"
 fi
 pass "first-run macOS bootstrap records homebrew-core marker when the Homebrew installer command fails"
+
+homebrew_first_run_download_bin="$tmp_dir/homebrew-first-run-download-bin"
+homebrew_first_run_download_state="$tmp_dir/homebrew-first-run-download-state"
+homebrew_first_run_download_home="$tmp_dir/homebrew-first-run-download-home"
+homebrew_first_run_download_log="$tmp_dir/homebrew-first-run-download.log"
+mkdir -p "$homebrew_first_run_download_bin" "$homebrew_first_run_download_home"
+write_stub "$homebrew_first_run_download_bin/curl" \
+  'printf "%s\n" "curl args:$*" >>"$HOMEBREW_INSTALLER_FAILURE_LOG"' \
+  'exit 42'
+
+if HOME="$homebrew_first_run_download_home" XDG_STATE_HOME="$homebrew_first_run_download_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_first_run_download_log" PATH="$homebrew_first_run_download_bin:/usr/bin:/bin" \
+  TERRAPOD_FIRST_RUN_APPLY=1 sh "$homebrew_installer_failure_script" >"$tmp_dir/homebrew-first-run-download.out" 2>"$tmp_dir/homebrew-first-run-download.err"; then
+  fail "first-run macOS bootstrap hard-fails when the Homebrew installer download fails"
+fi
+if [ ! -f "$homebrew_first_run_download_state/terrapod/install-warnings/homebrew-core" ]; then
+  fail "first-run macOS bootstrap records homebrew-core marker when the Homebrew installer download fails"
+fi
+pass "first-run macOS bootstrap hard-fails and records a marker when the Homebrew installer download fails"
+
+homebrew_first_run_not_found_bin="$tmp_dir/homebrew-first-run-not-found-bin"
+homebrew_first_run_not_found_state="$tmp_dir/homebrew-first-run-not-found-state"
+homebrew_first_run_not_found_home="$tmp_dir/homebrew-first-run-not-found-home"
+homebrew_first_run_not_found_log="$tmp_dir/homebrew-first-run-not-found.log"
+mkdir -p "$homebrew_first_run_not_found_bin" "$homebrew_first_run_not_found_home"
+write_stub "$homebrew_first_run_not_found_bin/curl" \
+  'printf "%s\n" "curl args:$*" >>"$HOMEBREW_INSTALLER_FAILURE_LOG"' \
+  'output_file=' \
+  'while [ "$#" -gt 0 ]; do' \
+  '  if [ "$1" = -o ]; then shift; output_file="$1"; fi' \
+  '  shift' \
+  'done' \
+  'printf "%s\n" "exit 0" >"$output_file"'
+
+if HOME="$homebrew_first_run_not_found_home" XDG_STATE_HOME="$homebrew_first_run_not_found_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_first_run_not_found_log" PATH="$homebrew_first_run_not_found_bin:/usr/bin:/bin" \
+  TERRAPOD_FIRST_RUN_APPLY=1 sh "$homebrew_installer_failure_script" >"$tmp_dir/homebrew-first-run-not-found.out" 2>"$tmp_dir/homebrew-first-run-not-found.err"; then
+  fail "first-run macOS bootstrap hard-fails when brew is not found after installation"
+fi
+if [ ! -f "$homebrew_first_run_not_found_state/terrapod/install-warnings/homebrew-core" ]; then
+  fail "first-run macOS bootstrap records homebrew-core marker when brew is not found after installation"
+fi
+pass "first-run macOS bootstrap hard-fails and records a marker when brew is not found after installation"
 
 core_success_bin="$tmp_dir/core-success-bin"
 core_success_state="$tmp_dir/core-success-state"
@@ -577,6 +793,48 @@ if [ -e "$core_success_state/terrapod/install-warnings/homebrew-core" ]; then
   fail "successful core Homebrew bundle clears stale homebrew-core marker"
 fi
 pass "successful core Homebrew bundle clears stale homebrew-core marker"
+
+for shellenv_mode in command-failure eval-failure; do
+  shellenv_failure_state="$tmp_dir/core-shellenv-$shellenv_mode-state"
+  shellenv_failure_home="$tmp_dir/core-shellenv-$shellenv_mode-home"
+  shellenv_failure_log="$tmp_dir/core-shellenv-$shellenv_mode-brew.log"
+  shellenv_failure_bin="$tmp_dir/core-shellenv-$shellenv_mode-bin"
+  mkdir -p "$shellenv_failure_home" "$shellenv_failure_bin"
+  write_brew_bundle_stub "$shellenv_failure_bin/brew"
+
+  if ! HOME="$shellenv_failure_home" XDG_STATE_HOME="$shellenv_failure_state" \
+    MACOS_BREW_LOG="$shellenv_failure_log" MACOS_BREW_SHELLENV_MODE="$shellenv_mode" \
+    PATH="$shellenv_failure_bin:/usr/bin:/bin" \
+    sh "$macos_bootstrap_script" >"$tmp_dir/core-shellenv-$shellenv_mode.out" 2>"$tmp_dir/core-shellenv-$shellenv_mode.err"; then
+    fail "core Homebrew $shellenv_mode records a nonblocking warning"
+  fi
+
+  shellenv_failure_marker="$shellenv_failure_state/terrapod/install-warnings/homebrew-core"
+  if [ ! -f "$shellenv_failure_marker" ]; then
+    fail "core Homebrew $shellenv_mode records a homebrew-core marker"
+  fi
+  assert_contains_text "$(cat "$shellenv_failure_marker")" \
+    "Fix Homebrew shellenv, then rerun tpod apply." \
+    "core Homebrew $shellenv_mode marker provides actionable recovery guidance"
+  if grep -F "brew args:bundle" "$shellenv_failure_log" >/dev/null; then
+    fail "core Homebrew $shellenv_mode stops before bundle execution"
+  fi
+  pass "core Homebrew $shellenv_mode is category-scoped"
+done
+
+shellenv_marker_failure_home="$tmp_dir/core-shellenv-marker-failure-home"
+shellenv_marker_failure_state="$tmp_dir/core-shellenv-marker-failure-state"
+shellenv_marker_failure_bin="$tmp_dir/core-shellenv-marker-failure-bin"
+mkdir -p "$shellenv_marker_failure_home" "$shellenv_marker_failure_bin"
+: >"$shellenv_marker_failure_state"
+write_brew_bundle_stub "$shellenv_marker_failure_bin/brew"
+if HOME="$shellenv_marker_failure_home" XDG_STATE_HOME="$shellenv_marker_failure_state" \
+  MACOS_BREW_LOG="$tmp_dir/core-shellenv-marker-failure.log" MACOS_BREW_SHELLENV_MODE=command-failure \
+  PATH="$shellenv_marker_failure_bin:/usr/bin:/bin" \
+  sh "$macos_bootstrap_script" >"$tmp_dir/core-shellenv-marker-failure.out" 2>"$tmp_dir/core-shellenv-marker-failure.err"; then
+  fail "core Homebrew shellenv failure is hard when its warning marker cannot be written"
+fi
+pass "core Homebrew shellenv failure is hard only when its warning marker cannot be written"
 
 core_detail_bin="$tmp_dir/core-detail-bin"
 core_detail_state="$tmp_dir/core-detail-state"
@@ -664,6 +922,7 @@ fi
 core_retry_failure_marker_text="$(cat "$core_retry_failure_state/terrapod/install-warnings/homebrew-core")"
 assert_contains_text "$core_retry_failure_marker_text" "failed formulae: mise" "failed core retry replaces marker with current failed formula detail"
 assert_not_contains_text "$core_retry_failure_marker_text" "old core retry warning" "failed core retry replaces stale marker guidance"
+
 assert_contains_text "$core_retry_failure_marker_text" "updated_at='" "failed core retry replacement marker keeps updated_at"
 
 mise_missing_without_core_home="$tmp_dir/mise-missing-without-core-home"
@@ -705,10 +964,10 @@ pass "macOS mise tool installer exits 0 when missing mise is covered by a homebr
 if [ ! -f "$mise_missing_with_core_state/terrapod/install-warnings/homebrew-core" ]; then
   fail "macOS mise tool installer keeps the existing homebrew-core marker"
 fi
-if [ -e "$mise_missing_with_core_state/terrapod/install-warnings/mise-tools" ]; then
-  fail "macOS mise tool installer avoids duplicate mise-tools marker when homebrew-core is already actionable"
+if [ ! -f "$mise_missing_with_core_state/terrapod/install-warnings/mise-tools" ]; then
+  fail "macOS mise tool installer records its own warning when standard Homebrew mise is missing"
 fi
-pass "macOS mise tool installer leaves homebrew-core as the only actionable missing-mise marker"
+pass "macOS mise tool installer records missing standard Homebrew mise independently"
 
 assert_managed_paths_exclude_prefix \
   "$macos_managed_targets" \
@@ -766,7 +1025,10 @@ assert_text_equals \
   "development-apps group renders exactly the expected casks"
 
 development_apps_bootstrap_script="$tmp_dir/macos-development-apps-bootstrap.sh"
-printf '%s\n' "$macos_development_apps_bootstrap" >"$development_apps_bootstrap_script"
+printf '%s\n' "$macos_development_apps_bootstrap" | sed \
+  -e "s#/opt/homebrew/bin/brew#$tmp_dir/development-apps-failure-bin/brew#g" \
+  -e "s#/usr/local/bin/brew#$tmp_dir/development-apps-failure-bin/brew#g" \
+  >"$development_apps_bootstrap_script"
 sh -n "$development_apps_bootstrap_script" || fail "development-apps bootstrap script should be valid sh"
 pass "development-apps bootstrap script is valid sh"
 
@@ -793,7 +1055,10 @@ assert_contains_text "$development_apps_failure_marker_text" "failed casks: stab
 assert_contains_text "$development_apps_failure_marker_text" "App Groups: development-apps" "Orca failure attribution identifies the development-apps group"
 
 terminal_launcher_bootstrap_script="$tmp_dir/macos-terminal-launcher-bootstrap.sh"
-printf '%s\n' "$macos_terminal_launcher_apps_bootstrap" >"$terminal_launcher_bootstrap_script"
+printf '%s\n' "$macos_terminal_launcher_apps_bootstrap" | sed \
+  -e "s#/opt/homebrew/bin/brew#$tmp_dir/terminal-launcher-bin/brew#g" \
+  -e "s#/usr/local/bin/brew#$tmp_dir/terminal-launcher-bin/brew#g" \
+  >"$terminal_launcher_bootstrap_script"
 sh -n "$terminal_launcher_bootstrap_script" || fail "terminal and launcher bootstrap script should be valid sh"
 pass "terminal and launcher bootstrap script is valid sh"
 
@@ -829,7 +1094,7 @@ core_then_desktop_log="$tmp_dir/core-then-desktop-brew.log"
 mkdir -p "$core_then_desktop_bin" "$core_then_desktop_home"
 write_brew_bundle_stub "$core_then_desktop_bin/brew"
 
-if ! HOME="$core_then_desktop_home" XDG_STATE_HOME="$core_then_desktop_state" MACOS_BREW_LOG="$core_then_desktop_log" MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_FORMULAE="gum" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty raycast" PATH="$core_then_desktop_bin:/usr/bin:/bin" \
+if ! HOME="$core_then_desktop_home" XDG_STATE_HOME="$core_then_desktop_state" MACOS_BREW_LOG="$core_then_desktop_log" MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_FORMULAE="mise" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty raycast" PATH="$core_then_desktop_bin:/usr/bin:/bin" \
   sh "$terminal_launcher_bootstrap_script" >"$tmp_dir/core-then-desktop.out" 2>"$tmp_dir/core-then-desktop.err"; then
   printf '%s\n' "core then desktop stdout:" >&2
   sed 's/^/  /' "$tmp_dir/core-then-desktop.out" >&2
@@ -850,7 +1115,7 @@ pass "macOS bootstrap records core and desktop app warnings in one App Groups ru
 
 core_then_desktop_core_text="$(cat "$core_then_desktop_core_marker")"
 core_then_desktop_desktop_text="$(cat "$core_then_desktop_desktop_marker")"
-assert_contains_text "$core_then_desktop_core_text" "failed formulae: gum" "combined bootstrap core marker keeps failed formula detail"
+assert_contains_text "$core_then_desktop_core_text" "failed formulae: mise" "combined bootstrap core marker keeps failed formula detail"
 assert_contains_text "$core_then_desktop_desktop_text" "failed casks: ghostty, raycast" "combined bootstrap desktop marker keeps failed cask detail"
 
 terminal_launcher_marker_failure_bin="$tmp_dir/terminal-launcher-marker-failure-bin"
@@ -890,14 +1155,23 @@ write_stub "$desktop_retry_marker_failure_bin/brew" \
   '  *) exit 64 ;;' \
   'esac'
 
+desktop_retry_marker_failure_script="$tmp_dir/desktop-retry-marker-failure.sh"
+replace_standard_brew_path \
+  "$macos_terminal_apps_desktop_retry_script" \
+  "$desktop_retry_marker_failure_script" \
+  "$desktop_retry_marker_failure_bin/brew"
+
 if HOME="$desktop_retry_marker_failure_home" XDG_STATE_HOME="$desktop_retry_marker_failure_state" DESKTOP_RETRY_MARKER_FAILURE_DIR="$desktop_retry_marker_failure_dir" MACOS_BREW_LOG="$desktop_retry_marker_failure_log" PATH="$desktop_retry_marker_failure_bin:/usr/bin:/bin" \
-  sh "$macos_terminal_apps_desktop_retry_script" >"$tmp_dir/desktop-retry-marker-failure.out" 2>"$tmp_dir/desktop-retry-marker-failure.err"; then
+  sh "$desktop_retry_marker_failure_script" >"$tmp_dir/desktop-retry-marker-failure.out" 2>"$tmp_dir/desktop-retry-marker-failure.err"; then
   fail "macOS desktop retry failure blocks when the warning marker cannot be recorded"
 fi
 pass "macOS desktop retry failure blocks when the warning marker cannot be recorded"
 
 bulk_only_bootstrap_script="$tmp_dir/macos-bulk-only-bootstrap.sh"
-printf '%s\n' "$macos_terminal_launcher_apps_bootstrap" >"$bulk_only_bootstrap_script"
+printf '%s\n' "$macos_terminal_launcher_apps_bootstrap" | sed \
+  -e "s#/opt/homebrew/bin/brew#$tmp_dir/bulk-only-bin/brew#g" \
+  -e "s#/usr/local/bin/brew#$tmp_dir/bulk-only-bin/brew#g" \
+  >"$bulk_only_bootstrap_script"
 sh -n "$bulk_only_bootstrap_script" || fail "bulk-only desktop bootstrap script should be valid sh"
 pass "bulk-only desktop bootstrap script is valid sh"
 
@@ -934,7 +1208,8 @@ awk '
     next
   }
   { print }
-' "$terminal_launcher_bootstrap_script" >"$fallback_bootstrap_script"
+' "$terminal_launcher_bootstrap_script" |
+  sed "s#$tmp_dir/terminal-launcher-bin/brew#$tmp_dir/fallback-bin/brew#g" >"$fallback_bootstrap_script"
 sh -n "$fallback_bootstrap_script" || fail "fallback desktop bootstrap script should be valid sh"
 pass "fallback desktop bootstrap script is valid sh"
 
@@ -956,7 +1231,10 @@ assert_not_contains_text "$fallback_marker_text" "failed casks:" "desktop app fa
 assert_not_contains_text "$fallback_marker_text" "App Groups:" "desktop app fallback marker avoids invented App Group detail"
 
 terminal_only_bootstrap_script="$tmp_dir/macos-terminal-only-bootstrap.sh"
-printf '%s\n' "$macos_terminal_apps_bootstrap" >"$terminal_only_bootstrap_script"
+printf '%s\n' "$macos_terminal_apps_bootstrap" | sed \
+  -e "s#/opt/homebrew/bin/brew#$tmp_dir/terminal-only-bin/brew#g" \
+  -e "s#/usr/local/bin/brew#$tmp_dir/terminal-only-bin/brew#g" \
+  >"$terminal_only_bootstrap_script"
 sh -n "$terminal_only_bootstrap_script" || fail "terminal-only bootstrap script should be valid sh"
 pass "terminal-only bootstrap script is valid sh"
 
@@ -1075,10 +1353,10 @@ fi
 
 pass "core Brewfile declares gum as the setup UI dependency"
 
-if grep -E '^[[:space:]]*cask[[:space:]]+' "$repo_root/Brewfile" >/dev/null; then
-  fail "core Brewfile contains no casks after Jetendard moves to its release installer"
+if grep -E '^[[:space:]]*cask[[:space:]]+"' "$repo_root/Brewfile" >/dev/null; then
+  fail "cross-profile core Brewfile excludes macOS-only casks"
 fi
-pass "core Brewfile contains no casks after Jetendard moves to its release installer"
+pass "cross-profile core Brewfile excludes macOS-only casks"
 
 for app_config in \
   ".config/ghostty/config" \
@@ -1235,20 +1513,31 @@ assert_managed_paths_include_prefix \
 
 ubuntu_mise_config="$(render_template "$ubuntu_data" "dot_config/mise/config.toml.tmpl")"
 
-if ! printf '%s\n' "$ubuntu_mise_config" | grep -F '"aqua:neovim/neovim" = "latest"' >/dev/null; then
-  fail "Ubuntu VPS keeps plain Neovim in the Core Shell Stack"
+if printf '%s\n' "$ubuntu_mise_config" | grep -F '"aqua:neovim/neovim" = "latest"' >/dev/null; then
+  fail "Ubuntu VPS removes duplicate mise-managed Neovim"
 fi
 
-pass "Ubuntu VPS keeps plain Neovim in the Core Shell Stack"
+pass "Ubuntu VPS removes duplicate mise-managed Neovim"
 
-if ! printf '%s\n' "$ubuntu_mise_config" | grep -F '"aqua:cli/cli" = "latest"' >/dev/null; then
-  fail "Ubuntu VPS installs GitHub CLI gh in the Core Shell Stack"
+if printf '%s\n' "$ubuntu_mise_config" | grep -F '"aqua:cli/cli" = "latest"' >/dev/null; then
+  fail "Ubuntu VPS removes duplicate mise-managed GitHub CLI"
 fi
 
-pass "Ubuntu VPS installs GitHub CLI gh in the Core Shell Stack"
+pass "Ubuntu VPS removes duplicate mise-managed GitHub CLI"
+
+for formula in neovim gh; do
+  if ! grep -Fx "brew \"$formula\"" "$repo_root/Brewfile" >/dev/null; then
+    fail "cross-profile Brewfile declares migrated formula: $formula"
+  fi
+done
+pass "cross-profile Brewfile declares migrated Neovim and GitHub CLI"
 
 mise_tools_installer="$(render_template "$ubuntu_data" ".chezmoiscripts/run_onchange_after_20-install-mise-tools.sh.tmpl")"
 mise_tools_retry="$(render_template "$ubuntu_data" ".chezmoiscripts/run_after_21-retry-mise-tools.sh.tmpl")"
+
+assert_contains_text "$mise_tools_installer" 'mise_bin="$(standard_mise_path || true)"' "mise installer resolves mise from a standard Homebrew prefix"
+assert_contains_text "$mise_tools_installer" '"$mise_bin" install --yes -C "$HOME"' "Ubuntu runtime install invokes the resolved Homebrew mise"
+assert_not_contains_text "$mise_tools_installer" '/usr/bin/mise' "Ubuntu runtime install never falls back to APT mise"
 
 if ! printf '%s\n' "$mise_tools_installer" |
   grep -E '^# mise-config-sha256=[0-9a-f]{64}$' >/dev/null; then
@@ -1258,12 +1547,16 @@ fi
 pass "mise tool installer tracks rendered mise config changes"
 
 mise_tools_installer_script="$tmp_dir/mise-tools-installer.sh"
-printf '%s\n' "$mise_tools_installer" >"$mise_tools_installer_script"
+printf '%s\n' "$mise_tools_installer" |
+  sed "s#/home/linuxbrew/.linuxbrew/bin/mise#$tmp_dir/mise-tools-bin/mise#g" \
+  >"$mise_tools_installer_script"
 sh -n "$mise_tools_installer_script" || fail "mise tool installer script should be valid sh"
 pass "mise tool installer script should be valid sh"
 
 mise_tools_retry_script="$tmp_dir/mise-tools-retry.sh"
-printf '%s\n' "$mise_tools_retry" >"$mise_tools_retry_script"
+printf '%s\n' "$mise_tools_retry" |
+  sed "s#/home/linuxbrew/.linuxbrew/bin/mise#$tmp_dir/mise-tools-bin/mise#g" \
+  >"$mise_tools_retry_script"
 sh -n "$mise_tools_retry_script" || fail "mise tool retry script should be valid sh"
 pass "mise tool retry script should be valid sh"
 
@@ -1273,7 +1566,7 @@ mise_tools_home="$tmp_dir/mise-tools-home"
 mise_tools_log="$tmp_dir/mise-tools.log"
 mkdir -p "$mise_tools_bin" "$mise_tools_home"
 write_stub "$mise_tools_bin/mise" \
-  'printf "%s\n" "mise args:$*" >>"$MISE_TOOLS_LOG"' \
+  'printf "%s\n" "/home/linuxbrew/.linuxbrew/bin/mise args:$*" >>"$MISE_TOOLS_LOG"' \
   'case "$1" in' \
   '  install)' \
   '    exit "${MISE_TOOLS_INSTALL_STATUS:-0}"' \
@@ -1306,6 +1599,7 @@ HOME="$mise_tools_home" \
   XDG_STATE_HOME="$mise_tools_state" \
   MISE_TOOLS_LOG="$mise_tools_log" \
   MISE_TOOLS_INSTALL_STATUS=17 \
+  TERRAPOD_MACHINE_ARCH=aarch64 \
   PATH="$mise_tools_bin:/usr/bin:/bin" \
   sh "$mise_tools_installer_script" || mise_tools_install_failure_status=$?
 if [ "$mise_tools_install_failure_status" -ne 0 ]; then
@@ -1321,13 +1615,15 @@ assert_contains_text "$mise_tools_marker_text" "Failed step(s): mise install" "m
 assert_contains_text "$mise_tools_marker_text" "GITHUB_TOKEN" "mise install failure marker suggests GitHub token recovery"
 assert_contains_text "$mise_tools_marker_text" "gh auth login" "mise install failure marker suggests GitHub auth recovery"
 mise_tools_log_text="$(cat "$mise_tools_log")"
-assert_contains_text "$mise_tools_log_text" "mise args:install --yes -C $mise_tools_home" "mise install failure still attempts mise install"
+assert_contains_text "$mise_tools_log_text" "/home/linuxbrew/.linuxbrew/bin/mise args:install --yes -C $mise_tools_home" "Ubuntu runtime install uses Linuxbrew mise"
+assert_not_contains_text "$mise_tools_log_text" "/usr/bin/mise" "Ubuntu runtime install never falls back to APT mise"
 assert_contains_text "$mise_tools_log_text" "mise args:exec --yes -C $mise_tools_home -- sh -c command -v corepack" "mise install failure still checks corepack availability"
 assert_contains_text "$mise_tools_log_text" "mise args:exec --yes -C $mise_tools_home -- corepack enable" "mise install failure still attempts corepack enable"
 
 HOME="$mise_tools_home" \
   XDG_STATE_HOME="$mise_tools_state" \
   MISE_TOOLS_LOG="$mise_tools_log" \
+  TERRAPOD_MACHINE_ARCH=aarch64 \
   PATH="$mise_tools_bin:/usr/bin:/bin" \
   sh "$mise_tools_installer_script"
 if [ -e "$mise_tools_marker" ]; then
@@ -1346,6 +1642,7 @@ HOME="$mise_tools_home" \
   XDG_STATE_HOME="$mise_tools_state" \
   MISE_TOOLS_LOG="$mise_tools_log" \
   MISE_TOOLS_COREPACK_STATUS=23 \
+  TERRAPOD_MACHINE_ARCH=aarch64 \
   PATH="$mise_tools_bin:/usr/bin:/bin" \
   sh "$mise_tools_installer_script"
 mise_tools_marker_text="$(cat "$mise_tools_marker")"
@@ -1358,6 +1655,7 @@ assert_contains_text "$mise_tools_marker_text" "updated_at='" "mise tool install
 HOME="$mise_tools_home" \
   XDG_STATE_HOME="$mise_tools_state" \
   MISE_TOOLS_LOG="$mise_tools_log" \
+  TERRAPOD_MACHINE_ARCH=aarch64 \
   PATH="$mise_tools_bin:/usr/bin:/bin" \
   sh "$mise_tools_retry_script"
 if [ -e "$mise_tools_marker" ]; then
@@ -1372,6 +1670,7 @@ HOME="$mise_tools_home" \
   XDG_STATE_HOME="$mise_tools_state" \
   MISE_TOOLS_LOG="$mise_tools_log" \
   MISE_TOOLS_INSTALL_STATUS=17 \
+  TERRAPOD_MACHINE_ARCH=aarch64 \
   PATH="$mise_tools_bin:/usr/bin:/bin" \
   sh "$mise_tools_retry_script"
 if [ -s "$mise_tools_log" ]; then
@@ -1386,6 +1685,7 @@ HOME="$mise_tools_home" XDG_STATE_HOME="$mise_tools_state" sh -c \
 HOME="$mise_tools_home" \
   XDG_STATE_HOME="$mise_tools_state" \
   MISE_TOOLS_LOG="$mise_tools_log" \
+  TERRAPOD_MACHINE_ARCH=aarch64 \
   MISE_TOOLS_INSTALL_STATUS=17 \
   PATH="$mise_tools_bin:/usr/bin:/bin" \
   sh "$mise_tools_retry_script"
@@ -1400,6 +1700,7 @@ assert_contains_text "$mise_tools_marker_text" "Failed step(s): mise install" "m
 HOME="$mise_tools_home" \
   XDG_STATE_HOME="$mise_tools_state" \
   MISE_TOOLS_LOG="$mise_tools_log" \
+  TERRAPOD_MACHINE_ARCH=aarch64 \
   PATH="$mise_tools_bin:/usr/bin:/bin" \
   sh "$mise_tools_retry_script"
 if [ -e "$mise_tools_marker" ]; then
@@ -1414,6 +1715,12 @@ disabled_ai_cli_tools_cleanup="$(render_template "$ubuntu_data" ".chezmoiscripts
 ai_cli_tools_brewfile="$(render_template "$ai_cli_tools_data" "Brewfile.ai-cli-tools.tmpl")"
 development_workspace_ai_brewfile="$(render_template "$development_workspace_data" "Brewfile.ai-cli-tools.tmpl")"
 disabled_ai_cli_tools_brewfile="$(render_template "$ubuntu_data" "Brewfile.ai-cli-tools.tmpl")"
+
+assert_not_contains_text "$ai_cli_tools_installer" "bootstrap_linux_homebrew" "AI installer no longer owns Linuxbrew bootstrap"
+assert_not_contains_text "$ai_cli_tools_installer" "raw.githubusercontent.com/Homebrew/install" "AI installer never downloads Homebrew"
+assert_contains_text "$ai_cli_tools_installer" "/home/linuxbrew/.linuxbrew/bin/brew" "AI installer uses mandatory standard Linuxbrew"
+assert_contains_text "$ai_cli_tools_installer" "HOMEBREW_NO_AUTO_UPDATE=1" "AI bundle disables Homebrew auto-update"
+assert_contains_text "$macos_terminal_apps_bootstrap" "HOMEBREW_NO_AUTO_UPDATE=1" "desktop bundle disables Homebrew auto-update"
 
 for rendered_brewfile in "$ai_cli_tools_brewfile" "$development_workspace_ai_brewfile"; do
   assert_contains_text "$rendered_brewfile" 'cask "antigravity-cli"' "Optional AI Tool Stack declares Antigravity CLI cask"
@@ -1449,9 +1756,13 @@ printf '%s\n' "$ai_cli_tools_installer" |
   sed \
     -e "s#/opt/homebrew/bin/brew#$tmp_dir/missing-opt-homebrew-brew#g" \
     -e "s#/usr/local/bin/brew#$tmp_dir/missing-usr-local-brew#g" \
-    -e "s#/home/linuxbrew/.linuxbrew/bin/brew#$tmp_dir/missing-linuxbrew-brew#g" \
+    -e "s#/home/linuxbrew/.linuxbrew/bin/brew#$tmp_dir/linux-ai-brew-bin/brew#g" \
     >"$ai_cli_tools_installer_script"
-printf '%s\n' "$macos_ai_cli_tools_installer" >"$macos_ai_cli_tools_installer_script"
+printf '%s\n' "$macos_ai_cli_tools_installer" |
+  sed \
+    -e "s#/opt/homebrew/bin/brew#$tmp_dir/macos-ai-brew-bin/brew#g" \
+    -e "s#/usr/local/bin/brew#$tmp_dir/macos-intel-ai-brew-bin/brew#g" \
+    >"$macos_ai_cli_tools_installer_script"
 sh -n "$ai_cli_tools_installer_script" || fail "enabled Optional AI Tool Stack installer script should be valid sh"
 sh -n "$macos_ai_cli_tools_installer_script" || fail "macOS Optional AI Tool Stack installer script should be valid sh"
 pass "enabled Optional AI Tool Stack installer scripts are valid sh"
@@ -1460,8 +1771,13 @@ write_ai_brew_stub() {
   path="$1"
   write_stub "$path" \
     'printf "%s\n" "brew args:$*" >>"$AI_BREW_LOG"' \
+    'printf "%s\n" "brew path:$0" >>"$AI_BREW_LOG"' \
+    'printf "%s\n" "brew auto-update:${HOMEBREW_NO_AUTO_UPDATE:-}" >>"$AI_BREW_LOG"' \
     'case "$1" in' \
-    '  shellenv) printf "export PATH=\"%s:$PATH\"\n" "$AI_BREW_BIN" ;;' \
+    '  shellenv)' \
+    '    [ "${AI_BREW_SHELLENV_FAIL:-0}" = "0" ] || exit 41' \
+    '    printf "export PATH=\"%s:$PATH\"\n" "$AI_BREW_BIN"' \
+    '    ;;' \
     '  bundle)' \
     '    bundle_file=' \
     '    for arg do case "$arg" in --file=*) bundle_file="$(printf "%s" "$arg" | cut -d= -f2-)" ;; esac; done' \
@@ -1476,17 +1792,51 @@ write_ai_brew_stub() {
 }
 
 macos_ai_brew_bin="$tmp_dir/macos-ai-brew-bin"
+macos_intel_ai_brew_bin="$tmp_dir/macos-intel-ai-brew-bin"
+mkdir -p "$macos_ai_brew_bin" "$macos_intel_ai_brew_bin"
+write_ai_brew_stub "$macos_ai_brew_bin/brew"
+write_ai_brew_stub "$macos_intel_ai_brew_bin/brew"
+write_stub "$macos_ai_brew_bin/uname" 'printf "%s\n" "${AI_UNAME_ARCH:-arm64}"'
+
+run_macos_ai_arch_case() {
+  arch="$1"
+  expected_brew_bin="$2"
+  case_dir="$tmp_dir/macos-ai-$arch"
+  case_home="$case_dir/home"
+  case_state="$case_dir/state"
+  case_log="$case_dir/brew.log"
+  mkdir -p "$case_home"
+
+  HOME="$case_home" XDG_STATE_HOME="$case_state" \
+    AI_UNAME_ARCH="$arch" AI_BREW_BIN="$expected_brew_bin" AI_BREW_LOG="$case_log" AI_BREW_FAIL=0 \
+    PATH="$macos_ai_brew_bin:/usr/bin:/bin" sh "$macos_ai_cli_tools_installer_script"
+  case_log_text="$(cat "$case_log")"
+  assert_contains_text "$case_log_text" "brew path:$expected_brew_bin/brew" "macOS $arch Optional AI Tool Stack selects its standard Homebrew prefix"
+  assert_contains_text "$case_log_text" "brew args:shellenv" "macOS $arch Optional AI Tool Stack loads Homebrew shellenv"
+  assert_contains_text "$case_log_text" "brew args:bundle --no-upgrade --file=" "macOS $arch Optional AI Tool Stack installs the common no-upgrade bundle"
+  assert_contains_text "$case_log_text" "brew auto-update:1" "macOS $arch Optional AI Tool Stack disables Homebrew auto-update"
+}
+
+run_macos_ai_arch_case arm64 "$macos_ai_brew_bin"
+run_macos_ai_arch_case x86_64 "$macos_intel_ai_brew_bin"
+
 macos_ai_brew_home="$tmp_dir/macos-ai-brew-home"
 macos_ai_brew_state="$tmp_dir/macos-ai-brew-state"
 macos_ai_brew_log="$tmp_dir/macos-ai-brew.log"
-mkdir -p "$macos_ai_brew_bin" "$macos_ai_brew_home"
-write_ai_brew_stub "$macos_ai_brew_bin/brew"
+mkdir -p "$macos_ai_brew_home"
+
+ai_cli_shellenv_failure_status=0
 HOME="$macos_ai_brew_home" XDG_STATE_HOME="$macos_ai_brew_state" \
-  AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$macos_ai_brew_log" AI_BREW_FAIL=0 \
-  PATH="$macos_ai_brew_bin:/usr/bin:/bin" sh "$macos_ai_cli_tools_installer_script"
-macos_ai_brew_log_text="$(cat "$macos_ai_brew_log")"
-assert_contains_text "$macos_ai_brew_log_text" "brew args:shellenv" "macOS Optional AI Tool Stack loads Homebrew shellenv"
-assert_contains_text "$macos_ai_brew_log_text" "brew args:bundle --no-upgrade --file=" "macOS Optional AI Tool Stack installs the common no-upgrade bundle"
+  AI_UNAME_ARCH=arm64 AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$macos_ai_brew_log" \
+  AI_BREW_FAIL=0 AI_BREW_SHELLENV_FAIL=1 PATH="$macos_ai_brew_bin:/usr/bin:/bin" \
+  sh "$macos_ai_cli_tools_installer_script" >/dev/null 2>&1 || ai_cli_shellenv_failure_status=$?
+if [ "$ai_cli_shellenv_failure_status" -eq 0 ]; then
+  fail "Optional AI Tool Stack propagates a failing Homebrew shellenv"
+fi
+if grep -F "brew args:bundle" "$macos_ai_brew_log" >/dev/null; then
+  fail "Optional AI Tool Stack stops before bundle when Homebrew shellenv fails"
+fi
+pass "Optional AI Tool Stack propagates a failing Homebrew shellenv before bundle"
 
 for vendor_url in \
   "https://antigravity.google/cli/install.sh" \
@@ -1500,26 +1850,20 @@ linux_ai_brew_bin="$tmp_dir/linux-ai-brew-bin"
 linux_ai_brew_home="$tmp_dir/linux-ai-brew-home"
 linux_ai_brew_state="$tmp_dir/linux-ai-brew-state"
 linux_ai_brew_log="$tmp_dir/linux-ai-brew.log"
-linux_ai_curl_log="$tmp_dir/linux-ai-curl.log"
 linux_ai_brew_template="$tmp_dir/linux-ai-brew-template"
 mkdir -p "$linux_ai_brew_bin" "$linux_ai_brew_home"
 write_ai_brew_stub "$linux_ai_brew_template"
-write_stub "$linux_ai_brew_bin/uname" 'printf "%s\n" Linux'
-write_stub "$linux_ai_brew_bin/curl" \
-  'printf "%s\n" "curl args:$*" >>"$AI_CURL_LOG"' \
-  'output=' \
-  'while [ "$#" -gt 0 ]; do' \
-  '  if [ "$1" = "-o" ]; then shift; output="$1"; fi' \
-  '  shift' \
-  'done' \
-  '[ -n "$output" ] || exit 2' \
-  'printf "%s\n" "#!/bin/sh" "cp \"$AI_BREW_TEMPLATE\" \"$AI_BREW_BIN/brew\"" "chmod +x \"$AI_BREW_BIN/brew\"" >"$output"'
+cp "$linux_ai_brew_template" "$linux_ai_brew_bin/brew"
+write_stub "$linux_ai_brew_bin/uname" \
+  'case "${1:-}" in' \
+  '  -m) printf "%s\n" x86_64 ;;' \
+  '  *) printf "%s\n" Linux ;;' \
+  'esac'
 HOME="$linux_ai_brew_home" XDG_STATE_HOME="$linux_ai_brew_state" \
   AI_BREW_BIN="$linux_ai_brew_bin" AI_BREW_LOG="$linux_ai_brew_log" AI_BREW_FAIL=0 \
-  AI_BREW_TEMPLATE="$linux_ai_brew_template" AI_CURL_LOG="$linux_ai_curl_log" \
   PATH="$linux_ai_brew_bin:/usr/bin:/bin" sh "$ai_cli_tools_installer_script"
-assert_contains_text "$(cat "$linux_ai_curl_log")" "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh" "Ubuntu Optional AI Tool Stack downloads only the official Homebrew installer"
 assert_contains_text "$(cat "$linux_ai_brew_log")" "brew args:bundle --no-upgrade --file=" "Ubuntu Optional AI Tool Stack installs the common no-upgrade bundle"
+assert_contains_text "$(cat "$linux_ai_brew_log")" "brew auto-update:1" "Ubuntu Optional AI Tool Stack disables Homebrew auto-update"
 
 ai_cli_failure_state="$tmp_dir/ai-cli-failure-state"
 ai_cli_failure_home="$tmp_dir/ai-cli-failure-home"

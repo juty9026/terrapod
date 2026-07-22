@@ -3,6 +3,7 @@ set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
+chezmoi_bin="$(command -v chezmoi)"
 
 cleanup() {
   rm -rf "$tmp_dir"
@@ -72,27 +73,13 @@ write_stub() {
 mkdir -p "$tmp_dir/bin" "$tmp_dir/home"
 
 rendered="$tmp_dir/bootstrap-ubuntu.sh"
-rendered_ai="$tmp_dir/bootstrap-ubuntu-ai.sh"
-chezmoi execute-template \
+"$chezmoi_bin" execute-template \
   --source "$repo_root" \
   --override-data '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableAiCliTools":false,"enableDevelopmentWorkspace":false}' \
   --file "$repo_root/.chezmoiscripts/run_onchange_before_00-bootstrap-ubuntu.sh.tmpl" \
   >"$rendered"
-chezmoi execute-template \
-  --source "$repo_root" \
-  --override-data '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableAiCliTools":true}' \
-  --file "$repo_root/.chezmoiscripts/run_onchange_before_00-bootstrap-ubuntu.sh.tmpl" \
-  >"$rendered_ai"
-
 sh -n "$rendered" || fail "rendered Ubuntu bootstrap script should be valid sh"
 pass "rendered Ubuntu bootstrap script is valid sh"
-sh -n "$rendered_ai" || fail "rendered AI-enabled Ubuntu bootstrap script should be valid sh"
-pass "rendered AI-enabled Ubuntu bootstrap script is valid sh"
-
-assert_not_contains "$(cat "$rendered")" "  file \\" "disabled Optional AI Tool Stack does not add Linuxbrew file prerequisite"
-assert_not_contains "$(cat "$rendered")" "  procps \\" "disabled Optional AI Tool Stack does not add Linuxbrew procps prerequisite"
-assert_contains "$(cat "$rendered_ai")" "  file \\" "AI-enabled Ubuntu bootstrap adds Linuxbrew file prerequisite"
-assert_contains "$(cat "$rendered_ai")" "  procps \\" "AI-enabled Ubuntu bootstrap adds Linuxbrew procps prerequisite"
 
 write_stub "$tmp_dir/bin/id" \
   'case "$1" in' \
@@ -106,6 +93,9 @@ write_stub "$tmp_dir/bin/sudo" \
 
 write_stub "$tmp_dir/bin/apt-get" \
   'printf "%s\n" "apt-get args:$*" >>"$BOOTSTRAP_TEST_LOG"' \
+  'if [ "$1" = "install" ] && [ "${BOOTSTRAP_APT_INSTALL_STATUS:-0}" != "0" ]; then' \
+  '  exit "$BOOTSTRAP_APT_INSTALL_STATUS"' \
+  'fi' \
   'exit 0'
 
 write_stub "$tmp_dir/bin/install" \
@@ -183,14 +173,12 @@ fi
 pass "Ubuntu bootstrap sets the login shell to zsh"
 
 bootstrap_log="$(cat "$BOOTSTRAP_TEST_LOG")"
-assert_contains "$bootstrap_log" "install args:-dm 755 /etc/apt/keyrings" "Ubuntu bootstrap creates an APT keyring directory"
-assert_contains "$bootstrap_log" "curl args:-fSs https://mise.en.dev/gpg-key.pub" "Ubuntu bootstrap still fetches the mise APT signing key"
-assert_contains "$bootstrap_log" "curl args:-fsSL https://repo.charm.sh/apt/gpg.key -o " "Ubuntu bootstrap fetches the Charm APT signing key"
-assert_contains "$bootstrap_log" "gpg args:--dearmor --yes -o /etc/apt/keyrings/charm.gpg " "Ubuntu bootstrap dearmors the Charm APT signing key"
-assert_contains "$bootstrap_log" "tee stdin:deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" "Ubuntu bootstrap pins the Charm repository to its keyring"
-assert_contains "$bootstrap_log" "apt-get args:install -y gum" "Ubuntu bootstrap installs gum through APT"
-assert_contains "$bootstrap_log" "apt-get args:install -y mise" "Ubuntu bootstrap still installs mise through APT"
-assert_first_occurrence_before "$bootstrap_log" "tee stdin:deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" "apt-get args:install -y gum" "Ubuntu bootstrap adds the Charm repository before installing gum"
+assert_contains "$bootstrap_log" "apt-get args:install -y build-essential ca-certificates curl file git" "Ubuntu declared bootstrap installs Homebrew prerequisites"
+assert_contains "$bootstrap_log" "procps" "Ubuntu declared bootstrap includes the Homebrew procps prerequisite"
+assert_not_contains "$bootstrap_log" "mise.en.dev" "Ubuntu declared bootstrap removes the mise APT repository"
+assert_not_contains "$bootstrap_log" "repo.charm.sh" "Ubuntu declared bootstrap removes the Charm APT repository"
+assert_not_contains "$bootstrap_log" "apt-get args:install -y mise" "Ubuntu declared bootstrap does not install mise through APT"
+assert_not_contains "$bootstrap_log" "apt-get args:install -y gum" "Ubuntu declared bootstrap does not install gum through APT"
 
 rm -rf "$HOME/.local/state/terrapod/install-warnings"
 : >"$BOOTSTRAP_TEST_LOG"
@@ -217,31 +205,43 @@ pass "Ubuntu bootstrap does not write shell-integrations warnings for login shel
 ubuntu_bootstrap_marker_text="$(cat "$ubuntu_bootstrap_marker")"
 assert_contains "$ubuntu_bootstrap_marker_text" "guidance='Run chsh -s /usr/bin/zsh after fixing shell permission issues.'" "Ubuntu bootstrap marker preserves manual chsh guidance"
 
+rm -rf "$HOME/.local/state/terrapod/install-warnings"
 : >"$BOOTSTRAP_TEST_LOG"
-BOOTSTRAP_CHARM_KEY_CURL_STATUS=17
-export BOOTSTRAP_CHARM_KEY_CURL_STATUS
-if sh "$rendered" >"$tmp_dir/bootstrap-curl-failure.out" 2>"$tmp_dir/bootstrap-curl-failure.err"; then
-  unset BOOTSTRAP_CHARM_KEY_CURL_STATUS
-  fail "Ubuntu bootstrap should fail when the Charm signing key download fails"
+BOOTSTRAP_APT_INSTALL_STATUS=42
+export BOOTSTRAP_APT_INSTALL_STATUS
+if TERRAPOD_FIRST_RUN_APPLY=1 sh "$rendered" >"$tmp_dir/bootstrap-first-run-apt-failure.out" 2>"$tmp_dir/bootstrap-first-run-apt-failure.err"; then
+  unset BOOTSTRAP_APT_INSTALL_STATUS
+  fail "Ubuntu bootstrap should fail when first-run APT prerequisite install fails"
 fi
-unset BOOTSTRAP_CHARM_KEY_CURL_STATUS
-
-bootstrap_curl_failure_log="$(cat "$BOOTSTRAP_TEST_LOG")"
-assert_contains "$bootstrap_curl_failure_log" "curl args:-fsSL https://repo.charm.sh/apt/gpg.key -o " "Ubuntu bootstrap Charm key failure attempts to fetch the signing key"
-assert_not_contains "$bootstrap_curl_failure_log" "apt-get args:install -y gum" "Ubuntu bootstrap Charm key failure stops before installing gum"
-pass "Ubuntu bootstrap fails when the Charm signing key download fails"
-
-rm -f "$ubuntu_bootstrap_marker"
-: >"$BOOTSTRAP_TEST_LOG"
-BOOTSTRAP_CHARM_KEY_CURL_STATUS=17
-export BOOTSTRAP_CHARM_KEY_CURL_STATUS
-if ! TERRAPOD_FIRST_RUN_APPLY=1 sh "$rendered" >"$tmp_dir/bootstrap-first-run-curl-failure.out" 2>"$tmp_dir/bootstrap-first-run-curl-failure.err"; then
-  unset BOOTSTRAP_CHARM_KEY_CURL_STATUS
-  fail "first-run Ubuntu bootstrap should continue when the Charm signing key download warning is recorded"
-fi
-unset BOOTSTRAP_CHARM_KEY_CURL_STATUS
+unset BOOTSTRAP_APT_INSTALL_STATUS
+pass "Ubuntu bootstrap fails when first-run APT prerequisite install fails"
 
 if [ ! -f "$ubuntu_bootstrap_marker" ]; then
-  fail "first-run Ubuntu bootstrap should record a warning marker when the Charm signing key download fails"
+  fail "Ubuntu bootstrap should keep an ubuntu-bootstrap warning when first-run APT prerequisite install fails"
 fi
-pass "first-run Ubuntu bootstrap records a warning marker when the Charm signing key download fails"
+pass "Ubuntu bootstrap keeps an ubuntu-bootstrap warning when first-run APT prerequisite install fails"
+
+ubuntu_bootstrap_marker_text="$(cat "$ubuntu_bootstrap_marker")"
+assert_contains "$ubuntu_bootstrap_marker_text" "guidance='Review APT install output for system and Homebrew prerequisites, then rerun tpod apply.'" "Ubuntu bootstrap marker preserves APT prerequisite failure guidance"
+
+unsupported_rendered="$tmp_dir/bootstrap-ubuntu-unsupported.sh"
+"$chezmoi_bin" execute-template \
+  --source "$repo_root" \
+  --override-data '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"22.04"}},"enableAiCliTools":false,"enableDevelopmentWorkspace":false}' \
+  --file "$repo_root/.chezmoiscripts/run_onchange_before_00-bootstrap-ubuntu.sh.tmpl" \
+  >"$unsupported_rendered"
+
+rm -rf "$HOME/.local/state/terrapod/install-warnings"
+: >"$BOOTSTRAP_TEST_LOG"
+if TERRAPOD_FIRST_RUN_APPLY=1 sh "$unsupported_rendered" >"$tmp_dir/bootstrap-first-run-unsupported.out" 2>"$tmp_dir/bootstrap-first-run-unsupported.err"; then
+  fail "Ubuntu bootstrap should fail on an unsupported release during first-run apply"
+fi
+pass "Ubuntu bootstrap fails on an unsupported release during first-run apply"
+
+if [ ! -f "$ubuntu_bootstrap_marker" ]; then
+  fail "Ubuntu bootstrap should keep an ubuntu-bootstrap warning for an unsupported release during first-run apply"
+fi
+pass "Ubuntu bootstrap keeps an ubuntu-bootstrap warning for an unsupported release during first-run apply"
+
+ubuntu_bootstrap_marker_text="$(cat "$ubuntu_bootstrap_marker")"
+assert_contains "$ubuntu_bootstrap_marker_text" "guidance='Run Terrapod on Ubuntu 24.04, or use tpod doctor for current platform guidance.'" "Ubuntu bootstrap marker preserves unsupported release guidance"

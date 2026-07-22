@@ -3,6 +3,8 @@
 # mise-config-sha256={{ includeTemplate "dot_config/mise/config.toml.tmpl" . | sha256sum }}
 set -eu
 
+{{ include "dot_local/lib/terrapod/homebrew-prefix.sh" }}
+
 install_warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
 TERRAPOD_INSTALL_WARNINGS_LOADED=
 if [ -f "$install_warnings_lib" ]; then
@@ -63,64 +65,25 @@ finish_mise_tools() {
   clear_install_warning mise-tools
 }
 
-install_warning_exists() {
-  category="$1"
-
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
-    return 1
-  fi
-
-  terrapod_install_warning_existing_path "$category" >/dev/null 2>&1
+standard_mise_path() {
+  terrapod_standard_homebrew_mise_path "{{ .chezmoi.os }}"
 }
 
-setup_mise() {
-  if command -v mise >/dev/null 2>&1; then
-    return
-  fi
-
-{{ if eq .chezmoi.os "darwin" }}
-  if [ -x /opt/homebrew/bin/brew ]; then
-    eval "$(/opt/homebrew/bin/brew shellenv)"
-  fi
-
-  if command -v mise >/dev/null 2>&1; then
-    return
-  fi
-
-  if [ -x /usr/local/bin/brew ]; then
-    eval "$(/usr/local/bin/brew shellenv)"
-  fi
-
-  if ! command -v mise >/dev/null 2>&1; then
-    if install_warning_exists homebrew-core; then
-      echo "mise is required, but Homebrew core install already needs attention. Fix Homebrew core, then rerun tpod apply." >&2
-      exit 0
-    fi
-
-    echo "mise is required. Run the Homebrew Brewfile bundle first." >&2
-    mark_install_warning \
-      mise-tools \
-      "mise tool install needs attention" \
-      "Run the Homebrew Brewfile bundle or fix mise on PATH, then rerun tpod apply."
-    exit_after_install_warning
-  fi
-{{ else }}
-  echo "mise is required. The Ubuntu bootstrap script should install mise from the official APT repository." >&2
+mise_bin="$(standard_mise_path || true)"
+if [ -z "$mise_bin" ] || [ ! -x "$mise_bin" ]; then
   mark_install_warning \
     mise-tools \
     "mise tool install needs attention" \
-    "Run the Ubuntu bootstrap script or fix mise on PATH, then rerun tpod apply."
+    "Install the mandatory Homebrew core bundle, then rerun tpod apply."
   exit_after_install_warning
-{{ end }}
-}
+fi
 
-setup_mise
-if ! mise install --yes -C "$HOME"; then
+if ! "$mise_bin" install --yes -C "$HOME"; then
   append_failed_mise_step "mise install"
 fi
 
-if mise exec --yes -C "$HOME" -- sh -c 'command -v corepack' >/dev/null 2>&1; then
-  if ! mise exec --yes -C "$HOME" -- corepack enable; then
+if "$mise_bin" exec --yes -C "$HOME" -- sh -c 'command -v corepack' >/dev/null 2>&1; then
+  if ! "$mise_bin" exec --yes -C "$HOME" -- corepack enable; then
     append_failed_mise_step "corepack enable"
   fi
 fi

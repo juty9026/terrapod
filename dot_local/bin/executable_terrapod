@@ -940,6 +940,99 @@ missing_tools() {
   printf '%s\n' "$missing"
 }
 
+managed_homebrew_cli_records() {
+  tab="$(printf '\t')"
+  while IFS=' ' read -r formula command; do
+    printf '%s%s%s\n' "$formula" "$tab" "$command"
+  done <<'EOF'
+bat bat
+btop btop
+chezmoi chezmoi
+dust dust
+duf duf
+fastfetch fastfetch
+fd fd
+fzf fzf
+gh gh
+git git
+git-delta delta
+gum gum
+lazygit lazygit
+lsd lsd
+mise mise
+neovim nvim
+ripgrep rg
+starship starship
+zellij zellij
+zoxide zoxide
+EOF
+}
+
+if [ "${TERRAPOD_PRINT_HOMEBREW_CLI_RECORDS:-}" = "1" ]; then
+  managed_homebrew_cli_records
+  exit 0
+fi
+
+standard_homebrew_prefix() {
+  profile="$1"
+  case "$profile" in
+    macos-terminal) os=darwin ;;
+    vps-shell) os=linux ;;
+    *) return 1 ;;
+  esac
+
+  arch="${TERRAPOD_MACHINE_ARCH:-$(uname -m 2>/dev/null || true)}"
+  if [ "$os" = darwin ] && [ "$arch" = x86_64 ] &&
+    [ "$(sysctl -in sysctl.proc_translated 2>/dev/null || true)" = 1 ]; then
+    arch=arm64
+  fi
+
+  case "$os:$arch" in
+    darwin:arm64|darwin:aarch64) printf '%s\n' /opt/homebrew ;;
+    darwin:x86_64) printf '%s\n' /usr/local ;;
+    linux:x86_64|linux:aarch64) printf '%s\n' /home/linuxbrew/.linuxbrew ;;
+    *) return 1 ;;
+  esac
+}
+
+if [ "${TERRAPOD_PRINT_STANDARD_HOMEBREW_PREFIX:-}" = "1" ]; then
+  if standard_homebrew_prefix "${TERRAPOD_PROFILE:-}"; then
+    exit 0
+  fi
+  exit 1
+fi
+
+path_is_under_prefix() {
+  path="$1"
+  prefix="$2"
+  case "$path" in
+    "$prefix"/*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+homebrew_cli_ownership_problems() {
+  prefix="$(standard_homebrew_prefix "$(current_profile)" || true)"
+  if [ -z "$prefix" ]; then
+    printf '%s\n' "brew: unsupported-prefix"
+    return
+  fi
+
+  tab="$(printf '\t')"
+  managed_homebrew_cli_records | while IFS="$tab" read -r formula command; do
+    command_path="$(command -v "$command" 2>/dev/null || true)"
+    if [ -z "$command_path" ]; then
+      printf '%s: missing\n' "$command"
+    elif ! path_is_under_prefix "$command_path" "$prefix"; then
+      printf '%s: %s\n' "$command" "$command_path"
+    fi
+  done
+}
+
 homebrew_prefix() {
   if ! command -v brew >/dev/null 2>&1; then
     return 1
@@ -1077,12 +1170,10 @@ print_key_tool_status() {
       else
         print_indented_colon_state_line "apt" "missing"
       fi
-      if is_enabled "$(effective_ai_cli_tools_enabled "$config_file")"; then
-        if command -v brew >/dev/null 2>&1; then
-          print_indented_colon_state_line "brew" "available"
-        else
-          print_indented_colon_state_line "brew" "missing"
-        fi
+      if command -v brew >/dev/null 2>&1; then
+        print_indented_colon_state_line "brew" "available"
+      else
+        print_indented_colon_state_line "brew" "missing"
       fi
       ;;
   esac
@@ -1099,24 +1190,14 @@ print_jetendard_status() {
 status_key_tool_warnings() {
   profile="$1"
   config_file="$2"
-  missing="$(missing_tools chezmoi git zsh mise nvim zellij)"
+  missing="$(missing_tools zsh)"
 
   case "$profile" in
     macos-terminal)
       platform_missing="$(missing_tools brew)"
       ;;
     vps-shell)
-      platform_missing="$(missing_tools apt)"
-      if is_enabled "$(effective_ai_cli_tools_enabled "$config_file")"; then
-        ai_platform_missing="$(missing_tools brew)"
-        if [ -n "$ai_platform_missing" ]; then
-          if [ -n "$platform_missing" ]; then
-            platform_missing="$platform_missing, $ai_platform_missing"
-          else
-            platform_missing="$ai_platform_missing"
-          fi
-        fi
-      fi
+      platform_missing="$(missing_tools apt brew)"
       ;;
     *)
       platform_missing=
@@ -1219,6 +1300,21 @@ print_install_warning_status() {
   fi
 }
 
+print_homebrew_cli_ownership_status() {
+  printf '%s\n' "Core Shell Stack source: Homebrew"
+  problems="$(homebrew_cli_ownership_problems)"
+
+  if [ -z "$problems" ]; then
+    printf '%s\n' "Homebrew CLI ownership: ready"
+    return
+  fi
+
+  printf '%s\n' "Homebrew CLI ownership: warning"
+  printf '%s\n' "$problems" | while IFS= read -r problem; do
+    printf '  %s\n' "$problem"
+  done
+}
+
 run_status() {
   if [ "$#" -ne 0 ]; then
     fail_usage "status accepts no arguments"
@@ -1230,6 +1326,7 @@ run_status() {
   print_title "Terrapod status"
   print_section_value "Profile:" "$(profile_context_label)"
   show_config_context "$config_file"
+  print_homebrew_cli_ownership_status
   print_section "Optional stacks:"
   print_optional_setting_status "Optional Editor Stack" "$(effective_editor_stack_enabled "$config_file")" "rich Neovim configuration"
   print_stack_status "Optional AI Tool Stack" "$(effective_ai_cli_tools_enabled "$config_file")" agy claude codex
@@ -1516,6 +1613,55 @@ doctor_check_command() {
   fi
 }
 
+doctor_check_homebrew_prefix() {
+  expected_prefix="$(standard_homebrew_prefix "$(current_profile)" || true)"
+  if [ -z "$expected_prefix" ]; then
+    doctor_warn "Homebrew has no standard prefix for this profile and architecture"
+    doctor_guidance "Use a supported profile and architecture, then rerun tpod doctor."
+    return
+  fi
+
+  actual_prefix="$(homebrew_prefix 2>/dev/null || true)"
+  if [ -z "$actual_prefix" ]; then
+    doctor_warn "Homebrew prefix cannot be resolved"
+    doctor_guidance "Repair Homebrew until 'brew --prefix' succeeds, open a new shell, and rerun tpod apply."
+  elif [ "$actual_prefix" != "$expected_prefix" ]; then
+    doctor_warn "Homebrew prefix is $actual_prefix; expected $expected_prefix"
+    doctor_guidance "Repair the Homebrew installation at $expected_prefix, open a new shell, and rerun tpod apply."
+  else
+    doctor_ok "Homebrew prefix is standard: $expected_prefix"
+  fi
+}
+
+doctor_check_homebrew_cli_ownership() {
+  problems="$(homebrew_cli_ownership_problems)"
+  if [ -z "$problems" ]; then
+    doctor_ok "Mandatory Homebrew CLI ownership is ready"
+    return
+  fi
+
+  while IFS= read -r problem; do
+    command_name="${problem%%:*}"
+    command_path="${problem#*: }"
+    case "$command_path" in
+      missing)
+        doctor_warn "mandatory Homebrew CLI is missing: $command_name"
+        doctor_guidance "Run tpod apply to restore '$command_name' through Homebrew."
+        ;;
+      unsupported-prefix)
+        doctor_warn "mandatory Homebrew CLI ownership cannot resolve a standard prefix"
+        doctor_guidance "Use a supported profile and architecture, then rerun tpod doctor."
+        ;;
+      *)
+        doctor_warn "mandatory Homebrew CLI is shadowed: $command_name"
+        doctor_guidance "Remove or move $command_path, open a new shell, and rerun tpod apply."
+        ;;
+    esac
+  done <<EOF
+$problems
+EOF
+}
+
 doctor_check_jetendard_component() {
   label="$1"
   helper="$2"
@@ -1651,13 +1797,13 @@ run_doctor() {
     doctor_guidance "$(managed_setup_guidance_message)"
   fi
 
-  for tool in chezmoi git zsh mise nvim zellij; do
-    doctor_check_command "$tool"
-  done
+  doctor_check_command zsh
 
   case "$profile" in
     macos-terminal)
       doctor_check_command brew
+      doctor_check_homebrew_prefix
+      doctor_check_homebrew_cli_ownership
       doctor_check_jetendard_component "Jetendard font files" "$jetendard_font_helper" check
       doctor_check_jetendard_component "Ghostty font setting" "$jetendard_settings_helper" check-ghostty
       doctor_check_jetendard_component "Zed font settings" "$jetendard_settings_helper" check-zed
@@ -1665,9 +1811,9 @@ run_doctor() {
       ;;
     vps-shell)
       doctor_check_command apt
-      if is_enabled "$(effective_ai_cli_tools_enabled "$config_file")"; then
-        doctor_check_command brew
-      fi
+      doctor_check_command brew
+      doctor_check_homebrew_prefix
+      doctor_check_homebrew_cli_ownership
       ;;
   esac
 
@@ -1683,11 +1829,6 @@ run_doctor() {
     agy claude codex
 
   if is_enabled "$(effective_ai_cli_tools_enabled "$config_file")"; then
-    if command -v brew >/dev/null 2>&1 && ! homebrew_prefix_is_available; then
-      doctor_warn "Optional AI Tool Stack cannot resolve the Homebrew prefix"
-      doctor_guidance "Repair Homebrew until 'brew --prefix' succeeds, open a new shell, and rerun tpod apply."
-    fi
-
     shadowed="$(shadowed_ai_cli_tools)"
     if [ -n "$shadowed" ]; then
       doctor_advisory "Optional AI Tool Stack has non-Homebrew commands shadowing managed casks: $shadowed"
