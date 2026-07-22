@@ -36,7 +36,7 @@
       "provider": "homebrew-formula",
       "package": "btop",
       "commands": ["btop"],
-      "metadata": {"legacy.homebrew.package": "btop", "legacy.mise.package": "aqua:aristocratos/btop"}
+      "metadata": {"legacy.homebrew.package": "btop", "legacy.mise.package": "aqua:aristocratos/btop", "legacy.mise.profile": "vps-shell"}
     },
     {
       "id": "core.chezmoi",
@@ -146,7 +146,7 @@
       "provider": "homebrew-formula",
       "package": "gum",
       "commands": ["gum"],
-      "metadata": {"legacy.homebrew.package": "gum"}
+      "metadata": {"legacy.apt.package": "gum", "legacy.homebrew.package": "gum"}
     },
     {
       "id": "core.lazygit",
@@ -179,7 +179,7 @@
       "provider": "homebrew-formula",
       "package": "mise",
       "commands": ["mise"],
-      "metadata": {"legacy.homebrew.package": "mise"}
+      "metadata": {"legacy.apt.package": "mise", "legacy.homebrew.package": "mise"}
     },
     {
       "id": "core.neovim",

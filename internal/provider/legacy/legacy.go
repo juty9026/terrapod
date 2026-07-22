@@ -8,33 +8,24 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 
+	"github.com/juty9026/terrapod/internal/legacydecl"
 	"github.com/juty9026/terrapod/internal/model"
 	"github.com/juty9026/terrapod/internal/provider"
 )
 
-type Kind string
+type Kind = legacydecl.Kind
 
 const (
-	APT      Kind = "apt"
-	Mise     Kind = "mise"
-	Homebrew Kind = "homebrew"
-	Vendor   Kind = "vendor"
+	APT      = legacydecl.APT
+	Mise     = legacydecl.Mise
+	Homebrew = legacydecl.Homebrew
+	Vendor   = legacydecl.Vendor
 )
 
-var knownVendorKinds = map[string]struct{}{
-	"antigravity-native": {},
-	"claude-native":      {},
-	"codex-standalone":   {},
-}
-
-type Declaration struct {
-	Kind          Kind
-	Package       string
-	ReceiptKind   string
-	UninstallKind string
-}
+type Declaration = legacydecl.Declaration
 
 type Receipt struct {
 	Present  bool
@@ -65,6 +56,7 @@ type Observation struct {
 
 type Inventory struct {
 	Resource model.Resource
+	Profile  model.Profile
 	Desired  model.Observation
 	Legacy   []Observation
 }
@@ -116,60 +108,19 @@ func New(handlers map[Kind]Handler, paths PathResolver) (*Coordinator, error) {
 }
 
 func ParseDeclarations(resource model.Resource) ([]Declaration, error) {
-	knownKeys := map[string]struct{}{
-		"legacy.apt.package":      {},
-		"legacy.mise.package":     {},
-		"legacy.homebrew.package": {},
-		"legacy.vendor.receipt":   {},
-		"legacy.vendor.uninstall": {},
-	}
-	for key := range resource.Metadata {
-		if strings.HasPrefix(key, "legacy.") {
-			if _, ok := knownKeys[key]; !ok {
-				return nil, fmt.Errorf("legacy: resource %q has unknown legacy metadata %q", resource.ID, key)
-			}
-		}
-	}
-	declarations := make([]Declaration, 0, 4)
-	for _, item := range []struct {
-		key  string
-		kind Kind
-	}{
-		{"legacy.apt.package", APT},
-		{"legacy.mise.package", Mise},
-		{"legacy.homebrew.package", Homebrew},
-	} {
-		if pkg, ok := resource.Metadata[item.key]; ok {
-			if !safeIdentifier(pkg) {
-				return nil, fmt.Errorf("legacy: resource %q has unsafe %s %q", resource.ID, item.key, pkg)
-			}
-			declarations = append(declarations, Declaration{Kind: item.kind, Package: pkg})
-		}
-	}
-	receipt, hasReceipt := resource.Metadata["legacy.vendor.receipt"]
-	uninstall, hasUninstall := resource.Metadata["legacy.vendor.uninstall"]
-	if hasReceipt != hasUninstall {
-		return nil, fmt.Errorf("legacy: resource %q must pair vendor receipt and uninstall kinds", resource.ID)
-	}
-	if hasReceipt {
-		if _, ok := knownVendorKinds[receipt]; !ok {
-			return nil, fmt.Errorf("legacy: resource %q has unknown vendor receipt kind %q", resource.ID, receipt)
-		}
-		if _, ok := knownVendorKinds[uninstall]; !ok || receipt != uninstall {
-			return nil, fmt.Errorf("legacy: resource %q has unsupported vendor uninstall kind %q", resource.ID, uninstall)
-		}
-		declarations = append(declarations, Declaration{Kind: Vendor, Package: resource.Package, ReceiptKind: receipt, UninstallKind: uninstall})
-	}
-	return declarations, nil
+	return legacydecl.Parse(resource)
 }
 
-func (c *Coordinator) Detect(ctx context.Context, resource model.Resource, desired model.Observation) (Inventory, error) {
-	inventory := Inventory{Resource: cloneResource(resource), Desired: cloneModelObservation(desired)}
+func (c *Coordinator) Detect(ctx context.Context, profile model.Profile, resource model.Resource, desired model.Observation) (Inventory, error) {
+	inventory := Inventory{Resource: cloneResource(resource), Profile: profile, Desired: cloneModelObservation(desired)}
 	declarations, err := ParseDeclarations(resource)
 	if err != nil {
 		return inventory, err
 	}
 	for _, declaration := range declarations {
+		if declaration.Profile != "" && declaration.Profile != profile {
+			continue
+		}
 		handler, ok := c.handlers[declaration.Kind]
 		if !ok {
 			return inventory, &ErrUnsupportedSource{Kind: declaration.Kind}
@@ -193,19 +144,44 @@ func (c *Coordinator) Detect(ctx context.Context, resource model.Resource, desir
 	return inventory, nil
 }
 
-func (c *Coordinator) RemovalOperations(inventory Inventory) []RemovalOperation {
+func (c *Coordinator) RemovalOperations(inventory Inventory) ([]RemovalOperation, error) {
+	declarations, err := ParseDeclarations(inventory.Resource)
+	if err != nil {
+		return nil, err
+	}
+	authorized := make(map[string]Declaration, len(declarations))
+	for _, declaration := range declarations {
+		if declaration.Profile != "" && declaration.Profile != inventory.Profile {
+			continue
+		}
+		key := declarationKey(declaration)
+		if _, duplicate := authorized[key]; duplicate {
+			return nil, errors.New("legacy: ambiguous duplicate declaration")
+		}
+		authorized[key] = declaration
+	}
 	operations := make([]RemovalOperation, 0, len(inventory.Legacy))
+	seen := make(map[string]struct{}, len(inventory.Legacy))
 	for _, observation := range inventory.Legacy {
 		if !observation.Present {
 			continue
 		}
+		declaration := Declaration{Kind: observation.Kind, Package: observation.Package, ReceiptKind: observation.ReceiptKind, UninstallKind: observation.UninstallKind}
+		key := declarationKey(declaration)
+		if _, duplicate := seen[key]; duplicate {
+			return nil, errors.New("legacy: ambiguous duplicate observation")
+		}
+		seen[key] = struct{}{}
+		if _, ok := authorized[key]; !ok {
+			return nil, fmt.Errorf("legacy: observation for %s package %q is not authorized by catalog", observation.Kind, observation.Package)
+		}
 		operations = append(operations, RemovalOperation{
 			resource:    cloneResource(inventory.Resource),
-			declaration: Declaration{Kind: observation.Kind, Package: observation.Package, ReceiptKind: observation.ReceiptKind, UninstallKind: observation.UninstallKind},
+			declaration: declaration,
 			observation: cloneObservation(observation),
 		})
 	}
-	return operations
+	return operations, nil
 }
 
 func (c *Coordinator) Remove(ctx context.Context, operation RemovalOperation) error {
@@ -215,6 +191,20 @@ func (c *Coordinator) Remove(ctx context.Context, operation RemovalOperation) er
 	handler, ok := c.handlers[operation.declaration.Kind]
 	if !ok {
 		return &ErrUnsupportedSource{Kind: operation.declaration.Kind}
+	}
+	fresh, err := handler.Inspect(ctx, operation.resource, operation.declaration)
+	if err != nil {
+		return fmt.Errorf("legacy: refresh receipt for %q: %w", operation.declaration.Package, err)
+	}
+	if !fresh.Present {
+		return nil
+	}
+	freshObservation, err := observationFromReceipt(operation.declaration, fresh)
+	if err != nil {
+		return fmt.Errorf("legacy: invalid refreshed receipt: %w", err)
+	}
+	if !observationsEqual(freshObservation, operation.observation) {
+		return &ErrStaleReceipt{Kind: operation.declaration.Kind, Package: operation.declaration.Package}
 	}
 	changes, err := handler.SimulateRemoval(ctx, operation.resource, operation.declaration)
 	if err != nil {
@@ -241,15 +231,18 @@ func (c *Coordinator) Remove(ctx context.Context, operation RemovalOperation) er
 }
 
 func (c *Coordinator) validateCommandProvenance(resource model.Resource, desired model.Observation, legacy []Observation) error {
-	trustedPrefixes := standardPrefixes(desired.Provider)
-	trustedPaths := map[string]string{}
-	for command, path := range desired.Paths {
-		trustedPaths[command] = path
+	trustedPaths := map[string][]string{}
+	if desired.Present {
+		for command, path := range desired.Paths {
+			trustedPaths[command] = append(trustedPaths[command], path)
+		}
 	}
 	for _, observation := range legacy {
-		trustedPrefixes = append(trustedPrefixes, observation.Prefixes...)
 		for command, path := range observation.Paths {
-			trustedPaths[command] = path
+			if len(observation.Prefixes) != 0 && !pathWithinAnyResolved(c.paths, path, observation.Prefixes) {
+				return &ErrUnknownProvenance{ResourceID: resource.ID, Command: command, Path: path}
+			}
+			trustedPaths[command] = append(trustedPaths[command], path)
 		}
 	}
 	for _, command := range resource.Commands {
@@ -265,13 +258,9 @@ func (c *Coordinator) validateCommandProvenance(resource model.Resource, desired
 			return &ErrUnknownProvenance{ResourceID: resource.ID, Command: command, Path: path}
 		}
 		trusted := false
-		if exact := trustedPaths[command]; exact != "" {
+		for _, exact := range trustedPaths[command] {
 			resolvedExact, exactErr := resolveClean(c.paths, exact)
-			trusted = exactErr == nil && resolved == resolvedExact
-		}
-		for _, prefix := range trustedPrefixes {
-			resolvedPrefix, prefixErr := resolveClean(c.paths, prefix)
-			if prefixErr == nil && pathWithin(resolved, resolvedPrefix) {
+			if exactErr == nil && resolved == resolvedExact {
 				trusted = true
 				break
 			}
@@ -283,36 +272,40 @@ func (c *Coordinator) validateCommandProvenance(resource model.Resource, desired
 	return nil
 }
 
-// ProviderHandler adapts an APT, mise, or Homebrew provider without exposing
-// executable command strings through catalog data.
-type ProviderHandler struct {
-	Adapter  provider.Provider
-	Prefixes []string
-	Paths    map[string]string
+// APTHandler narrows the current APT adapter to the two historical bootstrap
+// packages declared by the catalog.
+type APTHandler struct{ adapter provider.Provider }
+
+func NewAPTHandler(adapter provider.Provider) (*APTHandler, error) {
+	if isNil(adapter) || adapter.Name() != "apt" {
+		return nil, errors.New("legacy: APT provider adapter is required")
+	}
+	return &APTHandler{adapter: adapter}, nil
 }
 
-func (h ProviderHandler) Inspect(ctx context.Context, desired model.Resource, declaration Declaration) (Receipt, error) {
-	if isNil(h.Adapter) {
-		return Receipt{}, errors.New("legacy: provider adapter is required")
+func (h *APTHandler) Inspect(ctx context.Context, desired model.Resource, declaration Declaration) (Receipt, error) {
+	if declaration.Kind != APT || (declaration.Package != "gum" && declaration.Package != "mise") {
+		return Receipt{}, fmt.Errorf("legacy: unsupported APT package %q", declaration.Package)
 	}
-	legacy := legacyResource(desired, declaration, h.Adapter.Name())
-	observation, err := h.Adapter.Inspect(ctx, legacy)
+	legacy := legacyResource(desired, declaration, h.adapter.Name())
+	legacy.Metadata["bootstrapOnly"] = "true"
+	observation, err := h.adapter.Inspect(ctx, legacy)
 	if err != nil {
 		return Receipt{}, err
 	}
-	paths := clonePaths(h.Paths)
-	for command, path := range observation.Paths {
-		paths[command] = path
+	paths := map[string]string{}
+	if observation.Present {
+		paths[declaration.Package] = "/usr/bin/" + declaration.Package
 	}
-	return Receipt{Present: observation.Present, Prefixes: append([]string(nil), h.Prefixes...), Paths: paths}, nil
+	return Receipt{Present: observation.Present, Paths: paths}, nil
 }
 
-func (h ProviderHandler) SimulateRemoval(ctx context.Context, desired model.Resource, declaration Declaration) (provider.ChangeSet, error) {
-	return h.Adapter.Simulate(ctx, pruneOperation(desired, declaration, h.Adapter.Name()))
+func (h *APTHandler) SimulateRemoval(ctx context.Context, desired model.Resource, declaration Declaration) (provider.ChangeSet, error) {
+	return h.adapter.Simulate(ctx, pruneOperation(desired, declaration, h.adapter.Name()))
 }
 
-func (h ProviderHandler) Remove(ctx context.Context, desired model.Resource, declaration Declaration) error {
-	return h.Adapter.Execute(ctx, pruneOperation(desired, declaration, h.Adapter.Name()))
+func (h *APTHandler) Remove(ctx context.Context, desired model.Resource, declaration Declaration) error {
+	return h.adapter.Execute(ctx, pruneOperation(desired, declaration, h.adapter.Name()))
 }
 
 func legacyResource(desired model.Resource, declaration Declaration, providerName string) model.Resource {
@@ -340,11 +333,38 @@ func observationFromReceipt(declaration Declaration, receipt Receipt) (Observati
 	return Observation{Kind: declaration.Kind, Package: declaration.Package, ReceiptKind: declaration.ReceiptKind, UninstallKind: declaration.UninstallKind, Present: true, Prefixes: append([]string(nil), receipt.Prefixes...), Paths: clonePaths(receipt.Paths)}, nil
 }
 
-func standardPrefixes(providerName string) []string {
-	if providerName == "homebrew-formula" || providerName == "homebrew-cask" {
-		return []string{"/opt/homebrew", "/usr/local", "/home/linuxbrew/.linuxbrew"}
+type ErrStaleReceipt struct {
+	Kind    Kind
+	Package string
+}
+
+func (e *ErrStaleReceipt) Error() string {
+	return fmt.Sprintf("legacy: stale %s receipt for %q", e.Kind, e.Package)
+}
+
+func declarationKey(d Declaration) string {
+	return string(d.Kind) + "\x00" + d.Package + "\x00" + d.ReceiptKind + "\x00" + d.UninstallKind
+}
+func observationsEqual(a, b Observation) bool {
+	return a.Kind == b.Kind && a.Package == b.Package && a.ReceiptKind == b.ReceiptKind && a.UninstallKind == b.UninstallKind && a.Present == b.Present && reflect.DeepEqual(sortedStrings(a.Prefixes), sortedStrings(b.Prefixes)) && reflect.DeepEqual(a.Paths, b.Paths)
+}
+func sortedStrings(values []string) []string {
+	result := append([]string(nil), values...)
+	sort.Strings(result)
+	return result
+}
+func pathWithinAnyResolved(paths PathResolver, path string, prefixes []string) bool {
+	resolved, err := resolveClean(paths, path)
+	if err != nil {
+		return false
 	}
-	return nil
+	for _, prefix := range prefixes {
+		root, e := resolveClean(paths, prefix)
+		if e == nil && pathWithin(resolved, root) {
+			return true
+		}
+	}
+	return false
 }
 
 func resolveClean(paths PathResolver, path string) (string, error) {
@@ -365,30 +385,13 @@ func pathWithin(path, prefix string) bool {
 
 func cleanAbsolute(path string) bool { return filepath.IsAbs(path) && filepath.Clean(path) == path }
 
-func safeIdentifier(value string) bool {
-	if value == "" || strings.HasPrefix(value, "-") || strings.HasPrefix(value, "/") {
-		return false
-	}
-	for _, segment := range strings.Split(value, "/") {
-		if segment == "" || segment == "." || segment == ".." {
-			return false
-		}
-	}
-	for _, char := range []byte(value) {
-		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || strings.ContainsRune("._+@:/~-", rune(char)) {
-			continue
-		}
-		return false
-	}
-	return true
-}
-
 func cloneResource(resource model.Resource) model.Resource {
+	metadata := resource.Metadata
 	resource.Profiles = append([]model.Profile(nil), resource.Profiles...)
 	resource.DependsOn = append([]model.ResourceID(nil), resource.DependsOn...)
 	resource.Commands = append([]string(nil), resource.Commands...)
 	resource.Metadata = make(map[string]string, len(resource.Metadata))
-	for key, value := range resource.Metadata {
+	for key, value := range metadata {
 		resource.Metadata[key] = value
 	}
 	return resource

@@ -94,8 +94,10 @@ func TestSeedCatalogDeclaresOnlyKnownLegacyPackageSources(t *testing.T) {
 		"optional-ai.claude-code":     "claude-native",
 		"optional-ai.codex":           "codex-standalone",
 	}
+	wantAPT := map[model.ResourceID]string{"core.gum": "gum", "core.mise": "mise"}
 	seenMise := 0
 	seenVendor := 0
+	seenAPT := 0
 	for _, resource := range seed.Resources {
 		if resource.Provider != "homebrew-formula" && resource.Provider != "homebrew-cask" {
 			continue
@@ -111,6 +113,15 @@ func TestSeedCatalogDeclaresOnlyKnownLegacyPackageSources(t *testing.T) {
 				t.Fatalf("resource %q legacy mise package = %q, want %q", resource.ID, got, want)
 			}
 		}
+		if resource.ID == "core.btop" && resource.Metadata["legacy.mise.profile"] != string(model.ProfileVPSShell) {
+			t.Fatalf("core.btop legacy mise scope = %q", resource.Metadata["legacy.mise.profile"])
+		}
+		if want, ok := wantAPT[resource.ID]; ok {
+			seenAPT++
+			if got := resource.Metadata["legacy.apt.package"]; got != want {
+				t.Fatalf("resource %q legacy APT package = %q, want %q", resource.ID, got, want)
+			}
+		}
 		if want, ok := wantVendor[resource.ID]; ok {
 			seenVendor++
 			if resource.Metadata["legacy.vendor.receipt"] != want || resource.Metadata["legacy.vendor.uninstall"] != want {
@@ -118,8 +129,8 @@ func TestSeedCatalogDeclaresOnlyKnownLegacyPackageSources(t *testing.T) {
 			}
 		}
 	}
-	if seenMise != len(wantMise) || seenVendor != len(wantVendor) {
-		t.Fatalf("legacy declarations seen mise=%d vendor=%d", seenMise, seenVendor)
+	if seenMise != len(wantMise) || seenVendor != len(wantVendor) || seenAPT != len(wantAPT) {
+		t.Fatalf("legacy declarations seen mise=%d vendor=%d apt=%d", seenMise, seenVendor, seenAPT)
 	}
 }
 
@@ -466,7 +477,31 @@ func TestLoadVerifiedRejectsInvalidCatalog(t *testing.T) {
 			edit: func(input map[string]any) {
 				resourcesOf(input)[0]["metadata"] = map[string]any{"legacy.vendor.receipt": "shell", "legacy.vendor.uninstall": "shell"}
 			},
-			want: `unknown legacy vendor receipt kind "shell"`,
+			want: `unsupported legacy vendor transition "shell"/"shell"`,
+		},
+		{
+			name: "unsafe APT transition",
+			edit: func(input map[string]any) {
+				resource := resourcesOf(input)[0]
+				resource["id"] = "core.gum"
+				resource["package"] = "gum"
+				resource["metadata"] = map[string]any{"legacy.apt.package": "gum;rm"}
+			},
+			want: `unsupported legacy APT transition "gum;rm"`,
+		},
+		{
+			name: "mismatched mise declaration",
+			edit: func(input map[string]any) {
+				resourcesOf(input)[0]["metadata"] = map[string]any{"legacy.mise.package": "aqua:sharkdp/fd"}
+			},
+			want: `unsupported legacy mise transition "aqua:sharkdp/fd"`,
+		},
+		{
+			name: "mismatched Homebrew token",
+			edit: func(input map[string]any) {
+				resourcesOf(input)[0]["metadata"] = map[string]any{"legacy.homebrew.package": "fd"}
+			},
+			want: `unsupported legacy Homebrew transition "fd"`,
 		},
 		{
 			name: "dependency cycle",
