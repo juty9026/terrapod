@@ -130,7 +130,7 @@ func (a *ProviderTransferAdapter) InstallDesired(ctx context.Context, item model
 	desired.RequiresPrivilege = item.Provider == "apt"
 	return a.desired.Execute(ctx, desired)
 }
-func (a *ProviderTransferAdapter) RemoveLegacy(ctx context.Context, item model.Resource, op model.Operation) model.OperationResult {
+func (a *ProviderTransferAdapter) RemoveLegacy(ctx context.Context, item model.Resource, op model.Operation) (result model.OperationResult) {
 	desired, err := a.desired.Verify(ctx, item)
 	if err != nil {
 		return failedPhase(op, err.Error())
@@ -143,15 +143,29 @@ func (a *ProviderTransferAdapter) RemoveLegacy(ctx context.Context, item model.R
 	if err := authorizedLegacySubset(observed, op.Removes); err != nil {
 		return failedPhase(op, err.Error())
 	}
+	if err := ctx.Err(); err != nil {
+		return failedPhase(op, err.Error())
+	}
 	a.mu.Lock()
 	preflight, ok := a.preflights[op.ID]
-	if ok {
+	if ok && reflect.DeepEqual(preflight.operation, op) {
 		delete(a.preflights, op.ID)
+	} else {
+		ok = false
 	}
 	a.mu.Unlock()
-	if !ok || !reflect.DeepEqual(preflight.operation, op) {
+	if !ok {
 		return failedPhase(op, "legacy transfer was not preflighted")
 	}
+	defer func() {
+		if err := a.legacy.CancelPreflight(preflight.capability); err != nil {
+			if result.Success {
+				result = failedPhase(op, err.Error())
+			} else {
+				result.Detail = errors.Join(errors.New(result.Detail), err).Error()
+			}
+		}
+	}()
 	if err := ctx.Err(); err != nil {
 		return failedPhase(op, err.Error())
 	}

@@ -22,20 +22,35 @@ type transferProvider struct {
 type transferCoordinator struct {
 	preflights int
 	canceled   int
+	active     int
+	removed    int
+	onDetect   func()
+	removeErr  error
 }
 
-func (*transferCoordinator) Detect(context.Context, model.Profile, model.Resource, model.Observation) (legacy.Inventory, error) {
+func (c *transferCoordinator) Detect(context.Context, model.Profile, model.Resource, model.Observation) (legacy.Inventory, error) {
+	if c.onDetect != nil {
+		c.onDetect()
+	}
 	return legacy.Inventory{}, nil
 }
 func (c *transferCoordinator) PreflightRemovals(context.Context, legacy.Inventory) (legacy.Preflight, provider.ChangeSet, error) {
 	c.preflights++
+	c.active++
 	return legacy.Preflight{}, provider.ChangeSet{}, nil
 }
-func (*transferCoordinator) RemovePreflight(context.Context, legacy.Preflight, legacy.Inventory) error {
-	return nil
+func (c *transferCoordinator) RemovePreflight(context.Context, legacy.Preflight, legacy.Inventory) error {
+	c.removed++
+	if c.active > 0 {
+		c.active--
+	}
+	return c.removeErr
 }
 func (c *transferCoordinator) CancelPreflight(legacy.Preflight) error {
 	c.canceled++
+	if c.active > 0 {
+		c.active--
+	}
 	return nil
 }
 
@@ -218,6 +233,107 @@ func TestProviderTransferAdapterRevokesSupersededAndCanceledSimulation(t *testin
 	}
 	if coordinator.canceled != 2 {
 		t.Fatalf("idempotent cancel count=%d", coordinator.canceled)
+	}
+	if coordinator.active != 0 {
+		t.Fatalf("active capabilities=%d", coordinator.active)
+	}
+}
+
+func TestProviderTransferAdapterKeepsCapabilityCancelableWhenDetectCancelsContext(t *testing.T) {
+	backend := &transferProvider{present: true}
+	desired, err := resource.NewProviderAdapter(backend, func(context.Context, model.Resource, model.Observation, model.Ownership) ([]model.Operation, error) {
+		return nil, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	coordinator := &transferCoordinator{onDetect: cancel}
+	adapter, err := NewProviderTransferAdapter(desired, coordinator, model.ProfileVPSShell)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := model.Resource{ID: "core.alpha", Type: model.ResourcePackage, Provider: "fixture", Package: "alpha", VersionPolicy: model.VersionTracked}
+	op := model.Operation{ID: "transfer", ResourceID: item.ID, Kind: model.OperationTransfer, Provider: item.Provider, Package: item.Package}
+	coordinator.onDetect = nil
+	if _, err := adapter.Simulate(context.Background(), item, op); err != nil {
+		t.Fatal(err)
+	}
+	coordinator.onDetect = cancel
+	if result := adapter.RemoveLegacy(ctx, item, op); result.Success || result.Detail != context.Canceled.Error() {
+		t.Fatalf("result=%#v", result)
+	}
+	if coordinator.removed != 0 || coordinator.active != 1 {
+		t.Fatalf("removed=%d active=%d", coordinator.removed, coordinator.active)
+	}
+	if err := adapter.CancelSimulation(op); err != nil {
+		t.Fatal(err)
+	}
+	if coordinator.active != 0 {
+		t.Fatalf("orphaned capabilities=%d", coordinator.active)
+	}
+}
+
+func TestProviderTransferAdapterOperationMismatchDoesNotOrphanCapability(t *testing.T) {
+	backend := &transferProvider{present: true}
+	desired, err := resource.NewProviderAdapter(backend, func(context.Context, model.Resource, model.Observation, model.Ownership) ([]model.Operation, error) {
+		return nil, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator := &transferCoordinator{}
+	adapter, err := NewProviderTransferAdapter(desired, coordinator, model.ProfileVPSShell)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := model.Resource{ID: "core.alpha", Type: model.ResourcePackage, Provider: "fixture", Package: "alpha", VersionPolicy: model.VersionTracked}
+	op := model.Operation{ID: "transfer", ResourceID: item.ID, Kind: model.OperationTransfer, Provider: item.Provider, Package: item.Package}
+	if _, err := adapter.Simulate(context.Background(), item, op); err != nil {
+		t.Fatal(err)
+	}
+	mismatched := op
+	mismatched.Package = "different"
+	if result := adapter.RemoveLegacy(context.Background(), item, mismatched); result.Success {
+		t.Fatalf("mismatched removal=%#v", result)
+	}
+	if coordinator.removed != 0 || coordinator.active != 1 {
+		t.Fatalf("removed=%d active=%d", coordinator.removed, coordinator.active)
+	}
+	if err := adapter.CancelSimulation(op); err != nil {
+		t.Fatal(err)
+	}
+	if coordinator.active != 0 {
+		t.Fatalf("orphaned capabilities=%d", coordinator.active)
+	}
+	if result := adapter.RemoveLegacy(context.Background(), item, op); result.Success {
+		t.Fatal("revoked capability replayed")
+	}
+}
+
+func TestProviderTransferAdapterRevokesCapabilityWhenRemovalFails(t *testing.T) {
+	backend := &transferProvider{present: true}
+	desired, err := resource.NewProviderAdapter(backend, func(context.Context, model.Resource, model.Observation, model.Ownership) ([]model.Operation, error) {
+		return nil, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator := &transferCoordinator{removeErr: context.Canceled}
+	adapter, err := NewProviderTransferAdapter(desired, coordinator, model.ProfileVPSShell)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := model.Resource{ID: "core.alpha", Type: model.ResourcePackage, Provider: "fixture", Package: "alpha", VersionPolicy: model.VersionTracked}
+	op := model.Operation{ID: "transfer", ResourceID: item.ID, Kind: model.OperationTransfer, Provider: item.Provider, Package: item.Package}
+	if _, err := adapter.Simulate(context.Background(), item, op); err != nil {
+		t.Fatal(err)
+	}
+	if result := adapter.RemoveLegacy(context.Background(), item, op); result.Success || result.Detail != context.Canceled.Error() {
+		t.Fatalf("result=%#v", result)
+	}
+	if coordinator.removed != 1 || coordinator.canceled != 1 || coordinator.active != 0 {
+		t.Fatalf("removed=%d canceled=%d active=%d", coordinator.removed, coordinator.canceled, coordinator.active)
 	}
 }
 
