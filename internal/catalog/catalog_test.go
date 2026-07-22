@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -142,46 +143,88 @@ func TestSeedCatalogMatchesBootstrapAPTAndMiseDeclarations(t *testing.T) {
 
 func extractAPTInstallList(t *testing.T, script string) []string {
 	t.Helper()
-	start := strings.Index(script, "apt-get install -y \\\n")
-	if start < 0 {
-		t.Fatal("APT install declaration not found")
-	}
-	block := script[start+len("apt-get install -y \\\n"):]
-	end := strings.Index(block, "; then")
-	if end < 0 {
-		t.Fatal("APT install declaration terminator not found")
-	}
-	lines := strings.Split(block[:end], "\n")
-	packages := make([]string, 0, len(lines))
-	for _, line := range lines {
-		pkg := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(line), "\\"))
-		if pkg == "" || strings.ContainsAny(pkg, " \t\"'$") {
-			t.Fatalf("invalid APT package declaration %q", line)
-		}
-		packages = append(packages, pkg)
+	packages, err := parseAPTInstallList(script)
+	if err != nil {
+		t.Fatal(err)
 	}
 	return packages
 }
 
+func parseAPTInstallList(script string) ([]string, error) {
+	start := strings.Index(script, "apt-get install -y \\\n")
+	if start < 0 {
+		return nil, fmt.Errorf("APT install declaration not found")
+	}
+	block := script[start+len("apt-get install -y \\\n"):]
+	end := strings.Index(block, "; then")
+	if end < 0 {
+		return nil, fmt.Errorf("APT install declaration terminator not found")
+	}
+	lines := strings.Split(block[:end], "\n")
+	packages := make([]string, 0, len(lines))
+	seen := make(map[string]int, len(lines))
+	for index, line := range lines {
+		pkg := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(line), "\\"))
+		if pkg == "" || strings.ContainsAny(pkg, " \t\"'$") {
+			return nil, fmt.Errorf("invalid APT package declaration at line %d: %q", index+1, line)
+		}
+		if firstLine, duplicate := seen[pkg]; duplicate {
+			return nil, fmt.Errorf("duplicate APT package %q at line %d (first declared at line %d)", pkg, index+1, firstLine)
+		}
+		seen[pkg] = index + 1
+		packages = append(packages, pkg)
+	}
+	return packages, nil
+}
+
+func TestParseAPTInstallListRejectsDuplicatePackageDeclaration(t *testing.T) {
+	script := "apt-get install -y \\\n  curl \\\n  curl; then\n"
+	_, err := parseAPTInstallList(script)
+	if err == nil || !strings.Contains(err.Error(), "duplicate") || !strings.Contains(err.Error(), "curl") || !strings.Contains(err.Error(), "line") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func extractMiseTools(t *testing.T, config string) map[string]string {
 	t.Helper()
+	tools, err := parseMiseTools(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tools
+}
+
+func parseMiseTools(config string) (map[string]string, error) {
 	start := strings.Index(config, "[tools]\n")
 	if start < 0 {
-		t.Fatal("mise [tools] declaration not found")
+		return nil, fmt.Errorf("mise [tools] declaration not found")
 	}
 	block := config[start+len("[tools]\n"):]
 	if end := strings.Index(block, "\n["); end >= 0 {
 		block = block[:end]
 	}
 	tools := make(map[string]string)
-	for _, line := range strings.Split(strings.TrimSpace(block), "\n") {
+	seen := make(map[string]int)
+	for index, line := range strings.Split(strings.TrimSpace(block), "\n") {
 		parts := strings.Split(line, " = ")
 		if len(parts) != 2 || len(parts[1]) < 2 || parts[1][0] != '"' || parts[1][len(parts[1])-1] != '"' {
-			t.Fatalf("invalid mise tool declaration %q", line)
+			return nil, fmt.Errorf("invalid mise tool declaration at line %d: %q", index+1, line)
 		}
+		if firstLine, duplicate := seen[parts[0]]; duplicate {
+			return nil, fmt.Errorf("duplicate mise tool %q at line %d (first declared at line %d): %q", parts[0], index+1, firstLine, line)
+		}
+		seen[parts[0]] = index + 1
 		tools[parts[0]] = strings.Trim(parts[1], "\"")
 	}
-	return tools
+	return tools, nil
+}
+
+func TestParseMiseToolsRejectsDuplicateToolDeclaration(t *testing.T) {
+	config := "[tools]\nnode = \"24\"\nnode = \"25\"\n\n[settings]\n"
+	_, err := parseMiseTools(config)
+	if err == nil || !strings.Contains(err.Error(), "duplicate") || !strings.Contains(err.Error(), "node") || !strings.Contains(err.Error(), "line") {
+		t.Fatalf("error = %v", err)
+	}
 }
 
 func sortedResourceKeys(resources map[string]model.Resource) []string {
