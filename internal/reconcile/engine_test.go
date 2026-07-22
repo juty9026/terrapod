@@ -151,11 +151,31 @@ func TestApplyInstallsVerifiesAndCommitsOwnership(t *testing.T) {
 	}
 	snapshot, _ := store.Snapshot()
 	owned := snapshot.Ownership[item.ID]
-	if owned.CatalogDigest != "signed" || owned.Provider != item.Provider || owned.Paths["bin"] != "/safe/bin" {
+	if owned.CatalogDigest != "signed" || owned.Provider != item.Provider || len(owned.Paths) != 0 {
 		t.Fatalf("ownership = %#v", owned)
 	}
 	if got := strings.Join(adapter.events, ","); got != "inspect:core.alpha,execute:install,verify:core.alpha,verify:core.alpha" {
 		t.Fatalf("events = %s", got)
+	}
+}
+
+func TestDynamicObservationPathsRoundTripToHistoricalPrune(t *testing.T) {
+	item := pkg("core.alpha", "fixture")
+	adapter := &fixtureAdapter{fail: map[string]bool{}}
+	engine, store := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
+	if _, err := engine.Apply(context.Background(), model.Plan{ID: "install", Operations: []model.Operation{op(item, "install", model.OperationInstall)}}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ := store.Snapshot()
+	if len(snapshot.Ownership[item.ID].Paths) != 0 {
+		t.Fatalf("dynamic paths persisted=%#v", snapshot.Ownership[item.ID].Paths)
+	}
+	engine.Enabled = nil
+	if _, err := engine.Apply(context.Background(), model.Plan{ID: "prune", Operations: []model.Operation{op(item, "prune", model.OperationPrune)}}); err != nil {
+		t.Fatal(err)
+	}
+	if adapter.present {
+		t.Fatal("historical prune failed")
 	}
 }
 
@@ -611,6 +631,21 @@ func TestNoOpDependentWaitsForOperatedDependency(t *testing.T) {
 	lastExec := strings.Index(events, "execute:install-last")
 	if firstExec < 0 || middleVerify < firstExec || lastExec < middleVerify {
 		t.Fatalf("dependency schedule=%s", events)
+	}
+}
+
+func TestFinalVerificationPropagatesOperatedDependencyFailureToNoOpDependent(t *testing.T) {
+	first := pkg("core.first", "first")
+	dependent := pkg("core.dependent", "dependent", first.ID)
+	a := &fixtureAdapter{fail: map[string]bool{"execute:install": true}}
+	b := &fixtureAdapter{present: true, fail: map[string]bool{}}
+	engine, _ := testEngine(t, map[string]*fixtureAdapter{"first": a, "dependent": b}, first, dependent)
+	summary, err := engine.Apply(context.Background(), model.Plan{ID: "p", Operations: []model.Operation{op(first, "install", model.OperationInstall)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := summary.Unavailable[dependent.ID]; !ok {
+		t.Fatalf("dependent marked ready: %#v", summary)
 	}
 }
 

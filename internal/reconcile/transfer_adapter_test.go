@@ -62,3 +62,19 @@ func TestProviderTransferAdapterComposesRealOpaqueCoordinator(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAuthorizedLegacySubsetAllowsResumeAndRejectsExtras(t *testing.T) {
+	authorized := []string{"old-a", "old-b"}
+	for _, test := range []struct {
+		name     string
+		observed []legacy.Observation
+		wantErr  bool
+	}{{"all", []legacy.Observation{{Package: "old-a"}, {Package: "old-b"}}, false}, {"partial", []legacy.Observation{{Package: "old-b"}}, false}, {"all removed", nil, false}, {"extra", []legacy.Observation{{Package: "unknown"}}, true}} {
+		t.Run(test.name, func(t *testing.T) {
+			err := authorizedLegacySubset(test.observed, authorized)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+}

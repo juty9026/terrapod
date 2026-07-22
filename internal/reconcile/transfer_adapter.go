@@ -16,6 +16,7 @@ type LegacyCoordinator interface {
 	Detect(context.Context, model.Profile, model.Resource, model.Observation) (legacy.Inventory, error)
 	RemovalOperations(legacy.Inventory) ([]legacy.RemovalOperation, error)
 	Remove(context.Context, legacy.RemovalOperation) error
+	PreflightRemovals(context.Context, legacy.Inventory) (provider.ChangeSet, error)
 }
 
 // ProviderTransferAdapter composes a desired package provider with the opaque,
@@ -61,7 +62,22 @@ func (a *ProviderTransferAdapter) Simulate(ctx context.Context, item model.Resou
 		return provider.ChangeSet{}, err
 	}
 	if op.Kind == model.OperationTransfer {
-		changes.Removes = append([]string(nil), op.Removes...)
+		observation, inspectErr := a.desired.Inspect(ctx, item)
+		if inspectErr != nil {
+			return provider.ChangeSet{}, inspectErr
+		}
+		inventory, detectErr := a.legacy.Detect(ctx, a.profile, item, observation)
+		if detectErr != nil {
+			return provider.ChangeSet{}, detectErr
+		}
+		if err := authorizedLegacySubset(inventory.Legacy(), op.Removes); err != nil {
+			return provider.ChangeSet{}, err
+		}
+		legacyChanges, preflightErr := a.legacy.PreflightRemovals(ctx, inventory)
+		if preflightErr != nil {
+			return provider.ChangeSet{}, preflightErr
+		}
+		changes.Removes = legacyChanges.Removes
 	}
 	return changes, nil
 }
@@ -85,13 +101,8 @@ func (a *ProviderTransferAdapter) RemoveLegacy(ctx context.Context, item model.R
 		want[id] = struct{}{}
 	}
 	observed := inventory.Legacy()
-	if len(observed) != len(want) {
-		return failedPhase(op, "legacy inventory changed before removal")
-	}
-	for _, receipt := range observed {
-		if _, ok := want[receipt.Package]; !ok {
-			return failedPhase(op, "legacy inventory changed before removal")
-		}
+	if err := authorizedLegacySubset(observed, op.Removes); err != nil {
+		return failedPhase(op, err.Error())
 	}
 	operations, err := a.legacy.RemovalOperations(inventory)
 	if err != nil {
@@ -106,6 +117,23 @@ func (a *ProviderTransferAdapter) RemoveLegacy(ctx context.Context, item model.R
 		}
 	}
 	return model.OperationResult{OperationID: op.ID, ResourceID: op.ResourceID, Success: true, FinishedAt: time.Now().UTC()}
+}
+func authorizedLegacySubset(observed []legacy.Observation, authorized []string) error {
+	allowed := make(map[string]struct{}, len(authorized))
+	for _, id := range authorized {
+		allowed[id] = struct{}{}
+	}
+	seen := make(map[string]struct{})
+	for _, receipt := range observed {
+		if _, ok := allowed[receipt.Package]; !ok {
+			return errors.New("reconcile: legacy inventory contains unauthorized source")
+		}
+		seen[receipt.Package] = struct{}{}
+	}
+	if len(seen) > len(allowed) {
+		return errors.New("reconcile: legacy inventory contains unauthorized source")
+	}
+	return nil
 }
 func (a *ProviderTransferAdapter) VerifyLegacyAbsent(ctx context.Context, item model.Resource, _ model.Operation) error {
 	desired, err := a.desired.Verify(ctx, item)

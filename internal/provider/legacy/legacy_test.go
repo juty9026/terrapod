@@ -109,6 +109,31 @@ func TestDetectDesiredOnlyLegacyOnlyAndBoth(t *testing.T) {
 	}
 }
 
+func TestPreflightRemovalsRunsRealHandlerSimulationWithoutMutation(t *testing.T) {
+	h := &fakeHandler{receipt: Receipt{Present: true, Prefixes: []string{"/legacy/mise"}, Paths: map[string]string{"rg": "/legacy/mise/bin/rg"}}, changes: provider.ChangeSet{Removes: []string{"aqua:BurntSushi/ripgrep"}}}
+	paths := fakePaths{commands: map[string]string{"rg": "/legacy/mise/bin/rg"}}
+	c, err := newCoordinatorForTest(map[Kind]handler{Mise: h}, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := resource(map[string]string{"legacy.mise.package": "aqua:BurntSushi/ripgrep"})
+	inventory, err := c.Detect(context.Background(), model.ProfileMacOSTerminal, item, model.Observation{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes, err := c.PreflightRemovals(context.Background(), inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes.Removes) != 1 || h.simulateCalls != 1 || h.removeCalls != 0 {
+		t.Fatalf("changes=%#v handler=%#v", changes, h)
+	}
+	h.changes = provider.ChangeSet{Removes: []string{"unmanaged"}}
+	if _, err := c.PreflightRemovals(context.Background(), inventory); err == nil {
+		t.Fatal("unmanaged removal accepted")
+	}
+}
+
 func TestDetectKnownVendorReceipt(t *testing.T) {
 	h := &fakeHandler{receipt: Receipt{Present: true, Paths: map[string]string{"claude": "/Users/test/.local/bin/claude"}}}
 	c, err := newCoordinatorForTest(map[Kind]handler{Vendor: h}, fakePaths{commands: map[string]string{"claude": "/Users/test/.local/bin/claude"}})

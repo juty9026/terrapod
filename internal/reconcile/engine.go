@@ -350,6 +350,10 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 		if !failed[id] {
 			if _, unavailable := summary.Unavailable[id]; !unavailable {
 				item := e.Resources[id]
+				if dependency, blocked := blockedDependency(item, failed, summary.Unavailable); blocked {
+					summary.Unavailable[id] = fmt.Sprintf("final dependency %q is unavailable", dependency)
+					continue
+				}
 				adapter, ok := e.Registry.Lookup(item.Type, item.Provider)
 				if !ok {
 					summary.Unavailable[id] = "no adapter for final verification"
@@ -425,7 +429,7 @@ func (e *Engine) execute(ctx context.Context, item model.Resource, operation mod
 			}
 			return model.Observation{}, e.State.DeleteOwnership(item.ID)
 		}
-		if observed.Provider != item.Provider || observed.Package != item.Package || !reflect.DeepEqual(observed.Paths, owned.Paths) {
+		if !observed.Healthy || observed.Provider != item.Provider || observed.Package != item.Package {
 			return model.Observation{}, errors.New("historical inspection does not match ownership receipt")
 		}
 		if err := ctx.Err(); err != nil {
@@ -541,6 +545,14 @@ func exactRemovals(actual []string, operation model.Operation, target string) bo
 			return false
 		}
 		seen[id] = struct{}{}
+	}
+	if operation.Kind == model.OperationTransfer {
+		for id := range seen {
+			if _, ok := expected[id]; !ok {
+				return false
+			}
+		}
+		return true
 	}
 	if len(seen) != len(expected) {
 		return false
@@ -670,10 +682,12 @@ func validResult(operation model.Operation, result model.OperationResult) error 
 	return nil
 }
 
-func (e *Engine) own(item model.Resource, observed model.Observation) error {
-	paths := make(map[string]string, len(observed.Paths))
-	for key, value := range observed.Paths {
-		paths[key] = value
+func (e *Engine) own(item model.Resource, _ model.Observation) error {
+	paths := make(map[string]string)
+	for key, value := range item.Metadata {
+		if strings.HasPrefix(key, "path.") {
+			paths[strings.TrimPrefix(key, "path.")] = value
+		}
 	}
 	return e.State.PutOwnership(model.Ownership{ResourceID: item.ID, CatalogDigest: e.CatalogDigest, Provider: item.Provider, Package: item.Package, Paths: paths, PriorValues: make(map[string]json.RawMessage)})
 }
