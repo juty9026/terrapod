@@ -210,6 +210,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import sys
 
 helper_path, base_home_arg, base_state_arg, release_arg, temp_arg = sys.argv[1:]
@@ -241,6 +242,61 @@ def assert_snapshot(home, state, expected):
     assert snapshot(home, state) == expected
 
 real_replace = module.os.replace
+
+home, state = scenario("recovery-symlink")
+before = snapshot(home, state)
+recovery_root = state / "terrapod" / "jetendard" / "recovery"
+unrelated = temp / "unrelated-recovery-target"
+unrelated.mkdir(mode=0o755)
+(unrelated / "sentinel.txt").write_text("unrelated\n")
+recovery_root.symlink_to(unrelated, target_is_directory=True)
+unrelated_mode = stat.S_IMODE(unrelated.stat().st_mode)
+try:
+    module.install(home)
+except ValueError as error:
+    assert "recovery" in str(error) and "symlink" in str(error)
+else:
+    raise AssertionError("recovery symlink was accepted")
+assert_snapshot(home, state, before)
+assert stat.S_IMODE(unrelated.stat().st_mode) == unrelated_mode
+assert (unrelated / "sentinel.txt").read_text() == "unrelated\n"
+assert not list(unrelated.glob("rollback-*"))
+
+home, state = scenario("recovery-file")
+before = snapshot(home, state)
+recovery_root = state / "terrapod" / "jetendard" / "recovery"
+recovery_root.write_text("not a directory\n")
+try:
+    module.install(home)
+except ValueError as error:
+    assert "recovery" in str(error) and "directory" in str(error)
+else:
+    raise AssertionError("recovery non-directory was accepted")
+assert_snapshot(home, state, before)
+assert recovery_root.read_text() == "not a directory\n"
+
+home, state = scenario("transaction-creation")
+before = snapshot(home, state)
+recovery_root = state / "terrapod" / "jetendard" / "recovery"
+real_stat = module.os.stat
+verification_attempts = []
+def fail_transaction_verification(path, *args, **kwargs):
+    if kwargs.get("dir_fd") is not None and str(path).startswith("rollback-"):
+        verification_attempts.append(str(path))
+        raise OSError("injected transaction verification failure")
+    return real_stat(path, *args, **kwargs)
+module.os.stat = fail_transaction_verification
+try:
+    module.install(home)
+except OSError as error:
+    assert "injected transaction verification failure" in str(error)
+else:
+    raise AssertionError("transaction verification failure was not injected")
+finally:
+    module.os.stat = real_stat
+assert verification_attempts
+assert_snapshot(home, state, before)
+assert not recovery_root.exists() or not list(recovery_root.glob("rollback-*"))
 
 home, state = scenario("backup-preparation")
 before = snapshot(home, state)

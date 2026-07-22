@@ -5,7 +5,9 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import secrets
 import shutil
+import stat
 import tempfile
 import urllib.request
 import zipfile
@@ -117,11 +119,60 @@ def backup_path(source: Path, destination: Path) -> None:
 
 
 def create_transaction(recovery_root: Path) -> Path:
-    recovery_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    recovery_root.chmod(0o700)
-    transaction = Path(tempfile.mkdtemp(prefix="rollback-", dir=recovery_root))
-    transaction.chmod(0o700)
-    return transaction
+    recovery_root.parent.mkdir(parents=True, exist_ok=True)
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+    parent_fd = os.open(recovery_root.parent, directory_flags)
+    root_fd = None
+    root_created = False
+    transaction_name = None
+    try:
+        try:
+            root_status = os.stat(recovery_root.name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            os.mkdir(recovery_root.name, 0o700, dir_fd=parent_fd)
+            root_created = True
+            root_status = os.stat(recovery_root.name, dir_fd=parent_fd, follow_symlinks=False)
+        if stat.S_ISLNK(root_status.st_mode):
+            raise ValueError(f"Jetendard recovery path must not be a symlink: {recovery_root}")
+        if not stat.S_ISDIR(root_status.st_mode):
+            raise ValueError(f"Jetendard recovery path must be a directory: {recovery_root}")
+        try:
+            root_fd = os.open(recovery_root.name, directory_flags, dir_fd=parent_fd)
+        except OSError as error:
+            raise ValueError(f"Jetendard recovery path must be a real directory: {recovery_root}") from error
+        root_mode = stat.S_IMODE(os.fstat(root_fd).st_mode)
+        if root_mode != 0o700:
+            raise ValueError(f"Jetendard recovery directory must have mode 0700: {recovery_root}")
+        for _ in range(100):
+            candidate = "rollback-" + secrets.token_hex(8)
+            try:
+                os.mkdir(candidate, 0o700, dir_fd=root_fd)
+            except FileExistsError:
+                continue
+            transaction_name = candidate
+            break
+        if transaction_name is None:
+            raise FileExistsError("could not allocate a unique Jetendard recovery transaction")
+        transaction_status = os.stat(transaction_name, dir_fd=root_fd, follow_symlinks=False)
+        if not stat.S_ISDIR(transaction_status.st_mode) or stat.S_IMODE(transaction_status.st_mode) != 0o700:
+            raise ValueError("Jetendard recovery transaction must be a mode-0700 directory")
+        return recovery_root / transaction_name
+    except BaseException:
+        if transaction_name is not None and root_fd is not None:
+            try:
+                os.rmdir(transaction_name, dir_fd=root_fd)
+            except OSError:
+                pass
+        if root_created:
+            try:
+                os.rmdir(recovery_root.name, dir_fd=parent_fd)
+            except OSError:
+                pass
+        raise
+    finally:
+        if root_fd is not None:
+            os.close(root_fd)
+        os.close(parent_fd)
 
 
 def cleanup_transaction(transaction: Path, recovery_root: Path) -> None:
