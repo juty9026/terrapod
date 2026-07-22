@@ -1571,6 +1571,12 @@ ai_cli_tools_brewfile="$(render_template "$ai_cli_tools_data" "Brewfile.ai-cli-t
 development_workspace_ai_brewfile="$(render_template "$development_workspace_data" "Brewfile.ai-cli-tools.tmpl")"
 disabled_ai_cli_tools_brewfile="$(render_template "$ubuntu_data" "Brewfile.ai-cli-tools.tmpl")"
 
+assert_not_contains_text "$ai_cli_tools_installer" "bootstrap_linux_homebrew" "AI installer no longer owns Linuxbrew bootstrap"
+assert_not_contains_text "$ai_cli_tools_installer" "raw.githubusercontent.com/Homebrew/install" "AI installer never downloads Homebrew"
+assert_contains_text "$ai_cli_tools_installer" "/home/linuxbrew/.linuxbrew/bin/brew" "AI installer uses mandatory standard Linuxbrew"
+assert_contains_text "$ai_cli_tools_installer" "HOMEBREW_NO_AUTO_UPDATE=1" "AI bundle disables Homebrew auto-update"
+assert_contains_text "$macos_terminal_apps_bootstrap" "HOMEBREW_NO_AUTO_UPDATE=1" "desktop bundle disables Homebrew auto-update"
+
 for rendered_brewfile in "$ai_cli_tools_brewfile" "$development_workspace_ai_brewfile"; do
   assert_contains_text "$rendered_brewfile" 'cask "antigravity-cli"' "Optional AI Tool Stack declares Antigravity CLI cask"
   assert_contains_text "$rendered_brewfile" 'cask "claude-code"' "Optional AI Tool Stack declares Claude Code cask"
@@ -1605,9 +1611,13 @@ printf '%s\n' "$ai_cli_tools_installer" |
   sed \
     -e "s#/opt/homebrew/bin/brew#$tmp_dir/missing-opt-homebrew-brew#g" \
     -e "s#/usr/local/bin/brew#$tmp_dir/missing-usr-local-brew#g" \
-    -e "s#/home/linuxbrew/.linuxbrew/bin/brew#$tmp_dir/missing-linuxbrew-brew#g" \
+    -e "s#/home/linuxbrew/.linuxbrew/bin/brew#$tmp_dir/linux-ai-brew-bin/brew#g" \
     >"$ai_cli_tools_installer_script"
-printf '%s\n' "$macos_ai_cli_tools_installer" >"$macos_ai_cli_tools_installer_script"
+printf '%s\n' "$macos_ai_cli_tools_installer" |
+  sed \
+    -e "s#/opt/homebrew/bin/brew#$tmp_dir/macos-ai-brew-bin/brew#g" \
+    -e "s#/usr/local/bin/brew#$tmp_dir/missing-usr-local-brew#g" \
+    >"$macos_ai_cli_tools_installer_script"
 sh -n "$ai_cli_tools_installer_script" || fail "enabled Optional AI Tool Stack installer script should be valid sh"
 sh -n "$macos_ai_cli_tools_installer_script" || fail "macOS Optional AI Tool Stack installer script should be valid sh"
 pass "enabled Optional AI Tool Stack installer scripts are valid sh"
@@ -1616,6 +1626,7 @@ write_ai_brew_stub() {
   path="$1"
   write_stub "$path" \
     'printf "%s\n" "brew args:$*" >>"$AI_BREW_LOG"' \
+    'printf "%s\n" "brew auto-update:${HOMEBREW_NO_AUTO_UPDATE:-}" >>"$AI_BREW_LOG"' \
     'case "$1" in' \
     '  shellenv) printf "export PATH=\"%s:$PATH\"\n" "$AI_BREW_BIN" ;;' \
     '  bundle)' \
@@ -1643,6 +1654,7 @@ HOME="$macos_ai_brew_home" XDG_STATE_HOME="$macos_ai_brew_state" \
 macos_ai_brew_log_text="$(cat "$macos_ai_brew_log")"
 assert_contains_text "$macos_ai_brew_log_text" "brew args:shellenv" "macOS Optional AI Tool Stack loads Homebrew shellenv"
 assert_contains_text "$macos_ai_brew_log_text" "brew args:bundle --no-upgrade --file=" "macOS Optional AI Tool Stack installs the common no-upgrade bundle"
+assert_contains_text "$macos_ai_brew_log_text" "brew auto-update:1" "macOS Optional AI Tool Stack disables Homebrew auto-update"
 
 for vendor_url in \
   "https://antigravity.google/cli/install.sh" \
@@ -1656,26 +1668,20 @@ linux_ai_brew_bin="$tmp_dir/linux-ai-brew-bin"
 linux_ai_brew_home="$tmp_dir/linux-ai-brew-home"
 linux_ai_brew_state="$tmp_dir/linux-ai-brew-state"
 linux_ai_brew_log="$tmp_dir/linux-ai-brew.log"
-linux_ai_curl_log="$tmp_dir/linux-ai-curl.log"
 linux_ai_brew_template="$tmp_dir/linux-ai-brew-template"
 mkdir -p "$linux_ai_brew_bin" "$linux_ai_brew_home"
 write_ai_brew_stub "$linux_ai_brew_template"
-write_stub "$linux_ai_brew_bin/uname" 'printf "%s\n" Linux'
-write_stub "$linux_ai_brew_bin/curl" \
-  'printf "%s\n" "curl args:$*" >>"$AI_CURL_LOG"' \
-  'output=' \
-  'while [ "$#" -gt 0 ]; do' \
-  '  if [ "$1" = "-o" ]; then shift; output="$1"; fi' \
-  '  shift' \
-  'done' \
-  '[ -n "$output" ] || exit 2' \
-  'printf "%s\n" "#!/bin/sh" "cp \"$AI_BREW_TEMPLATE\" \"$AI_BREW_BIN/brew\"" "chmod +x \"$AI_BREW_BIN/brew\"" >"$output"'
+cp "$linux_ai_brew_template" "$linux_ai_brew_bin/brew"
+write_stub "$linux_ai_brew_bin/uname" \
+  'case "${1:-}" in' \
+  '  -m) printf "%s\n" x86_64 ;;' \
+  '  *) printf "%s\n" Linux ;;' \
+  'esac'
 HOME="$linux_ai_brew_home" XDG_STATE_HOME="$linux_ai_brew_state" \
   AI_BREW_BIN="$linux_ai_brew_bin" AI_BREW_LOG="$linux_ai_brew_log" AI_BREW_FAIL=0 \
-  AI_BREW_TEMPLATE="$linux_ai_brew_template" AI_CURL_LOG="$linux_ai_curl_log" \
   PATH="$linux_ai_brew_bin:/usr/bin:/bin" sh "$ai_cli_tools_installer_script"
-assert_contains_text "$(cat "$linux_ai_curl_log")" "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh" "Ubuntu Optional AI Tool Stack downloads only the official Homebrew installer"
 assert_contains_text "$(cat "$linux_ai_brew_log")" "brew args:bundle --no-upgrade --file=" "Ubuntu Optional AI Tool Stack installs the common no-upgrade bundle"
+assert_contains_text "$(cat "$linux_ai_brew_log")" "brew auto-update:1" "Ubuntu Optional AI Tool Stack disables Homebrew auto-update"
 
 ai_cli_failure_state="$tmp_dir/ai-cli-failure-state"
 ai_cli_failure_home="$tmp_dir/ai-cli-failure-home"

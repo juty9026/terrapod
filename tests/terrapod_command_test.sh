@@ -950,6 +950,7 @@ chezmoi execute-template \
   --source "$repo_root" \
   --override-data '{"chezmoi":{"os":"linux","sourceDir":"/missing-terrapod-source"},"enableAiCliTools":true}' \
   --file "$repo_root/.chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
+  | sed "s#/home/linuxbrew/.linuxbrew/bin/brew#$fake_warning_bin/brew#g" \
   >"$fake_ai_cli_installer"
 
 if ! HOME="$fake_ai_cli_home" FAKE_INSTALL_WARNING_CALLS="$fake_warning_calls" PATH="$fake_warning_bin:/usr/bin:/bin" /bin/sh "$fake_ai_cli_installer" >"$tmp_dir/fake-ai-cli-installer.out" 2>"$tmp_dir/fake-ai-cli-installer.err"; then
@@ -975,6 +976,7 @@ chezmoi execute-template \
   --source "$repo_root" \
   --override-data '{"chezmoi":{"os":"linux","sourceDir":"/missing-terrapod-source"},"enableAiCliTools":true}' \
   --file "$repo_root/.chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
+  | sed "s#/home/linuxbrew/.linuxbrew/bin/brew#$fake_ai_cli_failure_home/.local/bin/brew#g" \
   >"$fake_ai_cli_failure_installer"
 
 fake_ai_cli_failure_status=0
@@ -1009,6 +1011,7 @@ chezmoi execute-template \
   --source "$repo_root" \
   --override-data "{\"chezmoi\":{\"os\":\"linux\",\"sourceDir\":\"$fake_ai_cli_warning_source\"},\"enableAiCliTools\":true}" \
   --file "$repo_root/.chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
+  | sed "s#/home/linuxbrew/.linuxbrew/bin/brew#$fake_ai_cli_write_failure_home/.local/bin/brew#g" \
   >"$fake_ai_cli_write_failure_installer"
 
 fake_ai_cli_write_failure_status=0

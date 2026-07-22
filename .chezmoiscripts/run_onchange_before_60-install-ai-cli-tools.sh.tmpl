@@ -33,11 +33,9 @@ clear_install_warning() {
 clear_install_warning "$AI_CLI_WARNING_CATEGORY"
 exit 0
 {{ else }}
-homebrew_installer=
 ai_cli_brewfile=
 
 cleanup_ai_cli_install() {
-  [ -z "$homebrew_installer" ] || rm -f "$homebrew_installer"
   [ -z "$ai_cli_brewfile" ] || rm -f "$ai_cli_brewfile"
 }
 
@@ -62,58 +60,22 @@ finish_ai_cli_install() {
   clear_install_warning "$AI_CLI_WARNING_CATEGORY"
 }
 
-find_brew() {
-  if command -v brew >/dev/null 2>&1; then
-    command -v brew
-    return
-  fi
-
-  for candidate in \
-    /opt/homebrew/bin/brew \
-    /usr/local/bin/brew \
-    /home/linuxbrew/.linuxbrew/bin/brew
-  do
-    if [ -x "$candidate" ]; then
-      printf '%s\n' "$candidate"
-      return
-    fi
-  done
-
-  return 1
-}
-
-bootstrap_linux_homebrew() {
-  if [ "$(uname -s)" != "Linux" ]; then
-    return 1
-  fi
-
-  if ! command -v curl >/dev/null 2>&1; then
-    echo "curl is required to install Homebrew for the Optional AI Tool Stack." >&2
-    return 1
-  fi
-
-  homebrew_installer="$(mktemp "${TMPDIR:-/tmp}/terrapod-homebrew-install.XXXXXX")" || return 1
-  if ! curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "$homebrew_installer"; then
-    return 1
-  fi
-
-  NONINTERACTIVE=1 /bin/bash "$homebrew_installer"
+standard_brew_path() {
+  case "{{ .chezmoi.os }}:$(uname -m)" in
+    darwin:arm64) printf '%s\n' /opt/homebrew/bin/brew ;;
+    darwin:x86_64) printf '%s\n' /usr/local/bin/brew ;;
+    linux:x86_64|linux:aarch64|linux:arm64) printf '%s\n' /home/linuxbrew/.linuxbrew/bin/brew ;;
+    *) return 1 ;;
+  esac
 }
 
 setup_brew_environment() {
-  brew_bin="$(find_brew || true)"
-  if [ -z "$brew_bin" ]; then
-    bootstrap_linux_homebrew || return 1
-    brew_bin="$(find_brew || true)"
-  fi
-
-  if [ -z "$brew_bin" ]; then
-    echo "Homebrew is required for the Optional AI Tool Stack." >&2
+  brew_bin="$(standard_brew_path || true)"
+  if [ -z "$brew_bin" ] || [ ! -x "$brew_bin" ]; then
+    echo "Mandatory standard-prefix Homebrew is unavailable for the Optional AI Tool Stack." >&2
     return 1
   fi
-
-  brew_shellenv="$("$brew_bin" shellenv)" || return 1
-  eval "$brew_shellenv"
+  eval "$("$brew_bin" shellenv)"
 }
 
 install_ai_cli_bundle() {
@@ -123,7 +85,7 @@ install_ai_cli_bundle() {
 {{ includeTemplate "Brewfile.ai-cli-tools.tmpl" . }}
 BREWFILE
 
-  "$brew_bin" bundle --no-upgrade --file="$ai_cli_brewfile"
+  HOMEBREW_NO_AUTO_UPDATE=1 "$brew_bin" bundle --no-upgrade --file="$ai_cli_brewfile"
 }
 
 # Optional AI Tool Stack Brewfile checksum: {{ includeTemplate "Brewfile.ai-cli-tools.tmpl" . | sha256sum }}
