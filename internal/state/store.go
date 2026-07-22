@@ -22,6 +22,7 @@ const (
 )
 
 var journalIDPattern = regexp.MustCompile(`^\d{8}T\d{6}\.\d{9}Z-[0-9a-f]{32}$`)
+var afterJournalCompleted func() error
 
 // Store persists state for one caller. Mutating methods are serialized only for
 // concurrent use of this Store; callers must hold a Lock acquired with Acquire
@@ -143,6 +144,14 @@ func (s *Store) BeginOrResume(plan model.Plan) (model.Journal, bool, error) {
 		if err != nil {
 			return model.Journal{}, false, err
 		}
+		if active.Status == "completed" {
+			snapshot.ActiveJournal = nil
+			if err := s.writeSnapshot(snapshot); err != nil {
+				return model.Journal{}, false, err
+			}
+			journal, err := s.newJournal(plan)
+			return journal, false, err
+		}
 		if active.Status != "active" {
 			return model.Journal{}, false, fmt.Errorf("active journal %q has status %q", active.ID, active.Status)
 		}
@@ -214,7 +223,32 @@ func (s *Store) Record(result model.OperationResult) error {
 	if journal.Status != "active" {
 		return fmt.Errorf("journal %q has status %q", journal.ID, journal.Status)
 	}
-	journal.Results = append(journal.Results, result)
+	known := false
+	for _, operation := range journal.Plan.Operations {
+		if operation.ID == result.OperationID && operation.ResourceID == result.ResourceID {
+			known = true
+			break
+		}
+	}
+	if !known {
+		return fmt.Errorf("operation result %q is not in active plan", result.OperationID)
+	}
+	results := make([]model.OperationResult, 0, len(journal.Results)+1)
+	inserted := false
+	for _, existing := range journal.Results {
+		if existing.OperationID == result.OperationID {
+			if !inserted {
+				results = append(results, result)
+				inserted = true
+			}
+			continue
+		}
+		results = append(results, existing)
+	}
+	if !inserted {
+		results = append(results, result)
+	}
+	journal.Results = results
 	return s.writeJournal(journal)
 }
 
@@ -284,6 +318,11 @@ func (s *Store) finish(journalID, status, replacementID string) error {
 	journal.SupersededBy = replacementID
 	if err := s.writeJournal(journal); err != nil {
 		return err
+	}
+	if status == "completed" && afterJournalCompleted != nil {
+		if err := afterJournalCompleted(); err != nil {
+			return err
+		}
 	}
 	snapshot.ActiveJournal = nil
 	return s.writeSnapshot(snapshot)

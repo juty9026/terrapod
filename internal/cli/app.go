@@ -34,23 +34,26 @@ const (
 var beforeOpenLockOwner = func() {}
 
 type Dependencies struct {
-	Stdout      io.Writer
-	Stderr      io.Writer
-	Geteuid     func() int
-	Paths       paths.Layout
-	LoadCatalog func() (catalog.Verified, error)
-	LoadConfig  func() (model.Config, error)
-	OpenState   func() (*state.Store, error)
-	Planner     *planner.Planner
-	Apply       func(context.Context, model.Plan, []model.Resource, string) (reconcile.Summary, error)
+	Stdout         io.Writer
+	Stderr         io.Writer
+	Geteuid        func() int
+	Paths          paths.Layout
+	LoadCatalog    func() (catalog.Verified, error)
+	LoadConfig     func() (model.Config, error)
+	OpenState      func() (*state.Store, error)
+	Planner        *planner.Planner
+	LoadHistorical func() (map[string]model.Catalog, error)
+	Apply          func(context.Context, reconcile.ApplyInput) (reconcile.Summary, error)
 }
 
 type reconciliation struct {
-	catalog model.Catalog
-	config  model.Config
-	plan    model.Plan
-	lock    string
-	digest  string
+	catalog    model.Catalog
+	config     model.Config
+	plan       model.Plan
+	lock       string
+	digest     string
+	historical map[string]model.Catalog
+	snapshot   model.Snapshot
 }
 
 func Run(ctx context.Context, args []string, deps Dependencies) int {
@@ -125,7 +128,7 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 			fmt.Fprintln(stderr, "internal error: reconciliation engine is not configured")
 			return exitFailure
 		}
-		summary, applyErr := deps.Apply(ctx, snapshot.plan, enabledResources(snapshot.catalog, snapshot.config), snapshot.digest)
+		summary, applyErr := deps.Apply(ctx, snapshot.applyInput())
 		renderApplySummary(stdout, summary)
 		if applyErr != nil {
 			fmt.Fprintln(stderr, applyErr)
@@ -201,6 +204,16 @@ func buildReconciliation(ctx context.Context, deps Dependencies, upgrade bool) (
 	if deps.Planner == nil {
 		return reconciliation{}, errors.New("internal error: planner is not configured")
 	}
+	historical := map[string]model.Catalog{}
+	if deps.LoadHistorical != nil {
+		historical, err = deps.LoadHistorical()
+		if err != nil {
+			return reconciliation{}, fmt.Errorf("load historical catalogs: %w", err)
+		}
+		if historical == nil {
+			historical = map[string]model.Catalog{}
+		}
+	}
 	profile, err := configuredProfile(cfg)
 	if err != nil {
 		return reconciliation{}, err
@@ -211,6 +224,7 @@ func buildReconciliation(ctx context.Context, deps Dependencies, upgrade bool) (
 		Config:        cfg,
 		Profile:       profile,
 		Snapshot:      persisted,
+		Historical:    historical,
 		Upgrade:       upgrade,
 	})
 	if err != nil {
@@ -220,7 +234,34 @@ func buildReconciliation(ctx context.Context, deps Dependencies, upgrade bool) (
 	if err != nil {
 		return reconciliation{}, fmt.Errorf("inspect reconciliation lock: %w", err)
 	}
-	return reconciliation{catalog: verified.Catalog, config: cfg, plan: built, lock: lock, digest: verified.Digest}, nil
+	return reconciliation{catalog: verified.Catalog, config: cfg, plan: built, lock: lock, digest: verified.Digest, historical: historical, snapshot: persisted}, nil
+}
+
+func (r reconciliation) applyInput() reconcile.ApplyInput {
+	enabled := enabledResources(r.catalog, r.config)
+	ids := make([]model.ResourceID, len(enabled))
+	enabledSet := make(map[model.ResourceID]struct{}, len(enabled))
+	for index, item := range enabled {
+		ids[index] = item.ID
+		enabledSet[item.ID] = struct{}{}
+	}
+	historical := make(map[model.ResourceID]reconcile.HistoricalResource)
+	for id, owned := range r.snapshot.Ownership {
+		if _, current := enabledSet[id]; current {
+			continue
+		}
+		catalog, ok := r.historical[owned.CatalogDigest]
+		if !ok {
+			continue
+		}
+		for _, item := range catalog.Resources {
+			if item.ID == id {
+				historical[id] = reconcile.HistoricalResource{Resource: item, CatalogDigest: owned.CatalogDigest}
+				break
+			}
+		}
+	}
+	return reconcile.ApplyInput{Plan: r.plan, CurrentResources: append([]model.Resource(nil), r.catalog.Resources...), EnabledIDs: ids, HistoricalResources: historical, CatalogDigest: r.digest}
 }
 
 func configuredProfile(cfg model.Config) (model.Profile, error) {

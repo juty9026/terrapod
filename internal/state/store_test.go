@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,6 +80,66 @@ func TestBeginOrResumeRejectsEmptyPlanID(t *testing.T) {
 	}
 	if _, _, err := store.BeginOrResume(model.Plan{}); err == nil {
 		t.Fatal("empty plan ID accepted")
+	}
+}
+
+func TestBeginOrResumeRecoversCompletedActivePointer(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := model.Plan{ID: "plan", Operations: []model.Operation{{ID: "install", ResourceID: "core.alpha"}}}
+	journal, err := store.Begin(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterJournalCompleted = func() error { return errors.New("crash after completed journal") }
+	t.Cleanup(func() { afterJournalCompleted = nil })
+	if err := store.Complete(journal.ID); err == nil {
+		t.Fatal("crash hook did not fail")
+	}
+	afterJournalCompleted = nil
+	replacement, resumed, err := store.BeginOrResume(plan)
+	if err != nil || resumed || replacement.ID == journal.ID {
+		t.Fatalf("recovery=%#v resumed=%v err=%v", replacement, resumed, err)
+	}
+}
+
+func TestRecordUpsertsOperationResultOnResume(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := model.Plan{ID: "plan", Operations: []model.Operation{{ID: "install", ResourceID: "core.alpha"}}}
+	journal, err := store.Begin(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := model.OperationResult{OperationID: "install", ResourceID: "core.alpha", Detail: "interrupted"}
+	second := model.OperationResult{OperationID: "install", ResourceID: "core.alpha", Success: true, Detail: "verified"}
+	if err := store.Record(first); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := store.readJournal(journal.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy.Results = append(legacy.Results, first)
+	if err := store.writeJournal(legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Record(second); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.readJournal(journal.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Results) != 1 || !got.Results[0].Success || got.Results[0].Detail != "verified" {
+		t.Fatalf("results=%#v", got.Results)
+	}
+	if err := store.Record(model.OperationResult{OperationID: "forged", ResourceID: "core.alpha"}); err == nil {
+		t.Fatal("unknown operation recorded")
 	}
 }
 

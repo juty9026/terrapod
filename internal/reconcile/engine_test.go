@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -13,11 +14,13 @@ import (
 )
 
 type fixtureAdapter struct {
-	present, legacy bool
-	fail            map[string]bool
-	events          []string
-	shared          *[]string
-	simulation      provider.ChangeSet
+	present, legacy              bool
+	fail                         map[string]bool
+	events                       []string
+	shared                       *[]string
+	simulation                   provider.ChangeSet
+	verifyCalls, failVerifyAfter int
+	onExecute                    func()
 }
 
 func (f *fixtureAdapter) event(value string) {
@@ -44,10 +47,17 @@ func (f *fixtureAdapter) Execute(_ context.Context, operation model.Operation) m
 	} else {
 		f.present = true
 	}
+	if f.onExecute != nil {
+		f.onExecute()
+	}
 	return f.result(operation, "execute:"+operation.ID)
 }
 func (f *fixtureAdapter) Verify(_ context.Context, item model.Resource) (model.Observation, error) {
 	f.event("verify:" + string(item.ID))
+	f.verifyCalls++
+	if f.failVerifyAfter > 0 && f.verifyCalls >= f.failVerifyAfter {
+		return model.Observation{}, errors.New("verify failed")
+	}
 	if f.fail["verify:"+string(item.ID)] {
 		return model.Observation{}, errors.New("verify failed")
 	}
@@ -119,8 +129,15 @@ func testEngine(t *testing.T, adapters map[string]*fixtureAdapter, resources ...
 func pkg(id, providerName string, dependencies ...model.ResourceID) model.Resource {
 	return model.Resource{ID: model.ResourceID(id), Type: model.ResourcePackage, Provider: providerName, Package: id, DependsOn: dependencies, VersionPolicy: model.VersionTracked}
 }
+func transferPkg() model.Resource {
+	return model.Resource{ID: "core.ripgrep", Type: model.ResourcePackage, Provider: "homebrew-formula", Package: "ripgrep", VersionPolicy: model.VersionTracked, Metadata: map[string]string{"legacy.mise.package": "aqua:BurntSushi/ripgrep"}}
+}
 func op(item model.Resource, id string, kind model.OperationKind) model.Operation {
-	return model.Operation{ID: id, ResourceID: item.ID, Kind: kind, Provider: item.Provider, Package: item.Package}
+	operation := model.Operation{ID: id, ResourceID: item.ID, Kind: kind, Provider: item.Provider, Package: item.Package}
+	if kind == model.OperationPrune {
+		operation.Removes = []string{item.Package}
+	}
+	return operation
 }
 
 func TestApplyInstallsVerifiesAndCommitsOwnership(t *testing.T) {
@@ -141,15 +158,35 @@ func TestApplyInstallsVerifiesAndCommitsOwnership(t *testing.T) {
 	}
 }
 
-func TestApplyTransferControlsSafePhaseOrder(t *testing.T) {
+func TestApplyInputComposesCurrentAndHistoricalFacts(t *testing.T) {
 	item := pkg("core.alpha", "fixture")
-	adapter := &fixtureAdapter{legacy: true, fail: map[string]bool{}}
+	adapter := &fixtureAdapter{fail: map[string]bool{}}
 	engine, store := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
-	_, err := engine.Apply(context.Background(), model.Plan{ID: "p", Operations: []model.Operation{op(item, "transfer", model.OperationTransfer)}})
+	engine.Resources = nil
+	engine.Enabled = nil
+	engine.ResourceDigests = nil
+	engine.CatalogDigest = ""
+	input := ApplyInput{Plan: model.Plan{ID: "p", Operations: []model.Operation{op(item, "install", model.OperationInstall)}}, CurrentResources: []model.Resource{item}, EnabledIDs: []model.ResourceID{item.ID}, HistoricalResources: map[model.ResourceID]HistoricalResource{}, CatalogDigest: "current"}
+	if _, err := engine.ApplyInput(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ := store.Snapshot()
+	if snapshot.Ownership[item.ID].CatalogDigest != "current" {
+		t.Fatalf("ownership=%#v", snapshot.Ownership[item.ID])
+	}
+}
+
+func TestApplyTransferControlsSafePhaseOrder(t *testing.T) {
+	item := transferPkg()
+	adapter := &fixtureAdapter{legacy: true, fail: map[string]bool{}}
+	engine, store := testEngine(t, map[string]*fixtureAdapter{"homebrew-formula": adapter}, item)
+	operation := op(item, "transfer", model.OperationTransfer)
+	operation.Removes = []string{"aqua:BurntSushi/ripgrep"}
+	_, err := engine.Apply(context.Background(), model.Plan{ID: "p", Operations: []model.Operation{operation}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "inspect:core.alpha,install-desired,verify:core.alpha,remove-legacy,verify-legacy-absent,verify:core.alpha,verify:core.alpha"
+	want := "inspect:core.ripgrep,install-desired,verify:core.ripgrep,remove-legacy,verify-legacy-absent,verify:core.ripgrep,verify:core.ripgrep"
 	if got := strings.Join(adapter.events, ","); got != want {
 		t.Fatalf("events = %s, want %s", got, want)
 	}
@@ -160,10 +197,12 @@ func TestApplyTransferControlsSafePhaseOrder(t *testing.T) {
 }
 
 func TestApplyDoesNotRemoveLegacyWhenDesiredVerificationFails(t *testing.T) {
-	item := pkg("core.alpha", "fixture")
-	adapter := &fixtureAdapter{legacy: true, fail: map[string]bool{"verify:core.alpha": true}}
-	engine, store := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
-	summary, err := engine.Apply(context.Background(), model.Plan{ID: "p", Operations: []model.Operation{op(item, "transfer", model.OperationTransfer)}})
+	item := transferPkg()
+	adapter := &fixtureAdapter{legacy: true, fail: map[string]bool{"verify:core.ripgrep": true}}
+	engine, store := testEngine(t, map[string]*fixtureAdapter{"homebrew-formula": adapter}, item)
+	operation := op(item, "transfer", model.OperationTransfer)
+	operation.Removes = []string{"aqua:BurntSushi/ripgrep"}
+	summary, err := engine.Apply(context.Background(), model.Plan{ID: "p", Operations: []model.Operation{operation}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,6 +279,11 @@ func TestApplyResumeReinspectsActualStateAndPreservesReversePruneOrder(t *testin
 	b := &fixtureAdapter{present: true, fail: map[string]bool{}, shared: &shared}
 	engine, store := testEngine(t, map[string]*fixtureAdapter{"a": a, "b": b}, aItem, bItem)
 	engine.Enabled = nil
+	for _, item := range []model.Resource{aItem, bItem} {
+		if err := store.PutOwnership(model.Ownership{ResourceID: item.ID, CatalogDigest: "signed", Provider: item.Provider, Package: item.Package, Paths: map[string]string{"bin": "/safe/bin"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	plan := model.Plan{ID: "p", Operations: []model.Operation{op(bItem, "prune-b", model.OperationPrune), op(aItem, "prune-a", model.OperationPrune)}}
 	if _, err := store.Begin(plan); err != nil {
 		t.Fatal(err)
@@ -277,7 +321,7 @@ func TestApplyRejectsCrossResourceRemovalAuthority(t *testing.T) {
 	install.RequiresPrivilege = true
 	install.Removes = []string{second.Package}
 	plan := model.Plan{ID: "p", Operations: []model.Operation{install, op(second, "prune", model.OperationPrune)}}
-	if _, err := engine.Apply(context.Background(), plan); err == nil || !strings.Contains(err.Error(), "unauthorized removal") {
+	if _, err := engine.Apply(context.Background(), plan); err == nil || !strings.Contains(err.Error(), "removes") {
 		t.Fatalf("cross-resource removal err=%v", err)
 	}
 	if len(a.events) != 0 || len(b.events) != 0 {
@@ -286,11 +330,17 @@ func TestApplyRejectsCrossResourceRemovalAuthority(t *testing.T) {
 }
 
 func TestApplyFailsClosedOnInitialInspectError(t *testing.T) {
-	for _, kind := range []model.OperationKind{model.OperationInstall, model.OperationAdopt, model.OperationTransfer, model.OperationPrune} {
+	for _, kind := range []model.OperationKind{model.OperationInstall, model.OperationAdopt, model.OperationPrune} {
 		t.Run(string(kind), func(t *testing.T) {
 			item := pkg("core.alpha", "fixture")
 			adapter := &fixtureAdapter{legacy: true, fail: map[string]bool{"inspect:core.alpha": true}}
 			engine, store := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
+			if kind == model.OperationPrune {
+				engine.Enabled = nil
+				if err := store.PutOwnership(model.Ownership{ResourceID: item.ID, CatalogDigest: "signed", Provider: item.Provider, Package: item.Package, Paths: map[string]string{}}); err != nil {
+					t.Fatal(err)
+				}
+			}
 			summary, err := engine.Apply(context.Background(), model.Plan{ID: "p", Operations: []model.Operation{op(item, "operation", kind)}})
 			if err != nil {
 				t.Fatal(err)
@@ -304,7 +354,11 @@ func TestApplyFailsClosedOnInitialInspectError(t *testing.T) {
 				}
 			}
 			snapshot, _ := store.Snapshot()
-			if _, ok := snapshot.Ownership[item.ID]; ok {
+			_, owned := snapshot.Ownership[item.ID]
+			if kind == model.OperationPrune && !owned {
+				t.Fatal("ownership removed after failed inspect")
+			}
+			if kind != model.OperationPrune && owned {
 				t.Fatal("ownership committed")
 			}
 		})
@@ -318,7 +372,7 @@ func TestApplyRejectsUntrustedRemovalAndTypedNilPrivilegeBeforeMutation(t *testi
 	operation := op(item, "install", model.OperationInstall)
 	operation.RequiresPrivilege = true
 	operation.Removes = []string{"victim"}
-	if _, err := engine.Apply(context.Background(), model.Plan{ID: "p", Operations: []model.Operation{operation}}); err == nil || !strings.Contains(err.Error(), "unauthorized removal") {
+	if _, err := engine.Apply(context.Background(), model.Plan{ID: "p", Operations: []model.Operation{operation}}); err == nil || !strings.Contains(err.Error(), "removes") {
 		t.Fatalf("untrusted removal err=%v", err)
 	}
 	if len(adapter.events) != 0 {
@@ -352,6 +406,126 @@ func TestApplyHonorsCanceledContextBeforeMutation(t *testing.T) {
 	}
 }
 
+func TestApplyDoesNotWriteStateAfterContextCanceledByMutation(t *testing.T) {
+	item := pkg("core.alpha", "fixture")
+	ctx, cancel := context.WithCancel(context.Background())
+	adapter := &fixtureAdapter{fail: map[string]bool{}, onExecute: cancel}
+	engine, store := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
+	if _, err := engine.Apply(ctx, model.Plan{ID: "p", Operations: []model.Operation{op(item, "install", model.OperationInstall)}}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v", err)
+	}
+	snapshot, _ := store.Snapshot()
+	if snapshot.ActiveJournal == nil {
+		t.Fatal("interrupted journal was not preserved")
+	}
+	if len(snapshot.ActiveJournal.Results) != 0 {
+		t.Fatalf("result written after cancellation: %#v", snapshot.ActiveJournal.Results)
+	}
+	if _, ok := snapshot.Ownership[item.ID]; ok {
+		t.Fatal("ownership written after cancellation")
+	}
+}
+
+func TestApplyRejectsStaleOrMismatchedHistoricalOwnership(t *testing.T) {
+	item := pkg("core.legacy", "fixture")
+	adapter := &fixtureAdapter{present: true, fail: map[string]bool{}}
+	engine, store := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
+	engine.Enabled = nil
+	plan := model.Plan{ID: "p", Operations: []model.Operation{op(item, "prune", model.OperationPrune)}}
+	if _, err := engine.Apply(context.Background(), plan); err == nil || !strings.Contains(err.Error(), "ownership") {
+		t.Fatalf("stale ownership err=%v", err)
+	}
+	if len(adapter.events) != 0 {
+		t.Fatalf("provider touched=%v", adapter.events)
+	}
+	if err := store.PutOwnership(model.Ownership{ResourceID: item.ID, CatalogDigest: "wrong", Provider: item.Provider, Package: item.Package, Paths: map[string]string{}, PriorValues: map[string]json.RawMessage{}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.Apply(context.Background(), plan); err == nil || !strings.Contains(err.Error(), "ownership") {
+		t.Fatalf("mismatch ownership err=%v", err)
+	}
+	if err := store.PutOwnership(model.Ownership{ResourceID: item.ID, CatalogDigest: "signed", Provider: item.Provider, Package: item.Package, Paths: map[string]string{"bin": "/different"}}); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := engine.Apply(context.Background(), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := summary.Unavailable[item.ID]; !ok || !adapter.present {
+		t.Fatalf("receipt mismatch mutated resource: summary=%#v present=%v", summary, adapter.present)
+	}
+}
+
+func TestApplyRejectsPruneOfEnabledResource(t *testing.T) {
+	item := pkg("core.alpha", "fixture")
+	adapter := &fixtureAdapter{present: true, fail: map[string]bool{}}
+	engine, _ := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
+	if _, err := engine.Apply(context.Background(), model.Plan{ID: "p", Operations: []model.Operation{op(item, "prune", model.OperationPrune)}}); err == nil || !strings.Contains(err.Error(), "enabled resource") {
+		t.Fatalf("err=%v", err)
+	}
+	if len(adapter.events) != 0 {
+		t.Fatalf("provider touched=%v", adapter.events)
+	}
+}
+
+func TestApplyVerifiesNoOpDependencyBeforeDependentMutation(t *testing.T) {
+	dependency, child := pkg("core.dependency", "dep"), pkg("core.child", "child", "core.dependency")
+	depAdapter := &fixtureAdapter{present: false, fail: map[string]bool{}}
+	childAdapter := &fixtureAdapter{fail: map[string]bool{}}
+	engine, _ := testEngine(t, map[string]*fixtureAdapter{"dep": depAdapter, "child": childAdapter}, dependency, child)
+	summary, err := engine.Apply(context.Background(), model.Plan{ID: "p", Operations: []model.Operation{op(child, "install", model.OperationInstall)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := summary.Unavailable[dependency.ID]; !ok {
+		t.Fatalf("summary=%#v", summary)
+	}
+	if len(childAdapter.events) != 0 {
+		t.Fatalf("dependent touched=%v", childAdapter.events)
+	}
+}
+
+func TestApplyResumeSkipsUpgradeAndRestoreWhenAlreadyDesired(t *testing.T) {
+	for _, kind := range []model.OperationKind{model.OperationUpgrade, model.OperationRestore} {
+		t.Run(string(kind), func(t *testing.T) {
+			item := pkg("core.alpha", "fixture")
+			adapter := &fixtureAdapter{present: true, fail: map[string]bool{}}
+			engine, _ := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
+			if _, err := engine.Apply(context.Background(), model.Plan{ID: "p", Operations: []model.Operation{op(item, "mutate", kind)}}); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(strings.Join(adapter.events, ","), "execute:mutate") {
+				t.Fatalf("mutation repeated=%v", adapter.events)
+			}
+		})
+	}
+}
+
+func TestApplyValidatesRemovesForEveryOperationKind(t *testing.T) {
+	item := pkg("core.alpha", "fixture")
+	adapter := &fixtureAdapter{fail: map[string]bool{}}
+	for _, kind := range []model.OperationKind{model.OperationInstall, model.OperationAdopt, model.OperationUpgrade, model.OperationRestore, model.OperationVerify} {
+		t.Run(string(kind), func(t *testing.T) {
+			engine, _ := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
+			operation := op(item, "op", kind)
+			operation.Removes = []string{item.Package}
+			if _, err := engine.Apply(context.Background(), model.Plan{ID: "p", Operations: []model.Operation{operation}}); err == nil || !strings.Contains(err.Error(), "removes") {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+	engine, _ := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
+	prune := op(item, "prune", model.OperationPrune)
+	prune.Removes = []string{item.Package, item.Package}
+	engine.Enabled = nil
+	if err := engine.State.PutOwnership(model.Ownership{ResourceID: item.ID, CatalogDigest: "signed", Provider: item.Provider, Package: item.Package, Paths: map[string]string{}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.Apply(context.Background(), model.Plan{ID: "p2", Operations: []model.Operation{prune}}); err == nil || !strings.Contains(err.Error(), "removes") {
+		t.Fatalf("duplicate prune err=%v", err)
+	}
+}
+
 func TestApplyResumeAfterProviderMutationVerifiesWithoutRepeatingInstall(t *testing.T) {
 	item := pkg("core.alpha", "fixture")
 	adapter := &fixtureAdapter{present: true, fail: map[string]bool{}}
@@ -374,9 +548,9 @@ func TestApplyResumeAfterProviderMutationVerifiesWithoutRepeatingInstall(t *test
 
 func TestApplyDefersOwnershipUntilLastResourceOperation(t *testing.T) {
 	item := pkg("core.alpha", "fixture")
-	adapter := &fixtureAdapter{fail: map[string]bool{"execute:second": true}}
+	adapter := &fixtureAdapter{fail: map[string]bool{}, failVerifyAfter: 2}
 	engine, store := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
-	plan := model.Plan{ID: "p", Operations: []model.Operation{op(item, "first", model.OperationInstall), op(item, "second", model.OperationRestore)}}
+	plan := model.Plan{ID: "p", Operations: []model.Operation{op(item, "first", model.OperationInstall), op(item, "second", model.OperationVerify)}}
 	summary, err := engine.Apply(context.Background(), plan)
 	if err != nil {
 		t.Fatal(err)

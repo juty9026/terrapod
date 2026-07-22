@@ -482,12 +482,12 @@ func TestApplyBuildsNonUpgradePlanAndRendersDeterministicSummary(t *testing.T) {
 		"core.alpha": {{ID: "upgrade", Kind: model.OperationUpgrade, Provider: "fixture"}, {ID: "install", Kind: model.OperationInstall, Provider: "fixture"}},
 	}
 	called := false
-	deps.Apply = func(_ context.Context, plan model.Plan, resources []model.Resource, digest string) (reconcile.Summary, error) {
+	deps.Apply = func(_ context.Context, input reconcile.ApplyInput) (reconcile.Summary, error) {
 		called = true
-		if digest != "fixture-digest" || len(resources) != 4 {
-			t.Fatalf("apply facts: digest=%q resources=%d", digest, len(resources))
+		if input.CatalogDigest != "fixture-digest" || len(input.CurrentResources) != 5 || len(input.EnabledIDs) != 4 {
+			t.Fatalf("apply facts: %#v", input)
 		}
-		for _, operation := range plan.Operations {
+		for _, operation := range input.Plan.Operations {
 			if operation.Kind == model.OperationUpgrade {
 				t.Fatal("apply enabled upgrade")
 			}
@@ -505,12 +505,26 @@ func TestApplyBuildsNonUpgradePlanAndRendersDeterministicSummary(t *testing.T) {
 
 func TestApplyReturnsUnavailableWithUsefulSummaryOnResourceFailure(t *testing.T) {
 	deps, _ := fixtureDependencies(t, "ready.json")
-	deps.Apply = func(context.Context, model.Plan, []model.Resource, string) (reconcile.Summary, error) {
+	deps.Apply = func(context.Context, reconcile.ApplyInput) (reconcile.Summary, error) {
 		return reconcile.Summary{Ready: []model.ResourceID{"core.alpha"}, Unavailable: map[model.ResourceID]string{"core.beta": "verify failed"}}, errors.New("journal warning")
 	}
 	code, stdout, stderr := run(t, []string{"apply"}, deps)
 	if code != exitUnavailable || !strings.Contains(stdout, "core.beta: verify failed") || !strings.Contains(stderr, "journal warning") {
 		t.Fatalf("apply=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
+func TestApplyInputPreservesCurrentEnabledAndHistoricalAuthorities(t *testing.T) {
+	current := model.Resource{ID: "core.alpha", Type: model.ResourcePackage, Provider: "new", Package: "alpha", VersionPolicy: model.VersionTracked, Metadata: map[string]string{planner.EnabledByConfigMetadataKey: "enableAlpha"}}
+	historical := model.Resource{ID: "core.alpha", Type: model.ResourcePackage, Provider: "old", Package: "alpha-old", VersionPolicy: model.VersionTracked}
+	r := reconciliation{catalog: model.Catalog{Resources: []model.Resource{current}}, config: model.Config{Terrapod: map[string]any{"profile": "vps-shell", "enableAlpha": false}}, plan: model.Plan{ID: "p"}, digest: "current", historical: map[string]model.Catalog{"old-digest": {Resources: []model.Resource{historical}}}, snapshot: model.Snapshot{Ownership: map[model.ResourceID]model.Ownership{"core.alpha": {ResourceID: "core.alpha", CatalogDigest: "old-digest", Provider: "old", Package: "alpha-old"}}}}
+	input := r.applyInput()
+	if len(input.CurrentResources) != 1 || len(input.EnabledIDs) != 0 {
+		t.Fatalf("current/enabled lost: %#v", input)
+	}
+	got, ok := input.HistoricalResources["core.alpha"]
+	if !ok || got.Resource.Provider != "old" || got.CatalogDigest != "old-digest" {
+		t.Fatalf("historical lost: %#v", input.HistoricalResources)
 	}
 }
 

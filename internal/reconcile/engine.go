@@ -36,6 +36,18 @@ type Summary struct {
 	Unavailable map[model.ResourceID]string
 }
 
+type HistoricalResource struct {
+	Resource      model.Resource
+	CatalogDigest string
+}
+type ApplyInput struct {
+	Plan                model.Plan
+	CurrentResources    []model.Resource
+	EnabledIDs          []model.ResourceID
+	HistoricalResources map[model.ResourceID]HistoricalResource
+	CatalogDigest       string
+}
+
 type Engine struct {
 	Registry        resource.Registry
 	State           *state.Store
@@ -46,6 +58,35 @@ type Engine struct {
 	ResourceDigests map[model.ResourceID]string
 	CatalogDigest   string
 	EffectiveUID    func() int
+}
+
+func (e *Engine) ApplyInput(ctx context.Context, input ApplyInput) (Summary, error) {
+	copyEngine := *e
+	copyEngine.Resources = make(map[model.ResourceID]model.Resource, len(input.CurrentResources)+len(input.HistoricalResources))
+	for _, item := range input.CurrentResources {
+		if _, duplicate := copyEngine.Resources[item.ID]; duplicate {
+			return Summary{}, fmt.Errorf("reconcile: duplicate current resource %q", item.ID)
+		}
+		copyEngine.Resources[item.ID] = item
+	}
+	copyEngine.Enabled = append([]model.ResourceID(nil), input.EnabledIDs...)
+	copyEngine.ResourceDigests = make(map[model.ResourceID]string, len(input.HistoricalResources))
+	enabled := make(map[model.ResourceID]struct{}, len(input.EnabledIDs))
+	for _, id := range input.EnabledIDs {
+		enabled[id] = struct{}{}
+	}
+	for id, historical := range input.HistoricalResources {
+		if historical.Resource.ID != id {
+			return Summary{}, fmt.Errorf("reconcile: historical resource index mismatch for %q", id)
+		}
+		if _, current := enabled[id]; current {
+			return Summary{}, fmt.Errorf("reconcile: enabled resource %q also supplied as historical", id)
+		}
+		copyEngine.Resources[id] = historical.Resource
+		copyEngine.ResourceDigests[id] = historical.CatalogDigest
+	}
+	copyEngine.CatalogDigest = input.CatalogDigest
+	return copyEngine.Apply(ctx, input.Plan)
 }
 
 func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, retErr error) {
@@ -66,6 +107,9 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 	if e.CatalogDigest == "" {
 		return summary, errors.New("reconcile: verified catalog digest is required")
 	}
+	if err := ctx.Err(); err != nil {
+		return summary, err
+	}
 	enabledSet := make(map[model.ResourceID]struct{}, len(e.Enabled))
 	for _, id := range e.Enabled {
 		if _, duplicate := enabledSet[id]; duplicate {
@@ -77,16 +121,15 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 			return summary, fmt.Errorf("reconcile: enabled resource %q is not signed", id)
 		}
 	}
-	for id := range plan.Unavailable {
-		if _, ok := enabledSet[id]; !ok {
-			return summary, fmt.Errorf("reconcile: unavailable resource %q is not enabled", id)
-		}
-	}
 	lock, err := state.Acquire(e.LockDir, "tpod apply")
 	if err != nil {
 		return summary, fmt.Errorf("reconcile: acquire state lock: %w", err)
 	}
 	defer func() { retErr = errors.Join(retErr, lock.Release()) }()
+	persisted, err := e.State.Snapshot()
+	if err != nil {
+		return summary, fmt.Errorf("reconcile: read locked snapshot: %w", err)
+	}
 
 	indexed := make(map[model.ResourceID]model.Resource, len(plan.Operations))
 	adapters := make(map[model.ResourceID]resource.Adapter, len(plan.Operations))
@@ -105,8 +148,17 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 			return summary, err
 		}
 		indexed[operation.ResourceID], adapters[operation.ResourceID] = item, adapter
-		if _, current := enabledSet[item.ID]; !current && e.ResourceDigests[item.ID] == "" {
-			return summary, fmt.Errorf("reconcile: historical resource %q lacks catalog digest authority", item.ID)
+		_, current := enabledSet[item.ID]
+		if current && operation.Kind == model.OperationPrune {
+			return summary, fmt.Errorf("reconcile: enabled resource %q cannot be pruned", item.ID)
+		}
+		if !current {
+			if operation.Kind != model.OperationPrune {
+				return summary, fmt.Errorf("reconcile: historical resource %q only supports prune", item.ID)
+			}
+			if err := validateHistoricalOwnership(item, e.ResourceDigests[item.ID], persisted.Ownership[item.ID]); err != nil {
+				return summary, err
+			}
 		}
 		allowed := authorizedRemovals[item.ID]
 		if allowed == nil {
@@ -122,6 +174,9 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 		}
 		for _, declaration := range declarations {
 			allowed[declaration.Package] = struct{}{}
+		}
+		if err := validateRemoves(item, operation, declarations); err != nil {
+			return summary, err
 		}
 	}
 	for _, operation := range plan.Operations {
@@ -153,6 +208,47 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 			return summary, fmt.Errorf("reconcile: simulation removals for %q do not match authorized operation", operation.ID)
 		}
 	}
+	operated := make(map[model.ResourceID]struct{}, len(indexed))
+	for id := range indexed {
+		operated[id] = struct{}{}
+	}
+	for _, id := range dependencyOrder(e.Enabled, e.Resources) {
+		if _, unavailable := summary.Unavailable[id]; unavailable {
+			continue
+		}
+		if _, hasOperation := operated[id]; hasOperation {
+			continue
+		}
+		item := e.Resources[id]
+		if dependency, blocked := blockedDependency(item, map[model.ResourceID]bool{}, summary.Unavailable); blocked {
+			summary.Unavailable[id] = fmt.Sprintf("dependency %q is unavailable", dependency)
+			continue
+		}
+		adapter, ok := e.Registry.Lookup(item.Type, item.Provider)
+		if !ok {
+			summary.Unavailable[id] = "no adapter for preflight verification"
+			continue
+		}
+		if _, err := verifyDesired(ctx, adapter, item); err != nil {
+			summary.Unavailable[id] = "preflight verification: " + err.Error()
+		}
+	}
+	if privileged {
+		needed := false
+		for _, operation := range plan.Operations {
+			if !operation.RequiresPrivilege {
+				continue
+			}
+			item := indexed[operation.ResourceID]
+			if _, unavailable := summary.Unavailable[item.ID]; unavailable {
+				continue
+			}
+			if _, blocked := blockedDependency(item, map[model.ResourceID]bool{}, summary.Unavailable); !blocked {
+				needed = true
+			}
+		}
+		privileged = needed
+	}
 	if privileged {
 		if isNil(e.Privilege) {
 			return summary, errors.New("reconcile: privilege acquisition is not configured")
@@ -176,14 +272,14 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 	for _, operation := range plan.Operations {
 		item, adapter := indexed[operation.ResourceID], adapters[operation.ResourceID]
 		if failed[item.ID] {
-			if err := e.record(operation, false, "blocked by earlier resource failure"); err != nil {
+			if err := e.record(ctx, operation, false, "blocked by earlier resource failure"); err != nil {
 				return summary, err
 			}
 			continue
 		}
 		if dependency, blocked := blockedDependency(item, failed, summary.Unavailable); blocked {
 			e.setUnavailable(&summary, failed, item.ID, fmt.Sprintf("dependency %q is unavailable", dependency))
-			if err := e.record(operation, false, summary.Unavailable[item.ID]); err != nil {
+			if err := e.record(ctx, operation, false, summary.Unavailable[item.ID]); err != nil {
 				return summary, err
 			}
 			continue
@@ -193,10 +289,10 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 			_ = reason
 			continue
 		}
-		observed, err := e.execute(ctx, item, operation, adapter)
+		observed, err := e.execute(ctx, item, operation, adapter, persisted.Ownership[item.ID])
 		if err != nil {
 			e.setUnavailable(&summary, failed, item.ID, err.Error())
-			if recordErr := e.record(operation, false, err.Error()); recordErr != nil {
+			if recordErr := e.record(ctx, operation, false, err.Error()); recordErr != nil {
 				return summary, recordErr
 			}
 			continue
@@ -215,13 +311,13 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 			}
 			if verifyErr != nil {
 				e.setUnavailable(&summary, failed, item.ID, verifyErr.Error())
-				if recordErr := e.record(operation, false, verifyErr.Error()); recordErr != nil {
+				if recordErr := e.record(ctx, operation, false, verifyErr.Error()); recordErr != nil {
 					return summary, recordErr
 				}
 				continue
 			}
 		}
-		if err := e.record(operation, true, "verified"); err != nil {
+		if err := e.record(ctx, operation, true, "verified"); err != nil {
 			return summary, err
 		}
 	}
@@ -241,6 +337,9 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 				summary.Ready = append(summary.Ready, id)
 			}
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return summary, err
 	}
 	if err := e.State.Complete(journal.ID); err != nil {
 		return summary, fmt.Errorf("reconcile: complete journal: %w", err)
@@ -275,7 +374,7 @@ func (e *Engine) authorize(operation model.Operation) (model.Resource, resource.
 	return item, adapter, nil
 }
 
-func (e *Engine) execute(ctx context.Context, item model.Resource, operation model.Operation, adapter resource.Adapter) (model.Observation, error) {
+func (e *Engine) execute(ctx context.Context, item model.Resource, operation model.Operation, adapter resource.Adapter, owned model.Ownership) (model.Observation, error) {
 	if operation.Kind == model.OperationPrune {
 		observed, err := adapter.Inspect(ctx, item)
 		if err != nil {
@@ -286,6 +385,9 @@ func (e *Engine) execute(ctx context.Context, item model.Resource, operation mod
 				return model.Observation{}, err
 			}
 			return model.Observation{}, e.State.DeleteOwnership(item.ID)
+		}
+		if observed.Provider != item.Provider || observed.Package != item.Package || !reflect.DeepEqual(observed.Paths, owned.Paths) {
+			return model.Observation{}, errors.New("historical inspection does not match ownership receipt")
 		}
 		if err := ctx.Err(); err != nil {
 			return model.Observation{}, err
@@ -346,7 +448,7 @@ func (e *Engine) execute(ctx context.Context, item model.Resource, operation mod
 	if operation.Kind == model.OperationVerify {
 		return verifyDesired(ctx, adapter, item)
 	}
-	if operation.Kind == model.OperationInstall || operation.Kind == model.OperationAdopt {
+	if operation.Kind == model.OperationInstall || operation.Kind == model.OperationAdopt || operation.Kind == model.OperationUpgrade || operation.Kind == model.OperationRestore {
 		observed, err := adapter.Inspect(ctx, item)
 		if err != nil {
 			return model.Observation{}, fmt.Errorf("inspect resource before %s: %w", operation.Kind, err)
@@ -412,6 +514,83 @@ func exactRemovals(actual []string, operation model.Operation, target string) bo
 	return true
 }
 
+func validateRemoves(item model.Resource, operation model.Operation, declarations []legacydecl.Declaration) error {
+	seen := make(map[string]struct{}, len(operation.Removes))
+	for _, id := range operation.Removes {
+		if id == "" {
+			return fmt.Errorf("reconcile: operation %q removes contains an empty package", operation.ID)
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return fmt.Errorf("reconcile: operation %q removes contains duplicate %q", operation.ID, id)
+		}
+		seen[id] = struct{}{}
+	}
+	expected := make(map[string]struct{})
+	switch operation.Kind {
+	case model.OperationPrune:
+		expected[item.Package] = struct{}{}
+	case model.OperationTransfer:
+		for _, declaration := range declarations {
+			expected[declaration.Package] = struct{}{}
+		}
+		if len(seen) == 0 {
+			return fmt.Errorf("reconcile: operation %q removes has no legacy source", operation.ID)
+		}
+		for id := range seen {
+			if _, ok := expected[id]; !ok {
+				return fmt.Errorf("reconcile: operation %q removes is not authorized by its legacy declarations", operation.ID)
+			}
+		}
+		return nil
+	case model.OperationInstall, model.OperationAdopt, model.OperationUpgrade, model.OperationRestore, model.OperationVerify:
+	}
+	if len(seen) != len(expected) {
+		return fmt.Errorf("reconcile: operation %q removes does not match %s semantics", operation.ID, operation.Kind)
+	}
+	for id := range expected {
+		if _, ok := seen[id]; !ok {
+			return fmt.Errorf("reconcile: operation %q removes does not match %s semantics", operation.ID, operation.Kind)
+		}
+	}
+	return nil
+}
+
+func validateHistoricalOwnership(item model.Resource, digest string, owned model.Ownership) error {
+	if digest == "" || owned.ResourceID != item.ID || owned.Provider != item.Provider || owned.Package != item.Package || owned.CatalogDigest != digest {
+		return fmt.Errorf("reconcile: historical ownership for %q does not match signed authority", item.ID)
+	}
+	return nil
+}
+
+func dependencyOrder(ids []model.ResourceID, resources map[model.ResourceID]model.Resource) []model.ResourceID {
+	enabled := make(map[model.ResourceID]struct{}, len(ids))
+	for _, id := range ids {
+		enabled[id] = struct{}{}
+	}
+	state := make(map[model.ResourceID]uint8)
+	result := make([]model.ResourceID, 0, len(ids))
+	var visit func(model.ResourceID)
+	visit = func(id model.ResourceID) {
+		if state[id] != 0 {
+			return
+		}
+		state[id] = 1
+		for _, dependency := range resources[id].DependsOn {
+			if _, ok := enabled[dependency]; ok {
+				visit(dependency)
+			}
+		}
+		state[id] = 2
+		result = append(result, id)
+	}
+	sorted := append([]model.ResourceID(nil), ids...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	for _, id := range sorted {
+		visit(id)
+	}
+	return result
+}
+
 func verifyDesired(ctx context.Context, adapter resource.Adapter, item model.Resource) (model.Observation, error) {
 	observed, err := adapter.Verify(ctx, item)
 	if err != nil {
@@ -445,14 +624,13 @@ func (e *Engine) own(item model.Resource, observed model.Observation) error {
 	for key, value := range observed.Paths {
 		paths[key] = value
 	}
-	digest := e.CatalogDigest
-	if specific := e.ResourceDigests[item.ID]; specific != "" {
-		digest = specific
-	}
-	return e.State.PutOwnership(model.Ownership{ResourceID: item.ID, CatalogDigest: digest, Provider: item.Provider, Package: item.Package, Paths: paths, PriorValues: make(map[string]json.RawMessage)})
+	return e.State.PutOwnership(model.Ownership{ResourceID: item.ID, CatalogDigest: e.CatalogDigest, Provider: item.Provider, Package: item.Package, Paths: paths, PriorValues: make(map[string]json.RawMessage)})
 }
 
-func (e *Engine) record(operation model.Operation, success bool, detail string) error {
+func (e *Engine) record(ctx context.Context, operation model.Operation, success bool, detail string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return e.State.Record(model.OperationResult{OperationID: operation.ID, ResourceID: operation.ResourceID, Success: success, Detail: detail, FinishedAt: time.Now().UTC()})
 }
 
