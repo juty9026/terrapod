@@ -1,0 +1,21 @@
+{{ if eq .chezmoi.os "darwin" -}}
+#!/bin/sh
+set -u
+
+warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
+font_helper="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/executable_jetendard-font"
+# Jetendard font helper checksum: {{ include "dot_local/lib/terrapod/executable_jetendard-font" | sha256sum }}
+. "$warnings_lib"
+
+if command -v python3 >/dev/null 2>&1 && python3 "$font_helper" install; then
+  terrapod_install_warning_clear jetendard-font
+  printf '%s\n' "Jetendard is ready. Restart Ghostty or Zed if an existing window still uses a cached font."
+  exit 0
+fi
+
+terrapod_install_warning_write \
+  jetendard-font \
+  "Jetendard font install needs attention" \
+  "Restore Python and GitHub access, then rerun tpod apply." || exit 1
+exit 0
+{{- end }}

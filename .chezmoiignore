@@ -31,7 +31,12 @@ tests/**
 .chezmoiscripts/00-bootstrap-homebrew.sh
 .chezmoiscripts/01-retry-homebrew-core.sh
 .chezmoiscripts/01-retry-homebrew-desktop-apps.sh
+.chezmoiscripts/02-retry-jetendard-font.sh
 .chezmoiscripts/50-open-karabiner-if-needed.sh
+.chezmoiscripts/65-install-jetendard-font.sh
+.chezmoiscripts/70-apply-jetendard-settings.sh
+.local/lib/terrapod/jetendard-font
+.local/lib/terrapod/jetendard-settings
 .local/lib/terrapod/homebrew-core-bundle.sh
 .config/ghostty
 .config/ghostty/**

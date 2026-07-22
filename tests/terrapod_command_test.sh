@@ -735,7 +735,7 @@ pass "install warning markers honor XDG_STATE_HOME"
 marker_categories="$(
   sh -c '. "$1"; terrapod_install_warning_categories' sh "$install_warnings_lib"
 )"
-expected_marker_categories="$(printf '%s\n' homebrew-core homebrew-desktop-apps ubuntu-bootstrap shell-integrations mise-tools optional-ai-cli-tools)"
+expected_marker_categories="$(printf '%s\n' homebrew-core homebrew-desktop-apps ubuntu-bootstrap shell-integrations mise-tools optional-ai-cli-tools jetendard-font jetendard-settings)"
 
 if [ "$marker_categories" != "$expected_marker_categories" ]; then
   printf '%s\n' "expected marker categories:" >&2
@@ -745,6 +745,20 @@ if [ "$marker_categories" != "$expected_marker_categories" ]; then
   fail "install warning marker categories are explicit stable slugs"
 fi
 pass "install warning marker categories are explicit stable slugs"
+
+for warning_category in jetendard-font jetendard-settings; do
+  if ! sh -c '. "$1"; terrapod_install_warning_is_category "$2"' sh "$install_warnings_lib" "$warning_category"; then
+    fail "install warning marker accepts category: $warning_category"
+  fi
+done
+pass "install warning marker accepts Jetendard categories"
+
+for warning_category in jetendard_font jetendard_setting jetendard-fonts; do
+  if sh -c '. "$1"; terrapod_install_warning_is_category "$2"' sh "$install_warnings_lib" "$warning_category"; then
+    fail "install warning marker rejects unknown Jetendard spelling: $warning_category"
+  fi
+done
+pass "install warning marker rejects unknown Jetendard category spellings"
 
 HOME="$marker_home" XDG_STATE_HOME="$marker_xdg_state" sh -c \
   '. "$1"; terrapod_install_warning_write homebrew-core "Homebrew core install needs attention" "Run tpod apply after fixing the Homebrew bundle error."' \
@@ -2958,7 +2972,7 @@ HOME="$core_apply_home" XDG_STATE_HOME="$core_apply_state" sh -c \
   '. "$1"; terrapod_install_warning_write homebrew-core "Homebrew core install needs attention" "old apply core warning."' \
   sh "$install_warnings_lib"
 
-if ! HOME="$core_apply_home" XDG_STATE_HOME="$core_apply_state" TERRAPOD_CHEZMOI_CONFIG="$core_apply_config" MACOS_BREW_LOG="$core_apply_log" MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_CASKS="font-d2coding" PATH="$core_apply_bin:/usr/bin:/bin" \
+if ! HOME="$core_apply_home" XDG_STATE_HOME="$core_apply_state" TERRAPOD_CHEZMOI_CONFIG="$core_apply_config" MACOS_BREW_LOG="$core_apply_log" MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_FORMULAE="btop" PATH="$core_apply_bin:/usr/bin:/bin" \
   /bin/sh "$terrapod" apply >"$tmp_dir/core-apply-retry-failure.out" 2>"$tmp_dir/core-apply-retry-failure.err"; then
   printf '%s\n' "core apply retry failure stdout:" >&2
   sed 's/^/  /' "$tmp_dir/core-apply-retry-failure.out" >&2
@@ -2968,7 +2982,7 @@ if ! HOME="$core_apply_home" XDG_STATE_HOME="$core_apply_state" TERRAPOD_CHEZMOI
 fi
 
 core_apply_marker_text="$(cat "$core_apply_marker")"
-assert_contains "$core_apply_marker_text" "failed casks: font-d2coding" "Terrapod apply replaces core marker with current failed cask detail"
+assert_contains "$core_apply_marker_text" "failed formulae: btop" "Terrapod apply replaces core marker with current failed formula detail"
 assert_not_contains "$core_apply_marker_text" "old apply core warning" "Terrapod apply removes stale core marker guidance after failed retry"
 
 rm -f "$CHEZMOI_APPLY_ARGS_FILE" "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
