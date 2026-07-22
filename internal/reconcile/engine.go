@@ -724,6 +724,14 @@ func validateHistoricalOwnership(item model.Resource, digest string, owned model
 		}
 		return nil
 	}
+	if item.Type == model.ResourceIntegration {
+		for key, receipt := range owned.Paths {
+			if key == "" || !strings.Contains(key, "#") || !integrationReceiptPattern.MatchString(receipt) {
+				return fmt.Errorf("reconcile: historical integration ownership for %q is malformed", item.ID)
+			}
+		}
+		return nil
+	}
 	expected := make(map[string]string)
 	for key, value := range item.Metadata {
 		if strings.HasPrefix(key, "path.") {
@@ -742,6 +750,7 @@ func signedManagedScope(item model.Resource) (string, bool) {
 }
 
 var gitReceiptPattern = regexp.MustCompile(`^(file|link):[0-9a-f]{64}$`)
+var integrationReceiptPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 func validGitCheckoutOwnership(item model.Resource, paths map[string]string) bool {
 	destination := item.Metadata["git.destination"]
@@ -831,7 +840,7 @@ func validResult(operation model.Operation, result model.OperationResult) error 
 
 func (e *Engine) own(item model.Resource, observed model.Observation) error {
 	paths := make(map[string]string)
-	if item.Type == model.ResourceManagedFiles || item.Type == model.ResourceGitCheckout || item.Type == model.ResourceArchive {
+	if item.Type == model.ResourceManagedFiles || item.Type == model.ResourceGitCheckout || item.Type == model.ResourceArchive || item.Type == model.ResourceIntegration {
 		for path, digest := range observed.Paths {
 			paths[path] = digest
 		}

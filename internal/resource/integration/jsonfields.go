@@ -13,6 +13,7 @@ import (
 type fieldValue struct {
 	Exists bool
 	Value  any
+	Raw    []byte
 }
 
 func decodeJSON(contents []byte) (map[string]any, error) {
@@ -47,6 +48,14 @@ func pointerParts(pointer string) ([]string, error) {
 	raw := strings.Split(pointer[1:], "/")
 	parts := make([]string, len(raw))
 	for i, part := range raw {
+		for at := 0; at < len(part); at++ {
+			if part[at] == '~' && (at+1 >= len(part) || (part[at+1] != '0' && part[at+1] != '1')) {
+				return nil, fmt.Errorf("invalid JSON pointer escape in %q", pointer)
+			}
+			if part[at] == '~' {
+				at++
+			}
+		}
 		part = strings.ReplaceAll(part, "~1", "/")
 		part = strings.ReplaceAll(part, "~0", "~")
 		if part == "" {

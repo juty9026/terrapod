@@ -124,6 +124,7 @@ func (a *Adapter) Inspect(ctx context.Context, item model.Resource) (model.Obser
 	if err != nil {
 		return model.Observation{}, err
 	}
+	pruneReplay := a.activePrune(item.ID)
 	present := len(targets) > 0 || d.pathGlob != ""
 	healthy := true
 	paths := make(map[string]string)
@@ -143,9 +144,21 @@ func (a *Adapter) Inspect(ctx context.Context, item model.Resource) (model.Obser
 				return model.Observation{}, fmt.Errorf("integration: %s: %w", target.relative, err)
 			}
 			if !current.Exists || !sameValue(current.Value, desired) {
-				healthy = false
+				matchesPrior := false
+				if pruneReplay {
+					prior, ok, _ := decodePrior(owned.PriorValues[fieldKey(target.relative, pointer)])
+					matchesPrior = ok && sameField(current, prior)
+				}
+				if !matchesPrior {
+					healthy = false
+				}
 			}
 			paths[fieldKey(target.relative, pointer)] = digestValue(current)
+		}
+	}
+	for key, digest := range owned.Paths {
+		if _, exists := paths[key]; !exists {
+			paths[key] = digest
 		}
 	}
 	// A matching unowned setting still needs one Adopt execution to capture its prior value.
@@ -157,6 +170,22 @@ func (a *Adapter) Inspect(ctx context.Context, item model.Resource) (model.Obser
 		detail = "settings match [redacted]"
 	}
 	return model.Observation{Present: present, Healthy: healthy, Provider: item.Provider, Package: item.Package, Paths: paths, Detail: detail}, nil
+}
+
+func (a *Adapter) activePrune(id model.ResourceID) bool {
+	if a.State == nil {
+		return false
+	}
+	snapshot, err := a.State.Snapshot()
+	if err != nil || snapshot.ActiveJournal == nil || snapshot.ActiveJournal.Status != "active" {
+		return false
+	}
+	for _, op := range snapshot.ActiveJournal.Plan.Operations {
+		if op.ResourceID == id && op.Kind == model.OperationPrune {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Adapter) Verify(ctx context.Context, item model.Resource) (model.Observation, error) {
@@ -198,62 +227,77 @@ func (a *Adapter) Plan(ctx context.Context, item model.Resource, _ model.Observa
 		if err := validatePriorKeys(d, owned.PriorValues); err != nil {
 			return nil, err
 		}
+		if err := validateManagedKeys(d, owned.Paths); err != nil {
+			return nil, err
+		}
 	}
 	targets, err := a.targets(d)
 	if err != nil {
 		return nil, err
 	}
-	changed, receiptMissing := false, false
+	changed, receiptUpdate := false, false
+	authorization := &model.IntegrationAuthorization{Version: 1, Fields: make(map[string]model.IntegrationFieldAuthorization)}
 	for _, target := range targets {
 		doc, _, err := a.readDocument(d, target)
 		if err != nil {
 			return nil, err
 		}
 		for pointer, desired := range d.fields {
+			key := fieldKey(target.relative, pointer)
 			current, err := doc.get(pointer)
 			if err != nil {
 				return nil, err
 			}
-			matchesDesired := sameField(current, fieldValue{Exists: true, Value: desired})
+			desiredState := fieldValue{Exists: true, Value: desired}
+			desiredDigest := digestValue(desiredState)
+			matchesDesired := sameField(current, desiredState)
+			fieldAuth := model.IntegrationFieldAuthorization{Current: pathState(current), DesiredDigest: desiredDigest}
 			if owned.ResourceID == "" {
 				changed = changed || !matchesDesired
+				authorization.Fields[key] = fieldAuth
 				continue
 			}
-			_, hasPrior := owned.PriorValues[fieldKey(target.relative, pointer)]
-			if !hasPrior {
-				if d.pathGlob == "" {
-					return nil, fmt.Errorf("integration: missing prior receipt for %s%s", target.relative, pointer)
+			last, hasLast := owned.Paths[key]
+			fieldAuth.LastManagedDigest = last
+			if !hasLast {
+				prior, hasPrior, decodeErr := decodePrior(owned.PriorValues[key])
+				if decodeErr != nil {
+					return nil, decodeErr
 				}
-				receiptMissing = true
+				if !hasPrior && d.pathGlob == "" {
+					return nil, fmt.Errorf("integration: missing ownership receipt for %s%s", target.relative, pointer)
+				}
+				if hasPrior && !sameField(current, prior) && !matchesDesired {
+					return nil, fmt.Errorf("integration conflict at %s%s: field changed during interrupted takeover", target.relative, pointer)
+				}
+				receiptUpdate = true
 				changed = changed || !matchesDesired
-				continue
+			} else {
+				currentDigest := digestValue(current)
+				if currentDigest != last && !matchesDesired {
+					return nil, fmt.Errorf("integration conflict at %s%s: field differs from last managed value", target.relative, pointer)
+				}
+				changed = changed || !matchesDesired
+				receiptUpdate = receiptUpdate || last != desiredDigest
 			}
-			if matchesDesired {
-				continue
-			}
-			changed = true
-			prior, ok, err := decodePrior(owned.PriorValues[fieldKey(target.relative, pointer)])
-			if err != nil {
-				return nil, err
-			}
-			if !ok || !sameField(current, prior) {
-				return nil, fmt.Errorf("integration conflict at %s%s: field changed after Terrapod apply", target.relative, pointer)
-			}
+			authorization.Fields[key] = fieldAuth
 		}
 	}
-	if !changed && !receiptMissing && owned.ResourceID != "" {
+	if !changed && !receiptUpdate && owned.ResourceID != "" {
 		return nil, nil
 	}
 	if changed && d.handler == HandlerJetendardOrca && a.appRunning("Orca") {
 		return nil, errors.New("integration deferred: Orca is running; quit Orca and retry")
 	}
 	kind := model.OperationInstall
-	if !changed {
+	if !changed && owned.ResourceID == "" {
 		kind = model.OperationAdopt
 	} else if owned.ResourceID != "" {
-		kind = model.OperationRestore
+		kind = model.OperationUpgrade
 	}
-	return []model.Operation{operation(item, kind)}, nil
+	op := operation(item, kind)
+	op.IntegrationAuthorization = authorization
+	return []model.Operation{op}, nil
 }
 
 func (a *Adapter) PlanHistorical(_ context.Context, item model.Resource, _ model.Observation, owned model.Ownership) ([]model.Operation, error) {
@@ -274,28 +318,39 @@ func (a *Adapter) PlanHistorical(_ context.Context, item model.Resource, _ model
 	if err := validatePriorKeys(d, owned.PriorValues); err != nil {
 		return nil, err
 	}
+	if err := validateManagedKeys(d, owned.Paths); err != nil {
+		return nil, err
+	}
 	needsMutation := false
+	authorization := &model.IntegrationAuthorization{Version: 1, Fields: make(map[string]model.IntegrationFieldAuthorization)}
 	for _, target := range targets {
 		doc, _, err := a.readDocument(d, target)
 		if err != nil {
 			return nil, err
 		}
 		for pointer, desired := range d.fields {
+			key := fieldKey(target.relative, pointer)
 			current, err := doc.get(pointer)
 			if err != nil {
 				return nil, err
 			}
-			prior, ok, err := decodePrior(owned.PriorValues[fieldKey(target.relative, pointer)])
+			prior, ok, err := decodePrior(owned.PriorValues[key])
 			if err != nil {
 				return nil, err
 			}
 			if !ok {
 				return nil, fmt.Errorf("integration: missing prior receipt for %s%s", target.relative, pointer)
 			}
-			if !sameField(current, fieldValue{Exists: true, Value: desired}) && !sameField(current, prior) {
+			desiredDigest := digestValue(fieldValue{Exists: true, Value: desired})
+			last, hasLast := owned.Paths[key]
+			if !hasLast || last != desiredDigest {
+				return nil, fmt.Errorf("integration: last managed receipt mismatch for %s%s", target.relative, pointer)
+			}
+			if digestValue(current) != last && !sameField(current, prior) {
 				return nil, fmt.Errorf("integration conflict at %s%s: refusing to prune a user edit", target.relative, pointer)
 			}
 			needsMutation = needsMutation || !sameField(current, prior)
+			authorization.Fields[key] = model.IntegrationFieldAuthorization{Current: pathState(current), DesiredDigest: desiredDigest, LastManagedDigest: last}
 		}
 	}
 	if needsMutation && d.handler == HandlerJetendardOrca && a.appRunning("Orca") {
@@ -303,6 +358,7 @@ func (a *Adapter) PlanHistorical(_ context.Context, item model.Resource, _ model
 	}
 	op := operation(item, model.OperationPrune)
 	op.Removes = []string{item.Package}
+	op.IntegrationAuthorization = authorization
 	return []model.Operation{op}, nil
 }
 
@@ -353,6 +409,9 @@ func (a *Adapter) execute(ctx context.Context, item model.Resource, op model.Ope
 		if err != nil {
 			return err
 		}
+		if err := a.validateMutation(d, op, owned, true); err != nil {
+			return err
+		}
 		needsMutation, err := a.requiresRestore(d, owned)
 		if err != nil {
 			return err
@@ -360,7 +419,7 @@ func (a *Adapter) execute(ctx context.Context, item model.Resource, op model.Ope
 		if needsMutation && d.handler == HandlerJetendardOrca && a.appRunning("Orca") {
 			return errors.New("integration deferred: Orca is running; quit Orca and retry")
 		}
-		if err := a.restore(d, owned); err != nil {
+		if err := a.restore(d, owned, op); err != nil {
 			return err
 		}
 		a.markPruned(item.ID)
@@ -384,6 +443,9 @@ func (a *Adapter) execute(ctx context.Context, item model.Resource, op model.Ope
 	if err != nil {
 		return err
 	}
+	if err := a.validateMutation(d, op, owned, false); err != nil {
+		return err
+	}
 	if owned.ResourceID == "" || d.pathGlob != "" {
 		priors, err := a.captureMissing(d, targets, owned.PriorValues)
 		if err != nil {
@@ -398,7 +460,85 @@ func (a *Adapter) execute(ctx context.Context, item model.Resource, op model.Ope
 			return fmt.Errorf("integration: persist prior values: %w", err)
 		}
 	}
-	return a.apply(d, targets)
+	if err := a.apply(d, targets, op, owned); err != nil {
+		return err
+	}
+	if owned.Paths == nil {
+		owned.Paths = make(map[string]string)
+	}
+	for key, field := range op.IntegrationAuthorization.Fields {
+		owned.Paths[key] = field.DesiredDigest
+	}
+	if err := a.State.PutOwnership(owned); err != nil {
+		return fmt.Errorf("integration: persist managed field identities: %w", err)
+	}
+	return nil
+}
+
+func (a *Adapter) validateMutation(d declaration, op model.Operation, owned model.Ownership, prune bool) error {
+	auth := op.IntegrationAuthorization
+	if auth == nil || auth.Version != 1 {
+		return errors.New("integration: operation field authorization is required")
+	}
+	targets, err := a.targets(d)
+	if err != nil {
+		return err
+	}
+	expected := make(map[string]struct{})
+	for _, target := range targets {
+		doc, _, err := a.readDocument(d, target)
+		if err != nil {
+			return err
+		}
+		for pointer, desired := range d.fields {
+			key := fieldKey(target.relative, pointer)
+			expected[key] = struct{}{}
+			field, ok := auth.Fields[key]
+			if !ok {
+				return fmt.Errorf("integration conflict: operation omits %s", key)
+			}
+			desiredDigest := digestValue(fieldValue{Exists: true, Value: desired})
+			if field.DesiredDigest != desiredDigest {
+				return errors.New("integration: operation desired value does not match signed declaration")
+			}
+			stored, hasStored := owned.Paths[key]
+			if prune {
+				if !hasStored || stored != field.LastManagedDigest {
+					return errors.New("integration: prune last-managed receipt mismatch")
+				}
+			} else if hasStored && stored != field.LastManagedDigest && stored != desiredDigest {
+				return errors.New("integration: operation last-managed receipt mismatch")
+			}
+			current, err := doc.get(pointer)
+			if err != nil {
+				return err
+			}
+			if err := validateCurrentMutation(key, current, field, owned, prune); err != nil {
+				return fmt.Errorf("integration conflict at %s%s: field changed after plan", target.relative, pointer)
+			}
+		}
+	}
+	if len(expected) != len(auth.Fields) {
+		return errors.New("integration: operation authorizes undeclared fields")
+	}
+	return nil
+}
+
+func validateCurrentMutation(key string, current fieldValue, field model.IntegrationFieldAuthorization, owned model.Ownership, prune bool) error {
+	allowed := samePathState(current, field.Current)
+	if prune {
+		prior, ok, err := decodePrior(owned.PriorValues[key])
+		if err != nil {
+			return err
+		}
+		allowed = allowed || (ok && sameField(current, prior))
+	} else {
+		allowed = allowed || digestValue(current) == field.DesiredDigest
+	}
+	if !allowed {
+		return errors.New("field changed")
+	}
+	return nil
 }
 
 func (a *Adapter) requiresApply(d declaration, targets []target) (bool, error) {
@@ -478,7 +618,7 @@ func (a *Adapter) captureMissing(d declaration, targets []target, existing map[s
 	return priors, nil
 }
 
-func (a *Adapter) apply(d declaration, targets []target) error {
+func (a *Adapter) apply(d declaration, targets []target, op model.Operation, owned model.Ownership) error {
 	type change struct {
 		target target
 		doc    *document
@@ -494,6 +634,14 @@ func (a *Adapter) apply(d declaration, targets []target) error {
 			current, err := doc.get(pointer)
 			if err != nil {
 				return err
+			}
+			key := fieldKey(target.relative, pointer)
+			field, ok := op.IntegrationAuthorization.Fields[key]
+			if !ok {
+				return errors.New("integration: missing field authorization")
+			}
+			if err := validateCurrentMutation(key, current, field, owned, false); err != nil {
+				return fmt.Errorf("integration conflict at %s%s: field changed immediately before mutation", target.relative, pointer)
 			}
 			if sameField(current, fieldValue{Exists: true, Value: value}) {
 				continue
@@ -519,7 +667,7 @@ func (a *Adapter) apply(d declaration, targets []target) error {
 	return nil
 }
 
-func (a *Adapter) restore(d declaration, owned model.Ownership) error {
+func (a *Adapter) restore(d declaration, owned model.Ownership, op model.Operation) error {
 	targets, err := a.targets(d)
 	if err != nil {
 		return err
@@ -538,7 +686,19 @@ func (a *Adapter) restore(d declaration, owned model.Ownership) error {
 			continue
 		}
 		for pointer := range d.fields {
-			prior, ok, err := decodePrior(owned.PriorValues[fieldKey(target.relative, pointer)])
+			current, err := doc.get(pointer)
+			if err != nil {
+				return err
+			}
+			key := fieldKey(target.relative, pointer)
+			field, ok := op.IntegrationAuthorization.Fields[key]
+			if !ok {
+				return errors.New("integration: missing field authorization")
+			}
+			if err := validateCurrentMutation(key, current, field, owned, true); err != nil {
+				return fmt.Errorf("integration conflict at %s%s: field changed immediately before prune", target.relative, pointer)
+			}
+			prior, ok, err := decodePrior(owned.PriorValues[key])
 			if err != nil {
 				return err
 			}
@@ -546,7 +706,13 @@ func (a *Adapter) restore(d declaration, owned model.Ownership) error {
 				return fmt.Errorf("integration: missing prior receipt for %s%s", target.relative, pointer)
 			}
 			if prior.Exists {
-				if err := doc.set(pointer, prior.Value); err != nil {
+				var err error
+				if len(prior.Raw) > 0 {
+					err = doc.setRaw(pointer, prior.Raw)
+				} else {
+					err = doc.set(pointer, prior.Value)
+				}
+				if err != nil {
 					return err
 				}
 			} else {
@@ -701,6 +867,7 @@ func (a *Adapter) safePath(relative string, allowGlob bool) (string, error) {
 type document struct {
 	format, text string
 	root         map[string]any
+	plist        *plistSpanDocument
 }
 
 func (a *Adapter) readDocument(d declaration, target target) (*document, bool, error) {
@@ -738,10 +905,11 @@ func (a *Adapter) readDocument(d declaration, target target) (*document, bool, e
 		_, err = parseJSONC(doc.text)
 	case "plist":
 		if !exists {
-			doc.root = make(map[string]any)
+			doc.text = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\">\n<dict>\n</dict>\n</plist>\n"
 		} else {
-			doc.root, err = decodePlist(contents)
+			doc.text = string(contents)
 		}
+		doc.plist, err = parsePlistSpans(doc.text)
 	}
 	if err != nil {
 		return nil, false, fmt.Errorf("integration: malformed %s config %s: %w", d.format, target.relative, err)
@@ -751,6 +919,9 @@ func (a *Adapter) readDocument(d declaration, target target) (*document, bool, e
 func (d *document) get(pointer string) (fieldValue, error) {
 	if d.format == "jsonc" {
 		return jsoncGet(d.text, pointer)
+	}
+	if d.format == "plist" {
+		return d.plist.get(pointer)
 	}
 	return getField(d.root, pointer)
 }
@@ -771,12 +942,39 @@ func (d *document) set(pointer string, value any) error {
 		}
 		return err
 	}
+	if d.format == "plist" {
+		text, err := d.plist.set(pointer, value)
+		if err == nil {
+			d.text = text
+			d.plist, err = parsePlistSpans(text)
+		}
+		return err
+	}
 	return setField(d.root, pointer, value)
+}
+func (d *document) setRaw(pointer string, raw []byte) error {
+	if d.format != "plist" {
+		return d.set(pointer, json.RawMessage(raw))
+	}
+	text, err := d.plist.setRaw(pointer, raw)
+	if err == nil {
+		d.text = text
+		d.plist, err = parsePlistSpans(text)
+	}
+	return err
 }
 func (d *document) remove(pointer string) error {
 	if d.format == "jsonc" {
 		text, err := jsoncRemove(d.text, pointer)
 		d.text = text
+		return err
+	}
+	if d.format == "plist" {
+		text, err := d.plist.remove(pointer)
+		if err == nil {
+			d.text = text
+			d.plist, err = parsePlistSpans(text)
+		}
 		return err
 	}
 	return removeField(d.root, pointer)
@@ -786,7 +984,7 @@ func (d *document) bytes() ([]byte, error) {
 	case "jsonc":
 		return []byte(d.text), nil
 	case "plist":
-		return encodePlist(d.root)
+		return []byte(d.text), nil
 	default:
 		return encodeJSON(d.root)
 	}
@@ -958,6 +1156,10 @@ func encodePrior(value fieldValue) (json.RawMessage, error) {
 		case time.Time:
 			typeName = "date"
 		}
+		if len(value.Raw) > 0 {
+			typeName = "plist-raw"
+			value.Value = base64.StdEncoding.EncodeToString(value.Raw)
+		}
 		contents, err := json.Marshal(value.Value)
 		if err != nil {
 			return nil, err
@@ -1004,6 +1206,25 @@ func decodePrior(raw json.RawMessage) (fieldValue, bool, error) {
 			return fieldValue{}, false, err
 		}
 		value = parsed
+	case "plist-raw":
+		encoded, ok := value.(string)
+		if !ok {
+			return fieldValue{}, false, errors.New("integration: invalid plist prior")
+		}
+		decoded, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			return fieldValue{}, false, err
+		}
+		parsed, err := parsePlistSpans("<?xml version=\"1.0\"?><plist><dict><key>x</key>" + string(decoded) + "</dict></plist>")
+		if err != nil {
+			return fieldValue{}, false, err
+		}
+		field, err := parsed.get("/x")
+		if err != nil {
+			return fieldValue{}, false, err
+		}
+		value = field.Value
+		return fieldValue{Exists: true, Value: value, Raw: decoded}, true, nil
 	case "":
 	default:
 		return fieldValue{}, false, errors.New("integration: invalid prior type")
@@ -1036,6 +1257,31 @@ func validatePriorKeys(d declaration, values map[string]json.RawMessage) error {
 	}
 	return nil
 }
+func validateManagedKeys(d declaration, values map[string]string) error {
+	for key, digest := range values {
+		split := strings.LastIndex(key, "#")
+		if split < 0 || len(digest) != 71 || !strings.HasPrefix(digest, "sha256:") {
+			return errors.New("integration: malformed last-managed receipt")
+		}
+		if _, err := hex.DecodeString(digest[7:]); err != nil {
+			return errors.New("integration: malformed last-managed digest")
+		}
+		relative, pointer := key[:split], key[split+1:]
+		if _, ok := d.fields[pointer]; !ok {
+			return errors.New("integration: last-managed field is outside signed declaration")
+		}
+		if d.path != "" && relative != filepath.ToSlash(filepath.Clean(d.path)) {
+			return errors.New("integration: last-managed path is outside signed declaration")
+		}
+		if d.pathGlob != "" {
+			matched, err := filepath.Match(filepath.FromSlash(d.pathGlob), filepath.FromSlash(relative))
+			if err != nil || !matched {
+				return errors.New("integration: last-managed path is outside signed glob")
+			}
+		}
+	}
+	return nil
+}
 func sameField(a, b fieldValue) bool {
 	return a.Exists == b.Exists && (!a.Exists || sameValue(a.Value, b.Value))
 }
@@ -1045,9 +1291,18 @@ func sameValue(a, b any) bool {
 	return string(left) == string(right)
 }
 func digestValue(value fieldValue) string {
-	raw, _ := json.Marshal(value)
+	raw, _ := json.Marshal(struct {
+		Exists bool `json:"exists"`
+		Value  any  `json:"value,omitempty"`
+	}{value.Exists, value.Value})
 	sum := sha256.Sum256(raw)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+func pathState(value fieldValue) model.ManagedFilePathState {
+	return model.ManagedFilePathState{Exists: value.Exists, Digest: digestValue(value)}
+}
+func samePathState(value fieldValue, state model.ManagedFilePathState) bool {
+	return value.Exists == state.Exists && digestValue(value) == state.Digest
 }
 func mustRelative(root, path string) string { relative, _ := filepath.Rel(root, path); return relative }
 func sameStrings(a, b []string) bool {

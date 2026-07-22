@@ -109,6 +109,37 @@ func TestAbsentFieldPruneRemovesOnlyTouchedField(t *testing.T) {
 	}
 }
 
+func TestPruneReplayAcceptsAlreadyRestoredPrior(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, "settings.json")
+	mustWrite(t, path, []byte(`{"font":"Original"}`), 0o600)
+	store, _ := state.Open(filepath.Join(t.TempDir(), "state"))
+	a := &Adapter{Home: home, State: store}
+	item := jsonItem("integration.prune-replay", "settings.json", map[string]any{"/font": "Managed"})
+	op := mustSinglePlan(t, a, item, model.Ownership{})
+	if result := executeAuthorized(t, a, store, item, op); !result.Success {
+		t.Fatal(result.Detail)
+	}
+	owned := mustOwnership(t, store, item.ID)
+	completeJournal(t, store)
+	ops, err := a.PlanHistorical(context.Background(), item, model.Observation{}, owned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Begin(model.Plan{ID: "prune-replay", Operations: ops, Unavailable: map[model.ResourceID]string{}}); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, path, []byte(`{"font":"Original"}`), 0o600)
+	restarted := &Adapter{Home: home, State: store}
+	observed, err := restarted.Inspect(context.Background(), item)
+	if err != nil || !observed.Healthy || !observed.Present {
+		t.Fatalf("partial prune inspect=%#v err=%v", observed, err)
+	}
+	if result := restarted.ExecuteResource(context.Background(), item, ops[0]); !result.Success {
+		t.Fatal(result.Detail)
+	}
+}
+
 func TestPostApplyEditIsConflict(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -125,6 +156,107 @@ func TestPostApplyEditIsConflict(t *testing.T) {
 	mustWrite(t, path, []byte(`{"font":"User Choice"}`), 0o600)
 	if _, err := a.Plan(context.Background(), item, model.Observation{}, owned); err == nil || !strings.Contains(err.Error(), "conflict") {
 		t.Fatalf("wanted conflict, got %v", err)
+	}
+}
+
+func TestDesiredUpdateUsesLastManagedValueNotOriginalPrior(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, "settings.json")
+	mustWrite(t, path, []byte(`{"font":"Original"}`), 0o600)
+	store, _ := state.Open(filepath.Join(t.TempDir(), "state"))
+	a := &Adapter{Home: home, State: store}
+	first := jsonItem("integration.update", "settings.json", map[string]any{"/font": "A"})
+	op := mustSinglePlan(t, a, first, model.Ownership{})
+	if result := executeAuthorized(t, a, store, first, op); !result.Success {
+		t.Fatal(result.Detail)
+	}
+	completeJournal(t, store)
+	owned := mustOwnership(t, store, first.ID)
+	second := jsonItem("integration.update", "settings.json", map[string]any{"/font": "B"})
+	op = mustSinglePlan(t, a, second, owned)
+	if op.Kind != model.OperationUpgrade {
+		t.Fatalf("kind=%s", op.Kind)
+	}
+	if result := executeAuthorized(t, a, store, second, op); !result.Success {
+		t.Fatal(result.Detail)
+	}
+	if string(mustRead(t, path)) != "{\n  \"font\": \"B\"\n}\n" {
+		t.Fatalf("update=%s", mustRead(t, path))
+	}
+	owned = mustOwnership(t, store, first.ID)
+	if len(owned.PriorValues) != 1 || len(owned.Paths) != 1 {
+		t.Fatalf("receipt=%#v", owned)
+	}
+	completeJournal(t, store)
+	prune, err := a.PlanHistorical(context.Background(), second, model.Observation{}, owned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := executeAuthorized(t, a, store, second, prune[0]); !result.Success {
+		t.Fatal(result.Detail)
+	}
+	var restored map[string]any
+	if err := json.Unmarshal(mustRead(t, path), &restored); err != nil {
+		t.Fatal(err)
+	}
+	if restored["font"] != "Original" {
+		t.Fatalf("restored=%#v", restored)
+	}
+	completeJournal(t, store)
+	mustWrite(t, path, []byte(`{"font":"User"}`), 0o600)
+	if _, err := a.Plan(context.Background(), second, model.Observation{}, owned); err == nil || !strings.Contains(err.Error(), "conflict") {
+		t.Fatalf("user edit accepted: %v", err)
+	}
+}
+
+func TestExecuteRejectsEditAfterPlan(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, "settings.json")
+	mustWrite(t, path, []byte(`{"font":"A"}`), 0o600)
+	store, _ := state.Open(filepath.Join(t.TempDir(), "state"))
+	a := &Adapter{Home: home, State: store}
+	item := jsonItem("integration.race", "settings.json", map[string]any{"/font": "B"})
+	op := mustSinglePlan(t, a, item, model.Ownership{})
+	mustWrite(t, path, []byte(`{"font":"User"}`), 0o600)
+	result := executeAuthorized(t, a, store, item, op)
+	if result.Success || !strings.Contains(result.Detail, "conflict") {
+		t.Fatalf("result=%#v", result)
+	}
+	if string(mustRead(t, path)) != `{"font":"User"}` {
+		t.Fatal("user edit overwritten")
+	}
+}
+
+func TestUpdateExecuteAndReplayRejectPostPlanEdit(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, "settings.json")
+	mustWrite(t, path, []byte(`{"font":"Original"}`), 0o600)
+	store, _ := state.Open(filepath.Join(t.TempDir(), "state"))
+	a := &Adapter{Home: home, State: store}
+	first := jsonItem("integration.update-race", "settings.json", map[string]any{"/font": "A"})
+	op := mustSinglePlan(t, a, first, model.Ownership{})
+	if result := executeAuthorized(t, a, store, first, op); !result.Success {
+		t.Fatal(result.Detail)
+	}
+	completeJournal(t, store)
+	second := jsonItem("integration.update-race", "settings.json", map[string]any{"/font": "B"})
+	owned := mustOwnership(t, store, first.ID)
+	op = mustSinglePlan(t, a, second, owned)
+	mustWrite(t, path, []byte(`{"font":"User"}`), 0o600)
+	result := executeAuthorized(t, a, store, second, op)
+	if result.Success || !strings.Contains(result.Detail, "conflict") {
+		t.Fatalf("update race=%#v", result)
+	}
+	// Restore the authorized old value, apply once, then edit before an exact journal replay.
+	mustWrite(t, path, []byte(`{"font":"A"}`), 0o600)
+	result = a.ExecuteResource(context.Background(), second, op)
+	if !result.Success {
+		t.Fatal(result.Detail)
+	}
+	mustWrite(t, path, []byte(`{"font":"User after replay"}`), 0o600)
+	result = a.ExecuteResource(context.Background(), second, op)
+	if result.Success || !strings.Contains(result.Detail, "conflict") {
+		t.Fatalf("replay race=%#v", result)
 	}
 }
 
@@ -188,7 +320,7 @@ func TestDynamicProfileCapturesLaterPriorWithoutRewrite(t *testing.T) {
 	mustWrite(t, second, body, 0o600)
 	owned := mustOwnership(t, store, item.ID)
 	op = mustSinglePlan(t, a, item, owned)
-	if op.Kind != model.OperationAdopt {
+	if op.Kind != model.OperationUpgrade {
 		t.Fatalf("kind=%s", op.Kind)
 	}
 	if result := executeAuthorized(t, a, store, item, op); !result.Success {
@@ -284,6 +416,97 @@ func TestPlistFieldsRoundTrip(t *testing.T) {
 	}
 	if values["font"] != "Monaco" || values["keep"] != true {
 		t.Fatalf("plist restore: %#v", values)
+	}
+}
+
+func TestPlistSurgicalMutationPreservesUnrelatedBytes(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, "settings.plist")
+	body := `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- before -->
+  <key>keep</key><integer>01</integer>
+  <key>font</key>  <string>Monaco</string><!-- after -->
+</dict>
+</plist>
+`
+	mustWrite(t, path, []byte(body), 0o600)
+	store, _ := state.Open(filepath.Join(t.TempDir(), "state"))
+	a := &Adapter{Home: home, State: store}
+	item := jsonItem("integration.plist-surgical", "settings.plist", map[string]any{"/font": "Jetendard"})
+	item.Provider = ProviderPlistFields
+	item.Metadata[MetadataFormat] = "plist"
+	op := mustSinglePlan(t, a, item, model.Ownership{})
+	if result := executeAuthorized(t, a, store, item, op); !result.Success {
+		t.Fatal(result.Detail)
+	}
+	got := string(mustRead(t, path))
+	want := strings.Replace(body, "<string>Monaco</string>", "<string>Jetendard</string>", 1)
+	if got != want {
+		t.Fatalf("surgical apply\ngot:\n%s\nwant:\n%s", got, want)
+	}
+	owned := mustOwnership(t, store, item.ID)
+	completeJournal(t, store)
+	prune, err := a.PlanHistorical(context.Background(), item, model.Observation{}, owned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := executeAuthorized(t, a, store, item, prune[0]); !result.Success {
+		t.Fatal(result.Detail)
+	}
+	if got := string(mustRead(t, path)); got != body {
+		t.Fatalf("surgical restore differs:\n%s", got)
+	}
+}
+
+func TestPlistAbsentFieldRoundTripIsByteExact(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, "settings.plist")
+	body := `<?xml version="1.0"?>
+<plist><dict>
+  <!-- keep -->
+  <key>keep</key><string>x</string>
+</dict></plist>
+`
+	mustWrite(t, path, []byte(body), 0o600)
+	store, _ := state.Open(filepath.Join(t.TempDir(), "state"))
+	a := &Adapter{Home: home, State: store}
+	item := jsonItem("integration.plist-absent", "settings.plist", map[string]any{"/font": "Jetendard"})
+	item.Provider = ProviderPlistFields
+	item.Metadata[MetadataFormat] = "plist"
+	op := mustSinglePlan(t, a, item, model.Ownership{})
+	if result := executeAuthorized(t, a, store, item, op); !result.Success {
+		t.Fatal(result.Detail)
+	}
+	owned := mustOwnership(t, store, item.ID)
+	completeJournal(t, store)
+	prune, err := a.PlanHistorical(context.Background(), item, model.Observation{}, owned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := executeAuthorized(t, a, store, item, prune[0]); !result.Success {
+		t.Fatal(result.Detail)
+	}
+	if got := string(mustRead(t, path)); got != body {
+		t.Fatalf("round trip differs\ngot=%q\nwant=%q", got, body)
+	}
+}
+
+func TestPlistRejectsMalformedTokens(t *testing.T) {
+	for _, body := range []string{`<plist><dict><key>x</key>junk<string>y</string></dict></plist>`, `<plist><dict><key>x</key><array>junk<string>y</string></array></dict></plist>`, `<plist><dict><key>x</key><string>y</dict></plist>`, `<plist><dict><key>x</key><?bad value?><string>y</string></dict></plist>`} {
+		if _, err := parsePlistSpans(body); err == nil {
+			t.Fatalf("accepted %q", body)
+		}
+	}
+}
+
+func TestRejectsInvalidJSONPointerEscapes(t *testing.T) {
+	for _, pointer := range []string{"/~2", "/bad~", "/~01~2"} {
+		if _, err := pointerParts(pointer); err == nil {
+			t.Fatalf("accepted %q", pointer)
+		}
 	}
 }
 

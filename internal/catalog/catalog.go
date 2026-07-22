@@ -290,11 +290,26 @@ func validateIntegrationMetadata(resource model.Resource) error {
 		return fmt.Errorf("resource %q has malformed integration fields", resource.ID)
 	}
 	for pointer := range fields {
-		if !strings.HasPrefix(pointer, "/") || pointer == "/" || strings.Contains(pointer, "//") {
+		if !validJSONPointer(pointer) {
 			return fmt.Errorf("resource %q has invalid integration field path %q", resource.ID, pointer)
 		}
 	}
 	return nil
+}
+
+func validJSONPointer(pointer string) bool {
+	if !strings.HasPrefix(pointer, "/") || pointer == "/" || strings.Contains(pointer, "//") {
+		return false
+	}
+	for i := 0; i < len(pointer); i++ {
+		if pointer[i] == '~' {
+			if i+1 >= len(pointer) || (pointer[i+1] != '0' && pointer[i+1] != '1') {
+				return false
+			}
+			i++
+		}
+	}
+	return true
 }
 
 func validateManagedFileScopes(resources []model.Resource) error {

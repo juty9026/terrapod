@@ -136,6 +136,18 @@ type Operation struct {
 	Removes                  []string
 	Detail                   string
 	ManagedFileAuthorization *ManagedFileAuthorization `json:"managedFileAuthorization,omitempty"`
+	IntegrationAuthorization *IntegrationAuthorization `json:"integrationAuthorization,omitempty"`
+}
+
+type IntegrationFieldAuthorization struct {
+	Current           ManagedFilePathState `json:"current"`
+	DesiredDigest     string               `json:"desiredDigest"`
+	LastManagedDigest string               `json:"lastManagedDigest,omitempty"`
+}
+
+type IntegrationAuthorization struct {
+	Version int                                      `json:"version"`
+	Fields  map[string]IntegrationFieldAuthorization `json:"fields"`
 }
 
 type OperationResult struct {

