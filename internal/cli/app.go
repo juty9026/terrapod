@@ -54,6 +54,7 @@ type reconciliation struct {
 	digest     string
 	historical map[string]model.Catalog
 	snapshot   model.Snapshot
+	profile    model.Profile
 }
 
 func Run(ctx context.Context, args []string, deps Dependencies) int {
@@ -234,7 +235,7 @@ func buildReconciliation(ctx context.Context, deps Dependencies, upgrade bool) (
 	if err != nil {
 		return reconciliation{}, fmt.Errorf("inspect reconciliation lock: %w", err)
 	}
-	return reconciliation{catalog: verified.Catalog, config: cfg, plan: built, lock: lock, digest: verified.Digest, historical: historical, snapshot: persisted}, nil
+	return reconciliation{catalog: verified.Catalog, config: cfg, plan: built, lock: lock, digest: verified.Digest, historical: historical, snapshot: persisted, profile: profile}, nil
 }
 
 func (r reconciliation) applyInput() reconcile.ApplyInput {
@@ -261,7 +262,7 @@ func (r reconciliation) applyInput() reconcile.ApplyInput {
 			}
 		}
 	}
-	return reconcile.ApplyInput{Plan: r.plan, CurrentResources: append([]model.Resource(nil), r.catalog.Resources...), EnabledIDs: ids, HistoricalResources: historical, CatalogDigest: r.digest}
+	return reconcile.ApplyInput{Plan: r.plan, CurrentResources: append([]model.Resource(nil), r.catalog.Resources...), EnabledIDs: ids, HistoricalResources: historical, CatalogDigest: r.digest, Profile: r.profile}
 }
 
 func configuredProfile(cfg model.Config) (model.Profile, error) {

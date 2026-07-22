@@ -517,7 +517,7 @@ func TestApplyReturnsUnavailableWithUsefulSummaryOnResourceFailure(t *testing.T)
 func TestApplyInputPreservesCurrentEnabledAndHistoricalAuthorities(t *testing.T) {
 	current := model.Resource{ID: "core.alpha", Type: model.ResourcePackage, Provider: "new", Package: "alpha", VersionPolicy: model.VersionTracked, Metadata: map[string]string{planner.EnabledByConfigMetadataKey: "enableAlpha"}}
 	historical := model.Resource{ID: "core.alpha", Type: model.ResourcePackage, Provider: "old", Package: "alpha-old", VersionPolicy: model.VersionTracked}
-	r := reconciliation{catalog: model.Catalog{Resources: []model.Resource{current}}, config: model.Config{Terrapod: map[string]any{"profile": "vps-shell", "enableAlpha": false}}, plan: model.Plan{ID: "p"}, digest: "current", historical: map[string]model.Catalog{"old-digest": {Resources: []model.Resource{historical}}}, snapshot: model.Snapshot{Ownership: map[model.ResourceID]model.Ownership{"core.alpha": {ResourceID: "core.alpha", CatalogDigest: "old-digest", Provider: "old", Package: "alpha-old"}}}}
+	r := reconciliation{catalog: model.Catalog{Resources: []model.Resource{current}}, config: model.Config{Terrapod: map[string]any{"profile": "vps-shell", "enableAlpha": false}}, plan: model.Plan{ID: "p"}, digest: "current", historical: map[string]model.Catalog{"old-digest": {Resources: []model.Resource{historical}}}, snapshot: model.Snapshot{Ownership: map[model.ResourceID]model.Ownership{"core.alpha": {ResourceID: "core.alpha", CatalogDigest: "old-digest", Provider: "old", Package: "alpha-old"}}}, profile: model.ProfileVPSShell}
 	input := r.applyInput()
 	if len(input.CurrentResources) != 1 || len(input.EnabledIDs) != 0 {
 		t.Fatalf("current/enabled lost: %#v", input)
@@ -525,6 +525,9 @@ func TestApplyInputPreservesCurrentEnabledAndHistoricalAuthorities(t *testing.T)
 	got, ok := input.HistoricalResources["core.alpha"]
 	if !ok || got.Resource.Provider != "old" || got.CatalogDigest != "old-digest" {
 		t.Fatalf("historical lost: %#v", input.HistoricalResources)
+	}
+	if input.Profile != model.ProfileVPSShell {
+		t.Fatalf("profile=%q", input.Profile)
 	}
 }
 

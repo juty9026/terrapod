@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/juty9026/terrapod/internal/legacydecl"
 	"github.com/juty9026/terrapod/internal/model"
 	"github.com/juty9026/terrapod/internal/provider"
 	"github.com/juty9026/terrapod/internal/resource"
@@ -166,7 +167,7 @@ func TestApplyInputComposesCurrentAndHistoricalFacts(t *testing.T) {
 	engine.Enabled = nil
 	engine.ResourceDigests = nil
 	engine.CatalogDigest = ""
-	input := ApplyInput{Plan: model.Plan{ID: "p", Operations: []model.Operation{op(item, "install", model.OperationInstall)}}, CurrentResources: []model.Resource{item}, EnabledIDs: []model.ResourceID{item.ID}, HistoricalResources: map[model.ResourceID]HistoricalResource{}, CatalogDigest: "current"}
+	input := ApplyInput{Plan: model.Plan{ID: "p", Operations: []model.Operation{op(item, "install", model.OperationInstall)}}, CurrentResources: []model.Resource{item}, EnabledIDs: []model.ResourceID{item.ID}, HistoricalResources: map[model.ResourceID]HistoricalResource{}, CatalogDigest: "current", Profile: model.ProfileVPSShell}
 	if _, err := engine.ApplyInput(context.Background(), input); err != nil {
 		t.Fatal(err)
 	}
@@ -239,6 +240,8 @@ func TestApplyContinuesIndependentAndBlocksDependentResources(t *testing.T) {
 
 func TestApplyPreflightsEveryPrivilegedOperationBeforeMutationAndAcquiresOnce(t *testing.T) {
 	aItem, bItem := pkg("core.alpha", "a"), pkg("core.beta", "b")
+	aItem.Metadata = map[string]string{"path.bin": "/safe/bin"}
+	bItem.Metadata = map[string]string{"path.bin": "/safe/bin"}
 	shared := []string{}
 	a := &fixtureAdapter{fail: map[string]bool{}, shared: &shared}
 	b := &fixtureAdapter{fail: map[string]bool{}, shared: &shared}
@@ -274,6 +277,8 @@ func TestApplyPreflightsEveryPrivilegedOperationBeforeMutationAndAcquiresOnce(t 
 
 func TestApplyResumeReinspectsActualStateAndPreservesReversePruneOrder(t *testing.T) {
 	aItem, bItem := pkg("core.alpha", "a"), pkg("core.beta", "b")
+	aItem.Metadata = map[string]string{"path.bin": "/safe/bin"}
+	bItem.Metadata = map[string]string{"path.bin": "/safe/bin"}
 	shared := []string{}
 	a := &fixtureAdapter{present: true, fail: map[string]bool{}, shared: &shared}
 	b := &fixtureAdapter{present: true, fail: map[string]bool{}, shared: &shared}
@@ -428,6 +433,7 @@ func TestApplyDoesNotWriteStateAfterContextCanceledByMutation(t *testing.T) {
 
 func TestApplyRejectsStaleOrMismatchedHistoricalOwnership(t *testing.T) {
 	item := pkg("core.legacy", "fixture")
+	item.Metadata = map[string]string{"path.bin": "/safe/bin"}
 	adapter := &fixtureAdapter{present: true, fail: map[string]bool{}}
 	engine, store := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
 	engine.Enabled = nil
@@ -447,12 +453,17 @@ func TestApplyRejectsStaleOrMismatchedHistoricalOwnership(t *testing.T) {
 	if err := store.PutOwnership(model.Ownership{ResourceID: item.ID, CatalogDigest: "signed", Provider: item.Provider, Package: item.Package, Paths: map[string]string{"bin": "/different"}}); err != nil {
 		t.Fatal(err)
 	}
-	summary, err := engine.Apply(context.Background(), plan)
-	if err != nil {
+	if _, err := engine.Apply(context.Background(), plan); err == nil || !strings.Contains(err.Error(), "ownership paths") {
+		t.Fatalf("path scope err=%v", err)
+	}
+	if err := store.PutOwnership(model.Ownership{ResourceID: item.ID, CatalogDigest: "signed", Provider: item.Provider, Package: item.Package, Paths: map[string]string{"bin": "/safe/bin"}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := summary.Unavailable[item.ID]; !ok || !adapter.present {
-		t.Fatalf("receipt mismatch mutated resource: summary=%#v present=%v", summary, adapter.present)
+	if _, err := engine.Apply(context.Background(), plan); err != nil {
+		t.Fatal(err)
+	}
+	if adapter.present {
+		t.Fatal("valid historical resource was not pruned")
 	}
 }
 
@@ -561,6 +572,71 @@ func TestApplyDefersOwnershipUntilLastResourceOperation(t *testing.T) {
 	snapshot, _ := store.Snapshot()
 	if _, ok := snapshot.Ownership[item.ID]; ok {
 		t.Fatal("ownership committed before final operation")
+	}
+}
+
+func TestApplyDoesNotOwnWhenGlobalFinalVerificationFails(t *testing.T) {
+	item := pkg("core.alpha", "fixture")
+	adapter := &fixtureAdapter{fail: map[string]bool{}, failVerifyAfter: 2}
+	engine, store := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
+	summary, err := engine.Apply(context.Background(), model.Plan{ID: "p", Operations: []model.Operation{op(item, "install", model.OperationInstall)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := summary.Unavailable[item.ID]; !ok {
+		t.Fatalf("summary=%#v", summary)
+	}
+	snapshot, _ := store.Snapshot()
+	if _, ok := snapshot.Ownership[item.ID]; ok {
+		t.Fatal("ownership written before global final verification")
+	}
+}
+
+func TestNoOpDependentWaitsForOperatedDependency(t *testing.T) {
+	first := pkg("core.first", "first")
+	middle := pkg("core.middle", "middle", first.ID)
+	last := pkg("core.last", "last", middle.ID)
+	shared := []string{}
+	a := &fixtureAdapter{fail: map[string]bool{}, shared: &shared}
+	b := &fixtureAdapter{present: true, fail: map[string]bool{}, shared: &shared}
+	c := &fixtureAdapter{fail: map[string]bool{}, shared: &shared}
+	engine, _ := testEngine(t, map[string]*fixtureAdapter{"first": a, "middle": b, "last": c}, first, middle, last)
+	plan := model.Plan{ID: "p", Operations: []model.Operation{op(first, "install-first", model.OperationInstall), op(last, "install-last", model.OperationInstall)}}
+	if _, err := engine.Apply(context.Background(), plan); err != nil {
+		t.Fatal(err)
+	}
+	events := strings.Join(shared, ",")
+	firstExec := strings.Index(events, "execute:install-first")
+	middleVerify := strings.Index(events, "verify:core.middle")
+	lastExec := strings.Index(events, "execute:install-last")
+	if firstExec < 0 || middleVerify < firstExec || lastExec < middleVerify {
+		t.Fatalf("dependency schedule=%s", events)
+	}
+}
+
+func TestTransferRemovalAuthorityHonorsDeclarationProfile(t *testing.T) {
+	item := model.Resource{ID: "core.btop", Type: model.ResourcePackage, Provider: "homebrew-formula", Package: "btop", VersionPolicy: model.VersionTracked, Metadata: map[string]string{"legacy.mise.package": "aqua:aristocratos/btop", "legacy.mise.profile": "vps-shell"}}
+	declarations, err := legacydecl.Parse(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation := op(item, "transfer", model.OperationTransfer)
+	operation.Removes = []string{"aqua:aristocratos/btop"}
+	if err := validateRemoves(item, operation, declarations, model.ProfileMacOSTerminal); err == nil {
+		t.Fatal("profile-scoped legacy source authorized on macOS")
+	}
+	if err := validateRemoves(item, operation, declarations, model.ProfileVPSShell); err != nil {
+		t.Fatal(err)
+	}
+	unscoped := transferPkg()
+	declarations, err = legacydecl.Parse(unscoped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation = op(unscoped, "transfer", model.OperationTransfer)
+	operation.Removes = []string{"aqua:BurntSushi/ripgrep"}
+	if err := validateRemoves(unscoped, operation, declarations, ""); err != nil {
+		t.Fatalf("empty profile rejected unscoped declaration: %v", err)
 	}
 }
 

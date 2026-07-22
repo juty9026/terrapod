@@ -8,6 +8,7 @@ import (
 	"os"
 	"reflect"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/juty9026/terrapod/internal/legacydecl"
@@ -46,6 +47,7 @@ type ApplyInput struct {
 	EnabledIDs          []model.ResourceID
 	HistoricalResources map[model.ResourceID]HistoricalResource
 	CatalogDigest       string
+	Profile             model.Profile
 }
 
 type Engine struct {
@@ -58,9 +60,13 @@ type Engine struct {
 	ResourceDigests map[model.ResourceID]string
 	CatalogDigest   string
 	EffectiveUID    func() int
+	Profile         model.Profile
 }
 
 func (e *Engine) ApplyInput(ctx context.Context, input ApplyInput) (Summary, error) {
+	if !input.Profile.Supported() {
+		return Summary{}, fmt.Errorf("reconcile: unsupported active profile %q", input.Profile)
+	}
 	copyEngine := *e
 	copyEngine.Resources = make(map[model.ResourceID]model.Resource, len(input.CurrentResources)+len(input.HistoricalResources))
 	for _, item := range input.CurrentResources {
@@ -86,6 +92,7 @@ func (e *Engine) ApplyInput(ctx context.Context, input ApplyInput) (Summary, err
 		copyEngine.ResourceDigests[id] = historical.CatalogDigest
 	}
 	copyEngine.CatalogDigest = input.CatalogDigest
+	copyEngine.Profile = input.Profile
 	return copyEngine.Apply(ctx, input.Plan)
 }
 
@@ -175,7 +182,7 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 		for _, declaration := range declarations {
 			allowed[declaration.Package] = struct{}{}
 		}
-		if err := validateRemoves(item, operation, declarations); err != nil {
+		if err := validateRemoves(item, operation, declarations, e.Profile); err != nil {
 			return summary, err
 		}
 	}
@@ -211,27 +218,6 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 	operated := make(map[model.ResourceID]struct{}, len(indexed))
 	for id := range indexed {
 		operated[id] = struct{}{}
-	}
-	for _, id := range dependencyOrder(e.Enabled, e.Resources) {
-		if _, unavailable := summary.Unavailable[id]; unavailable {
-			continue
-		}
-		if _, hasOperation := operated[id]; hasOperation {
-			continue
-		}
-		item := e.Resources[id]
-		if dependency, blocked := blockedDependency(item, map[model.ResourceID]bool{}, summary.Unavailable); blocked {
-			summary.Unavailable[id] = fmt.Sprintf("dependency %q is unavailable", dependency)
-			continue
-		}
-		adapter, ok := e.Registry.Lookup(item.Type, item.Provider)
-		if !ok {
-			summary.Unavailable[id] = "no adapter for preflight verification"
-			continue
-		}
-		if _, err := verifyDesired(ctx, adapter, item); err != nil {
-			summary.Unavailable[id] = "preflight verification: " + err.Error()
-		}
 	}
 	if privileged {
 		needed := false
@@ -269,11 +255,53 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 	}
 
 	failed := make(map[model.ResourceID]bool)
+	completed := make(map[model.ResourceID]bool)
+	verifiedNoOp := make(map[model.ResourceID]bool)
+	var verifyDependencies func(model.Resource) error
+	verifyDependencies = func(item model.Resource) error {
+		for _, id := range item.DependsOn {
+			if reason, unavailable := summary.Unavailable[id]; unavailable {
+				return fmt.Errorf("dependency %q is unavailable: %s", id, reason)
+			}
+			dependency := e.Resources[id]
+			if _, hasOperation := operated[id]; hasOperation {
+				if !completed[id] {
+					return fmt.Errorf("dependency %q has not reconciled", id)
+				}
+				continue
+			}
+			if !verifiedNoOp[id] {
+				if err := verifyDependencies(dependency); err != nil {
+					summary.Unavailable[id] = err.Error()
+					return err
+				}
+				adapter, ok := e.Registry.Lookup(dependency.Type, dependency.Provider)
+				if !ok {
+					summary.Unavailable[id] = "no adapter for dependency verification"
+					return errors.New(summary.Unavailable[id])
+				}
+				if _, err := verifyDesired(ctx, adapter, dependency); err != nil {
+					summary.Unavailable[id] = "dependency verification: " + err.Error()
+					return err
+				}
+				verifiedNoOp[id] = true
+			}
+		}
+		return nil
+	}
+	pendingOwnership := make(map[model.ResourceID]struct{})
 	for _, operation := range plan.Operations {
 		item, adapter := indexed[operation.ResourceID], adapters[operation.ResourceID]
 		if failed[item.ID] {
 			if err := e.record(ctx, operation, false, "blocked by earlier resource failure"); err != nil {
 				return summary, err
+			}
+			continue
+		}
+		if err := verifyDependencies(item); err != nil {
+			e.setUnavailable(&summary, failed, item.ID, err.Error())
+			if recordErr := e.record(ctx, operation, false, err.Error()); recordErr != nil {
+				return summary, recordErr
 			}
 			continue
 		}
@@ -303,12 +331,6 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 			if !desiredVerified(item, observed) {
 				observed, verifyErr = verifyDesired(ctx, adapter, item)
 			}
-			if verifyErr == nil {
-				verifyErr = ctx.Err()
-			}
-			if verifyErr == nil {
-				verifyErr = e.own(item, observed)
-			}
 			if verifyErr != nil {
 				e.setUnavailable(&summary, failed, item.ID, verifyErr.Error())
 				if recordErr := e.record(ctx, operation, false, verifyErr.Error()); recordErr != nil {
@@ -316,12 +338,15 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 				}
 				continue
 			}
+			pendingOwnership[item.ID] = struct{}{}
+			completed[item.ID] = true
 		}
 		if err := e.record(ctx, operation, true, "verified"); err != nil {
 			return summary, err
 		}
 	}
-	for _, id := range e.Enabled {
+	finalObservations := make(map[model.ResourceID]model.Observation)
+	for _, id := range dependencyOrder(e.Enabled, e.Resources) {
 		if !failed[id] {
 			if _, unavailable := summary.Unavailable[id]; !unavailable {
 				item := e.Resources[id]
@@ -330,12 +355,26 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 					summary.Unavailable[id] = "no adapter for final verification"
 					continue
 				}
-				if _, err := verifyDesired(ctx, adapter, item); err != nil {
+				observed, err := verifyDesired(ctx, adapter, item)
+				if err != nil {
 					summary.Unavailable[id] = "final readiness verification: " + err.Error()
 					continue
 				}
+				finalObservations[id] = observed
 				summary.Ready = append(summary.Ready, id)
 			}
+		}
+	}
+	for id := range pendingOwnership {
+		observed, ready := finalObservations[id]
+		if !ready {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return summary, err
+		}
+		if err := e.own(e.Resources[id], observed); err != nil {
+			return summary, err
 		}
 	}
 	if err := ctx.Err(); err != nil {
@@ -514,7 +553,7 @@ func exactRemovals(actual []string, operation model.Operation, target string) bo
 	return true
 }
 
-func validateRemoves(item model.Resource, operation model.Operation, declarations []legacydecl.Declaration) error {
+func validateRemoves(item model.Resource, operation model.Operation, declarations []legacydecl.Declaration, profile model.Profile) error {
 	seen := make(map[string]struct{}, len(operation.Removes))
 	for _, id := range operation.Removes {
 		if id == "" {
@@ -531,6 +570,9 @@ func validateRemoves(item model.Resource, operation model.Operation, declaration
 		expected[item.Package] = struct{}{}
 	case model.OperationTransfer:
 		for _, declaration := range declarations {
+			if declaration.Profile != "" && declaration.Profile != profile {
+				continue
+			}
 			expected[declaration.Package] = struct{}{}
 		}
 		if len(seen) == 0 {
@@ -558,6 +600,15 @@ func validateRemoves(item model.Resource, operation model.Operation, declaration
 func validateHistoricalOwnership(item model.Resource, digest string, owned model.Ownership) error {
 	if digest == "" || owned.ResourceID != item.ID || owned.Provider != item.Provider || owned.Package != item.Package || owned.CatalogDigest != digest {
 		return fmt.Errorf("reconcile: historical ownership for %q does not match signed authority", item.ID)
+	}
+	expected := make(map[string]string)
+	for key, value := range item.Metadata {
+		if strings.HasPrefix(key, "path.") {
+			expected[strings.TrimPrefix(key, "path.")] = value
+		}
+	}
+	if !reflect.DeepEqual(expected, owned.Paths) {
+		return fmt.Errorf("reconcile: historical ownership paths for %q do not match signed authority", item.ID)
 	}
 	return nil
 }
