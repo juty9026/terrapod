@@ -26,7 +26,7 @@ var (
 	binaryPackagePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9+.~-]*(?::[a-z0-9][a-z0-9-]*)?$`)
 	installPlanPattern   = regexp.MustCompile(`^Inst ([a-z0-9][a-z0-9+.~-]*(?::[a-z0-9][a-z0-9-]*)?)(?: \[[^]]+\])? \(.+\)$`)
 	removePlanPattern    = regexp.MustCompile(`^Remv ([a-z0-9][a-z0-9+.~-]*(?::[a-z0-9][a-z0-9-]*)?) \[[^]]+\](?: \(.+\))?$`)
-	confPlanPattern      = regexp.MustCompile(`^Conf [a-z0-9][a-z0-9+.~-]*(?::[a-z0-9][a-z0-9-]*)?(?: \(.+\))?$`)
+	confPlanPattern      = regexp.MustCompile(`^Conf ([a-z0-9][a-z0-9+.~-]*(?::[a-z0-9][a-z0-9-]*)?)(?: \(.+\))?$`)
 	summaryPattern       = regexp.MustCompile(`^([0-9]+) upgraded, ([0-9]+) newly installed, ([0-9]+) to remove and ([0-9]+) not upgraded\.$`)
 	packageListPattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9+.~:-]*(?: [a-z0-9][a-z0-9+.~:-]*)*$`)
 )
@@ -90,9 +90,7 @@ func (a *Adapter) queryRecord(ctx context.Context, pkg string) (dpkgRecord, bool
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return dpkgRecord{}, false, fmt.Errorf("apt: inspect %q: %w", pkg, ctxErr)
 		}
-		var exitErr *exec.ExitError
-		var limitErr *execx.ErrOutputLimit
-		if len(result.Stdout) == 0 && !errors.As(err, &limitErr) && errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		if exitCode, single := singleUnwrapExitCode(err); len(result.Stdout) == 0 && single && exitCode == 1 {
 			return dpkgRecord{}, false, nil
 		}
 		return dpkgRecord{}, false, fmt.Errorf("apt: inspect %q: %w", pkg, err)
@@ -205,6 +203,8 @@ func parseDpkgRecord(output []byte, target string) (dpkgRecord, error) {
 func parsePlan(output []byte, target string) (provider.ChangeSet, error) {
 	var changes provider.ChangeSet
 	seen := make(map[string]string)
+	instIdentities := make(map[string]string)
+	confIdentities := make(map[string]string)
 	summaryFound := false
 	summary := [3]int{}
 	allowPackageList := false
@@ -246,6 +246,7 @@ func parsePlan(output []byte, target string) (provider.ChangeSet, error) {
 				return provider.ChangeSet{}, fmt.Errorf("duplicate plan mutation for %q (%s and %s)", pkg, previous, kind)
 			}
 			seen[pkg] = kind
+			instIdentities[match[1]] = pkg
 			if kind == "upgrade" {
 				changes.Upgrades = append(changes.Upgrades, pkg)
 			} else {
@@ -270,7 +271,23 @@ func parsePlan(output []byte, target string) (provider.ChangeSet, error) {
 			changes.Removes = append(changes.Removes, pkg)
 			continue
 		}
-		if confPlanPattern.MatchString(line) || knownHeader(line) {
+		if strings.HasPrefix(line, "Conf ") {
+			allowPackageList = false
+			match := confPlanPattern.FindStringSubmatch(line)
+			if match == nil {
+				return provider.ChangeSet{}, fmt.Errorf("malformed Conf plan line %q", line)
+			}
+			pkg, err := normalizeTargetPackage(match[1], target)
+			if err != nil {
+				pkg = match[1]
+			}
+			if _, duplicate := confIdentities[match[1]]; duplicate {
+				return provider.ChangeSet{}, fmt.Errorf("duplicate Conf for %q", match[1])
+			}
+			confIdentities[match[1]] = pkg
+			continue
+		}
+		if knownHeader(line) {
 			allowPackageList = false
 			continue
 		}
@@ -286,10 +303,33 @@ func parsePlan(output []byte, target string) (provider.ChangeSet, error) {
 	if !summaryFound {
 		return provider.ChangeSet{}, errors.New("missing English simulation summary")
 	}
+	for raw, normalized := range confIdentities {
+		instNormalized, ok := instIdentities[raw]
+		if !ok || instNormalized != normalized {
+			return provider.ChangeSet{}, fmt.Errorf("Conf package %q does not correspond to an exact Inst package", raw)
+		}
+	}
 	if summary[0] != len(changes.Upgrades) || summary[1] != len(changes.Installs) || summary[2] != len(changes.Removes) {
 		return provider.ChangeSet{}, fmt.Errorf("simulation summary counts do not match parsed changes")
 	}
 	return changes, nil
+}
+
+func singleUnwrapExitCode(err error) (int, bool) {
+	for err != nil {
+		if _, multi := err.(interface{ Unwrap() []error }); multi {
+			return 0, false
+		}
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return exitErr.ExitCode(), true
+		}
+		unwrapper, ok := err.(interface{ Unwrap() error })
+		if !ok {
+			return 0, false
+		}
+		err = unwrapper.Unwrap()
+	}
+	return 0, false
 }
 
 func normalizeTargetPackage(candidate, target string) (string, error) {

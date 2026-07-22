@@ -3,6 +3,7 @@ package apt
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"reflect"
@@ -231,6 +232,31 @@ func TestSimulationRequiresEnglishSummaryAndMatchingCounts(t *testing.T) {
 	}
 }
 
+func TestSimulationConfMustMatchOneExactInstIdentity(t *testing.T) {
+	for _, tc := range []struct{ name, output string }{
+		{name: "hidden conf with zero summary", output: "Conf curl (1 repo [amd64])\n0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.\n"},
+		{name: "duplicate conf", output: "Inst curl (1 repo [amd64])\nConf curl (1 repo [amd64])\nConf curl (1 repo [amd64])\n0 upgraded, 1 newly installed, 0 to remove and 0 not upgraded.\n"},
+		{name: "different base", output: "Inst curl (1 repo [amd64])\nConf wget (1 repo [amd64])\n0 upgraded, 1 newly installed, 0 to remove and 0 not upgraded.\n"},
+		{name: "different arch", output: "Inst curl:amd64 (1 repo [amd64])\nConf curl:arm64 (1 repo [arm64])\n0 upgraded, 1 newly installed, 0 to remove and 0 not upgraded.\n"},
+		{name: "remove and conf", output: "Remv curl [1]\nConf curl (1 repo [amd64])\n0 upgraded, 0 newly installed, 1 to remove and 0 not upgraded.\n"},
+		{name: "malformed package", output: "Inst curl (1 repo [amd64])\nConf curl:AMD64 (1 repo [amd64])\n0 upgraded, 1 newly installed, 0 to remove and 0 not upgraded.\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := parsePlan([]byte(tc.output), "curl"); err == nil || !strings.Contains(err.Error(), "Conf") {
+				t.Fatalf("error=%v", err)
+			}
+		})
+	}
+}
+
+func TestSimulationAcceptsConfForExactMultiarchInstAndNormalizesTarget(t *testing.T) {
+	output := "Inst curl:amd64 (1 repo [amd64])\nConf curl:amd64 (1 repo [amd64])\n0 upgraded, 1 newly installed, 0 to remove and 0 not upgraded.\n"
+	changes, err := parsePlan([]byte(output), "curl")
+	if err != nil || !reflect.DeepEqual(changes.Installs, []string{"curl"}) {
+		t.Fatalf("changes=%#v error=%v", changes, err)
+	}
+}
+
 func TestSimulationRejectsEssentialDependencyAfterPlan(t *testing.T) {
 	var calls []string
 	a := newAdapter(t, runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
@@ -258,6 +284,7 @@ func TestInspectPropagatesNonAbsenceFailures(t *testing.T) {
 		{name: "missing executable", ctx: context.Background(), err: exec.ErrNotFound},
 		{name: "canceled", ctx: canceledContext(), err: exitError(t, 1)},
 		{name: "output limit joined with exit one", ctx: context.Background(), err: errors.Join(exitError(t, 1), &execx.ErrOutputLimit{Streams: []string{"stderr"}})},
+		{name: "joined unrelated with exit one", ctx: context.Background(), err: fmt.Errorf("outer: %w", errors.Join(exitError(t, 1), errors.New("unrelated")))},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := newAdapter(t, runnerFunc(func(context.Context, execx.Request) (execx.Result, error) { return execx.Result{}, tc.err }))
@@ -265,6 +292,16 @@ func TestInspectPropagatesNonAbsenceFailures(t *testing.T) {
 				t.Fatal("Inspect succeeded")
 			}
 		})
+	}
+}
+
+func TestInspectAcceptsOrdinaryWrappedExitOneAsAbsent(t *testing.T) {
+	a := newAdapter(t, runnerFunc(func(context.Context, execx.Request) (execx.Result, error) {
+		return execx.Result{}, fmt.Errorf("runner: %w", exitError(t, 1))
+	}))
+	got, err := a.Inspect(context.Background(), aptResource("curl"))
+	if err != nil || got.Present {
+		t.Fatalf("observation=%#v error=%v", got, err)
 	}
 }
 
