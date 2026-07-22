@@ -718,3 +718,114 @@ func TestHomeAncestorSymlinkBlocksInstallRecoveryAndPrune(t *testing.T) {
 		}
 	}
 }
+
+func TestPublishedCleanupRecoversAfterFirstBackupDeletion(t *testing.T) {
+	body := fontArchive(t, map[string]string{"Jetendard-Regular.ttf": "new", "Jetendard-Bold.ttf": "new-bold"})
+	a, item, store, fonts, _ := fixture(t, body)
+	if err := os.MkdirAll(fonts, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, contents := range map[string]string{"Jetendard-Regular.ttf": "old", "Jetendard-Bold.ttf": "old-bold"} {
+		if err := os.WriteFile(filepath.Join(fonts, name), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	op := operation(item, model.OperationRestore)
+	if _, err := store.Begin(model.Plan{ID: "cleanup-crash", Operations: []model.Operation{op}}); err != nil {
+		t.Fatal(err)
+	}
+	deleted := 0
+	afterCleanupArtifact = func(path string) error {
+		if strings.HasPrefix(filepath.Base(path), "old-") {
+			deleted++
+			if deleted == 1 {
+				return errSimulatedCrash
+			}
+		}
+		return nil
+	}
+	t.Cleanup(func() { afterCleanupArtifact = nil })
+	if result := a.ExecuteResource(context.Background(), item, op); result.Success || !strings.Contains(result.Detail, "simulated crash") {
+		t.Fatalf("result=%#v", result)
+	}
+	afterCleanupArtifact = nil
+	for name, want := range map[string]string{"Jetendard-Regular.ttf": "new", "Jetendard-Bold.ttf": "new-bold"} {
+		got, err := os.ReadFile(filepath.Join(fonts, name))
+		if err != nil || string(got) != want {
+			t.Fatalf("%s=%q err=%v", name, got, err)
+		}
+	}
+	fresh := &Adapter{Archive: a.Archive, Home: a.Home, State: a.State, Recovery: a.Recovery}
+	obs, err := fresh.Inspect(context.Background(), item)
+	if err != nil || !obs.Healthy {
+		t.Fatalf("obs=%#v err=%v", obs, err)
+	}
+	ops, err := fresh.Plan(context.Background(), item, obs, model.Ownership{})
+	if err != nil || len(ops) != 1 || ops[0].Kind != model.OperationAdopt {
+		t.Fatalf("ops=%#v err=%v", ops, err)
+	}
+	if _, err := os.Stat(filepath.Join(fonts, transactionDirname)); !os.IsNotExist(err) {
+		t.Fatalf("transaction remains: %v", err)
+	}
+}
+
+func TestRollbackCleanupRecoversAfterFirstBackupDeletion(t *testing.T) {
+	body := fontArchive(t, map[string]string{"Jetendard-Regular.ttf": "new", "Jetendard-Bold.ttf": "new-bold"})
+	a, item, store, fonts, _ := fixture(t, body)
+	if err := os.MkdirAll(fonts, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	owned := model.Ownership{ResourceID: item.ID, Provider: item.Provider, Package: item.Package, Paths: map[string]string{}}
+	for name, contents := range map[string]string{"Jetendard-Regular.ttf": "old", "Jetendard-Bold.ttf": "old-bold"} {
+		path := filepath.Join(fonts, name)
+		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		owned.Paths[path] = digestString([]byte(contents))
+	}
+	if err := store.PutOwnership(owned); err != nil {
+		t.Fatal(err)
+	}
+	op := operation(item, model.OperationUpgrade)
+	if _, err := store.Begin(model.Plan{ID: "rollback-cleanup-crash", Operations: []model.Operation{op}}); err != nil {
+		t.Fatal(err)
+	}
+	publishCalls := 0
+	beforeInstallFile = func(string) error {
+		publishCalls++
+		if publishCalls == 2 {
+			return fmt.Errorf("injected publish failure")
+		}
+		return nil
+	}
+	deleted := 0
+	afterCleanupArtifact = func(path string) error {
+		if strings.HasPrefix(filepath.Base(path), "old-") {
+			deleted++
+			if deleted == 1 {
+				return errSimulatedCrash
+			}
+		}
+		return nil
+	}
+	t.Cleanup(func() { beforeInstallFile = nil; afterCleanupArtifact = nil })
+	if result := a.ExecuteResource(context.Background(), item, op); result.Success {
+		t.Fatalf("result=%#v", result)
+	}
+	beforeInstallFile = nil
+	afterCleanupArtifact = nil
+	for name, want := range map[string]string{"Jetendard-Regular.ttf": "old", "Jetendard-Bold.ttf": "old-bold"} {
+		got, err := os.ReadFile(filepath.Join(fonts, name))
+		if err != nil || string(got) != want {
+			t.Fatalf("%s=%q err=%v", name, got, err)
+		}
+	}
+	fresh := &Adapter{Archive: a.Archive, Home: a.Home, State: a.State, Recovery: a.Recovery}
+	obs, err := fresh.Inspect(context.Background(), item)
+	if err != nil || !obs.Healthy {
+		t.Fatalf("obs=%#v err=%v", obs, err)
+	}
+	if _, err := os.Stat(filepath.Join(fonts, transactionDirname)); !os.IsNotExist(err) {
+		t.Fatalf("transaction remains: %v", err)
+	}
+}

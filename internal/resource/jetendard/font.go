@@ -24,17 +24,21 @@ import (
 )
 
 const (
-	ResourceID          model.ResourceID = "font.jetendard"
-	Provider                             = "jetendard"
-	MetadataURL                          = "asset.url"
-	MetadataSHA256                       = "asset.sha256"
-	MetadataFormat                       = "asset.format"
-	MetadataTag                          = "asset.tag"
-	MetadataDestination                  = "font.destination"
-	MetadataFiles                        = "font.files"
-	transactionDirname                   = ".terrapod-jetendard-transaction"
-	transactionFilename                  = "intent.json"
-	defaultFontBytes    int64            = 64 << 20
+	ResourceID           model.ResourceID = "font.jetendard"
+	Provider                              = "jetendard"
+	MetadataURL                           = "asset.url"
+	MetadataSHA256                        = "asset.sha256"
+	MetadataFormat                        = "asset.format"
+	MetadataTag                           = "asset.tag"
+	MetadataDestination                   = "font.destination"
+	MetadataFiles                         = "font.files"
+	transactionDirname                    = ".terrapod-jetendard-transaction"
+	transactionFilename                   = "intent.json"
+	defaultFontBytes     int64            = 64 << 20
+	phasePrepared                         = "prepared"
+	phasePublished                        = "published"
+	phaseCleanup                          = "cleanup"
+	phaseRollbackCleanup                  = "rollback-cleanup"
 )
 
 var fontPattern = regexp.MustCompile(`^Jetendard-[A-Za-z0-9]+\.ttf$`)
@@ -42,6 +46,7 @@ var shaPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 var rawSHA256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var beforeInstallFile func(string) error
 var afterPublishFile func(string) error
+var afterCleanupArtifact func(string) error
 var errSimulatedCrash = errors.New("jetendard: simulated crash")
 
 type Adapter struct {
@@ -372,7 +377,7 @@ func (a *Adapter) install(ctx context.Context, item model.Resource, d declaratio
 	if _, healthy, detail := inspectPaths(installed); !healthy {
 		return errors.Join(fmt.Errorf("jetendard: installed manifest verification failed: %s", detail), rollbackTransaction(fonts, txn))
 	}
-	if err := cleanupTransaction(fonts, txn); err != nil {
+	if err := finishTransaction(fonts, txn, phaseCleanup); err != nil {
 		return err
 	}
 	a.setInstalled(item.ID, installed)
@@ -402,7 +407,7 @@ func (a *Adapter) prepareTransaction(item model.Resource, d declaration, op mode
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	txn := transaction{Version: 1, Phase: "prepared", ResourceID: string(item.ID), ManifestDigest: manifestDigest(d.files), OwnershipDigest: ownershipDigest(owned), JournalID: snapshot.ActiveJournal.ID, OperationID: op.ID, OperationKind: op.Kind}
+	txn := transaction{Version: 1, Phase: phasePrepared, ResourceID: string(item.ID), ManifestDigest: manifestDigest(d.files), OwnershipDigest: ownershipDigest(owned), JournalID: snapshot.ActiveJournal.ID, OperationID: op.ID, OperationKind: op.Kind}
 	covered := make(map[string]bool)
 	for _, name := range names {
 		font := desired[name]
@@ -534,7 +539,7 @@ func publishTransaction(fonts string, txn transaction) error {
 	if err := syncDirectory(fonts); err != nil {
 		return err
 	}
-	txn.Phase = "published"
+	txn.Phase = phasePublished
 	if err := writeTransaction(filepath.Join(fonts, transactionDirname), txn); err != nil {
 		return err
 	}
@@ -558,26 +563,72 @@ func rollbackTransaction(fonts string, txn transaction) error {
 		}
 	}
 	if result == nil {
-		result = cleanupTransaction(fonts, txn)
+		if err := verifyRolledBackState(fonts, txn); err != nil {
+			return err
+		}
+		result = finishTransaction(fonts, txn, phaseRollbackCleanup)
 	}
 	return result
 }
 
+func finishTransaction(fonts string, txn transaction, phase string) error {
+	directory := filepath.Join(fonts, transactionDirname)
+	if phase != phaseCleanup && phase != phaseRollbackCleanup {
+		return errors.New("jetendard: invalid cleanup phase")
+	}
+	txn.Phase = phase
+	if err := writeTransaction(directory, txn); err != nil {
+		return err
+	}
+	if err := syncDirectory(directory); err != nil {
+		return err
+	}
+	return cleanupTransaction(fonts, txn)
+}
+
 func cleanupTransaction(fonts string, txn transaction) error {
 	directory := filepath.Join(fonts, transactionDirname)
+	if err := validateCleanupArtifacts(directory, txn); err != nil {
+		return err
+	}
+	names := make([]string, 0, len(txn.Entries)*2)
+	seen := map[string]bool{}
 	for _, entry := range txn.Entries {
 		for _, name := range []string{stageName(entry), backupName(entry)} {
-			if name != "" {
-				if err := os.Remove(filepath.Join(directory, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
-					return err
-				}
+			if !seen[name] {
+				seen[name] = true
+				names = append(names, name)
 			}
 		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		path := filepath.Join(directory, name)
+		if err := os.Remove(path); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return err
+		}
+		if err := syncDirectory(directory); err != nil {
+			return err
+		}
+		if afterCleanupArtifact != nil {
+			if err := afterCleanupArtifact(path); err != nil {
+				return err
+			}
+		}
+	}
+	if err := os.Remove(filepath.Join(directory, ".intent.tmp")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := syncDirectory(directory); err != nil {
+		return err
 	}
 	if err := os.Remove(filepath.Join(directory, transactionFilename)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := os.Remove(filepath.Join(directory, ".intent.tmp")); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := syncDirectory(directory); err != nil {
 		return err
 	}
 	if err := os.Remove(directory); err != nil {
@@ -588,6 +639,65 @@ func cleanupTransaction(fonts string, txn transaction) error {
 
 func stageName(entry transactionEntry) string  { return "new-" + entry.Name }
 func backupName(entry transactionEntry) string { return "old-" + entry.Name }
+
+func validateCleanupArtifacts(directory string, txn transaction) error {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return err
+	}
+	allowed := map[string]bool{transactionFilename: true, ".intent.tmp": true}
+	for _, entry := range txn.Entries {
+		allowed[stageName(entry)] = true
+		allowed[backupName(entry)] = true
+	}
+	if len(entries) > len(allowed) {
+		return errors.New("jetendard: transaction cleanup is unbounded")
+	}
+	for _, entry := range entries {
+		if !allowed[entry.Name()] || entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+			return errors.New("jetendard: unsafe cleanup artifact")
+		}
+	}
+	return nil
+}
+
+func verifyPublishedState(fonts string, txn transaction) error {
+	for _, entry := range txn.Entries {
+		path := filepath.Join(fonts, entry.Name)
+		if entry.Remove {
+			if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+				continue
+			} else if err != nil {
+				return err
+			}
+			return fmt.Errorf("jetendard: obsolete font remains after publish: %s", entry.Name)
+		}
+		digest, size, err := digestFileSize(path)
+		if err != nil || digest != entry.NewDigest || size != entry.NewSize {
+			return fmt.Errorf("jetendard: published font is incomplete: %s", entry.Name)
+		}
+	}
+	return nil
+}
+
+func verifyRolledBackState(fonts string, txn transaction) error {
+	for _, entry := range txn.Entries {
+		path := filepath.Join(fonts, entry.Name)
+		if !entry.OldExists {
+			if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+				continue
+			} else if err != nil {
+				return err
+			}
+			return fmt.Errorf("jetendard: new font remains after rollback: %s", entry.Name)
+		}
+		digest, size, err := digestFileSize(path)
+		if err != nil || digest != entry.OldDigest || size != entry.OldSize {
+			return fmt.Errorf("jetendard: rollback is incomplete: %s", entry.Name)
+		}
+	}
+	return nil
+}
 
 func cleanupTransactionFiles(directory string) error {
 	entries, err := os.ReadDir(directory)
@@ -634,7 +744,8 @@ func readTransaction(directory string) (transaction, error) {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return transaction{}, errors.New("jetendard: trailing transaction data")
 	}
-	if txn.Version != 1 || (txn.Phase != "prepared" && txn.Phase != "published") || !rawSHA256Pattern.MatchString(txn.ManifestDigest) || !rawSHA256Pattern.MatchString(txn.OwnershipDigest) || txn.ResourceID == "" || txn.JournalID == "" || txn.OperationID == "" || len(txn.Entries) == 0 || len(txn.Entries) > 4096 {
+	validPhase := txn.Phase == phasePrepared || txn.Phase == phasePublished || txn.Phase == phaseCleanup || txn.Phase == phaseRollbackCleanup
+	if txn.Version != 1 || !validPhase || !rawSHA256Pattern.MatchString(txn.ManifestDigest) || !rawSHA256Pattern.MatchString(txn.OwnershipDigest) || txn.ResourceID == "" || txn.JournalID == "" || txn.OperationID == "" || len(txn.Entries) == 0 || len(txn.Entries) > 4096 {
 		return transaction{}, errors.New("jetendard: invalid transaction intent")
 	}
 	seen := map[string]bool{}
@@ -794,7 +905,10 @@ func (a *Adapter) recoverPending(item model.Resource, d declaration, owned model
 	}
 	txn, err := readTransaction(directory)
 	if errors.Is(err, os.ErrNotExist) {
-		return cleanupTransactionFiles(directory)
+		if err := cleanupTransactionFiles(directory); err != nil {
+			return err
+		}
+		return syncDirectory(fonts)
 	}
 	if err != nil {
 		return err
@@ -805,6 +919,18 @@ func (a *Adapter) recoverPending(item model.Resource, d declaration, owned model
 	}
 	if err := validateTransactionAuthority(txn, item, d, owned, snapshot.ActiveJournal, fonts); err != nil {
 		return err
+	}
+	if txn.Phase == phaseCleanup {
+		if err := verifyPublishedState(fonts, txn); err != nil {
+			return err
+		}
+		return cleanupTransaction(fonts, txn)
+	}
+	if txn.Phase == phaseRollbackCleanup {
+		if err := verifyRolledBackState(fonts, txn); err != nil {
+			return err
+		}
+		return cleanupTransaction(fonts, txn)
 	}
 	if err := validateTransactionArtifacts(fonts, txn); err != nil {
 		return err
@@ -821,7 +947,7 @@ func (a *Adapter) recoverPending(item model.Resource, d declaration, owned model
 	if _, healthy, detail := inspectPaths(expected); !healthy {
 		return fmt.Errorf("jetendard: recovered transaction failed verification: %s", detail)
 	}
-	return cleanupTransaction(fonts, txn)
+	return finishTransaction(fonts, txn, phaseCleanup)
 }
 
 func syncDirectory(path string) error {
