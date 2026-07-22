@@ -59,6 +59,7 @@ type managedResolveFixture struct {
 	recovery string
 	item     model.Resource
 	client   *managedResolveClient
+	adapter  *managedfiles.Adapter
 	input    reconcile.ApplyInput
 }
 
@@ -91,7 +92,7 @@ func newManagedResolveFixture(t *testing.T) *managedResolveFixture {
 	}
 	engine := &reconcile.Engine{Registry: registry, State: store, LockDir: stateDir, EffectiveUID: func() int { return 501 }}
 	fixture := &managedResolveFixture{
-		store: store, home: home, stateDir: stateDir, recovery: recoveryRoot, item: item, client: client,
+		store: store, home: home, stateDir: stateDir, recovery: recoveryRoot, item: item, client: client, adapter: adapter,
 		input: reconcile.ApplyInput{
 			Plan:                model.Plan{ID: "ordinary-plan", Release: "v2", Unavailable: map[model.ResourceID]string{}},
 			CurrentResources:    []model.Resource{item},
@@ -288,5 +289,142 @@ func TestDispatcherFallsBackToPackageResolverForNonManagedResource(t *testing.T)
 	result, err := dispatcher.Resolve(context.Background(), "core.mise", strings.NewReader("yes\n"), &bytes.Buffer{})
 	if err != nil || !result.Proceeded || !called {
 		t.Fatalf("result=%#v called=%t err=%v", result, called, err)
+	}
+}
+
+func TestManagedFilesResolveEditedConflictAfterCrashRepromptsAndDeclineIsSafe(t *testing.T) {
+	fixture := newManagedResolveFixture(t)
+	path := filepath.Join(fixture.home, "managed")
+	if err := os.WriteFile(path, []byte("first-edit"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fixture.client.targets = []chezmoi.Target{fixture.target(path, "desired")}
+	fixture.own(t, map[string]string{path: "file:" + managedfiles.Digest("file", []byte("old"))}, "signed-v1")
+	afterManagedFilesMutation = func() error { return errors.New("simulated crash") }
+	t.Cleanup(func() { afterManagedFilesMutation = nil })
+	if _, err := fixture.service.Resolve(context.Background(), fixture.item.ID, strings.NewReader("yes\n"), &bytes.Buffer{}); err == nil {
+		t.Fatal("first resolution did not crash")
+	}
+	afterManagedFilesMutation = nil
+	before, _ := fixture.store.Snapshot()
+	if err := os.WriteFile(path, []byte("second-edit"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	result, err := fixture.service.Resolve(context.Background(), fixture.item.ID, strings.NewReader("\n"), &output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, _ := fixture.store.Snapshot()
+	got, _ := os.ReadFile(path)
+	if result.Proceeded || output.Len() == 0 || string(got) != "second-edit" || before.ActiveJournal == nil || after.ActiveJournal == nil || before.ActiveJournal.ID != after.ActiveJournal.ID {
+		t.Fatalf("declined retry changed state: result=%#v before=%#v after=%#v content=%q prompt=%q", result, before.ActiveJournal, after.ActiveJournal, got, output.String())
+	}
+
+	if _, err := fixture.service.Resolve(context.Background(), fixture.item.ID, strings.NewReader("yes\n"), &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = os.ReadFile(path)
+	after, _ = fixture.store.Snapshot()
+	if string(got) != "desired" || after.ActiveJournal != nil {
+		t.Fatalf("approved retry content=%q snapshot=%#v", got, after)
+	}
+	backups, _ := filepath.Glob(filepath.Join(fixture.recovery, "*", "managed"))
+	if len(backups) != 2 {
+		t.Fatalf("superseding approval backups=%v", backups)
+	}
+}
+
+func TestManagedFilesResolvePartialResumeAllowsExactConflictSubsetWithoutPrompt(t *testing.T) {
+	fixture := newManagedResolveFixture(t)
+	first, second := filepath.Join(fixture.home, "first"), filepath.Join(fixture.home, "second")
+	for _, path := range []string{first, second} {
+		if err := os.WriteFile(path, []byte("local"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fixture.client.targets = []chezmoi.Target{fixture.target(first, "desired"), fixture.target(second, "desired")}
+	fixture.own(t, map[string]string{
+		first:  "file:" + managedfiles.Digest("file", []byte("old")),
+		second: "file:" + managedfiles.Digest("file", []byte("old")),
+	}, "signed-v1")
+	snapshot, _ := fixture.store.Snapshot()
+	conflicts, err := fixture.adapter.Conflicts(context.Background(), fixture.item, snapshot.Ownership[fixture.item.ID])
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := managedResolutionPlan(fixture.input, fixture.item, false, conflicts)
+	if _, err := fixture.store.Begin(plan); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(first, []byte("desired"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	result, err := fixture.service.Resolve(context.Background(), fixture.item.ID, strings.NewReader(""), &output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(second)
+	if !result.Proceeded || output.Len() != 0 || string(got) != "desired" {
+		t.Fatalf("result=%#v prompt=%q second=%q", result, output.String(), got)
+	}
+}
+
+func TestManagedFilesResolveTamperedJournalBaselineFailsClosed(t *testing.T) {
+	fixture := newManagedResolveFixture(t)
+	path := filepath.Join(fixture.home, "managed")
+	if err := os.WriteFile(path, []byte("local"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fixture.client.targets = []chezmoi.Target{fixture.target(path, "desired")}
+	fixture.own(t, map[string]string{path: "file:" + managedfiles.Digest("file", []byte("old"))}, "signed-v1")
+	snapshot, _ := fixture.store.Snapshot()
+	conflicts, _ := fixture.adapter.Conflicts(context.Background(), fixture.item, snapshot.Ownership[fixture.item.ID])
+	plan := managedResolutionPlan(fixture.input, fixture.item, false, conflicts)
+	plan.Operations[0].ManagedFileAuthorization.Conflicts[0].Current.Digest = "tampered"
+	if _, err := fixture.store.Begin(plan); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	_, err := fixture.service.Resolve(context.Background(), fixture.item.ID, strings.NewReader("yes\n"), &output)
+	got, _ := os.ReadFile(path)
+	if err == nil || output.Len() != 0 || string(got) != "local" {
+		t.Fatalf("tampered journal err=%v prompt=%q content=%q", err, output.String(), got)
+	}
+}
+
+func TestManagedFilesResolveDesiredCatalogChangeRepromptsAndSupersedes(t *testing.T) {
+	fixture := newManagedResolveFixture(t)
+	path := filepath.Join(fixture.home, "managed")
+	if err := os.WriteFile(path, []byte("local"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fixture.client.targets = []chezmoi.Target{fixture.target(path, "desired-v1")}
+	fixture.own(t, map[string]string{path: "file:" + managedfiles.Digest("file", []byte("old"))}, "signed-v1")
+	snapshot, _ := fixture.store.Snapshot()
+	conflicts, _ := fixture.adapter.Conflicts(context.Background(), fixture.item, snapshot.Ownership[fixture.item.ID])
+	oldPlan := managedResolutionPlan(fixture.input, fixture.item, false, conflicts)
+	oldJournal, err := fixture.store.Begin(oldPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.input.CatalogDigest = "signed-v3"
+	fixture.input.Plan.Release = "v3"
+	fixture.client.targets = []chezmoi.Target{fixture.target(path, "desired-v2")}
+	var output bytes.Buffer
+	if _, err := fixture.service.Resolve(context.Background(), fixture.item.ID, strings.NewReader("yes\n"), &output); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ = fixture.store.Snapshot()
+	got, _ := os.ReadFile(path)
+	if output.Len() == 0 || string(got) != "desired-v2" || snapshot.ActiveJournal != nil || snapshot.Ownership[fixture.item.ID].CatalogDigest != "signed-v3" {
+		t.Fatalf("prompt=%q content=%q snapshot=%#v", output.String(), got, snapshot)
+	}
+	backups, _ := filepath.Glob(filepath.Join(fixture.recovery, "*", "managed"))
+	for _, backup := range backups {
+		if strings.Contains(backup, oldJournal.ID) {
+			t.Fatalf("superseded plan reused old journal backup: %v", backups)
+		}
 	}
 }

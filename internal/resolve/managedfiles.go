@@ -3,11 +3,13 @@ package resolve
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"reflect"
+	"strings"
 
 	"github.com/juty9026/terrapod/internal/model"
 	"github.com/juty9026/terrapod/internal/reconcile"
@@ -21,7 +23,8 @@ var afterManagedFilesMutation func() error
 type managedFilesCapability interface {
 	resource.Adapter
 	Conflicts(context.Context, model.Resource, model.Ownership) ([]managedfiles.Conflict, error)
-	ResolveConflict(context.Context, model.Resource, string) error
+	ValidateConflictBaseline(model.Resource, []managedfiles.Conflict) error
+	ResolveConflict(context.Context, model.Resource, string, []managedfiles.Conflict) error
 }
 
 // ManagedFiles resolves local managed-file conflicts and commits the resulting
@@ -90,11 +93,29 @@ func (r *ManagedFiles) Resolve(ctx context.Context, id model.ResourceID, input i
 	if err != nil {
 		return result, fmt.Errorf("resolve: read locked snapshot: %w", err)
 	}
-	plan := managedResolutionPlan(rebuilt, item, historical)
-	resume := snapshot.ActiveJournal != nil && reflect.DeepEqual(snapshot.ActiveJournal.Plan, plan)
 	conflicts, err := capability.Conflicts(ctx, item, snapshot.Ownership[id])
 	if err != nil {
 		return result, fmt.Errorf("resolve: inspect managed-file conflicts: %w", err)
+	}
+	if len(conflicts) != 0 {
+		if err := capability.ValidateConflictBaseline(item, conflicts); err != nil {
+			return result, fmt.Errorf("resolve: validate managed-file conflicts: %w", err)
+		}
+	}
+	approved, activeResolution, err := activeManagedAuthorization(snapshot.ActiveJournal, id, capability)
+	if err != nil {
+		return result, err
+	}
+	resume := false
+	var plan model.Plan
+	if activeResolution {
+		currentBinding := managedAuthorization(rebuilt, item, historical, approved)
+		resume = snapshot.ActiveJournal.Plan.Release == rebuilt.Plan.Release &&
+			reflect.DeepEqual(*snapshot.ActiveJournal.Plan.Operations[0].ManagedFileAuthorization, currentBinding) &&
+			conflictSubset(conflicts, approved)
+		if resume {
+			plan = snapshot.ActiveJournal.Plan
+		}
 	}
 	result.Blockers = conflictPaths(conflicts)
 	if !resume {
@@ -111,6 +132,8 @@ func (r *ManagedFiles) Resolve(ctx context.Context, id model.ResourceID, input i
 		if !confirmed {
 			return result, nil
 		}
+		approved = conflicts
+		plan = managedResolutionPlan(rebuilt, item, historical, approved)
 	}
 	if err := ctx.Err(); err != nil {
 		return result, err
@@ -123,7 +146,7 @@ func (r *ManagedFiles) Resolve(ctx context.Context, id model.ResourceID, input i
 		return result, errors.New("resolve: active managed-files journal changed under held lock")
 	}
 	if len(conflicts) != 0 {
-		if err := capability.ResolveConflict(ctx, item, journal.ID); err != nil {
+		if err := capability.ResolveConflict(ctx, item, journal.ID, approved); err != nil {
 			return result, fmt.Errorf("resolve: accept managed-file conflicts: %w", err)
 		}
 	}
@@ -189,26 +212,107 @@ func selectManagedResource(id model.ResourceID, input reconcile.ApplyInput) (mod
 	return historical.Resource, true, nil
 }
 
-func managedResolutionPlan(input reconcile.ApplyInput, item model.Resource, historical bool) model.Plan {
-	mode, kind, removes := "current", model.OperationVerify, []string(nil)
+func managedResolutionPlan(input reconcile.ApplyInput, item model.Resource, historical bool, conflicts []managedfiles.Conflict) model.Plan {
+	return managedPlanFromAuthorization(managedAuthorization(input, item, historical, conflicts), input.Plan.Release)
+}
+
+func managedAuthorization(input reconcile.ApplyInput, item model.Resource, historical bool, conflicts []managedfiles.Conflict) model.ManagedFileAuthorization {
+	mode := "current"
+	historicalCatalog := ""
 	if historical {
-		mode, kind, removes = "historical", model.OperationPrune, []string{item.Package}
+		mode = "historical"
+		historicalCatalog = historicalDigest(item.ID, input)
 	}
-	sum := sha256.Sum256([]byte(string(item.ID) + "\x00" + input.CatalogDigest + "\x00" + mode))
+	return model.ManagedFileAuthorization{
+		Version:          1,
+		CatalogDigest:    input.CatalogDigest,
+		HistoricalDigest: historicalCatalog,
+		Mode:             mode,
+		Resource:         item,
+		Conflicts:        append([]managedfiles.Conflict(nil), conflicts...),
+	}
+}
+
+func managedPlanFromAuthorization(authorization model.ManagedFileAuthorization, release string) model.Plan {
+	kind, removes := model.OperationVerify, []string(nil)
+	if authorization.Mode == "historical" {
+		kind, removes = model.OperationPrune, []string{authorization.Resource.Package}
+	}
+	payload, _ := json.Marshal(struct {
+		Authorization model.ManagedFileAuthorization `json:"authorization"`
+		Release       string                         `json:"release"`
+	}{Authorization: authorization, Release: release})
+	sum := sha256.Sum256(payload)
 	operation := model.Operation{
-		ID:         "resolve-managed-files-" + string(item.ID),
-		ResourceID: item.ID,
-		Kind:       kind,
-		Provider:   item.Provider,
-		Package:    item.Package,
-		Removes:    removes,
+		ID:                       "resolve-managed-files-" + string(authorization.Resource.ID),
+		ResourceID:               authorization.Resource.ID,
+		Kind:                     kind,
+		Provider:                 authorization.Resource.Provider,
+		Package:                  authorization.Resource.Package,
+		Removes:                  removes,
+		ManagedFileAuthorization: &authorization,
 	}
 	return model.Plan{
 		ID:          fmt.Sprintf("resolve-managed-files-%x", sum[:16]),
-		Release:     input.Plan.Release,
+		Release:     release,
 		Operations:  []model.Operation{operation},
 		Unavailable: map[model.ResourceID]string{},
 	}
+}
+
+func activeManagedAuthorization(journal *model.Journal, id model.ResourceID, capability managedFilesCapability) ([]managedfiles.Conflict, bool, error) {
+	if journal == nil {
+		return nil, false, nil
+	}
+	resolutionPlan := strings.HasPrefix(journal.Plan.ID, "resolve-managed-files-")
+	if len(journal.Plan.Operations) != 1 {
+		if resolutionPlan {
+			return nil, true, errors.New("resolve: active managed-files journal is malformed")
+		}
+		return nil, false, nil
+	}
+	operation := journal.Plan.Operations[0]
+	expectedID := "resolve-managed-files-" + string(id)
+	if operation.ManagedFileAuthorization != nil && operation.ManagedFileAuthorization.Resource.ID != id && operation.ID != expectedID {
+		return nil, false, nil
+	}
+	if operation.ID != expectedID && operation.ManagedFileAuthorization == nil && !resolutionPlan {
+		return nil, false, nil
+	}
+	if operation.ID != expectedID || operation.ManagedFileAuthorization == nil {
+		return nil, true, errors.New("resolve: active managed-files journal is malformed")
+	}
+	authorization := *operation.ManagedFileAuthorization
+	if authorization.Version != 1 || authorization.CatalogDigest == "" || authorization.Resource.ID != id || authorization.Resource.Type != model.ResourceManagedFiles || authorization.Resource.Provider != "chezmoi" ||
+		(authorization.Mode != "current" && authorization.Mode != "historical") ||
+		(authorization.Mode == "current" && authorization.HistoricalDigest != "") ||
+		(authorization.Mode == "historical" && authorization.HistoricalDigest == "") {
+		return nil, true, errors.New("resolve: active managed-files authorization is invalid")
+	}
+	if err := authorization.Resource.Validate(); err != nil {
+		return nil, true, fmt.Errorf("resolve: active managed-files resource is invalid: %w", err)
+	}
+	if err := capability.ValidateConflictBaseline(authorization.Resource, authorization.Conflicts); err != nil {
+		return nil, true, fmt.Errorf("resolve: active managed-files conflict baseline is invalid: %w", err)
+	}
+	expected := managedPlanFromAuthorization(authorization, journal.Plan.Release)
+	if !reflect.DeepEqual(journal.Plan, expected) {
+		return nil, true, errors.New("resolve: active managed-files journal authorization was tampered")
+	}
+	return append([]managedfiles.Conflict(nil), authorization.Conflicts...), true, nil
+}
+
+func conflictSubset(current, approved []managedfiles.Conflict) bool {
+	byPath := make(map[string]managedfiles.Conflict, len(approved))
+	for _, conflict := range approved {
+		byPath[conflict.Path] = conflict
+	}
+	for _, conflict := range current {
+		if expected, ok := byPath[conflict.Path]; !ok || !reflect.DeepEqual(expected, conflict) {
+			return false
+		}
+	}
+	return true
 }
 
 func scopeManagedInput(input reconcile.ApplyInput, item model.Resource, historical bool, plan model.Plan) reconcile.ApplyInput {

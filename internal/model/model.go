@@ -127,14 +127,15 @@ type Observation struct {
 }
 
 type Operation struct {
-	ID                string
-	ResourceID        ResourceID
-	Kind              OperationKind
-	Provider          string `json:"provider"`
-	Package           string `json:"package"`
-	RequiresPrivilege bool
-	Removes           []string
-	Detail            string
+	ID                       string
+	ResourceID               ResourceID
+	Kind                     OperationKind
+	Provider                 string `json:"provider"`
+	Package                  string `json:"package"`
+	RequiresPrivilege        bool
+	Removes                  []string
+	Detail                   string
+	ManagedFileAuthorization *ManagedFileAuthorization `json:"managedFileAuthorization,omitempty"`
 }
 
 type OperationResult struct {
@@ -143,6 +144,28 @@ type OperationResult struct {
 	Success     bool
 	Detail      string
 	FinishedAt  time.Time
+}
+
+type ManagedFilePathState struct {
+	Exists bool   `json:"exists"`
+	Kind   string `json:"kind,omitempty"`
+	Digest string `json:"digest,omitempty"`
+}
+
+type ManagedFileConflict struct {
+	Path     string               `json:"path"`
+	Obsolete bool                 `json:"obsolete,omitempty"`
+	Current  ManagedFilePathState `json:"current"`
+	Desired  ManagedFilePathState `json:"desired"`
+}
+
+type ManagedFileAuthorization struct {
+	Version          int                   `json:"version"`
+	CatalogDigest    string                `json:"catalogDigest"`
+	HistoricalDigest string                `json:"historicalDigest,omitempty"`
+	Mode             string                `json:"mode"`
+	Resource         Resource              `json:"resource"`
+	Conflicts        []ManagedFileConflict `json:"conflicts"`
 }
 
 type Plan struct {

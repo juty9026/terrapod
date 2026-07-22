@@ -31,6 +31,9 @@ func (f *fakeClient) ApplyTargets(_ context.Context, paths []string) error {
 	return nil
 }
 func (f *fakeClient) ApplyTargetsChecked(_ context.Context, expected []chezmoi.ExpectedTarget, check func(string) error) error {
+	if len(expected) == 0 {
+		return nil
+	}
 	if f.beforeCheck != nil {
 		f.beforeCheck()
 	}
@@ -74,6 +77,23 @@ func begin(t *testing.T, store *state.Store, op model.Operation) {
 }
 func operation(item model.Resource, kind model.OperationKind) model.Operation {
 	return model.Operation{ID: "managed-" + string(kind), ResourceID: item.ID, Kind: kind, Provider: item.Provider, Package: item.Package}
+}
+
+func beginConflictResolution(t *testing.T, store *state.Store, item model.Resource, approved []Conflict) string {
+	t.Helper()
+	authorization := &model.ManagedFileAuthorization{Version: 1, CatalogDigest: "signed", Mode: "current", Resource: item, Conflicts: approved}
+	journal, err := store.Begin(model.Plan{ID: "resolve-test", Operations: []model.Operation{{
+		ID:                       "resolve-managed-files-" + string(item.ID),
+		ResourceID:               item.ID,
+		Kind:                     model.OperationVerify,
+		Provider:                 item.Provider,
+		Package:                  item.Package,
+		ManagedFileAuthorization: authorization,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return journal.ID
 }
 
 func TestAbsentCreateAndExactOwnershipObservation(t *testing.T) {
@@ -556,20 +576,25 @@ func TestBackupFailureAbortsApply(t *testing.T) {
 }
 
 func TestResolveConflictBacksUpThenAcceptsDesired(t *testing.T) {
-	a, client, _, home, item := testAdapter(t, nil)
+	a, client, store, home, item := testAdapter(t, nil)
 	path := filepath.Join(home, "conflict")
 	if err := os.WriteFile(path, []byte("local edit"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	client.targets = []chezmoi.Target{target(path, "file", "desired")}
+	if err := store.PutOwnership(model.Ownership{ResourceID: item.ID, Paths: map[string]string{path: "file:" + Digest("file", []byte("old"))}}); err != nil {
+		t.Fatal(err)
+	}
+	approved := []Conflict{{Path: path, Current: model.ManagedFilePathState{Exists: true, Kind: "file", Digest: Digest("file", []byte("local edit"))}, Desired: model.ManagedFilePathState{Exists: true, Kind: "file", Digest: Digest("file", []byte("desired"))}}}
+	journal := beginConflictResolution(t, store, item, approved)
 	client.apply = func(paths []string) error {
-		backup, err := os.ReadFile(filepath.Join(a.Backup.Root, "resolve-1", "conflict"))
+		backup, err := os.ReadFile(filepath.Join(a.Backup.Root, journal, "conflict"))
 		if err != nil || string(backup) != "local edit" {
 			t.Fatalf("resolve backup = %q, %v", backup, err)
 		}
 		return os.WriteFile(paths[0], []byte("desired"), 0o600)
 	}
-	if err := a.ResolveConflict(context.Background(), item, "resolve-1"); err != nil {
+	if err := a.ResolveConflict(context.Background(), item, journal, approved); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(path)
@@ -594,14 +619,58 @@ func TestResolveConflictBacksUpAndDeletesModifiedObsoleteOwnedPath(t *testing.T)
 		t.Fatal(err)
 	}
 	client.apply = func(paths []string) error { return os.WriteFile(paths[0], []byte("desired"), 0o600) }
-	if err := a.ResolveConflict(context.Background(), item, "resolve-obsolete"); err != nil {
+	approved, err := a.Conflicts(context.Background(), item, owned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal := beginConflictResolution(t, store, item, approved)
+	if err := a.ResolveConflict(context.Background(), item, journal, approved); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(obsolete); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("obsolete remains: %v", err)
 	}
-	backup, err := os.ReadFile(filepath.Join(a.Backup.Root, "resolve-obsolete", "obsolete"))
+	backup, err := os.ReadFile(filepath.Join(a.Backup.Root, journal, "obsolete"))
 	if err != nil || string(backup) != "local edit" {
 		t.Fatalf("backup=%q,%v", backup, err)
+	}
+}
+
+func TestResolveConflictRejectsNewConflictBeforeFirstMutation(t *testing.T) {
+	a, client, store, home, item := testAdapter(t, nil)
+	first, newlyConflicting := filepath.Join(home, "first"), filepath.Join(home, "new-conflict")
+	if err := os.WriteFile(first, []byte("local"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client.targets = []chezmoi.Target{target(first, "file", "desired")}
+	owned := model.Ownership{ResourceID: item.ID, Paths: map[string]string{
+		first:            "file:" + Digest("file", []byte("old")),
+		newlyConflicting: "file:" + Digest("file", []byte("old")),
+	}}
+	if err := store.PutOwnership(owned); err != nil {
+		t.Fatal(err)
+	}
+	approved, err := a.Conflicts(context.Background(), item, owned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeManagedConflictMutation = func() {
+		beforeManagedConflictMutation = nil
+		if err := os.WriteFile(newlyConflicting, []byte("new edit"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { beforeManagedConflictMutation = nil })
+	client.apply = func(paths []string) error {
+		t.Fatalf("mutation started for %v", paths)
+		return nil
+	}
+	journal := beginConflictResolution(t, store, item, approved)
+	if err := a.ResolveConflict(context.Background(), item, journal, approved); err == nil {
+		t.Fatal("new conflict was silently accepted")
+	}
+	got, _ := os.ReadFile(first)
+	if string(got) != "local" {
+		t.Fatalf("approved path changed before complete re-inventory: %q", got)
 	}
 }

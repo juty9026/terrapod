@@ -35,10 +35,7 @@ type Adapter struct {
 	Backup recovery.Backup
 }
 
-type Conflict struct {
-	Path     string
-	Obsolete bool
-}
+type Conflict = model.ManagedFileConflict
 
 func (a *Adapter) Conflicts(ctx context.Context, desired model.Resource, owned model.Ownership) ([]Conflict, error) {
 	if err := a.validate(); err != nil {
@@ -64,24 +61,86 @@ func (a *Adapter) Conflicts(ctx context.Context, desired model.Resource, owned m
 		}
 		target, desiredNow := targets[path]
 		ownedKind, ownedDigest, hasOwned := decodeOwned(owned.Paths[path])
+		currentState := exportedPathState(current)
 		if desiredNow {
 			matchesDesired := current.exists && current.kind == target.Kind && current.digest == target.Digest
 			matchesOwned := hasOwned && current.exists && current.kind == ownedKind && current.digest == ownedDigest
 			if current.exists && !matchesDesired && !matchesOwned && (hasOwned || current.kind == "symlink") {
-				conflicts = append(conflicts, Conflict{Path: path})
+				conflicts = append(conflicts, Conflict{Path: path, Current: currentState, Desired: model.ManagedFilePathState{Exists: true, Kind: target.Kind, Digest: target.Digest}})
 			}
 		} else if current.exists && (!hasOwned || current.kind != ownedKind || current.digest != ownedDigest) {
-			conflicts = append(conflicts, Conflict{Path: path, Obsolete: true})
+			conflicts = append(conflicts, Conflict{Path: path, Obsolete: true, Current: currentState})
 		}
 	}
 	sort.Slice(conflicts, func(i, j int) bool { return conflicts[i].Path < conflicts[j].Path })
 	return conflicts, nil
 }
 
+func (a *Adapter) ValidateConflictBaseline(desired model.Resource, conflicts []Conflict) error {
+	if err := a.validate(); err != nil {
+		return err
+	}
+	if len(conflicts) == 0 {
+		return errors.New("managed-files: conflict baseline is empty")
+	}
+	previous := ""
+	paths := make(map[string]string, len(conflicts))
+	for _, conflict := range conflicts {
+		if !filepath.IsAbs(conflict.Path) || filepath.Clean(conflict.Path) != conflict.Path || conflict.Path <= previous {
+			return errors.New("managed-files: conflict baseline is not canonical")
+		}
+		previous = conflict.Path
+		if !validConflictState(conflict.Current, true) {
+			return fmt.Errorf("managed-files: invalid current conflict state at %s", conflict.Path)
+		}
+		if conflict.Obsolete {
+			if conflict.Desired != (model.ManagedFilePathState{}) {
+				return fmt.Errorf("managed-files: obsolete conflict has desired state at %s", conflict.Path)
+			}
+		} else if !validConflictState(conflict.Desired, true) || conflict.Current.Kind != conflict.Desired.Kind {
+			return fmt.Errorf("managed-files: invalid desired conflict state at %s", conflict.Path)
+		}
+		paths[conflict.Path] = "bound"
+	}
+	return a.validateOwnershipScope(desired, paths)
+}
+
+func conflictSubset(current, approved []Conflict) bool {
+	approvedByPath := make(map[string]Conflict, len(approved))
+	for _, conflict := range approved {
+		approvedByPath[conflict.Path] = conflict
+	}
+	for _, conflict := range current {
+		if expected, ok := approvedByPath[conflict.Path]; !ok || !reflect.DeepEqual(conflict, expected) {
+			return false
+		}
+	}
+	return true
+}
+
 type pathState struct {
 	kind   string
 	digest string
 	exists bool
+}
+
+func exportedPathState(value pathState) model.ManagedFilePathState {
+	return model.ManagedFilePathState{Exists: value.exists, Kind: value.kind, Digest: value.digest}
+}
+
+func internalPathState(value model.ManagedFilePathState) pathState {
+	return pathState{exists: value.Exists, kind: value.Kind, digest: value.Digest}
+}
+
+func validConflictState(value model.ManagedFilePathState, mustExist bool) bool {
+	if value.Exists != mustExist {
+		return false
+	}
+	if !value.Exists {
+		return value.Kind == "" && value.Digest == ""
+	}
+	digest, err := hex.DecodeString(value.Digest)
+	return (value.Kind == "file" || value.Kind == "symlink") && err == nil && len(digest) == sha256.Size
 }
 
 type homeFS struct {
@@ -91,6 +150,7 @@ type homeFS struct {
 }
 
 var beforeManagedRemove func()
+var beforeManagedConflictMutation func()
 
 func Digest(_ string, data []byte) string {
 	sum := sha256.Sum256(data)
@@ -323,81 +383,69 @@ func (a *Adapter) Verify(ctx context.Context, desired model.Resource) (model.Obs
 
 // ResolveConflict is the explicit managed-file conflict action: it always
 // creates a recovery copy before accepting the desired target.
-func (a *Adapter) ResolveConflict(ctx context.Context, desired model.Resource, journal string) error {
+func (a *Adapter) ResolveConflict(ctx context.Context, desired model.Resource, journal string, approved []Conflict) error {
 	if err := a.validate(); err != nil {
 		return err
 	}
 	if desired.Type != model.ResourceManagedFiles || desired.Provider != "chezmoi" || desired.ID == "" {
 		return errors.New("managed-files: resolve requires an exact managed-files/chezmoi resource")
 	}
-	targets, err := a.targets(ctx, desired)
-	if err != nil {
-		return err
-	}
-	var paths []string
-	authorized := make(map[string]pathState)
-	home, err := a.openHome()
-	if err != nil {
-		return err
-	}
-	defer home.root.Close()
-	for _, path := range sortedTargetPaths(targets) {
-		current, err := home.inspect(path)
-		if err != nil {
-			return err
-		}
-		if !current.exists || (current.kind == targets[path].Kind && current.digest == targets[path].Digest) {
-			continue
-		}
-		if current.kind != targets[path].Kind {
-			return fmt.Errorf("managed-files: unsafe type replacement at %s", path)
-		}
-		if err := a.Backup.Save(journal, path); err != nil {
-			return err
-		}
-		paths = append(paths, path)
-		authorized[path] = current
-	}
 	snapshot, err := a.State.Snapshot()
 	if err != nil {
+		return err
+	}
+	if err := validateActiveConflictAuthorization(snapshot, desired, journal, approved); err != nil {
 		return err
 	}
 	owned := snapshot.Ownership[desired.ID]
 	if err := a.validateOwnershipScope(desired, owned.Paths); err != nil {
 		return err
 	}
-	var obsolete []string
-	for path := range owned.Paths {
-		if _, remains := targets[path]; remains {
-			continue
-		}
-		current, err := home.inspect(path)
-		if err != nil {
-			return err
-		}
-		if !current.exists {
-			continue
-		}
-		if err := a.Backup.Save(journal, path); err != nil {
-			return err
-		}
-		obsolete = append(obsolete, path)
-		authorized[path] = current
+	if err := a.ValidateConflictBaseline(desired, approved); err != nil {
+		return err
 	}
-	sort.Strings(obsolete)
-	if len(paths) == 0 && len(obsolete) == 0 {
+	fresh, err := a.Conflicts(ctx, desired, owned)
+	if err != nil {
+		return err
+	}
+	if !conflictSubset(fresh, approved) {
+		return errors.New("managed-files: current conflicts exceed approved baseline")
+	}
+	if len(fresh) == 0 {
 		return errors.New("managed-files: resource has no resolvable conflict")
 	}
-	for _, path := range paths {
-		current, err := home.inspect(path)
-		if err != nil {
+	for _, conflict := range fresh {
+		if err := a.Backup.Save(journal, conflict.Path); err != nil {
 			return err
 		}
-		if current != authorized[path] {
-			return fmt.Errorf("managed-files: conflict changed immediately before resolution at %s", path)
+	}
+	if beforeManagedConflictMutation != nil {
+		beforeManagedConflictMutation()
+	}
+	latest, err := a.Conflicts(ctx, desired, owned)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(latest, fresh) {
+		return errors.New("managed-files: conflicts changed before first mutation")
+	}
+	home, err := a.openHome()
+	if err != nil {
+		return err
+	}
+	defer home.root.Close()
+	authorized := make(map[string]pathState, len(fresh))
+	var expected []chezmoi.ExpectedTarget
+	var obsolete []string
+	for _, conflict := range fresh {
+		authorized[conflict.Path] = internalPathState(conflict.Current)
+		if conflict.Obsolete {
+			obsolete = append(obsolete, conflict.Path)
+		} else {
+			expected = append(expected, chezmoi.ExpectedTarget{Path: conflict.Path, Kind: conflict.Desired.Kind, Digest: conflict.Desired.Digest})
 		}
 	}
-	if err := a.Client.ApplyTargetsChecked(ctx, expectedTargets(targets, paths), func(path string) error {
+	if err := a.Client.ApplyTargetsChecked(ctx, expected, func(path string) error {
 		current, err := home.inspect(path)
 		if err != nil {
 			return err
@@ -426,6 +474,30 @@ func (a *Adapter) ResolveConflict(ctx context.Context, desired model.Resource, j
 		if err := home.removeEmptyParents(filepath.Dir(path)); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateActiveConflictAuthorization(snapshot model.Snapshot, desired model.Resource, journal string, approved []Conflict) error {
+	if snapshot.ActiveJournal == nil || snapshot.ActiveJournal.ID != journal || len(snapshot.ActiveJournal.Plan.Operations) != 1 {
+		return errors.New("managed-files: exact active resolution journal is required")
+	}
+	operation := snapshot.ActiveJournal.Plan.Operations[0]
+	authorization := operation.ManagedFileAuthorization
+	if authorization == nil || authorization.Version != 1 || !reflect.DeepEqual(authorization.Resource, desired) || !reflect.DeepEqual(authorization.Conflicts, approved) ||
+		operation.ID != "resolve-managed-files-"+string(desired.ID) || operation.ResourceID != desired.ID || operation.Provider != desired.Provider || operation.Package != desired.Package {
+		return errors.New("managed-files: active journal does not authorize the conflict baseline")
+	}
+	if authorization.Mode == "current" {
+		if operation.Kind != model.OperationVerify || len(operation.Removes) != 0 {
+			return errors.New("managed-files: active journal has invalid current resolution semantics")
+		}
+	} else if authorization.Mode == "historical" {
+		if operation.Kind != model.OperationPrune || !reflect.DeepEqual(operation.Removes, []string{desired.Package}) {
+			return errors.New("managed-files: active journal has invalid historical resolution semantics")
+		}
+	} else {
+		return errors.New("managed-files: active journal has invalid resolution mode")
 	}
 	return nil
 }
