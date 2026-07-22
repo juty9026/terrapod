@@ -43,7 +43,10 @@ func fixture(t *testing.T, body []byte) (*Adapter, model.Resource, *state.Store,
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { requests++; _, _ = w.Write(body) }))
 	t.Cleanup(server.Close)
 	digest := sha256.Sum256(body)
-	home := t.TempDir()
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	store, err := state.Open(filepath.Join(t.TempDir(), "state"))
 	if err != nil {
 		t.Fatal(err)
@@ -459,5 +462,259 @@ func TestPruneRejectsSymlinkedFontsDirectoryWithoutDeletingExternalFile(t *testi
 	}
 	if got, err := os.ReadFile(externalFont); err != nil || string(got) != "same" {
 		t.Fatalf("external=%q err=%v", got, err)
+	}
+}
+
+func writeRecoveryIntent(t *testing.T, a *Adapter, item model.Resource, owned model.Ownership, op model.Operation, entries []transactionEntry) string {
+	t.Helper()
+	d, err := a.declaration(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := a.State.Snapshot()
+	if err != nil || snapshot.ActiveJournal == nil {
+		t.Fatalf("snapshot=%#v err=%v", snapshot, err)
+	}
+	fonts := filepath.Join(a.Home, "Library", "Fonts")
+	directory := filepath.Join(fonts, transactionDirname)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	txn := transaction{Version: 1, Phase: "prepared", ResourceID: string(item.ID), ManifestDigest: manifestDigest(d.files), OwnershipDigest: ownershipDigest(owned), JournalID: snapshot.ActiveJournal.ID, OperationID: op.ID, OperationKind: op.Kind, Entries: entries}
+	contents, err := json.Marshal(txn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, transactionFilename), contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return directory
+}
+
+func TestRecoveryRejectsForgedOrStaleIntentWithoutMutation(t *testing.T) {
+	body := fontArchive(t, map[string]string{"Jetendard-Regular.ttf": "desired"})
+	for _, tc := range []struct {
+		name  string
+		forge func(*transaction)
+	}{
+		{"remove outside receipt", func(txn *transaction) {
+			txn.Entries = []transactionEntry{{Name: "Jetendard-Manual.ttf", Remove: true, OldExists: true, OldDigest: digestString([]byte("manual")), OldSize: int64(len("manual"))}}
+		}},
+		{"stale manifest", func(txn *transaction) { txn.ManifestDigest = strings.Repeat("0", 64) }},
+		{"stale ownership", func(txn *transaction) { txn.OwnershipDigest = strings.Repeat("0", 64) }},
+		{"stale journal", func(txn *transaction) { txn.JournalID = "stale-journal" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, item, store, fonts, _ := fixture(t, body)
+			if err := os.MkdirAll(fonts, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			manual := filepath.Join(fonts, "Jetendard-Manual.ttf")
+			if err := os.WriteFile(manual, []byte("manual"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			op := operation(item, model.OperationInstall)
+			if _, err := store.Begin(model.Plan{ID: "forged", Operations: []model.Operation{op}}); err != nil {
+				t.Fatal(err)
+			}
+			d, err := a.declaration(item)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot, _ := store.Snapshot()
+			txn := transaction{Version: 1, Phase: "prepared", ResourceID: string(item.ID), ManifestDigest: manifestDigest(d.files), OwnershipDigest: ownershipDigest(model.Ownership{}), JournalID: snapshot.ActiveJournal.ID, OperationID: op.ID, OperationKind: op.Kind, Entries: []transactionEntry{{Name: "Jetendard-Regular.ttf", NewDigest: d.files["Jetendard-Regular.ttf"], NewSize: int64(len("desired"))}}}
+			tc.forge(&txn)
+			directory := filepath.Join(fonts, transactionDirname)
+			if err := os.Mkdir(directory, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			contents, _ := json.Marshal(txn)
+			if err := os.WriteFile(filepath.Join(directory, transactionFilename), contents, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range txn.Entries {
+				if entry.Remove {
+					if err := os.WriteFile(filepath.Join(directory, backupName(entry)), []byte("manual"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					if err := os.WriteFile(filepath.Join(directory, stageName(entry)), []byte("desired"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if _, err := a.Inspect(context.Background(), item); err == nil {
+				t.Fatal("expected forged intent rejection")
+			}
+			if got, err := os.ReadFile(manual); err != nil || string(got) != "manual" {
+				t.Fatalf("manual=%q err=%v", got, err)
+			}
+		})
+	}
+}
+
+func TestRecoveryRejectsSymlinkedOrForgedStageAndBackupWithoutMutation(t *testing.T) {
+	body := fontArchive(t, map[string]string{"Jetendard-Regular.ttf": "new"})
+	for _, kind := range []string{"stage-symlink", "backup-symlink", "stage-digest", "backup-digest"} {
+		t.Run(kind, func(t *testing.T) {
+			a, item, store, fonts, _ := fixture(t, body)
+			if err := os.MkdirAll(fonts, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			target := filepath.Join(fonts, "Jetendard-Regular.ttf")
+			if err := os.WriteFile(target, []byte("old"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			op := operation(item, model.OperationRestore)
+			if _, err := store.Begin(model.Plan{ID: "symlink-artifact", Operations: []model.Operation{op}}); err != nil {
+				t.Fatal(err)
+			}
+			entry := transactionEntry{Name: "Jetendard-Regular.ttf", NewDigest: digestString([]byte("new")), NewSize: 3, OldExists: true, OldDigest: digestString([]byte("old")), OldSize: 3}
+			directory := writeRecoveryIntent(t, a, item, model.Ownership{}, op, []transactionEntry{entry})
+			external := filepath.Join(t.TempDir(), "artifact")
+			isBackup := strings.HasPrefix(kind, "backup")
+			contents := "new"
+			if isBackup {
+				contents = "old"
+				if err := os.WriteFile(filepath.Join(directory, stageName(entry)), []byte("new"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if strings.HasSuffix(kind, "digest") {
+				contents = "forged"
+			}
+			if err := os.WriteFile(external, []byte(contents), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			link := stageName(entry)
+			if isBackup {
+				link = backupName(entry)
+			} else {
+				if err := os.WriteFile(filepath.Join(directory, backupName(entry)), []byte("old"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if strings.HasSuffix(kind, "symlink") {
+				if err := os.Symlink(external, filepath.Join(directory, link)); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(filepath.Join(directory, link), []byte(contents), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := a.Inspect(context.Background(), item); err == nil {
+				t.Fatal("expected symlink artifact rejection")
+			}
+			if got, _ := os.ReadFile(target); string(got) != "old" {
+				t.Fatalf("target mutated: %q", got)
+			}
+		})
+	}
+}
+
+func TestRecoveryRejectsSymlinkedIntentWithoutMutation(t *testing.T) {
+	body := fontArchive(t, map[string]string{"Jetendard-Regular.ttf": "new"})
+	a, item, store, fonts, _ := fixture(t, body)
+	if err := os.MkdirAll(fonts, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(fonts, "Jetendard-Regular.ttf")
+	if err := os.WriteFile(target, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	op := operation(item, model.OperationRestore)
+	if _, err := store.Begin(model.Plan{ID: "symlink-intent", Operations: []model.Operation{op}}); err != nil {
+		t.Fatal(err)
+	}
+	entry := transactionEntry{Name: "Jetendard-Regular.ttf", NewDigest: digestString([]byte("new")), NewSize: 3, OldExists: true, OldDigest: digestString([]byte("old")), OldSize: 3}
+	directory := writeRecoveryIntent(t, a, item, model.Ownership{}, op, []transactionEntry{entry})
+	if err := os.WriteFile(filepath.Join(directory, stageName(entry)), []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, backupName(entry)), []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	intent := filepath.Join(directory, transactionFilename)
+	contents, err := os.ReadFile(intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(t.TempDir(), transactionFilename)
+	if err := os.WriteFile(external, contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(intent); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, intent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Inspect(context.Background(), item); err == nil {
+		t.Fatal("expected symlink intent rejection")
+	}
+	if got, err := os.ReadFile(target); err != nil || string(got) != "old" {
+		t.Fatalf("target=%q err=%v", got, err)
+	}
+}
+
+func TestHomeAncestorSymlinkBlocksInstallRecoveryAndPrune(t *testing.T) {
+	body := fontArchive(t, map[string]string{"Jetendard-Regular.ttf": "new"})
+	for _, depth := range []string{"parent", "grandparent"} {
+		for _, action := range []string{"install", "recovery", "prune"} {
+			t.Run(depth+"/"+action, func(t *testing.T) {
+				a, item, store, _, _ := fixture(t, body)
+				base, err := filepath.EvalSymlinks(t.TempDir())
+				if err != nil {
+					t.Fatal(err)
+				}
+				realParent := filepath.Join(base, "real")
+				relativeHome := "home"
+				if depth == "grandparent" {
+					relativeHome = filepath.Join("nested", "home")
+				}
+				realHome := filepath.Join(realParent, relativeHome)
+				if err := os.MkdirAll(filepath.Join(realHome, "Library", "Fonts"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				alias := filepath.Join(base, "alias")
+				if err := os.Symlink(realParent, alias); err != nil {
+					t.Fatal(err)
+				}
+				a.Home = filepath.Join(alias, relativeHome)
+				target := filepath.Join(realHome, "Library", "Fonts", "Jetendard-Regular.ttf")
+				if err := os.WriteFile(target, []byte("old"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				digest := digestString([]byte("old"))
+				owned := model.Ownership{ResourceID: item.ID, Provider: item.Provider, Package: item.Package, Paths: map[string]string{filepath.Join(a.Home, "Library", "Fonts", "Jetendard-Regular.ttf"): digest}}
+				if action == "prune" {
+					op := operation(item, model.OperationPrune)
+					op.Removes = []string{item.Package}
+					if err := a.Prune(context.Background(), item, op, owned); err == nil {
+						t.Fatal("expected ancestor rejection")
+					}
+				} else {
+					op := operation(item, model.OperationInstall)
+					if _, err := store.Begin(model.Plan{ID: "ancestor", Operations: []model.Operation{op}}); err != nil {
+						t.Fatal(err)
+					}
+					if action == "recovery" {
+						entry := transactionEntry{Name: "Jetendard-Regular.ttf", NewDigest: digestString([]byte("new")), NewSize: 3, OldExists: true, OldDigest: digest, OldSize: 3}
+						directory := writeRecoveryIntent(t, a, item, model.Ownership{}, op, []transactionEntry{entry})
+						if err := os.WriteFile(filepath.Join(directory, stageName(entry)), []byte("new"), 0o600); err != nil {
+							t.Fatal(err)
+						}
+						if err := os.WriteFile(filepath.Join(directory, backupName(entry)), []byte("old"), 0o600); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if _, err := a.Inspect(context.Background(), item); err == nil {
+						t.Fatal("expected ancestor rejection")
+					}
+				}
+				if got, err := os.ReadFile(target); err != nil || string(got) != "old" {
+					t.Fatalf("target=%q err=%v", got, err)
+				}
+			})
+		}
 	}
 }
