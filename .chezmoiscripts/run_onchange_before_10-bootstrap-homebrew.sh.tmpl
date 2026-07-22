@@ -228,6 +228,26 @@ find_brew() {
 brew_bin="$(find_brew || true)"
 
 if [ -z "$brew_bin" ]; then
+{{ if eq .chezmoi.os "linux" -}}
+  homebrew_space_path=/home/linuxbrew
+  homebrew_space_parent="$homebrew_space_path"
+  while [ ! -e "$homebrew_space_parent" ] && [ "$homebrew_space_parent" != / ]; do
+    homebrew_space_parent="$(dirname "$homebrew_space_parent")"
+  done
+
+  if homebrew_df_output="$(df -Pk "$homebrew_space_parent" 2>/dev/null)"; then
+    homebrew_available_kb="$(printf '%s\n' "$homebrew_df_output" | awk 'NR == 2 { print $4; exit }')"
+    case "$homebrew_available_kb" in
+      ''|*[!0-9]*) ;;
+      *)
+        if [ "$homebrew_available_kb" -lt 3145728 ]; then
+          printf '%s\n' \
+            "Warning: less than 3 GiB is available for $homebrew_space_path; Homebrew installation will continue." >&2
+        fi
+        ;;
+    esac
+  fi
+{{ end -}}
   echo "Installing Homebrew..."
   homebrew_installer="$(mktemp "${TMPDIR:-/tmp}/terrapod-homebrew-install.XXXXXX")"
   if ! curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "$homebrew_installer"; then

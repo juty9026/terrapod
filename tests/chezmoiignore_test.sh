@@ -473,6 +473,60 @@ run_linux_homebrew_arch_case arm64 failure
 run_linux_homebrew_arch_case i686 failure
 run_linux_homebrew_arch_case unknown failure
 
+run_linux_homebrew_space_case() {
+  available_kb="$1"
+  expected_warning="$2"
+  case_name="$3"
+  case_dir="$tmp_dir/linux-homebrew-space-$case_name"
+  case_bin="$case_dir/bin"
+  case_script="$case_dir/bootstrap.sh"
+  case_log="$case_dir/commands.log"
+  case_state="$case_dir/state"
+  case_home="$case_dir/home"
+  mkdir -p "$case_bin" "$case_home"
+
+  write_stub "$case_bin/uname" 'printf "%s\n" x86_64'
+  write_stub "$case_bin/df" \
+    'printf "%s\n" "df args:$*" >>"$LINUX_HOMEBREW_SPACE_LOG"' \
+    'printf "%s\n" "Filesystem 1024-blocks Used Available Capacity Mounted on"' \
+    'printf "%s\n" "/dev/test 9999999 1 $LINUX_HOMEBREW_AVAILABLE_KB 1% /"'
+  write_stub "$case_bin/curl" \
+    'printf "%s\n" "curl args:$*" >>"$LINUX_HOMEBREW_SPACE_LOG"' \
+    'exit 97'
+
+  printf '%s\n' "$ubuntu_homebrew_bootstrap" |
+    sed "s#/home/linuxbrew/.linuxbrew/bin/brew#$case_dir/missing-brew#g" >"$case_script"
+  sh -n "$case_script" || fail "Ubuntu Homebrew $case_name space test script is valid sh"
+
+  case_status=0
+  HOME="$case_home" \
+    XDG_STATE_HOME="$case_state" \
+    TERRAPOD_FIRST_RUN_APPLY=1 \
+    LINUX_HOMEBREW_SPACE_LOG="$case_log" \
+    LINUX_HOMEBREW_AVAILABLE_KB="$available_kb" \
+    PATH="$case_bin:/usr/bin:/bin" \
+    sh "$case_script" >"$case_dir/stdout" 2>"$case_dir/stderr" || case_status=$?
+
+  if [ "$case_status" -eq 0 ]; then
+    fail "Ubuntu Homebrew $case_name space case reaches the intentionally failing installer download"
+  fi
+  if ! grep -F 'raw.githubusercontent.com/Homebrew/install' "$case_log" >/dev/null; then
+    fail "Ubuntu Homebrew $case_name space check continues to the installer download"
+  fi
+
+  if [ "$expected_warning" = yes ]; then
+    if ! grep -F 'Warning: less than 3 GiB is available for /home/linuxbrew; Homebrew installation will continue.' "$case_dir/stderr" >/dev/null; then
+      fail "Ubuntu Homebrew warns when available space is below 3 GiB"
+    fi
+  elif grep -F 'Warning: less than 3 GiB is available for /home/linuxbrew' "$case_dir/stderr" >/dev/null; then
+    fail "Ubuntu Homebrew does not warn when available space is at least 3 GiB"
+  fi
+  pass "Ubuntu Homebrew handles $case_name available space without blocking installation"
+}
+
+run_linux_homebrew_space_case 3145727 yes low
+run_linux_homebrew_space_case 3145728 no sufficient
+
 replace_standard_brew_path() {
   input_file="$1"
   output_file="$2"
