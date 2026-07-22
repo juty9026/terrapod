@@ -396,6 +396,77 @@ func TestRejectsDestinationAncestorSwapDuringGitCommand(t *testing.T) {
 	}
 }
 
+func TestRejectsStagingDirectorySwapDuringGitCommand(t *testing.T) {
+	swapped := false
+	a, item, store, destination := newFixture(t, func(_ context.Context, request execx.Request) (execx.Result, error) {
+		args := strings.Join(request.Args, " ")
+		if strings.Contains(args, " init ") {
+			return execx.Result{}, os.MkdirAll(filepath.Join(request.Dir, ".git"), 0o700)
+		}
+		if !swapped && strings.Contains(args, " remote add ") {
+			if err := os.Rename(request.Dir, request.Dir+"-original"); err != nil {
+				return execx.Result{}, err
+			}
+			if err := os.MkdirAll(filepath.Join(request.Dir, ".git"), 0o700); err != nil {
+				return execx.Result{}, err
+			}
+			swapped = true
+		}
+		return execx.Result{}, nil
+	})
+	op := operation(item, model.OperationInstall)
+	if _, err := store.Begin(model.Plan{ID: "staging-swap", Operations: []model.Operation{op}}); err != nil {
+		t.Fatal(err)
+	}
+	result := a.ExecuteResource(context.Background(), item, op)
+	if result.Success || !strings.Contains(result.Detail, "inode") {
+		t.Fatalf("result=%#v", result)
+	}
+	if !swapped {
+		t.Fatal("test did not swap staging")
+	}
+	if _, err := os.Lstat(destination); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("foreign staging committed: %v", err)
+	}
+}
+
+func TestStagingCapabilityRejectsForeignAndReplay(t *testing.T) {
+	a, item, _, _ := newFixture(t, func(_ context.Context, request execx.Request) (execx.Result, error) {
+		args := strings.Join(request.Args, " ")
+		if strings.Contains(args, " init ") {
+			return execx.Result{}, os.MkdirAll(filepath.Join(request.Dir, ".git"), 0o700)
+		}
+		if strings.Contains(args, "rev-parse FETCH_HEAD") {
+			return execx.Result{Stdout: []byte(testCommit + "\n")}, nil
+		}
+		if strings.Contains(args, " checkout ") {
+			return execx.Result{}, os.WriteFile(filepath.Join(request.Dir, "zinit.zsh"), []byte("zinit"), 0o600)
+		}
+		return execx.Result{}, nil
+	})
+	d, err := a.declaration(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignPath := filepath.Join(filepath.FromSlash(d.destination) + ".tpod-foreign")
+	if err := os.MkdirAll(filepath.Join(a.Home, foreignPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.commitStaging(d, stagingCapability{token: "foreign", path: foreignPath}); err == nil {
+		t.Fatal("foreign staging capability accepted")
+	}
+	cap, err := a.stage(context.Background(), d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.commitStaging(d, cap); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.commitStaging(d, cap); err == nil || !strings.Contains(err.Error(), "replayed") {
+		t.Fatalf("replay err=%v", err)
+	}
+}
+
 func TestInstallFetchesSignedCommitRatherThanMovingRef(t *testing.T) {
 	var fetch []string
 	a, item, store, _ := newFixture(t, func(_ context.Context, request execx.Request) (execx.Result, error) {
@@ -509,22 +580,59 @@ func TestRealHomebrewGitInstallUpdateAndConfigIsolation(t *testing.T) {
 	if got := strings.TrimSpace(runGitTest(t, git, "-C", filepath.Join(home, prior.destination), "rev-parse", "HEAD")); got != first {
 		t.Fatalf("HEAD=%s want old signed %s", got, first)
 	}
+	checkout := filepath.Join(home, prior.destination)
+	marker := filepath.Join(home, "filter-ran")
+	filter := filepath.Join(home, "filter.sh")
+	if err := os.WriteFile(filter, []byte("#!/bin/sh\ntouch \""+marker+"\"\ncat\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	item.Metadata[MetadataCommit] = second
 	upgrade := operation(item, model.OperationUpgrade)
 	journal, err = store.Begin(model.Plan{ID: "real-update", Operations: []model.Operation{upgrade}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result := a.ExecuteResource(context.Background(), item, upgrade); !result.Success {
-		t.Fatalf("update=%#v", result)
+	hookCalls := 0
+	afterSnapshotValidated = func() {
+		hookCalls++
+		if hookCalls == 3 {
+			runGitTest(t, git, "-C", checkout, "config", "filter.evil.process", filter)
+			if err := os.WriteFile(filepath.Join(checkout, ".gitattributes"), []byte("* filter=evil\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
-	if err := store.Complete(journal.ID); err != nil {
+	defer func() { afterSnapshotValidated = nil }()
+	if result := a.ExecuteResource(context.Background(), item, upgrade); result.Success || !strings.Contains(result.Detail, "changed after snapshot") {
+		t.Fatalf("concurrent config update=%#v hookCalls=%d", result, hookCalls)
+	}
+	if contents, err := os.ReadFile(filepath.Join(checkout, "zinit.zsh")); err != nil || string(contents) != "one" {
+		t.Fatalf("worktree mutated=%q err=%v", contents, err)
+	}
+	if _, err := os.Lstat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("concurrent filter executed: %v", err)
+	}
+	afterSnapshotValidated = nil
+	runGitTest(t, git, "-C", checkout, "config", "--unset", "filter.evil.process")
+	if err := os.Remove(filepath.Join(checkout, ".gitattributes")); err != nil {
 		t.Fatal(err)
 	}
-	checkout := filepath.Join(home, prior.destination)
-	marker := filepath.Join(home, "filter-ran")
-	filter := filepath.Join(home, "filter.sh")
-	if err := os.WriteFile(filter, []byte("#!/bin/sh\ntouch \""+marker+"\"\ncat\n"), 0o700); err != nil {
+	beforeGitMetadataCommit = func() error { return errors.New("simulated crash before metadata commit") }
+	if result := a.ExecuteResource(context.Background(), item, upgrade); result.Success || !strings.Contains(result.Detail, "simulated crash") {
+		t.Fatalf("pre-metadata crash=%#v", result)
+	}
+	beforeGitMetadataCommit = nil
+	defer func() { beforeGitMetadataCommit = nil }()
+	if got := strings.TrimSpace(runGitTest(t, git, "-C", checkout, "rev-parse", "HEAD")); got != first {
+		t.Fatalf("metadata advanced before commit: %s", got)
+	}
+	if contents, err := os.ReadFile(filepath.Join(checkout, "zinit.zsh")); err != nil || string(contents) != "two" {
+		t.Fatalf("staged worktree=%q err=%v", contents, err)
+	}
+	if result := a.ExecuteResource(context.Background(), item, upgrade); !result.Success {
+		t.Fatalf("update retry=%#v", result)
+	}
+	if err := store.Complete(journal.ID); err != nil {
 		t.Fatal(err)
 	}
 	runGitTest(t, git, "-C", checkout, "config", "filter.evil.process", filter)

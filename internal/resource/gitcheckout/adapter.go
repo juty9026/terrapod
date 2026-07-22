@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -47,12 +48,23 @@ type Runner interface {
 }
 
 type Adapter struct {
-	Runner Runner
-	Git    string
-	Home   string
-	State  *state.Store
-	Backup recovery.Backup
+	Runner  Runner
+	Git     string
+	Home    string
+	State   *state.Store
+	Backup  recovery.Backup
+	mu      sync.Mutex
+	staging map[string]stagingRecord
 }
+
+type stagingCapability struct{ token, path string }
+type stagingRecord struct {
+	path string
+	info os.FileInfo
+}
+
+var afterSnapshotValidated func()
+var beforeGitMetadataCommit func() error
 
 type declaration struct {
 	remote, ref, commit, destination string
@@ -124,20 +136,25 @@ func (h *homeRoot) validateDirectory(relative string, allowMissing bool) (bool, 
 	return true, h.verify()
 }
 
-func (a *Adapter) validatedGitDir(path string) (*homeRoot, string, error) {
+func (a *Adapter) validatedGitDir(path string) (*homeRoot, string, os.FileInfo, error) {
 	relative, err := filepath.Rel(a.Home, path)
 	if err != nil || !safeRelative(filepath.ToSlash(relative)) {
-		return nil, "", errors.New("git-checkout: Git directory escapes home")
+		return nil, "", nil, errors.New("git-checkout: Git directory escapes home")
 	}
 	home, err := a.openHome()
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	if _, err := home.validateDirectory(relative, false); err != nil {
 		home.close()
-		return nil, "", err
+		return nil, "", nil, err
 	}
-	return home, relative, nil
+	info, err := home.root.Lstat(relative)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		home.close()
+		return nil, "", nil, errors.New("git-checkout: Git directory identity is unsafe")
+	}
+	return home, relative, info, nil
 }
 
 func validateLocalConfig(contents []byte, remote string) error {
@@ -351,7 +368,7 @@ func (a *Adapter) execute(ctx context.Context, item model.Resource, op model.Ope
 		committed = true
 		return nil
 	case model.OperationUpgrade:
-		if !current.exists || !current.git || !current.clean || current.remote != d.remote {
+		if !current.exists || !current.git || current.remote != d.remote {
 			return errors.New("git-checkout: checkout changed before update")
 		}
 		return a.update(ctx, d)
@@ -534,26 +551,34 @@ func (a *Adapter) inspect(ctx context.Context, d declaration) (checkout, error) 
 	}
 	home.close()
 	current.git = true
-	config, err := a.git(ctx, destination, "config", "--local", "--null", "--list")
+	snapshot, err := a.snapshotGitDir(d)
+	if err != nil {
+		return current, err
+	}
+	defer snapshot.cleanup()
+	config, err := a.gitSnapshot(ctx, snapshot, destination, "config", "--local", "--null", "--list")
 	if err != nil {
 		return current, fmt.Errorf("git-checkout: inspect local config: %w", err)
 	}
 	if err := validateLocalConfig(config, d.remote); err != nil {
 		return current, err
 	}
-	remote, err := a.git(ctx, destination, "remote", "get-url", "origin")
+	if afterSnapshotValidated != nil {
+		afterSnapshotValidated()
+	}
+	remote, err := a.gitSnapshot(ctx, snapshot, destination, "remote", "get-url", "origin")
 	if err != nil {
 		return current, fmt.Errorf("git-checkout: inspect origin: %w", err)
 	}
-	head, err := a.git(ctx, destination, "rev-parse", "HEAD")
+	head, err := a.gitSnapshot(ctx, snapshot, destination, "rev-parse", "HEAD")
 	if err != nil {
 		return current, fmt.Errorf("git-checkout: inspect HEAD: %w", err)
 	}
-	status, err := a.git(ctx, destination, "status", "--porcelain", "--untracked-files=no")
+	status, err := a.gitSnapshot(ctx, snapshot, destination, "status", "--porcelain", "--untracked-files=no")
 	if err != nil {
 		return current, fmt.Errorf("git-checkout: inspect status: %w", err)
 	}
-	tracked, err := a.git(ctx, destination, "ls-files", "-z")
+	tracked, err := a.gitSnapshot(ctx, snapshot, destination, "ls-files", "-z")
 	if err != nil {
 		return current, fmt.Errorf("git-checkout: inspect tracked files: %w", err)
 	}
@@ -569,11 +594,14 @@ func (a *Adapter) inspect(ctx context.Context, d declaration) (checkout, error) 
 		}
 		current.paths[absolute] = receipt
 	}
+	if err := snapshot.verifySource(); err != nil {
+		return checkout{}, err
+	}
 	return current, nil
 }
 
 func (a *Adapter) git(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	home, relative, err := a.validatedGitDir(dir)
+	home, relative, directoryInfo, err := a.validatedGitDir(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -601,96 +629,469 @@ func (a *Adapter) git(ctx context.Context, dir string, args ...string) ([]byte, 
 	if _, err := home.validateDirectory(relative, false); err != nil {
 		return nil, err
 	}
+	current, err := home.root.Lstat(relative)
+	if err != nil || current.Mode() != directoryInfo.Mode() || !os.SameFile(current, directoryInfo) {
+		return nil, errors.New("git-checkout: Git directory inode changed during command")
+	}
 	return result.Stdout, nil
 }
 
-func (a *Adapter) stage(ctx context.Context, d declaration) (string, error) {
-	home, err := a.openHome()
-	if err != nil {
-		return "", err
-	}
-	defer home.close()
-	parent := filepath.Dir(filepath.FromSlash(d.destination))
-	if err := home.ensureDirectory(parent); err != nil {
-		return "", err
-	}
-	token := make([]byte, 8)
-	if _, err := rand.Read(token); err != nil {
-		return "", err
-	}
-	staging := filepath.FromSlash(d.destination) + ".tpod-" + hex.EncodeToString(token)
-	if err := home.root.Mkdir(staging, 0o700); err != nil {
-		return "", err
-	}
-	if err := home.verify(); err != nil {
-		return "", err
-	}
-	physical := filepath.Join(a.Home, staging)
-	if _, err := a.git(ctx, physical, "init", "--quiet"); err != nil {
-		return "", err
-	}
-	if _, err := a.git(ctx, physical, "remote", "add", "origin", d.remote); err != nil {
-		return "", err
-	}
-	if _, err := a.git(ctx, physical, "fetch", "--no-tags", "--depth=1", "origin", d.commit); err != nil {
-		return "", err
-	}
-	fetched, err := a.git(ctx, physical, "rev-parse", "FETCH_HEAD")
-	if err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(string(fetched)) != d.commit {
-		return "", errors.New("git-checkout: fetched ref does not match signed commit")
-	}
-	if _, err := a.git(ctx, physical, "checkout", "--detach", "--force", d.commit); err != nil {
-		return "", err
-	}
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	if err := syncRootDirectory(home.root, staging); err != nil {
-		return "", err
-	}
-	return staging, nil
+type gitSnapshot struct {
+	adapter *Adapter
+	decl    declaration
+	path    string
+	info    os.FileInfo
+	source  map[string]os.FileInfo
 }
 
-func (a *Adapter) commitStaging(d declaration, staging string) error {
+func (a *Adapter) snapshotGitDir(d declaration) (*gitSnapshot, error) {
+	home, err := a.openHome()
+	if err != nil {
+		return nil, err
+	}
+	defer home.close()
+	if _, err := home.validateDirectory(d.destination, false); err != nil {
+		return nil, err
+	}
+	gitRelative := filepath.Join(filepath.FromSlash(d.destination), ".git")
+	sourceRoot, err := home.root.OpenRoot(gitRelative)
+	if err != nil {
+		return nil, err
+	}
+	defer sourceRoot.Close()
+	temporary, err := os.MkdirTemp("", "tpod-git-snapshot-")
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(temporary, 0o700); err != nil {
+		_ = os.RemoveAll(temporary)
+		return nil, err
+	}
+	snapshot := &gitSnapshot{adapter: a, decl: d, path: temporary, source: map[string]os.FileInfo{}}
+	snapshot.info, err = os.Lstat(temporary)
+	if err != nil {
+		snapshot.cleanup()
+		return nil, err
+	}
+	err = fs.WalkDir(sourceRoot.FS(), ".", func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular()) {
+			return fmt.Errorf("git-checkout: unsafe .git snapshot source %s", path)
+		}
+		snapshot.source[path] = info
+		if path == "." {
+			return nil
+		}
+		destination := filepath.Join(temporary, path)
+		if info.IsDir() {
+			return os.Mkdir(destination, info.Mode().Perm())
+		}
+		input, err := sourceRoot.OpenFile(path, os.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+		if err != nil {
+			return err
+		}
+		output, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, info.Mode().Perm())
+		if err != nil {
+			input.Close()
+			return err
+		}
+		_, copyErr := io.Copy(output, input)
+		syncErr := output.Sync()
+		return errors.Join(copyErr, syncErr, input.Close(), output.Close())
+	})
+	if err != nil {
+		snapshot.cleanup()
+		return nil, err
+	}
+	if err := snapshot.verifySource(); err != nil {
+		snapshot.cleanup()
+		return nil, err
+	}
+	if err := syncPhysicalTree(temporary); err != nil {
+		snapshot.cleanup()
+		return nil, err
+	}
+	return snapshot, nil
+}
+
+func (s *gitSnapshot) verifySource() error {
+	home, err := s.adapter.openHome()
+	if err != nil {
+		return err
+	}
+	defer home.close()
+	if _, err := home.validateDirectory(s.decl.destination, false); err != nil {
+		return err
+	}
+	gitRelative := filepath.Join(filepath.FromSlash(s.decl.destination), ".git")
+	root, err := home.root.OpenRoot(gitRelative)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	seen := 0
+	err = fs.WalkDir(root.FS(), ".", func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		expected, ok := s.source[path]
+		if !ok {
+			return errors.New("git-checkout: original .git changed after snapshot")
+		}
+		current, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if current.Mode() != expected.Mode() || !os.SameFile(current, expected) {
+			return errors.New("git-checkout: original .git inode changed after snapshot")
+		}
+		seen++
+		return nil
+	})
+	if err != nil || seen != len(s.source) {
+		return errors.New("git-checkout: original .git changed after snapshot")
+	}
+	return home.verify()
+}
+
+func (s *gitSnapshot) verify() error {
+	current, err := os.Lstat(s.path)
+	if err != nil || current.Mode() != s.info.Mode() || !os.SameFile(current, s.info) {
+		return errors.New("git-checkout: private Git snapshot identity changed")
+	}
+	return nil
+}
+
+func (s *gitSnapshot) cleanup() { _ = os.RemoveAll(s.path) }
+
+func (a *Adapter) gitSnapshot(ctx context.Context, snapshot *gitSnapshot, worktree string, args ...string) ([]byte, error) {
+	if err := snapshot.verify(); err != nil {
+		return nil, err
+	}
+	home, relative, worktreeInfo, err := a.validatedGitDir(worktree)
+	if err != nil {
+		return nil, err
+	}
+	defer home.close()
+	common := []string{"--git-dir=" + snapshot.path, "--work-tree=" + worktree, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "credential.helper=", "-c", "protocol.file.allow=never", "-c", "protocol.ext.allow=never", "-c", "submodule.recurse=false"}
+	request := execx.Request{Path: a.Git, Dir: a.Home, Args: append(common, args...), Env: gitEnvironment()}
+	result, err := a.Runner.Run(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(result.Stderr)))
+	}
+	if err := snapshot.verify(); err != nil {
+		return nil, err
+	}
+	if err := home.verify(); err != nil {
+		return nil, err
+	}
+	if _, err := home.validateDirectory(relative, false); err != nil {
+		return nil, err
+	}
+	current, err := home.root.Lstat(relative)
+	if err != nil || current.Mode() != worktreeInfo.Mode() || !os.SameFile(current, worktreeInfo) {
+		return nil, errors.New("git-checkout: worktree inode changed during command")
+	}
+	return result.Stdout, nil
+}
+
+func (a *Adapter) materializeGitSnapshot(d declaration, snapshot *gitSnapshot) (stagingCapability, error) {
+	token := make([]byte, 8)
+	if _, err := rand.Read(token); err != nil {
+		return stagingCapability{}, err
+	}
+	cap := stagingCapability{token: hex.EncodeToString(token)}
+	cap.path = filepath.Join(filepath.FromSlash(d.destination), ".git.tpod-new-"+cap.token)
+	home, err := a.openHome()
+	if err != nil {
+		return cap, err
+	}
+	defer home.close()
+	if _, err := home.validateDirectory(d.destination, false); err != nil {
+		return cap, err
+	}
+	if err := home.root.Mkdir(cap.path, 0o700); err != nil {
+		return cap, err
+	}
+	info, err := home.root.Lstat(cap.path)
+	if err != nil {
+		return cap, err
+	}
+	a.mu.Lock()
+	if a.staging == nil {
+		a.staging = make(map[string]stagingRecord)
+	}
+	a.staging[cap.token] = stagingRecord{path: cap.path, info: info}
+	a.mu.Unlock()
+	if err := copyPhysicalTreeToRoot(snapshot.path, home.root, cap.path); err != nil {
+		_ = a.removeStaging(cap)
+		return cap, err
+	}
+	if err := a.verifyStaging(cap); err != nil {
+		return cap, err
+	}
+	return cap, nil
+}
+
+func (a *Adapter) commitGitSnapshot(d declaration, snapshot *gitSnapshot, cap stagingCapability) error {
+	if err := a.verifyStaging(cap); err != nil {
+		return err
+	}
+	if err := snapshot.verifySource(); err != nil {
+		return err
+	}
 	home, err := a.openHome()
 	if err != nil {
 		return err
 	}
 	defer home.close()
-	if _, err := home.validateDirectory(staging, false); err != nil {
+	destination := filepath.FromSlash(d.destination)
+	gitPath := filepath.Join(destination, ".git")
+	current, err := home.root.Lstat(gitPath)
+	expected := snapshot.source["."]
+	if err != nil || current.Mode() != expected.Mode() || !os.SameFile(current, expected) {
+		return errors.New("git-checkout: original .git inode changed before metadata commit")
+	}
+	oldPath := filepath.Join(destination, ".git.tpod-old-"+cap.token)
+	if _, err := home.root.Lstat(oldPath); !errors.Is(err, os.ErrNotExist) {
+		return errors.New("git-checkout: metadata recovery path already exists")
+	}
+	if err := home.root.Rename(gitPath, oldPath); err != nil {
+		return err
+	}
+	if err := home.root.Rename(cap.path, gitPath); err != nil {
+		_ = home.root.Rename(oldPath, gitPath)
+		return err
+	}
+	a.mu.Lock()
+	delete(a.staging, cap.token)
+	a.mu.Unlock()
+	if err := home.root.RemoveAll(oldPath); err != nil {
+		return err
+	}
+	if err := home.verify(); err != nil {
+		return err
+	}
+	return syncRootDirectory(home.root, destination)
+}
+
+func copyPhysicalTreeToRoot(source string, destination *os.Root, destinationBase string) error {
+	return filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		if relative == "." {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular()) {
+			return errors.New("git-checkout: unsafe private snapshot object")
+		}
+		target := filepath.Join(destinationBase, relative)
+		if info.IsDir() {
+			return destination.Mkdir(target, info.Mode().Perm())
+		}
+		input, err := os.OpenFile(path, os.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+		if err != nil {
+			return err
+		}
+		output, err := destination.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, info.Mode().Perm())
+		if err != nil {
+			input.Close()
+			return err
+		}
+		_, copyErr := io.Copy(output, input)
+		err = errors.Join(copyErr, output.Sync(), input.Close(), output.Close())
+		return err
+	})
+}
+
+func gitEnvironment() map[string]string {
+	return map[string]string{"GIT_ATTR_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
+}
+
+func syncPhysicalTree(root string) error {
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || !entry.IsDir() {
+			return err
+		}
+		directory, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		return errors.Join(directory.Sync(), directory.Close())
+	})
+}
+
+func (a *Adapter) stage(ctx context.Context, d declaration) (cap stagingCapability, retErr error) {
+	home, err := a.openHome()
+	if err != nil {
+		return cap, err
+	}
+	defer home.close()
+	parent := filepath.Dir(filepath.FromSlash(d.destination))
+	if err := home.ensureDirectory(parent); err != nil {
+		return cap, err
+	}
+	token := make([]byte, 8)
+	if _, err := rand.Read(token); err != nil {
+		return cap, err
+	}
+	cap.token = hex.EncodeToString(token)
+	cap.path = filepath.FromSlash(d.destination) + ".tpod-" + cap.token
+	staging := cap.path
+	if err := home.root.Mkdir(staging, 0o700); err != nil {
+		return cap, err
+	}
+	info, err := home.root.Lstat(staging)
+	if err != nil {
+		return cap, err
+	}
+	a.mu.Lock()
+	if a.staging == nil {
+		a.staging = make(map[string]stagingRecord)
+	}
+	a.staging[cap.token] = stagingRecord{path: cap.path, info: info}
+	a.mu.Unlock()
+	defer func() {
+		if retErr != nil {
+			_ = a.removeStaging(cap)
+		}
+	}()
+	if err := home.verify(); err != nil {
+		return cap, err
+	}
+	physical := filepath.Join(a.Home, staging)
+	if err := a.verifyStaging(cap); err != nil {
+		return cap, err
+	}
+	if _, err := a.git(ctx, physical, "init", "--quiet"); err != nil {
+		return cap, err
+	}
+	if err := a.verifyStaging(cap); err != nil {
+		return cap, err
+	}
+	if _, err := a.git(ctx, physical, "remote", "add", "origin", d.remote); err != nil {
+		return cap, err
+	}
+	if err := a.verifyStaging(cap); err != nil {
+		return cap, err
+	}
+	if _, err := a.git(ctx, physical, "fetch", "--no-tags", "--depth=1", "origin", d.commit); err != nil {
+		return cap, err
+	}
+	if err := a.verifyStaging(cap); err != nil {
+		return cap, err
+	}
+	fetched, err := a.git(ctx, physical, "rev-parse", "FETCH_HEAD")
+	if err != nil {
+		return cap, err
+	}
+	if strings.TrimSpace(string(fetched)) != d.commit {
+		return cap, errors.New("git-checkout: fetched ref does not match signed commit")
+	}
+	if err := a.verifyStaging(cap); err != nil {
+		return cap, err
+	}
+	if _, err := a.git(ctx, physical, "checkout", "--detach", "--force", d.commit); err != nil {
+		return cap, err
+	}
+	if err := ctx.Err(); err != nil {
+		return cap, err
+	}
+	if err := a.verifyStaging(cap); err != nil {
+		return cap, err
+	}
+	if err := syncRootDirectory(home.root, staging); err != nil {
+		return cap, err
+	}
+	return cap, nil
+}
+
+func (a *Adapter) commitStaging(d declaration, staging stagingCapability) error {
+	if err := a.verifyStaging(staging); err != nil {
+		return err
+	}
+	home, err := a.openHome()
+	if err != nil {
+		return err
+	}
+	defer home.close()
+	if _, err := home.validateDirectory(staging.path, false); err != nil {
 		return err
 	}
 	if _, err := home.root.Lstat(filepath.FromSlash(d.destination)); !errors.Is(err, os.ErrNotExist) {
 		return errors.New("git-checkout: destination appeared before install")
 	}
-	if err := home.root.Rename(staging, filepath.FromSlash(d.destination)); err != nil {
+	if err := home.root.Rename(staging.path, filepath.FromSlash(d.destination)); err != nil {
 		return err
 	}
 	if err := home.verify(); err != nil {
 		return err
 	}
+	a.mu.Lock()
+	delete(a.staging, staging.token)
+	a.mu.Unlock()
 	return syncRootDirectory(home.root, filepath.Dir(filepath.FromSlash(d.destination)))
 }
 
-func (a *Adapter) removeStaging(staging string) error {
+func (a *Adapter) removeStaging(staging stagingCapability) error {
+	if err := a.verifyStaging(staging); err != nil {
+		return err
+	}
 	home, err := a.openHome()
 	if err != nil {
 		return err
 	}
 	defer home.close()
-	if _, err := home.validateDirectory(staging, true); err != nil {
+	if _, err := home.validateDirectory(staging.path, true); err != nil {
 		return err
 	}
-	if err := home.root.RemoveAll(staging); err != nil {
+	if err := home.root.RemoveAll(staging.path); err != nil {
 		return err
 	}
 	if err := home.verify(); err != nil {
 		return err
 	}
-	return syncRootDirectory(home.root, filepath.Dir(staging))
+	a.mu.Lock()
+	delete(a.staging, staging.token)
+	a.mu.Unlock()
+	return syncRootDirectory(home.root, filepath.Dir(staging.path))
+}
+
+func (a *Adapter) verifyStaging(cap stagingCapability) error {
+	a.mu.Lock()
+	record, ok := a.staging[cap.token]
+	a.mu.Unlock()
+	if !ok || cap.token == "" || cap.path != record.path {
+		return errors.New("git-checkout: invalid or replayed staging capability")
+	}
+	home, err := a.openHome()
+	if err != nil {
+		return err
+	}
+	defer home.close()
+	if _, err := home.validateDirectory(cap.path, false); err != nil {
+		return err
+	}
+	current, err := home.root.Lstat(cap.path)
+	if err != nil || current.Mode() != record.info.Mode() || !os.SameFile(current, record.info) {
+		return errors.New("git-checkout: staging inode changed")
+	}
+	return home.verify()
 }
 
 func (h *homeRoot) ensureDirectory(relative string) error {
@@ -733,13 +1134,28 @@ func syncRootDirectory(root *os.Root, relative string) error {
 func (a *Adapter) update(ctx context.Context, d declaration) error {
 	destination := filepath.Join(a.Home, filepath.FromSlash(d.destination))
 	before, err := a.inspect(ctx, d)
-	if err != nil || !before.git || !before.clean || before.remote != d.remote {
+	if err != nil || !before.git || before.remote != d.remote {
 		return errors.New("git-checkout: checkout changed before fetch")
 	}
-	if _, err := a.git(ctx, destination, "fetch", "--no-tags", "--depth=1", "origin", d.commit); err != nil {
+	snapshot, err := a.snapshotGitDir(d)
+	if err != nil {
 		return err
 	}
-	fetched, err := a.git(ctx, destination, "rev-parse", "FETCH_HEAD")
+	defer snapshot.cleanup()
+	config, err := a.gitSnapshot(ctx, snapshot, destination, "config", "--local", "--null", "--list")
+	if err != nil {
+		return err
+	}
+	if err := validateLocalConfig(config, d.remote); err != nil {
+		return err
+	}
+	if afterSnapshotValidated != nil {
+		afterSnapshotValidated()
+	}
+	if _, err := a.gitSnapshot(ctx, snapshot, destination, "fetch", "--no-tags", "--depth=1", "origin", d.commit); err != nil {
+		return err
+	}
+	fetched, err := a.gitSnapshot(ctx, snapshot, destination, "rev-parse", "FETCH_HEAD")
 	if err != nil {
 		return err
 	}
@@ -748,26 +1164,58 @@ func (a *Adapter) update(ctx context.Context, d declaration) error {
 	}
 	// Fetch mutates only Git metadata. Reinspect the worktree immediately before
 	// checkout, and omit --force so a concurrent user edit fails closed.
-	current, err := a.inspect(ctx, d)
-	if err != nil {
+	if err := snapshot.verifySource(); err != nil {
 		return err
-	}
-	if !current.exists || !current.git || !current.clean || current.remote != d.remote {
-		return errors.New("git-checkout: checkout changed immediately before update")
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	_, err = a.git(ctx, destination, "checkout", "--detach", d.commit)
+	if before.clean {
+		if _, err := a.gitSnapshot(ctx, snapshot, destination, "checkout", "--detach", d.commit); err != nil {
+			return err
+		}
+	} else {
+		// A previous attempt may have updated the worktree but failed before
+		// committing its private Git metadata. Accept only that exact state.
+		if _, err := a.gitSnapshot(ctx, snapshot, destination, "reset", "--mixed", d.commit); err != nil {
+			return err
+		}
+	}
+	status, err := a.gitSnapshot(ctx, snapshot, destination, "status", "--porcelain", "--untracked-files=no")
+	if err != nil || len(status) != 0 {
+		if !before.clean {
+			return errors.New("git-checkout: dirty worktree is neither current nor signed desired state")
+		}
+		return errors.New("git-checkout: desired worktree verification failed")
+	}
+	if !before.clean {
+		if _, err := a.gitSnapshot(ctx, snapshot, destination, "checkout", "--detach", d.commit); err != nil {
+			return err
+		}
+	}
+	if err := snapshot.verifySource(); err != nil {
+		return err
+	}
+	cap, err := a.materializeGitSnapshot(d, snapshot)
 	if err != nil {
 		return err
 	}
-	home, openErr := a.openHome()
-	if openErr != nil {
-		return openErr
+	committed := false
+	defer func() {
+		if !committed {
+			_ = a.removeStaging(cap)
+		}
+	}()
+	if beforeGitMetadataCommit != nil {
+		if err := beforeGitMetadataCommit(); err != nil {
+			return err
+		}
 	}
-	defer home.close()
-	return syncRootDirectory(home.root, filepath.FromSlash(d.destination))
+	if err := a.commitGitSnapshot(d, snapshot, cap); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }
 
 func (a *Adapter) backupAndRemove(ctx context.Context, journal string, d declaration) error {
