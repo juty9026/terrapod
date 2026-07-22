@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -32,6 +34,16 @@ type Runner interface {
 	Run(context.Context, execx.Request) (execx.Result, error)
 }
 
+type FileSystem interface {
+	EvalSymlinks(string) (string, error)
+	Stat(string) (os.FileInfo, error)
+}
+
+type osFS struct{}
+
+func (osFS) EvalSymlinks(path string) (string, error) { return filepath.EvalSymlinks(path) }
+func (osFS) Stat(path string) (os.FileInfo, error)    { return os.Stat(path) }
+
 type inventory struct {
 	resource       model.Resource
 	present, ready bool
@@ -42,11 +54,12 @@ type Adapter struct {
 	path, dataRoot string
 	standard       bool
 	runner         Runner
+	fs             FileSystem
 	mu             sync.RWMutex
 	inventories    map[string]inventory
 }
 
-func New(path, dataRoot string, runner Runner) (*Adapter, error) {
+func New(path, dataRoot string, runner Runner, filesystems ...FileSystem) (*Adapter, error) {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return nil, fmt.Errorf("mise: executable path must be clean and absolute: %q", path)
 	}
@@ -56,8 +69,18 @@ func New(path, dataRoot string, runner Runner) (*Adapter, error) {
 	if isNilInterface(runner) {
 		return nil, errors.New("mise: runner is required")
 	}
+	if len(filesystems) > 1 {
+		return nil, errors.New("mise: at most one filesystem is allowed")
+	}
+	var fs FileSystem = osFS{}
+	if len(filesystems) == 1 {
+		if isNilInterface(filesystems[0]) {
+			return nil, errors.New("mise: filesystem must not be nil")
+		}
+		fs = filesystems[0]
+	}
 	_, standard := standardPaths[path]
-	return &Adapter{path: path, dataRoot: dataRoot, standard: standard, runner: runner, inventories: make(map[string]inventory)}, nil
+	return &Adapter{path: path, dataRoot: dataRoot, standard: standard, runner: runner, fs: fs, inventories: make(map[string]inventory)}, nil
 }
 
 func (a *Adapter) Name() string { return "mise" }
@@ -122,19 +145,33 @@ func (a *Adapter) Execute(ctx context.Context, operation model.Operation) error 
 	if err != nil {
 		return err
 	}
+	state, _ := a.inventory(operation.Package)
+	if operation.Kind == model.OperationPrune {
+		freshVersion, present, err := a.loadInventory(ctx, state.resource)
+		if err != nil {
+			return err
+		}
+		if !present {
+			return nil
+		}
+		if !selectorMatches(state.resource.Metadata["version"], freshVersion) {
+			return fmt.Errorf("mise: fresh installed version %q does not match selector %q", freshVersion, state.resource.Metadata["version"])
+		}
+		if freshVersion == "" {
+			return fmt.Errorf("mise: no exact installed version for %q", operation.Package)
+		}
+		if _, err := a.run(ctx, "uninstall", "--yes", operation.Package+"@"+freshVersion); err != nil {
+			return fmt.Errorf("mise: execute %s for %q: %w", operation.Kind, operation.Package, err)
+		}
+		return nil
+	}
 	if len(changes.Installs)+len(changes.Upgrades)+len(changes.Removes) == 0 {
 		return nil
 	}
-	state, _ := a.inventory(operation.Package)
 	var args []string
 	switch operation.Kind {
 	case model.OperationInstall, model.OperationAdopt, model.OperationUpgrade:
 		args = []string{"install", "--yes", operation.Package + "@" + state.resource.Metadata["version"]}
-	case model.OperationPrune:
-		if state.version == "" {
-			return fmt.Errorf("mise: no exact installed version for %q", operation.Package)
-		}
-		args = []string{"uninstall", "--yes", operation.Package + "@" + state.version}
 	default:
 		return fmt.Errorf("mise: unsupported operation %q", operation.Kind)
 	}
@@ -158,16 +195,60 @@ func (a *Adapter) Verify(ctx context.Context, resource model.Resource) (model.Ob
 		return observation, fmt.Errorf("mise: locate %q: %w", qualified, err)
 	}
 	path := strings.TrimSuffix(string(where.Stdout), "\n")
-	if !filepath.IsAbs(path) || filepath.Clean(path) != path || !pathBeneath(path, a.dataRoot) {
+	resolvedRoot, err := a.resolveDirectory(a.dataRoot)
+	if err != nil {
+		return observation, fmt.Errorf("mise: resolve trusted data root %q: %w", a.dataRoot, err)
+	}
+	resolvedPath, err := a.resolveDirectory(path)
+	if err != nil {
+		return observation, fmt.Errorf("mise: resolve location %q: %w", path, err)
+	}
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path || !pathBeneath(resolvedPath, resolvedRoot) {
 		return observation, fmt.Errorf("mise: location %q is not beneath trusted mise data root %q", path, a.dataRoot)
 	}
-	observation.Paths[resource.Package] = path
+	observation.Paths[resource.Package] = resolvedPath
 	for _, command := range toolCommands[resource.Package] {
 		if _, err := a.run(ctx, "exec", "--yes", qualified, "--", command, "--version"); err != nil {
 			return observation, fmt.Errorf("mise: verify command %q for %q: %w", command, qualified, err)
 		}
 	}
 	return observation, nil
+}
+
+func (a *Adapter) loadInventory(ctx context.Context, resource model.Resource) (string, bool, error) {
+	if err := validateResource(resource); err != nil {
+		return "", false, err
+	}
+	result, err := a.run(ctx, "ls", "--json", resource.Package)
+	if err != nil {
+		return "", false, fmt.Errorf("mise: inspect %q: %w", resource.Package, err)
+	}
+	version, present, err := parseInventory(result.Stdout, resource.Package, resource.Metadata["version"])
+	if err != nil {
+		return "", false, fmt.Errorf("mise: parse inventory for %q: %w", resource.Package, err)
+	}
+	return version, present, nil
+}
+
+func (a *Adapter) resolveDirectory(path string) (string, error) {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return "", errors.New("path must be clean and absolute")
+	}
+	resolved, err := a.fs.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(resolved) || filepath.Clean(resolved) != resolved {
+		return "", errors.New("resolved path must be clean and absolute")
+	}
+	info, err := a.fs.Stat(resolved)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", errors.New("resolved path is not a directory")
+	}
+	return resolved, nil
 }
 
 func (a *Adapter) run(ctx context.Context, args ...string) (execx.Result, error) {
@@ -214,6 +295,11 @@ func parseInventory(output []byte, target, selector string) (string, bool, error
 		if entry.Version == "" || strings.TrimSpace(entry.Version) != entry.Version {
 			return "", false, errors.New("invalid installed version")
 		}
+		if selector != "latest" {
+			if _, err := numericComponents(entry.Version); err != nil {
+				return "", false, fmt.Errorf("invalid installed version %q: %w", entry.Version, err)
+			}
+		}
 		if selectorMatches(selector, entry.Version) {
 			versions = append(versions, entry.Version)
 		}
@@ -239,7 +325,44 @@ func selectorMatches(selector, version string) bool {
 	if selector == "latest" {
 		return version != ""
 	}
-	return version == selector || strings.HasPrefix(version, selector+".")
+	selectorParts, err := numericComponents(selector)
+	if err != nil {
+		return false
+	}
+	versionParts, err := numericComponents(version)
+	if err != nil || len(versionParts) < len(selectorParts) {
+		return false
+	}
+	for index := range selectorParts {
+		if selectorParts[index] != versionParts[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func numericComponents(value string) ([]int, error) {
+	parts := strings.Split(value, ".")
+	if len(parts) == 0 {
+		return nil, errors.New("empty version")
+	}
+	components := make([]int, len(parts))
+	for index, part := range parts {
+		if part == "" {
+			return nil, errors.New("empty numeric component")
+		}
+		for _, char := range part {
+			if char < '0' || char > '9' {
+				return nil, errors.New("non-numeric component")
+			}
+		}
+		component, err := strconv.Atoi(part)
+		if err != nil {
+			return nil, err
+		}
+		components[index] = component
+	}
+	return components, nil
 }
 
 func validateResource(resource model.Resource) error {

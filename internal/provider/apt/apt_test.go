@@ -3,6 +3,8 @@ package apt
 import (
 	"context"
 	"errors"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -41,6 +43,9 @@ func TestInspectUsesExactDpkgQueryAndRejectsEssentialPackage(t *testing.T) {
 	var calls []execx.Request
 	a := newAdapter(t, runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
 		calls = append(calls, request)
+		if request.Path == AptGetPath {
+			return execx.Result{Stdout: []byte("Remv zsh [5.9-6ubuntu2]\n0 upgraded, 0 newly installed, 1 to remove and 0 not upgraded.\n")}, nil
+		}
 		return execx.Result{Stdout: []byte("zsh\tii \t5.9-6ubuntu2\tyes\n")}, nil
 	}))
 	got, err := a.Inspect(context.Background(), aptResource("zsh"))
@@ -50,7 +55,7 @@ func TestInspectUsesExactDpkgQueryAndRejectsEssentialPackage(t *testing.T) {
 	if !got.Present || got.Healthy || got.Version != "5.9-6ubuntu2" || !strings.Contains(got.Detail, "Essential") {
 		t.Fatalf("observation = %#v", got)
 	}
-	want := execx.Request{Path: DpkgQueryPath, Args: []string{"--show", "--showformat=${binary:Package}\\t${db:Status-Abbrev}\\t${Version}\\t${Essential}\\n", "zsh"}}
+	want := aptRequest(DpkgQueryPath, []string{"--show", "--showformat=${binary:Package}\\t${db:Status-Abbrev}\\t${Version}\\t${Essential}\\n", "zsh"}, false)
 	if !reflect.DeepEqual(calls, []execx.Request{want}) {
 		t.Fatalf("calls = %#v, want %#v", calls, []execx.Request{want})
 	}
@@ -62,7 +67,7 @@ func TestInspectUsesExactDpkgQueryAndRejectsEssentialPackage(t *testing.T) {
 
 func TestInspectTreatsOnlyEmptyNotFoundAsMissingAndStrictlyParsesOneRecord(t *testing.T) {
 	a := newAdapter(t, runnerFunc(func(_ context.Context, _ execx.Request) (execx.Result, error) {
-		return execx.Result{}, errors.New("exit status 1")
+		return execx.Result{}, exitError(t, 1)
 	}))
 	got, err := a.Inspect(context.Background(), aptResource("curl"))
 	if err != nil || got.Present {
@@ -79,11 +84,14 @@ func TestInspectTreatsOnlyEmptyNotFoundAsMissingAndStrictlyParsesOneRecord(t *te
 
 func TestSimulateParsesDependencyInstallsAndUpgrades(t *testing.T) {
 	a := newAdapter(t, runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+		if request.Path == DpkgQueryPath {
+			return execx.Result{Stdout: []byte("libssl3t64\tii \t3.0.13\tno\n")}, nil
+		}
 		want := []string{"-s", "install", "--", "python3-dev"}
 		if !reflect.DeepEqual(request.Args, want) || !request.Privilege {
 			t.Fatalf("request = %#v, want args %#v privileged", request, want)
 		}
-		return execx.Result{Stdout: []byte("Inst libpython3.12-dev (3.12.3 Ubuntu:24.04 [amd64])\nInst libssl3t64 [3.0.13] (3.0.14 Ubuntu:24.04 [amd64])\nInst python3-dev (3.12 Ubuntu:24.04 [amd64])\nConf python3-dev (3.12 Ubuntu:24.04 [amd64])\n")}, nil
+		return execx.Result{Stdout: []byte("Inst libpython3.12-dev (3.12.3 Ubuntu:24.04 [amd64])\nInst libssl3t64 [3.0.13] (3.0.14 Ubuntu:24.04 [amd64])\nInst python3-dev (3.12 Ubuntu:24.04 [amd64])\nConf python3-dev (3.12 Ubuntu:24.04 [amd64])\n1 upgraded, 2 newly installed, 0 to remove and 0 not upgraded.\n")}, nil
 	}))
 	changes, err := a.Simulate(context.Background(), aptOperation(model.OperationInstall, "python3-dev"))
 	if err != nil {
@@ -99,14 +107,15 @@ func TestSimulateUpgradeIsTargetedAndRejectsUnknownOrUnmanagedRemoval(t *testing
 	for _, tc := range []struct {
 		name, output, want string
 	}{
-		{name: "unmanaged removal", output: "Inst curl [1] (2 repo [amd64])\nRemv wget [1]\n", want: "unmanaged removals"},
-		{name: "unknown mutation", output: "Purg curl [1]\n", want: "unknown plan mutation"},
-		{name: "malformed install", output: "Inst curl\n", want: "malformed"},
+		{name: "unmanaged removal", output: "Inst curl [1] (2 repo [amd64])\nRemv wget [1]\n1 upgraded, 0 newly installed, 1 to remove and 0 not upgraded.\n", want: "unmanaged removals"},
+		{name: "unknown mutation", output: "Purg curl [1]\n0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.\n", want: "unknown"},
+		{name: "malformed install", output: "Inst curl\n0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.\n", want: "malformed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := newAdapter(t, runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
 				if request.Path == DpkgQueryPath {
-					return execx.Result{Stdout: []byte("curl\tii \t1\tno\n")}, nil
+					pkg := request.Args[len(request.Args)-1]
+					return execx.Result{Stdout: []byte(pkg + "\tii \t1\tno\n")}, nil
 				}
 				want := []string{"-s", "install", "--only-upgrade", "--", "curl"}
 				if !reflect.DeepEqual(request.Args, want) {
@@ -123,7 +132,10 @@ func TestSimulateUpgradeIsTargetedAndRejectsUnknownOrUnmanagedRemoval(t *testing
 
 func TestNormalInstallRejectsTargetUpgrade(t *testing.T) {
 	a := newAdapter(t, runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
-		return execx.Result{Stdout: []byte("Inst curl [1] (2 repo [amd64])\n")}, nil
+		if request.Path == DpkgQueryPath {
+			return execx.Result{Stdout: []byte("curl\tii \t1\tno\n")}, nil
+		}
+		return execx.Result{Stdout: []byte("Inst curl [1] (2 repo [amd64])\n1 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.\n")}, nil
 	}))
 	if _, err := a.Simulate(context.Background(), aptOperation(model.OperationInstall, "curl")); err == nil || !strings.Contains(err.Error(), "opportunistic upgrade") {
 		t.Fatalf("Simulate error = %v", err)
@@ -132,8 +144,8 @@ func TestNormalInstallRejectsTargetUpgrade(t *testing.T) {
 
 func TestSimulateFreshlyRejectsEssentialWithoutPriorInspect(t *testing.T) {
 	a := newAdapter(t, runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
-		if request.Path != DpkgQueryPath {
-			t.Fatal("apt-get simulation ran for Essential package")
+		if request.Path == AptGetPath {
+			return execx.Result{Stdout: []byte("Remv zsh [5.9]\n0 upgraded, 0 newly installed, 1 to remove and 0 not upgraded.\n")}, nil
 		}
 		return execx.Result{Stdout: []byte("zsh\tii \t5.9\tyes\n")}, nil
 	}))
@@ -150,7 +162,7 @@ func TestExecuteSimulatesImmediatelyBeforeTargetedMutation(t *testing.T) {
 			return execx.Result{Stdout: []byte("zlib1g-dev\tii \t1.3\tno\n")}, nil
 		}
 		if len(request.Args) > 0 && request.Args[0] == "-s" {
-			return execx.Result{Stdout: []byte("Remv zlib1g-dev [1.3]\n")}, nil
+			return execx.Result{Stdout: []byte("Remv zlib1g-dev [1.3]\n0 upgraded, 0 newly installed, 1 to remove and 0 not upgraded.\n")}, nil
 		}
 		return execx.Result{}, nil
 	}))
@@ -158,9 +170,9 @@ func TestExecuteSimulatesImmediatelyBeforeTargetedMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []execx.Request{
-		{Path: DpkgQueryPath, Args: []string{"--show", "--showformat=${binary:Package}\\t${db:Status-Abbrev}\\t${Version}\\t${Essential}\\n", "zlib1g-dev"}},
-		{Path: AptGetPath, Args: []string{"-s", "remove", "--", "zlib1g-dev"}, Privilege: true},
-		{Path: AptGetPath, Args: []string{"remove", "-y", "--", "zlib1g-dev"}, Privilege: true},
+		aptRequest(AptGetPath, []string{"-s", "remove", "--", "zlib1g-dev"}, true),
+		aptRequest(DpkgQueryPath, []string{"--show", "--showformat=${binary:Package}\\t${db:Status-Abbrev}\\t${Version}\\t${Essential}\\n", "zlib1g-dev"}, false),
+		aptRequest(AptGetPath, []string{"remove", "-y", "--", "zlib1g-dev"}, true),
 	}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %#v, want %#v", calls, want)
@@ -181,7 +193,7 @@ func TestRefreshMetadataCachesConcurrentSuccessAndError(t *testing.T) {
 				mu.Lock()
 				calls++
 				mu.Unlock()
-				if !reflect.DeepEqual(request, execx.Request{Path: AptGetPath, Args: []string{"update"}, Privilege: true}) {
+				if !reflect.DeepEqual(request, aptRequest(AptGetPath, []string{"update"}, true)) {
 					t.Fatalf("request = %#v", request)
 				}
 				if fail {
@@ -200,6 +212,136 @@ func TestRefreshMetadataCachesConcurrentSuccessAndError(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSimulationRequiresEnglishSummaryAndMatchingCounts(t *testing.T) {
+	for _, tc := range []struct{ name, output, want string }{
+		{name: "missing", output: "", want: "summary"},
+		{name: "localized", output: "0 aktualisiert, 0 neu installiert\n", want: "unknown"},
+		{name: "mismatch", output: "Inst curl (1 repo [amd64])\n0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.\n", want: "counts"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newAdapter(t, runnerFunc(func(_ context.Context, _ execx.Request) (execx.Result, error) {
+				return execx.Result{Stdout: []byte(tc.output)}, nil
+			}))
+			if _, err := a.Simulate(context.Background(), aptOperation(model.OperationInstall, "curl")); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error=%v", err)
+			}
+		})
+	}
+}
+
+func TestSimulationRejectsEssentialDependencyAfterPlan(t *testing.T) {
+	var calls []string
+	a := newAdapter(t, runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+		calls = append(calls, request.Path+" "+strings.Join(request.Args, " "))
+		if request.Path == AptGetPath {
+			return execx.Result{Stdout: []byte("Inst libssl3 [1] (2 repo [amd64])\n1 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.\n")}, nil
+		}
+		return execx.Result{Stdout: []byte("libssl3\tii \t1\tyes\n")}, nil
+	}))
+	if _, err := a.Simulate(context.Background(), aptOperation(model.OperationInstall, "curl")); err == nil || !strings.Contains(err.Error(), "Essential") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(calls) != 2 || !strings.Contains(calls[1], "libssl3") {
+		t.Fatalf("calls=%v", calls)
+	}
+}
+
+func TestInspectPropagatesNonAbsenceFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		err  error
+	}{
+		{name: "permission", ctx: context.Background(), err: exitError(t, 2)},
+		{name: "missing executable", ctx: context.Background(), err: exec.ErrNotFound},
+		{name: "canceled", ctx: canceledContext(), err: exitError(t, 1)},
+		{name: "output limit joined with exit one", ctx: context.Background(), err: errors.Join(exitError(t, 1), &execx.ErrOutputLimit{Streams: []string{"stderr"}})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newAdapter(t, runnerFunc(func(context.Context, execx.Request) (execx.Result, error) { return execx.Result{}, tc.err }))
+			if _, err := a.Inspect(tc.ctx, aptResource("curl")); err == nil {
+				t.Fatal("Inspect succeeded")
+			}
+		})
+	}
+}
+
+func TestInspectRejectsWrongOrMalformedMultiarchBinaryName(t *testing.T) {
+	for _, name := range []string{"wget:amd64", "curl:AMD64", "curl:amd64:evil"} {
+		t.Run(name, func(t *testing.T) {
+			a := newAdapter(t, runnerFunc(func(context.Context, execx.Request) (execx.Result, error) {
+				return execx.Result{Stdout: []byte(name + "\tii \t1\tno\n")}, nil
+			}))
+			if _, err := a.Inspect(context.Background(), aptResource("curl")); err == nil {
+				t.Fatal("Inspect succeeded")
+			}
+		})
+	}
+}
+
+func TestMultiarchTargetInventoryAndPlanNormalization(t *testing.T) {
+	a := newAdapter(t, runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+		if request.Path == DpkgQueryPath {
+			return execx.Result{Stdout: []byte("curl:amd64\tii \t1\tno\n")}, nil
+		}
+		return execx.Result{Stdout: []byte("Remv curl:amd64 [1]\n0 upgraded, 0 newly installed, 1 to remove and 0 not upgraded.\n")}, nil
+	}))
+	if got, err := a.Inspect(context.Background(), aptResource("curl")); err != nil || !got.Present {
+		t.Fatalf("got=%#v err=%v", got, err)
+	}
+	changes, err := a.Simulate(context.Background(), aptOperation(model.OperationPrune, "curl"))
+	if err != nil || !reflect.DeepEqual(changes.Removes, []string{"curl"}) {
+		t.Fatalf("changes=%#v err=%v", changes, err)
+	}
+}
+
+func TestExecutableFixturesProveArgvLocaleAndExitSemantics(t *testing.T) {
+	runner := execx.NewRunner([]string{"LC_ALL"}, nil, func() int { return 501 })
+	aptFixture, err := filepath.Abs(filepath.Join("testdata", "apt-get"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dpkgFixture, err := filepath.Abs(filepath.Join("testdata", "dpkg-query"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.Run(context.Background(), aptRequest(aptFixture, []string{"-s", "install", "--", "curl"}, false))
+	if err != nil || !strings.Contains(string(result.Stdout), "1 newly installed") {
+		t.Fatalf("result=%q error=%v", result.Stdout, err)
+	}
+	if _, err := runner.Run(context.Background(), aptRequest(aptFixture, []string{"install", "curl"}, false)); err == nil {
+		t.Fatal("fixture accepted wrong argv")
+	}
+	result, err = runner.Run(context.Background(), aptRequest(dpkgFixture, []string{"--show", "--showformat=" + dpkgFormat, "curl"}, false))
+	if err != nil || !strings.HasPrefix(string(result.Stdout), "curl\tii ") {
+		t.Fatalf("result=%q error=%v", result.Stdout, err)
+	}
+	if _, err := runner.Run(context.Background(), aptRequest(dpkgFixture, []string{"--show", "--showformat=" + dpkgFormat, "missing"}, false)); err == nil {
+		t.Fatal("missing fixture did not exit non-zero")
+	}
+}
+
+func aptRequest(path string, args []string, privilege bool) execx.Request {
+	return execx.Request{Path: path, Args: args, Env: map[string]string{"LC_ALL": "C"}, Privilege: privilege}
+}
+func exitError(t *testing.T, code int) error {
+	t.Helper()
+	command, args := "/usr/bin/false", []string{}
+	if code != 1 {
+		command, args = "/usr/bin/grep", []string{"--definitely-invalid-option"}
+	}
+	err := exec.Command(command, args...).Run()
+	if err == nil {
+		t.Fatal("expected exit error")
+	}
+	return err
+}
+func canceledContext() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return ctx
 }
 
 func aptResource(pkg string) model.Resource {

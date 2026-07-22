@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -21,10 +23,12 @@ const (
 )
 
 var (
-	packagePattern     = regexp.MustCompile(`^[a-z0-9][a-z0-9+.:~-]*$`)
-	installPlanPattern = regexp.MustCompile(`^Inst ([a-z0-9][a-z0-9+.:~-]*)(?: \[[^]]+\])? \(.+\)$`)
-	removePlanPattern  = regexp.MustCompile(`^Remv ([a-z0-9][a-z0-9+.:~-]*) \[[^]]+\](?: \(.+\))?$`)
-	planPrefixPattern  = regexp.MustCompile(`^[A-Z][A-Za-z]{3} `)
+	binaryPackagePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9+.~-]*(?::[a-z0-9][a-z0-9-]*)?$`)
+	installPlanPattern   = regexp.MustCompile(`^Inst ([a-z0-9][a-z0-9+.~-]*(?::[a-z0-9][a-z0-9-]*)?)(?: \[[^]]+\])? \(.+\)$`)
+	removePlanPattern    = regexp.MustCompile(`^Remv ([a-z0-9][a-z0-9+.~-]*(?::[a-z0-9][a-z0-9-]*)?) \[[^]]+\](?: \(.+\))?$`)
+	confPlanPattern      = regexp.MustCompile(`^Conf [a-z0-9][a-z0-9+.~-]*(?::[a-z0-9][a-z0-9-]*)?(?: \(.+\))?$`)
+	summaryPattern       = regexp.MustCompile(`^([0-9]+) upgraded, ([0-9]+) newly installed, ([0-9]+) to remove and ([0-9]+) not upgraded\.$`)
+	packageListPattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9+.~:-]*(?: [a-z0-9][a-z0-9+.~:-]*)*$`)
 )
 
 type Runner interface {
@@ -34,8 +38,6 @@ type Runner interface {
 type Adapter struct {
 	runner Runner
 
-	mu         sync.RWMutex
-	essential  map[string]bool
 	refresh    sync.Once
 	refreshErr error
 }
@@ -50,7 +52,7 @@ func New(aptGetPath, dpkgQueryPath string, runner Runner) (*Adapter, error) {
 	if isNilInterface(runner) {
 		return nil, errors.New("apt: runner is required")
 	}
-	return &Adapter{runner: runner, essential: make(map[string]bool)}, nil
+	return &Adapter{runner: runner}, nil
 }
 
 func (a *Adapter) Name() string { return "apt" }
@@ -66,9 +68,6 @@ func (a *Adapter) Inspect(ctx context.Context, resource model.Resource) (model.O
 	if !present {
 		return model.Observation{Provider: a.Name(), Package: resource.Package, Paths: map[string]string{}}, nil
 	}
-	a.mu.Lock()
-	a.essential[resource.Package] = record.essential
-	a.mu.Unlock()
 	detail := ""
 	healthy := record.installed
 	if record.essential {
@@ -85,11 +84,17 @@ func (a *Adapter) queryRecord(ctx context.Context, pkg string) (dpkgRecord, bool
 	result, err := a.runner.Run(ctx, execx.Request{
 		Path: DpkgQueryPath,
 		Args: []string{"--show", "--showformat=" + dpkgFormat, pkg},
+		Env:  map[string]string{"LC_ALL": "C"},
 	})
-	if err != nil && len(result.Stdout) == 0 {
-		return dpkgRecord{}, false, nil
-	}
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return dpkgRecord{}, false, fmt.Errorf("apt: inspect %q: %w", pkg, ctxErr)
+		}
+		var exitErr *exec.ExitError
+		var limitErr *execx.ErrOutputLimit
+		if len(result.Stdout) == 0 && !errors.As(err, &limitErr) && errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return dpkgRecord{}, false, nil
+		}
 		return dpkgRecord{}, false, fmt.Errorf("apt: inspect %q: %w", pkg, err)
 	}
 	record, err := parseDpkgRecord(result.Stdout, pkg)
@@ -103,26 +108,26 @@ func (a *Adapter) Simulate(ctx context.Context, operation model.Operation) (prov
 	if err := validateOperation(operation); err != nil {
 		return provider.ChangeSet{}, err
 	}
-	if operation.Kind == model.OperationUpgrade || operation.Kind == model.OperationPrune {
-		record, present, err := a.queryRecord(ctx, operation.Package)
-		if err != nil {
-			return provider.ChangeSet{}, err
-		}
-		if (present && record.essential) || a.isEssential(operation.Package) {
-			return provider.ChangeSet{}, fmt.Errorf("apt: refusing %s of Essential package %q", operation.Kind, operation.Package)
-		}
-	}
 	args, err := simulationArgs(operation)
 	if err != nil {
 		return provider.ChangeSet{}, err
 	}
-	result, err := a.runner.Run(ctx, execx.Request{Path: AptGetPath, Args: args, Privilege: true})
+	result, err := a.runner.Run(ctx, aptGetRequest(args, true))
 	if err != nil {
 		return provider.ChangeSet{}, fmt.Errorf("apt: simulate %s for %q: %w", operation.Kind, operation.Package, err)
 	}
-	changes, err := parsePlan(result.Stdout)
+	changes, err := parsePlan(result.Stdout, operation.Package)
 	if err != nil {
 		return provider.ChangeSet{}, fmt.Errorf("apt: parse simulation for %q: %w", operation.Package, err)
+	}
+	for _, pkg := range append(append([]string(nil), changes.Upgrades...), changes.Removes...) {
+		record, present, err := a.queryRecord(ctx, pkg)
+		if err != nil {
+			return provider.ChangeSet{}, err
+		}
+		if present && record.essential {
+			return provider.ChangeSet{}, fmt.Errorf("apt: refusing plan containing Essential package %q", pkg)
+		}
 	}
 	if err := provider.ValidateChangeSet(changes, model.Resource{Package: operation.Package}, nil); err != nil {
 		return provider.ChangeSet{}, err
@@ -141,7 +146,7 @@ func (a *Adapter) Execute(ctx context.Context, operation model.Operation) error 
 	if err != nil {
 		return err
 	}
-	if _, err := a.runner.Run(ctx, execx.Request{Path: AptGetPath, Args: args, Privilege: true}); err != nil {
+	if _, err := a.runner.Run(ctx, aptGetRequest(args, true)); err != nil {
 		return fmt.Errorf("apt: execute %s for %q: %w", operation.Kind, operation.Package, err)
 	}
 	return nil
@@ -160,18 +165,12 @@ func (a *Adapter) Verify(ctx context.Context, resource model.Resource) (model.Ob
 
 func (a *Adapter) RefreshMetadata(ctx context.Context) error {
 	a.refresh.Do(func() {
-		_, a.refreshErr = a.runner.Run(ctx, execx.Request{Path: AptGetPath, Args: []string{"update"}, Privilege: true})
+		_, a.refreshErr = a.runner.Run(ctx, aptGetRequest([]string{"update"}, true))
 		if a.refreshErr != nil {
 			a.refreshErr = fmt.Errorf("apt: refresh metadata: %w", a.refreshErr)
 		}
 	})
 	return a.refreshErr
-}
-
-func (a *Adapter) isEssential(pkg string) bool {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return a.essential[pkg]
 }
 
 type dpkgRecord struct {
@@ -188,7 +187,7 @@ func parseDpkgRecord(output []byte, target string) (dpkgRecord, error) {
 	if len(fields) != 4 {
 		return dpkgRecord{}, errors.New("expected exactly one record with four fields")
 	}
-	if fields[0] != target {
+	if _, err := normalizeTargetPackage(fields[0], target); err != nil {
 		return dpkgRecord{}, fmt.Errorf("binary package %q does not match target %q", fields[0], target)
 	}
 	if fields[1] != "ii " {
@@ -203,54 +202,138 @@ func parseDpkgRecord(output []byte, target string) (dpkgRecord, error) {
 	return dpkgRecord{installed: true, version: fields[2], essential: fields[3] == "yes"}, nil
 }
 
-func parsePlan(output []byte) (provider.ChangeSet, error) {
+func parsePlan(output []byte, target string) (provider.ChangeSet, error) {
 	var changes provider.ChangeSet
 	seen := make(map[string]string)
+	summaryFound := false
+	summary := [3]int{}
+	allowPackageList := false
 	for _, line := range strings.Split(strings.TrimSuffix(string(output), "\n"), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
+		if match := summaryPattern.FindStringSubmatch(line); match != nil {
+			allowPackageList = false
+			if summaryFound {
+				return provider.ChangeSet{}, errors.New("multiple simulation summaries")
+			}
+			summaryFound = true
+			for index := range 3 {
+				value, err := strconv.Atoi(match[index+1])
+				if err != nil {
+					return provider.ChangeSet{}, errors.New("invalid simulation summary count")
+				}
+				summary[index] = value
+			}
+			continue
+		}
 		if strings.HasPrefix(line, "Inst ") {
+			allowPackageList = false
 			match := installPlanPattern.FindStringSubmatch(line)
 			if match == nil {
 				return provider.ChangeSet{}, fmt.Errorf("malformed Inst plan line %q", line)
+			}
+			pkg, err := normalizeTargetPackage(match[1], target)
+			if err != nil {
+				pkg = match[1]
 			}
 			kind := "install"
 			if strings.Contains(strings.SplitN(line, " (", 2)[0], " [") {
 				kind = "upgrade"
 			}
-			if previous, ok := seen[match[1]]; ok {
-				return provider.ChangeSet{}, fmt.Errorf("duplicate plan mutation for %q (%s and %s)", match[1], previous, kind)
+			if previous, ok := seen[pkg]; ok {
+				return provider.ChangeSet{}, fmt.Errorf("duplicate plan mutation for %q (%s and %s)", pkg, previous, kind)
 			}
-			seen[match[1]] = kind
+			seen[pkg] = kind
 			if kind == "upgrade" {
-				changes.Upgrades = append(changes.Upgrades, match[1])
+				changes.Upgrades = append(changes.Upgrades, pkg)
 			} else {
-				changes.Installs = append(changes.Installs, match[1])
+				changes.Installs = append(changes.Installs, pkg)
 			}
 			continue
 		}
 		if strings.HasPrefix(line, "Remv ") {
+			allowPackageList = false
 			match := removePlanPattern.FindStringSubmatch(line)
 			if match == nil {
 				return provider.ChangeSet{}, fmt.Errorf("malformed Remv plan line %q", line)
 			}
-			if previous, ok := seen[match[1]]; ok {
-				return provider.ChangeSet{}, fmt.Errorf("duplicate plan mutation for %q (%s and remove)", match[1], previous)
+			pkg, err := normalizeTargetPackage(match[1], target)
+			if err != nil {
+				pkg = match[1]
 			}
-			seen[match[1]] = "remove"
-			changes.Removes = append(changes.Removes, match[1])
+			if previous, ok := seen[pkg]; ok {
+				return provider.ChangeSet{}, fmt.Errorf("duplicate plan mutation for %q (%s and remove)", pkg, previous)
+			}
+			seen[pkg] = "remove"
+			changes.Removes = append(changes.Removes, pkg)
 			continue
 		}
-		if strings.HasPrefix(line, "Conf ") {
+		if confPlanPattern.MatchString(line) || knownHeader(line) {
+			allowPackageList = false
 			continue
 		}
-		if planPrefixPattern.MatchString(line) {
-			return provider.ChangeSet{}, fmt.Errorf("unknown plan mutation line %q", line)
+		if knownListHeader(line) {
+			allowPackageList = true
+			continue
 		}
+		if allowPackageList && packageListPattern.MatchString(line) {
+			continue
+		}
+		return provider.ChangeSet{}, fmt.Errorf("unknown simulation output line %q", line)
+	}
+	if !summaryFound {
+		return provider.ChangeSet{}, errors.New("missing English simulation summary")
+	}
+	if summary[0] != len(changes.Upgrades) || summary[1] != len(changes.Installs) || summary[2] != len(changes.Removes) {
+		return provider.ChangeSet{}, fmt.Errorf("simulation summary counts do not match parsed changes")
 	}
 	return changes, nil
+}
+
+func normalizeTargetPackage(candidate, target string) (string, error) {
+	if !binaryPackagePattern.MatchString(candidate) || !binaryPackagePattern.MatchString(target) {
+		return "", errors.New("malformed binary package")
+	}
+	if candidate == target {
+		return target, nil
+	}
+	if strings.Contains(target, ":") {
+		return "", errors.New("qualified target mismatch")
+	}
+	base, _, ok := strings.Cut(candidate, ":")
+	if ok && base == target {
+		return target, nil
+	}
+	return "", errors.New("base package mismatch")
+}
+
+func knownHeader(line string) bool {
+	for _, exact := range []string{"NOTE: This is only a simulation!", "Reading package lists...", "Building dependency tree...", "Reading state information...", "Calculating upgrade...", "Use 'sudo apt autoremove' to remove them."} {
+		if line == exact {
+			return true
+		}
+	}
+	for _, prefix := range []string{"apt-get needs root privileges for real execution.", "Keep also in mind that locking is deactivated,", "so don't depend on the relevance to the real current situation!"} {
+		if line == prefix {
+			return true
+		}
+	}
+	return false
+}
+
+func knownListHeader(line string) bool {
+	for _, exact := range []string{"The following additional packages will be installed:", "The following NEW packages will be installed:", "The following packages will be upgraded:", "The following packages will be REMOVED:", "The following packages have been kept back:", "The following packages were automatically installed and are no longer required:", "Suggested packages:", "Recommended packages:"} {
+		if line == exact {
+			return true
+		}
+	}
+	return false
+}
+
+func aptGetRequest(args []string, privilege bool) execx.Request {
+	return execx.Request{Path: AptGetPath, Args: args, Env: map[string]string{"LC_ALL": "C"}, Privilege: privilege}
 }
 
 func simulationArgs(operation model.Operation) ([]string, error) {
@@ -297,7 +380,7 @@ func validateResource(resource model.Resource) error {
 	if resource.Provider != "apt" {
 		return fmt.Errorf("apt: resource provider %q does not match apt", resource.Provider)
 	}
-	if !packagePattern.MatchString(resource.Package) {
+	if !binaryPackagePattern.MatchString(resource.Package) {
 		return fmt.Errorf("apt: unsafe package token %q", resource.Package)
 	}
 	if resource.VersionPolicy != model.VersionTracked {
@@ -316,7 +399,7 @@ func validateOperation(operation model.Operation) error {
 	if operation.Provider != "apt" {
 		return fmt.Errorf("apt: operation provider %q does not match apt", operation.Provider)
 	}
-	if !packagePattern.MatchString(operation.Package) {
+	if !binaryPackagePattern.MatchString(operation.Package) {
 		return fmt.Errorf("apt: unsafe package token %q", operation.Package)
 	}
 	if !operation.RequiresPrivilege {

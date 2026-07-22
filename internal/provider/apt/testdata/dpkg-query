@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+[ "${LC_ALL:-}" = "C" ] || exit 9
+[ "$#" -eq 3 ] || exit 64
+[ "$1" = "--show" ] || exit 64
+[ "$2" = '--showformat=${binary:Package}\t${db:Status-Abbrev}\t${Version}\t${Essential}\n' ] || exit 64
+case "$3" in
+  curl) printf 'curl\tii \t8.0\tno\n' ;;
+  missing) exit 1 ;;
+  *) exit 64 ;;
+esac

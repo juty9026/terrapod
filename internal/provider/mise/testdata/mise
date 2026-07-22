@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+[ "$#" -eq 3 ] || exit 64
+[ "$1" = "ls" ] || exit 64
+[ "$2" = "--json" ] || exit 64
+[ "$3" = "node" ] || exit 64
+printf '%s\n' '{"node":[{"version":"24.7.0","installed":true}]}'

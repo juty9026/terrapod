@@ -92,15 +92,26 @@ func TestSeedCatalogMatchesBootstrapAPTAndMiseDeclarations(t *testing.T) {
 	wantMise := extractMiseTools(t, string(miseContents))
 	gotAPT := make(map[string]model.Resource)
 	gotMise := make(map[string]model.Resource)
+	seenIDs := make(map[model.ResourceID]struct{})
 	for _, resource := range seed.Resources {
+		if _, duplicate := seenIDs[resource.ID]; duplicate {
+			t.Fatalf("duplicate catalog resource ID %q", resource.ID)
+		}
+		seenIDs[resource.ID] = struct{}{}
 		switch resource.Provider {
 		case "apt":
+			if _, duplicate := gotAPT[resource.Package]; duplicate {
+				t.Fatalf("duplicate APT package %q", resource.Package)
+			}
 			gotAPT[resource.Package] = resource
 		case "mise":
+			if _, duplicate := gotMise[resource.Package]; duplicate {
+				t.Fatalf("duplicate mise package %q", resource.Package)
+			}
 			gotMise[resource.Package] = resource
 		}
 	}
-	if len(gotAPT) != len(wantAPT) {
+	if len(gotAPT) != 20 || len(wantAPT) != 20 || len(gotAPT) != len(wantAPT) {
 		t.Fatalf("APT catalog packages = %v, template packages = %v", sortedResourceKeys(gotAPT), wantAPT)
 	}
 	for _, pkg := range wantAPT {
@@ -108,11 +119,12 @@ func TestSeedCatalogMatchesBootstrapAPTAndMiseDeclarations(t *testing.T) {
 		if !ok {
 			t.Fatalf("missing APT resource for %q", pkg)
 		}
-		if resource.ID != model.ResourceID("bootstrap-apt."+pkg) || !reflect.DeepEqual(resource.Profiles, []model.Profile{model.ProfileVPSShell}) || resource.VersionPolicy != model.VersionTracked || len(resource.Commands) != 0 || !reflect.DeepEqual(resource.Metadata, map[string]string{"bootstrapOnly": "true"}) {
-			t.Fatalf("APT resource %q is mismapped: %#v", pkg, resource)
+		want := model.Resource{ID: model.ResourceID("bootstrap-apt." + pkg), Type: model.ResourcePackage, Profiles: []model.Profile{model.ProfileVPSShell}, DependsOn: []model.ResourceID{}, VersionPolicy: model.VersionTracked, Provider: "apt", Package: pkg, Commands: []string{}, Metadata: map[string]string{"bootstrapOnly": "true"}}
+		if !reflect.DeepEqual(resource, want) {
+			t.Fatalf("APT resource %q = %#v, want %#v", pkg, resource, want)
 		}
 	}
-	if len(gotMise) != len(wantMise) {
+	if len(gotMise) != 4 || len(wantMise) != 4 || len(gotMise) != len(wantMise) {
 		t.Fatalf("mise catalog tools = %v, template tools = %v", sortedResourceKeys(gotMise), sortedStringKeys(wantMise))
 	}
 	wantCommands := map[string][]string{"bun": {"bun"}, "node": {"node"}, "python": {"python"}, "uv": {"uv", "uvx"}}
@@ -121,8 +133,9 @@ func TestSeedCatalogMatchesBootstrapAPTAndMiseDeclarations(t *testing.T) {
 		if !ok {
 			t.Fatalf("missing mise resource for %q", tool)
 		}
-		if resource.ID != model.ResourceID("runtime."+tool) || !reflect.DeepEqual(resource.Profiles, []model.Profile{model.ProfileMacOSTerminal, model.ProfileVPSShell}) || resource.VersionPolicy != model.VersionPinned || resource.Metadata["version"] != version || !reflect.DeepEqual(resource.Commands, wantCommands[tool]) {
-			t.Fatalf("mise resource %q is mismapped: %#v", tool, resource)
+		want := model.Resource{ID: model.ResourceID("runtime." + tool), Type: model.ResourcePackage, Profiles: []model.Profile{model.ProfileMacOSTerminal, model.ProfileVPSShell}, DependsOn: []model.ResourceID{"core.mise"}, VersionPolicy: model.VersionPinned, Provider: "mise", Package: tool, Commands: wantCommands[tool], Metadata: map[string]string{"version": version}}
+		if !reflect.DeepEqual(resource, want) {
+			t.Fatalf("mise resource %q = %#v, want %#v", tool, resource, want)
 		}
 	}
 }
