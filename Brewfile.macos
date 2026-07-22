@@ -1,4 +1,0 @@
-# Mandatory macOS Terminal Profile assets.
-
-cask "font-jetbrains-mono-nerd-font"
-cask "font-d2coding"

@@ -235,14 +235,13 @@ do
 done
 pass "Ubuntu manages cross-profile Homebrew core state"
 
-printf '%s\n' "$ubuntu_managed" | grep -Fx '.chezmoiscripts/run_before_12-retry-homebrew-macos-platform.sh.tmpl' >/dev/null &&
-  fail "Ubuntu must not manage macOS platform retry state"
-pass "Ubuntu excludes macOS platform retry state"
-
 macos_only_entries="
-.chezmoiscripts/run_before_12-retry-homebrew-macos-platform.sh.tmpl
 .chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl
+.chezmoiscripts/run_before_02-retry-jetendard-font.sh.tmpl
 .chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl
+.chezmoiscripts/run_onchange_after_65-install-jetendard-font.sh.tmpl
+dot_local/lib/terrapod/executable_jetendard-font
+dot_local/lib/terrapod/executable_jetendard-settings
 dot_config/ghostty
 dot_config/private_karabiner
 dot_hammerspoon
@@ -252,6 +251,10 @@ dot_zprofile
 for entry in $macos_only_entries; do
   if printf '%s\n' "$ubuntu_managed" | grep -Fx "$entry" >/dev/null; then
     fail "Ubuntu VPS should not manage macOS-only entry: $entry"
+  fi
+
+  if ! printf '%s\n' "$macos_managed" | grep -Fx "$entry" >/dev/null; then
+    fail "macOS should manage macOS-only entry: $entry"
   fi
 done
 
@@ -271,10 +274,12 @@ macos_development_apps_bootstrap="$(render_template "$macos_development_apps_dat
 macos_development_workspace_bootstrap="$(render_template "$macos_development_workspace_data" ".chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl")"
 macos_core_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_11-retry-homebrew-core.sh.tmpl")"
 ubuntu_core_retry="$(render_template "$ubuntu_data" ".chezmoiscripts/run_before_11-retry-homebrew-core.sh.tmpl")"
-macos_platform_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_12-retry-homebrew-macos-platform.sh.tmpl")"
 macos_desktop_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl")"
 macos_terminal_apps_desktop_retry="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl")"
 macos_mise_tools_installer="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_20-install-mise-tools.sh.tmpl")"
+macos_jetendard_installer="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_65-install-jetendard-font.sh.tmpl")"
+macos_jetendard_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_02-retry-jetendard-font.sh.tmpl")"
+macos_jetendard_settings="$(render_template "$macos_data" ".chezmoiscripts/run_after_70-apply-jetendard-settings.sh.tmpl")"
 macos_karabiner_opener="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 macos_terminal_apps_karabiner_opener="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 macos_automation_apps_karabiner_opener="$(render_template "$macos_automation_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
@@ -286,9 +291,6 @@ assert_contains_text \
   "macOS bootstrap always runs the core Brewfile through the core bundle helper"
 
 assert_contains_text "$ubuntu_homebrew_bootstrap" 'core_brewfile="' "Ubuntu renders the mandatory CLI bundle"
-assert_not_contains_text "$ubuntu_homebrew_bootstrap" 'Brewfile.macos"' "Ubuntu excludes the macOS platform bundle"
-assert_contains_text "$macos_bootstrap" 'macos_brewfile="' "macOS renders the platform bundle"
-assert_contains_text "$macos_bootstrap" 'homebrew-macos-platform' "macOS uses a separate platform warning category"
 assert_contains_text "$ubuntu_homebrew_bootstrap" 'HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade' "Ubuntu bundle apply disables automatic updates"
 assert_not_contains_text "$ubuntu_homebrew_bootstrap" 'linux:arm64' "Ubuntu Homebrew bootstrap rejects the arm64 identifier"
 assert_not_contains_text "$ubuntu_core_retry" 'linux:arm64' "Ubuntu Homebrew retry rejects the arm64 identifier"
@@ -336,11 +338,6 @@ printf '%s\n' "$macos_core_retry" >"$macos_core_retry_script"
 sh -n "$macos_core_retry_script" || fail "macOS core retry script should be valid sh"
 pass "macOS core retry script is valid sh"
 
-macos_platform_retry_script="$tmp_dir/macos-platform-retry.sh"
-printf '%s\n' "$macos_platform_retry" >"$macos_platform_retry_script"
-sh -n "$macos_platform_retry_script" || fail "macOS platform retry script should be valid sh"
-pass "macOS platform retry script is valid sh"
-
 macos_desktop_retry_script="$tmp_dir/macos-desktop-retry-default.sh"
 printf '%s\n' "$macos_desktop_retry" >"$macos_desktop_retry_script"
 sh -n "$macos_desktop_retry_script" || fail "macOS desktop retry default cleanup script should be valid sh"
@@ -350,6 +347,100 @@ macos_terminal_apps_desktop_retry_script="$tmp_dir/macos-terminal-desktop-retry.
 printf '%s\n' "$macos_terminal_apps_desktop_retry" >"$macos_terminal_apps_desktop_retry_script"
 sh -n "$macos_terminal_apps_desktop_retry_script" || fail "macOS desktop retry App Group script should be valid sh"
 pass "macOS desktop retry App Group script is valid sh"
+
+macos_jetendard_installer_script="$tmp_dir/macos-jetendard-installer.sh"
+printf '%s\n' "$macos_jetendard_installer" >"$macos_jetendard_installer_script"
+sh -n "$macos_jetendard_installer_script" || fail "macOS Jetendard installer script should be valid sh"
+pass "macOS Jetendard installer script is valid sh"
+
+macos_jetendard_retry_script="$tmp_dir/macos-jetendard-retry.sh"
+printf '%s\n' "$macos_jetendard_retry" >"$macos_jetendard_retry_script"
+sh -n "$macos_jetendard_retry_script" || fail "macOS Jetendard retry script should be valid sh"
+pass "macOS Jetendard retry script is valid sh"
+
+assert_contains_text \
+  "$macos_jetendard_installer" \
+  "Jetendard font helper checksum:" \
+  "Jetendard installer tracks the helper checksum"
+
+assert_contains_text \
+  "$macos_jetendard_installer" \
+  'python3 "$font_helper" install' \
+  "Jetendard installer invokes the helper install command"
+
+assert_contains_text \
+  "$macos_jetendard_retry" \
+  'if ! terrapod_install_warning_existing_path jetendard-font >/dev/null 2>&1; then' \
+  "Jetendard retry is gated by its warning marker"
+
+assert_contains_text \
+  "$macos_jetendard_retry" \
+  'python3 "$font_helper" install' \
+  "Jetendard retry invokes the helper install command"
+
+jetendard_adapter_fixture="$tmp_dir/jetendard-adapter-fixture"
+mkdir -p "$jetendard_adapter_fixture"
+jetendard_adapter_log="$jetendard_adapter_fixture/actions.log"
+jetendard_warnings_stub="$jetendard_adapter_fixture/install-warnings.sh"
+jetendard_helper_stub="$jetendard_adapter_fixture/helper.py"
+cat >"$jetendard_warnings_stub" <<'SH'
+terrapod_install_warning_existing_path() {
+  printf '%s\n' marker-check >>"$JETENDARD_ADAPTER_LOG"
+  [ "${JETENDARD_MARKER_EXISTS:-0}" = 1 ]
+}
+terrapod_install_warning_clear() {
+  printf '%s\n' clear >>"$JETENDARD_ADAPTER_LOG"
+  [ "${JETENDARD_CLEAR_FAIL:-0}" != 1 ]
+}
+terrapod_install_warning_write() {
+  printf '%s\n' write >>"$JETENDARD_ADAPTER_LOG"
+  return 0
+}
+SH
+cat >"$jetendard_helper_stub" <<'PY'
+import os
+from pathlib import Path
+with Path(os.environ["JETENDARD_ADAPTER_LOG"]).open("a") as stream:
+    stream.write("helper\n")
+PY
+
+render_jetendard_adapter_fixture() {
+  rendered="$1"
+  destination="$2"
+  printf '%s\n' "$rendered" |
+    sed \
+      -e "s#^warnings_lib=.*#warnings_lib=\"$jetendard_warnings_stub\"#" \
+      -e "s#^font_helper=.*#font_helper=\"$jetendard_helper_stub\"#" \
+      -e "s#^settings_helper=.*#settings_helper=\"$jetendard_helper_stub\"#" \
+      >"$destination"
+}
+
+jetendard_installer_fixture="$jetendard_adapter_fixture/installer.sh"
+jetendard_retry_fixture="$jetendard_adapter_fixture/retry.sh"
+jetendard_settings_fixture="$jetendard_adapter_fixture/settings.sh"
+render_jetendard_adapter_fixture "$macos_jetendard_installer" "$jetendard_installer_fixture"
+render_jetendard_adapter_fixture "$macos_jetendard_retry" "$jetendard_retry_fixture"
+render_jetendard_adapter_fixture "$macos_jetendard_settings" "$jetendard_settings_fixture"
+
+for adapter in "$jetendard_installer_fixture" "$jetendard_retry_fixture" "$jetendard_settings_fixture"; do
+  : >"$jetendard_adapter_log"
+  if JETENDARD_ADAPTER_LOG="$jetendard_adapter_log" JETENDARD_MARKER_EXISTS=1 JETENDARD_CLEAR_FAIL=1 sh "$adapter" >/dev/null 2>&1; then
+    fail "successful Jetendard adapter blocks when warning clear fails: $adapter"
+  fi
+done
+pass "Jetendard adapters treat warning-clear failures as blocking"
+
+: >"$jetendard_adapter_log"
+JETENDARD_ADAPTER_LOG="$jetendard_adapter_log" JETENDARD_MARKER_EXISTS=0 JETENDARD_CLEAR_FAIL=0 sh "$jetendard_retry_fixture"
+assert_text_equals "$(cat "$jetendard_adapter_log")" 'marker-check' \
+  "Jetendard retry does not install without a warning marker"
+
+: >"$jetendard_adapter_log"
+JETENDARD_ADAPTER_LOG="$jetendard_adapter_log" JETENDARD_MARKER_EXISTS=1 JETENDARD_CLEAR_FAIL=0 sh "$jetendard_retry_fixture"
+assert_text_equals "$(cat "$jetendard_adapter_log")" 'marker-check
+helper
+clear' \
+  "Jetendard retry checks the marker before install and clear"
 
 macos_mise_missing_script="$tmp_dir/macos-mise-missing.sh"
 printf '%s\n' "$macos_mise_tools_installer" |
@@ -562,10 +653,6 @@ macos_core_retry_with_stub="$tmp_dir/macos-core-retry-with-stub.sh"
 replace_standard_brew_path "$macos_core_retry_script" "$macos_core_retry_with_stub" "$macos_brew_bin/brew"
 macos_core_retry_script="$macos_core_retry_with_stub"
 
-macos_platform_retry_with_stub="$tmp_dir/macos-platform-retry-with-stub.sh"
-replace_standard_brew_path "$macos_platform_retry_script" "$macos_platform_retry_with_stub" "$macos_brew_bin/brew"
-macos_platform_retry_script="$macos_platform_retry_with_stub"
-
 macos_marker_state="$tmp_dir/macos-marker-state"
 macos_marker_home="$tmp_dir/macos-marker-home"
 mkdir -p "$macos_marker_home"
@@ -775,6 +862,7 @@ core_detail_marker_text="$(cat "$core_detail_marker")"
 assert_contains_text "$core_detail_marker_text" "category='homebrew-core'" "core marker keeps one stable category"
 assert_contains_text "$core_detail_marker_text" "summary='Homebrew core install needs attention'" "core marker keeps stable summary"
 assert_contains_text "$core_detail_marker_text" "failed formulae: gum" "core marker guidance includes reliable failed formula names"
+assert_not_contains_text "$core_detail_marker_text" "failed casks:" "core marker guidance contains no cask detail after core casks are removed"
 assert_contains_text "$core_detail_marker_text" "Homebrew prefix is not writable: $core_detail_prefix" "core marker guidance identifies unwritable shared prefix"
 assert_not_contains_text "$core_detail_marker_text" "btop" "core marker excludes successful formula names"
 assert_not_contains_text "$core_detail_marker_text" "chown" "core marker avoids broad ownership command guidance"
@@ -835,34 +923,6 @@ core_retry_failure_marker_text="$(cat "$core_retry_failure_state/terrapod/instal
 assert_contains_text "$core_retry_failure_marker_text" "failed formulae: mise" "failed core retry replaces marker with current failed formula detail"
 assert_not_contains_text "$core_retry_failure_marker_text" "old core retry warning" "failed core retry replaces stale marker guidance"
 
-platform_retry_state="$tmp_dir/platform-retry-state"
-platform_retry_home="$tmp_dir/platform-retry-home"
-platform_retry_log="$tmp_dir/platform-retry-brew.log"
-platform_retry_bin="$tmp_dir/platform-retry-bin"
-mkdir -p "$platform_retry_home" "$platform_retry_bin"
-write_brew_bundle_stub "$platform_retry_bin/brew"
-HOME="$platform_retry_home" XDG_STATE_HOME="$platform_retry_state" sh -c \
-  '. "$1"; terrapod_install_warning_write homebrew-macos-platform "Homebrew macOS platform install needs attention" "old platform retry warning."' \
-  sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
-
-if ! HOME="$platform_retry_home" XDG_STATE_HOME="$platform_retry_state" MACOS_BREW_LOG="$platform_retry_log" MACOS_BREW_FAIL_CASKS="font-d2coding" PATH="$platform_retry_bin:/usr/bin:/bin" \
-  sh "$macos_platform_retry_script" >"$tmp_dir/platform-retry-failure.out" 2>"$tmp_dir/platform-retry-failure.err"; then
-  fail "failed macOS platform retry records a replacement marker and exits successfully"
-fi
-
-platform_retry_marker="$platform_retry_state/terrapod/install-warnings/homebrew-macos-platform"
-platform_retry_marker_text="$(cat "$platform_retry_marker")"
-assert_contains_text "$platform_retry_marker_text" "failed casks: font-d2coding" "failed macOS platform retry records the failed font cask"
-assert_not_contains_text "$platform_retry_marker_text" "old platform retry warning" "failed macOS platform retry replaces stale guidance"
-
-if ! HOME="$platform_retry_home" XDG_STATE_HOME="$platform_retry_state" MACOS_BREW_LOG="$platform_retry_log" PATH="$platform_retry_bin:/usr/bin:/bin" \
-  sh "$macos_platform_retry_script" >"$tmp_dir/platform-retry-success.out" 2>"$tmp_dir/platform-retry-success.err"; then
-  fail "successful macOS platform retry succeeds"
-fi
-if [ -e "$platform_retry_marker" ]; then
-  fail "successful macOS platform retry clears its marker"
-fi
-pass "successful macOS platform retry clears its marker"
 assert_contains_text "$core_retry_failure_marker_text" "updated_at='" "failed core retry replacement marker keeps updated_at"
 
 mise_missing_without_core_home="$tmp_dir/mise-missing-without-core-home"
@@ -1034,28 +1094,28 @@ core_then_desktop_log="$tmp_dir/core-then-desktop-brew.log"
 mkdir -p "$core_then_desktop_bin" "$core_then_desktop_home"
 write_brew_bundle_stub "$core_then_desktop_bin/brew"
 
-if ! HOME="$core_then_desktop_home" XDG_STATE_HOME="$core_then_desktop_state" MACOS_BREW_LOG="$core_then_desktop_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="font-d2coding ghostty raycast" PATH="$core_then_desktop_bin:/usr/bin:/bin" \
+if ! HOME="$core_then_desktop_home" XDG_STATE_HOME="$core_then_desktop_state" MACOS_BREW_LOG="$core_then_desktop_log" MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_FORMULAE="mise" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty raycast" PATH="$core_then_desktop_bin:/usr/bin:/bin" \
   sh "$terminal_launcher_bootstrap_script" >"$tmp_dir/core-then-desktop.out" 2>"$tmp_dir/core-then-desktop.err"; then
   printf '%s\n' "core then desktop stdout:" >&2
   sed 's/^/  /' "$tmp_dir/core-then-desktop.out" >&2
   printf '%s\n' "core then desktop stderr:" >&2
   sed 's/^/  /' "$tmp_dir/core-then-desktop.err" >&2
-  fail "macOS bootstrap records platform and desktop app warnings in one App Groups run"
+  fail "macOS bootstrap records core and desktop app warnings in one App Groups run"
 fi
 
-core_then_desktop_core_marker="$core_then_desktop_state/terrapod/install-warnings/homebrew-macos-platform"
+core_then_desktop_core_marker="$core_then_desktop_state/terrapod/install-warnings/homebrew-core"
 core_then_desktop_desktop_marker="$core_then_desktop_state/terrapod/install-warnings/homebrew-desktop-apps"
 if [ ! -f "$core_then_desktop_core_marker" ]; then
-  fail "macOS bootstrap keeps homebrew-macos-platform marker when desktop App Groups also need attention"
+  fail "macOS bootstrap keeps homebrew-core marker when desktop App Groups also need attention"
 fi
 if [ ! -f "$core_then_desktop_desktop_marker" ]; then
   fail "macOS bootstrap continues to desktop App Groups after recording a homebrew-core marker"
 fi
-pass "macOS bootstrap records platform and desktop app warnings in one App Groups run"
+pass "macOS bootstrap records core and desktop app warnings in one App Groups run"
 
 core_then_desktop_core_text="$(cat "$core_then_desktop_core_marker")"
 core_then_desktop_desktop_text="$(cat "$core_then_desktop_desktop_marker")"
-assert_contains_text "$core_then_desktop_core_text" "failed casks: font-d2coding" "combined bootstrap platform marker keeps failed font detail"
+assert_contains_text "$core_then_desktop_core_text" "failed formulae: mise" "combined bootstrap core marker keeps failed formula detail"
 assert_contains_text "$core_then_desktop_desktop_text" "failed casks: ghostty, raycast" "combined bootstrap desktop marker keeps failed cask detail"
 
 terminal_launcher_marker_failure_bin="$tmp_dir/terminal-launcher-marker-failure-bin"
@@ -1282,16 +1342,10 @@ assert_texts_differ \
   "$macos_automation_apps_karabiner_opener" \
   "Karabiner opener tracks different macOS Desktop App Group combinations"
 
-for cask in \
-  font-jetbrains-mono-nerd-font \
-  font-d2coding
-do
-  if ! grep -Fx "cask \"$cask\"" "$repo_root/Brewfile.macos" >/dev/null; then
-    fail "macOS platform Brewfile contains expected terminal font cask: $cask"
-  fi
-done
-
-pass "macOS platform Brewfile contains expected terminal font casks"
+if grep -E '^[[:space:]]*cask[[:space:]]+"font-(jetbrains-mono-nerd-font|d2coding)"' "$repo_root/Brewfile" >/dev/null; then
+  fail "core Brewfile no longer declares superseded terminal font casks"
+fi
+pass "core Brewfile no longer declares superseded terminal font casks"
 
 if ! grep -Fx 'brew "gum"' "$repo_root/Brewfile" >/dev/null; then
   fail "core Brewfile declares gum as the setup UI dependency"
@@ -1302,7 +1356,6 @@ pass "core Brewfile declares gum as the setup UI dependency"
 if grep -E '^[[:space:]]*cask[[:space:]]+"' "$repo_root/Brewfile" >/dev/null; then
   fail "cross-profile core Brewfile excludes macOS-only casks"
 fi
-
 pass "cross-profile core Brewfile excludes macOS-only casks"
 
 for app_config in \
@@ -1320,6 +1373,29 @@ do
 done
 
 pass "user-scoped macOS app config remains managed regardless of app group selection"
+
+assert_managed_paths_include_prefix \
+  "$macos_managed" \
+  ".chezmoiscripts/run_after_70-apply-jetendard-settings.sh.tmpl" \
+  "macOS default applies Jetendard app settings"
+
+assert_managed_paths_include_prefix \
+  "$macos_development_apps_managed" \
+  ".chezmoiscripts/run_after_70-apply-jetendard-settings.sh.tmpl" \
+  "development-apps selection applies the same user-scoped Jetendard settings"
+
+assert_managed_paths_exclude_prefix \
+  "$ubuntu_managed" \
+  ".chezmoiscripts/run_after_70-apply-jetendard-settings.sh.tmpl" \
+  "Ubuntu excludes Jetendard app settings"
+
+ghostty_font_lines="$(grep -E '^[[:space:]]*font-family[[:space:]]*=' "$repo_root/dot_config/ghostty/config")"
+assert_text_equals "$ghostty_font_lines" 'font-family = "Jetendard"' \
+  "Ghostty uses Jetendard as its sole font family"
+assert_not_contains_text "$(cat "$repo_root/dot_config/ghostty/config")" "JetBrainsMono Nerd Font" \
+  "Ghostty no longer declares JetBrains Mono Nerd Font"
+assert_not_contains_text "$(cat "$repo_root/dot_config/ghostty/config")" "D2Coding" \
+  "Ghostty no longer declares D2Coding"
 
 cmux_fixture_source="$tmp_dir/cmux-fixture-source"
 mkdir -p "$cmux_fixture_source/dot_config/cmux"

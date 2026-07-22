@@ -1,7 +1,6 @@
 README.md
 README.ko.md
 Brewfile
-Brewfile.macos
 Brewfile.ai-cli-tools
 Brewfile.macos-desktop-apps
 AGENTS.md
@@ -29,9 +28,13 @@ tests/**
 
 {{ if ne .chezmoi.os "darwin" }}
 # macOS Terminal Profile entries are not part of the VPS Shell Profile.
-.chezmoiscripts/12-retry-homebrew-macos-platform.sh
 .chezmoiscripts/13-retry-homebrew-desktop-apps.sh
+.chezmoiscripts/02-retry-jetendard-font.sh
 .chezmoiscripts/50-open-karabiner-if-needed.sh
+.chezmoiscripts/65-install-jetendard-font.sh
+.chezmoiscripts/70-apply-jetendard-settings.sh
+.local/lib/terrapod/jetendard-font
+.local/lib/terrapod/jetendard-settings
 .config/ghostty
 .config/ghostty/**
 .config/karabiner

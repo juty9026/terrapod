@@ -214,7 +214,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Mandatory stack warning markers such as Homebrew core, Ubuntu bootstrap, shell integrations, and mise tools are cleared only by successful reruns because their desired state cannot be disabled by optional settings.
 - Optional stack or app-group warning marker content may be cleared or reduced when the corresponding desired optional setting is disabled.
 - Terrapod install warnings are updated by both first-run installation and routine `tpod apply` because routine apply is the recovery path for previously failed installer categories.
-- Terrapod install warning categories include stable filename slugs for Homebrew core bundle (`homebrew-core`), macOS Homebrew platform bundle (`homebrew-macos-platform`), Homebrew desktop app bundle (`homebrew-desktop-apps`), Ubuntu bootstrap (`ubuntu-bootstrap`), shell integrations (`shell-integrations`), mise runtime tools (`mise-tools`), and optional AI CLI tools (`optional-ai-cli-tools`); best-effort UI nudges such as opening Karabiner do not need install warning markers.
+- Terrapod install warning categories include stable filename slugs for Homebrew core bundle (`homebrew-core`), Homebrew desktop app bundle (`homebrew-desktop-apps`), Ubuntu bootstrap (`ubuntu-bootstrap`), shell integrations (`shell-integrations`), mise runtime tools (`mise-tools`), optional AI CLI tools (`optional-ai-cli-tools`), Jetendard fonts (`jetendard-font`), and Jetendard settings (`jetendard-settings`); best-effort UI nudges such as opening Karabiner do not need install warning markers.
 - Terrapod install warning markers use shell-friendly key/value content with stable category, summary, guidance, and `updated_at` fields instead of free-form logs or captured stack traces.
 - Terrapod install warning marker values stay single-line so shell parsing remains predictable; longer human-readable explanations belong in `tpod doctor` output.
 - Terrapod install warning marker `updated_at` values use UTC ISO 8601 timestamps such as `2026-06-02T03:12:45Z`.
@@ -270,11 +270,17 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - A clean first-run success does not need extra `tpod doctor` guidance beyond the installer's final `tpod help` output.
 - When first-run completes with install warnings, the final installer output shows a separate warning block and the absolute `~/.local/bin/tpod doctor` recovery command in addition to surfacing `tpod help`.
 - The **macOS Desktop App Stack** is opt-in because Homebrew casks can install shared applications and desktop support assets outside a single user's home directory.
-- The **macOS Desktop App Stack** excludes Homebrew itself, shared CLI formulae such as mise and btop, and terminal font casks.
+- The **macOS Desktop App Stack** excludes Homebrew itself, shared CLI formulae such as mise and btop, and the Jetendard release installer owned by the **macOS Terminal Profile**.
 - On shared Macs with multiple login users, Homebrew prefix ownership and permissions remain outside Terrapod's automatic repair scope because changing them can affect other users and shared applications.
 - Homebrew permission failures for a second macOS login user should warn without blocking **Terrapod** command and managed dotfiles installation, with `tpod doctor` surfacing manual recovery guidance.
 - Homebrew permission guidance should identify the unwritable shared prefix and ask the user to fix Homebrew ownership or administration outside Terrapod before rerunning `tpod apply`; Terrapod should not suggest or run broad `chown` repair commands.
-- Terminal font casks belong to the macOS Terminal Profile core bootstrap because the managed terminal configuration depends on them and they are not desktop applications.
+- The **macOS Terminal Profile** installs every TTF from the latest stable `kuskhan/jetendard` GitHub release and verifies the asset digest published by GitHub instead of using a Homebrew font cask.
+- The Jetendard installer queries GitHub only when its managed source changes or a failed installation is retried; ordinary `tpod status` and `tpod doctor` checks remain offline, and an upstream release alone does not trigger an upgrade.
+- Jetendard installation records its tag, digest, and owned font files in a user-scoped manifest, and cleanup removes only obsolete files named by that manifest after a successful replacement.
+- Jetendard app-setting management changes only font-family keys for Ghostty, Zed buffers and terminals, and initialized Orca terminal profiles; other app settings remain outside Terrapod ownership.
+- Jetendard settings for Orca are deferred while Orca is running and require quitting Orca before rerunning `tpod apply`.
+- The **VPS Shell Profile** excludes the Jetendard installer, app-setting adapter, status, and doctor checks.
+- ADR 0009 supersedes only ADR 0001's Homebrew font-provider consequence; ADR 0001's Homebrew and mise ownership boundaries for all other tools remain unchanged.
 - Enabling the **Optional Development Workspace** does not enable the **macOS Desktop App Stack**.
 - **macOS App Groups** are configured during **Terrapod** setup and remain within the **macOS Desktop App Stack** boundary.
 - When **macOS App Group** settings change, `tpod apply` keeps Homebrew desktop app warning marker content aligned with currently enabled groups; failures for disabled groups are removed from readiness warnings while enabled group failures remain.

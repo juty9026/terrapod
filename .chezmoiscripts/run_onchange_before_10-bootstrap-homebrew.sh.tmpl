@@ -322,33 +322,6 @@ if [ -f "$core_brewfile" ]; then
   fi
 fi
 
-{{ if eq .chezmoi.os "darwin" -}}
-macos_brewfile="{{ .chezmoi.sourceDir }}/Brewfile.macos"
-
-# macOS platform Brewfile checksum: {{ include "Brewfile.macos" | sha256sum }}
-if [ -f "$macos_brewfile" ]; then
-  if [ "${TERRAPOD_HOMEBREW_CORE_BUNDLE_LOADED:-}" = "1" ]; then
-    if ! terrapod_homebrew_core_run_bundle "$macos_brewfile"; then
-      mark_install_warning \
-        homebrew-macos-platform \
-        "Homebrew macOS platform install needs attention" \
-        "$TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT" || exit 1
-    else
-      clear_install_warning homebrew-macos-platform
-    fi
-  else
-    if ! HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="$macos_brewfile"; then
-      mark_install_warning \
-        homebrew-macos-platform \
-        "Homebrew macOS platform install needs attention" \
-        "Review Homebrew macOS platform bundle output, fix package access, then rerun tpod apply." || exit 1
-    else
-      clear_install_warning homebrew-macos-platform
-    fi
-  fi
-fi
-{{ end -}}
-
 {{ if $enableMacosAppGroups -}}
 desktop_brewfile="$(mktemp "${TMPDIR:-/tmp}/terrapod-macos-desktop-apps.XXXXXX")"
 cleanup_desktop_brewfile() {

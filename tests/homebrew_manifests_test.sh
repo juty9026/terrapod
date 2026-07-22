@@ -87,19 +87,6 @@ if grep -F '| tee /tmp/mise.toml' "$ubuntu_smoke_fixture" >/dev/null ||
 fi
 pass "Ubuntu smoke template render fails before output and assertions"
 
-expected_macos="$tmp_dir/expected-macos"
-actual_macos="$tmp_dir/actual-macos"
-printf '%s\n' \
-  'cask "font-d2coding"' \
-  'cask "font-jetbrains-mono-nerd-font"' >"$expected_macos"
-sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' "$repo_root/Brewfile.macos" |
-  LC_ALL=C sort >"$actual_macos"
-if ! cmp -s "$expected_macos" "$actual_macos"; then
-  diff -u "$expected_macos" "$actual_macos" >&2 || true
-  fail "macOS Brewfile contains only mandatory terminal fonts"
-fi
-pass "macOS Brewfile contains only mandatory terminal fonts"
-
 runtime_config="$tmp_dir/mise.toml"
 chezmoi execute-template \
   --source "$repo_root" \

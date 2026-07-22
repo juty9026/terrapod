@@ -143,11 +143,13 @@ On Apple Silicon, Homebrew installs at `/opt/homebrew`; on Intel Macs, it instal
 
 - Standard-prefix Homebrew and the shared 20-formula `Brewfile` bundle
 - Core Shell Stack CLIs such as ripgrep, neovim, zellij, lazygit, GitHub CLI (`gh`), starship, and mise through Homebrew
-- Terminal font casks
+- Jetendard terminal font from the latest stable GitHub release
 - Oh My Zsh, zinit, and SCM Breeze
 - Bun, Node.js 24, Python 3.13, and uv/uvx through mise
 - pnpm through Node.js Corepack
 - Optional AI Tool Stack casks through Homebrew when that stack is enabled
+
+Terrapod installs every TTF in that Jetendard release and verifies the asset digest published by GitHub. Terrapod checks the latest Jetendard release only when its managed font installer source changes or a failed install is retried. It sets only the font-family keys used by Ghostty, Zed buffers and terminals, and Orca terminals. Quit Orca before rerunning `tpod apply` when Jetendard settings are deferred. Terrapod does not uninstall existing JetBrains Mono Nerd Font or D2Coding copies. Restart Ghostty, Zed, or Orca if an existing window still uses a cached font.
 
 macOS desktop applications are split into opt-in App Groups controlled by
 machine-local data keys. During Homebrew bootstrap, chezmoi renders selected
