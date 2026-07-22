@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "release": "development",
+  "config": {
+    "version": 1,
+    "fields": [
+      {"id": "profile", "kind": "string", "required": true},
+      {"id": "enableEditorStack", "kind": "bool", "required": false, "default": false},
+      {"id": "enableAiCliTools", "kind": "bool", "required": false, "default": false},
+      {"id": "enableDevelopmentWorkspace", "kind": "bool", "required": false, "default": false},
+      {"id": "enableMacosAppGroupTerminalApps", "kind": "bool", "required": false, "default": false},
+      {"id": "enableMacosAppGroupAutomation", "kind": "bool", "required": false, "default": false},
+      {"id": "enableMacosAppGroupLauncher", "kind": "bool", "required": false, "default": false},
+      {"id": "enableMacosAppGroupMonitoring", "kind": "bool", "required": false, "default": false},
+      {"id": "enableMacosAppGroupDevelopmentApps", "kind": "bool", "required": false, "default": false}
+    ]
+  },
+  "resources": []
+}

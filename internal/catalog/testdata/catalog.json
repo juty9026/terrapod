@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "release": "test-2026",
+  "config": {
+    "version": 1,
+    "fields": [
+      {"id": "profile", "kind": "string", "required": true},
+      {"id": "enableEditorStack", "kind": "bool", "required": false, "default": false},
+      {"id": "enableAiCliTools", "kind": "bool", "required": false, "default": false},
+      {"id": "enableDevelopmentWorkspace", "kind": "bool", "required": false, "default": false},
+      {"id": "enableMacosAppGroupTerminalApps", "kind": "bool", "required": false, "default": false},
+      {"id": "enableMacosAppGroupAutomation", "kind": "bool", "required": false, "default": false},
+      {"id": "enableMacosAppGroupLauncher", "kind": "bool", "required": false, "default": false},
+      {"id": "enableMacosAppGroupMonitoring", "kind": "bool", "required": false, "default": false},
+      {"id": "enableMacosAppGroupDevelopmentApps", "kind": "bool", "required": false, "default": false}
+    ]
+  },
+  "resources": [
+    {
+      "id": "core.ripgrep",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "ripgrep",
+      "commands": ["rg"],
+      "metadata": {}
+    }
+  ]
+}
