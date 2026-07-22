@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"syscall"
 
 	"github.com/juty9026/terrapod/internal/model"
 )
@@ -44,22 +45,27 @@ func (e *ErrNeedsSetup) Error() string {
 }
 
 func Load(path string) (model.Config, error) {
-	info, err := os.Lstat(path)
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
 	if errors.Is(err, os.ErrNotExist) {
 		return model.Config{}, &ErrMissing{Path: path}
 	}
 	if err != nil {
-		return model.Config{}, fmt.Errorf("inspect Terrapod config: %w", err)
+		return model.Config{}, fmt.Errorf("open Terrapod config %q: %w", path, err)
+	}
+	file := os.NewFile(uintptr(fd), path)
+	if file == nil {
+		_ = syscall.Close(fd)
+		return model.Config{}, fmt.Errorf("open Terrapod config %q: invalid file descriptor", path)
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return model.Config{}, fmt.Errorf("inspect opened Terrapod config %q: %w", path, err)
 	}
 	if !info.Mode().IsRegular() {
 		return model.Config{}, fmt.Errorf("Terrapod config %q is not a regular file", path)
 	}
-
-	file, err := os.Open(path)
-	if err != nil {
-		return model.Config{}, fmt.Errorf("open Terrapod config: %w", err)
-	}
-	defer file.Close()
 
 	decoder := json.NewDecoder(file)
 	decoder.DisallowUnknownFields()

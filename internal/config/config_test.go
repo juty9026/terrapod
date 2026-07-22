@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/juty9026/terrapod/internal/model"
@@ -65,10 +66,11 @@ func TestLoad(t *testing.T) {
 		if err := os.Symlink(target, symlink); err != nil {
 			t.Fatal(err)
 		}
-		for _, path := range []string{symlink, dir} {
-			if _, err := Load(path); err == nil {
-				t.Fatalf("Load(%q) error = nil", path)
-			}
+		if _, err := Load(symlink); !errors.Is(err, syscall.ELOOP) {
+			t.Fatalf("Load(%q) error = %v, want ELOOP", symlink, err)
+		}
+		if _, err := Load(dir); err == nil {
+			t.Fatalf("Load(%q) error = nil", dir)
 		}
 	})
 }
