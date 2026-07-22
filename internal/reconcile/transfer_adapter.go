@@ -18,6 +18,7 @@ type LegacyCoordinator interface {
 	Detect(context.Context, model.Profile, model.Resource, model.Observation) (legacy.Inventory, error)
 	PreflightRemovals(context.Context, legacy.Inventory) (legacy.Preflight, provider.ChangeSet, error)
 	RemovePreflight(context.Context, legacy.Preflight, legacy.Inventory) error
+	CancelPreflight(legacy.Preflight) error
 }
 
 // ProviderTransferAdapter composes a desired package provider with the opaque,
@@ -26,6 +27,7 @@ type ProviderTransferAdapter struct {
 	desired    *resource.ProviderAdapter
 	legacy     LegacyCoordinator
 	profile    model.Profile
+	simulateMu sync.Mutex
 	mu         sync.Mutex
 	preflights map[string]transferPreflight
 }
@@ -59,9 +61,17 @@ func (a *ProviderTransferAdapter) Verify(ctx context.Context, item model.Resourc
 	return a.desired.Verify(ctx, item)
 }
 func (a *ProviderTransferAdapter) Simulate(ctx context.Context, item model.Resource, op model.Operation) (provider.ChangeSet, error) {
+	a.simulateMu.Lock()
+	defer a.simulateMu.Unlock()
 	a.mu.Lock()
+	old, hadOld := a.preflights[op.ID]
 	delete(a.preflights, op.ID)
 	a.mu.Unlock()
+	if hadOld {
+		if err := a.legacy.CancelPreflight(old.capability); err != nil {
+			return provider.ChangeSet{}, err
+		}
+	}
 	desired := op
 	if desired.Kind == model.OperationTransfer {
 		desired.Kind = model.OperationInstall
@@ -97,6 +107,21 @@ func (a *ProviderTransferAdapter) Simulate(ctx context.Context, item model.Resou
 		a.mu.Unlock()
 	}
 	return changes, nil
+}
+
+func (a *ProviderTransferAdapter) CancelSimulation(op model.Operation) error {
+	a.mu.Lock()
+	preflight, ok := a.preflights[op.ID]
+	if ok && reflect.DeepEqual(preflight.operation, op) {
+		delete(a.preflights, op.ID)
+	} else {
+		ok = false
+	}
+	a.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	return a.legacy.CancelPreflight(preflight.capability)
 }
 func (a *ProviderTransferAdapter) InstallDesired(ctx context.Context, item model.Resource, op model.Operation) model.OperationResult {
 	desired := op
@@ -173,3 +198,4 @@ func failedPhase(op model.Operation, detail string) model.OperationResult {
 var _ resource.Adapter = (*ProviderTransferAdapter)(nil)
 var _ TransferAdapter = (*ProviderTransferAdapter)(nil)
 var _ Simulator = (*ProviderTransferAdapter)(nil)
+var _ SimulationLifecycle = (*ProviderTransferAdapter)(nil)

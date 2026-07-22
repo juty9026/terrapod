@@ -19,6 +19,26 @@ type transferProvider struct {
 	name, pkg           string
 }
 
+type transferCoordinator struct {
+	preflights int
+	canceled   int
+}
+
+func (*transferCoordinator) Detect(context.Context, model.Profile, model.Resource, model.Observation) (legacy.Inventory, error) {
+	return legacy.Inventory{}, nil
+}
+func (c *transferCoordinator) PreflightRemovals(context.Context, legacy.Inventory) (legacy.Preflight, provider.ChangeSet, error) {
+	c.preflights++
+	return legacy.Preflight{}, provider.ChangeSet{}, nil
+}
+func (*transferCoordinator) RemovePreflight(context.Context, legacy.Preflight, legacy.Inventory) error {
+	return nil
+}
+func (c *transferCoordinator) CancelPreflight(legacy.Preflight) error {
+	c.canceled++
+	return nil
+}
+
 func (p *transferProvider) Name() string {
 	if p.name != "" {
 		return p.name
@@ -155,6 +175,49 @@ func TestProviderTransferAdapterComposesRealOpaqueCoordinator(t *testing.T) {
 	}
 	if err := adapter.VerifyLegacyAbsent(context.Background(), item, op); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestProviderTransferAdapterRevokesSupersededAndCanceledSimulation(t *testing.T) {
+	backend := &transferProvider{}
+	desired, err := resource.NewProviderAdapter(backend, func(context.Context, model.Resource, model.Observation, model.Ownership) ([]model.Operation, error) {
+		return nil, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator := &transferCoordinator{}
+	adapter, err := NewProviderTransferAdapter(desired, coordinator, model.ProfileVPSShell)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := model.Resource{ID: "core.alpha", Type: model.ResourcePackage, Provider: "fixture", Package: "alpha", VersionPolicy: model.VersionTracked}
+	op := model.Operation{ID: "transfer", ResourceID: item.ID, Kind: model.OperationTransfer, Provider: item.Provider, Package: item.Package}
+	if _, err := adapter.Simulate(context.Background(), item, op); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adapter.Simulate(context.Background(), item, op); err != nil {
+		t.Fatal(err)
+	}
+	if coordinator.preflights != 2 || coordinator.canceled != 1 {
+		t.Fatalf("preflights=%d canceled=%d", coordinator.preflights, coordinator.canceled)
+	}
+	mismatched := op
+	mismatched.Package = "different"
+	if err := adapter.CancelSimulation(mismatched); err != nil {
+		t.Fatal(err)
+	}
+	if coordinator.canceled != 1 {
+		t.Fatal("mismatched operation canceled the current capability")
+	}
+	if err := adapter.CancelSimulation(op); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.CancelSimulation(op); err != nil {
+		t.Fatal(err)
+	}
+	if coordinator.canceled != 2 {
+		t.Fatalf("idempotent cancel count=%d", coordinator.canceled)
 	}
 }
 

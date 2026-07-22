@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -22,6 +24,8 @@ type fixtureAdapter struct {
 	simulation                   provider.ChangeSet
 	verifyCalls, failVerifyAfter int
 	onExecute                    func()
+	onSimulate                   func()
+	canceled                     []model.Operation
 }
 
 func (f *fixtureAdapter) event(value string) {
@@ -66,10 +70,18 @@ func (f *fixtureAdapter) Verify(_ context.Context, item model.Resource) (model.O
 }
 func (f *fixtureAdapter) Simulate(_ context.Context, _ model.Resource, operation model.Operation) (provider.ChangeSet, error) {
 	f.event("simulate:" + operation.ID)
+	if f.onSimulate != nil {
+		f.onSimulate()
+	}
 	if f.fail["simulate:"+operation.ID] {
 		return provider.ChangeSet{}, errors.New("simulation failed")
 	}
 	return f.simulation, nil
+}
+func (f *fixtureAdapter) CancelSimulation(operation model.Operation) error {
+	f.canceled = append(f.canceled, operation)
+	f.event("cancel:" + operation.ID)
+	return nil
 }
 func (f *fixtureAdapter) InstallDesired(_ context.Context, _ model.Resource, operation model.Operation) model.OperationResult {
 	f.event("install-desired")
@@ -207,13 +219,128 @@ func TestApplyTransferControlsSafePhaseOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "simulate:transfer,inspect:core.ripgrep,install-desired,verify:core.ripgrep,remove-legacy,verify-legacy-absent,verify:core.ripgrep,verify:core.ripgrep"
+	want := "simulate:transfer,inspect:core.ripgrep,install-desired,verify:core.ripgrep,remove-legacy,verify-legacy-absent,verify:core.ripgrep,verify:core.ripgrep,cancel:transfer"
 	if got := strings.Join(adapter.events, ","); got != want {
 		t.Fatalf("events = %s, want %s", got, want)
 	}
 	snapshot, _ := store.Snapshot()
 	if _, ok := snapshot.Ownership[item.ID]; !ok {
 		t.Fatal("ownership not committed")
+	}
+}
+
+func TestApplyRevokesTransferSimulationOnEveryExitPath(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*testing.T, *Engine, *state.Store, *fixtureAdapter, *model.Resource, *model.Operation, context.CancelFunc)
+	}{
+		{
+			name: "privilege failure",
+			setup: func(_ *testing.T, engine *Engine, _ *state.Store, _ *fixtureAdapter, _ *model.Resource, operation *model.Operation, _ context.CancelFunc) {
+				operation.RequiresPrivilege = true
+				engine.Privilege = &privilegeFixture{err: errors.New("denied")}
+			},
+		},
+		{
+			name: "context cancellation",
+			setup: func(_ *testing.T, _ *Engine, _ *state.Store, adapter *fixtureAdapter, _ *model.Resource, _ *model.Operation, cancel context.CancelFunc) {
+				adapter.onSimulate = cancel
+			},
+		},
+		{
+			name: "journal begin failure",
+			setup: func(t *testing.T, engine *Engine, store *state.Store, _ *fixtureAdapter, _ *model.Resource, operation *model.Operation, _ context.CancelFunc) {
+				plan := model.Plan{ID: "p", Operations: []model.Operation{*operation}}
+				journal, err := store.Begin(plan)
+				if err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(engine.LockDir, "journals", journal.ID+".json")
+				contents, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var document map[string]any
+				if err := json.Unmarshal(contents, &document); err != nil {
+					t.Fatal(err)
+				}
+				document["Status"] = "invalid"
+				contents, err = json.Marshal(document)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, contents, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "dependency failure",
+			setup: func(_ *testing.T, _ *Engine, _ *state.Store, _ *fixtureAdapter, item *model.Resource, _ *model.Operation, _ context.CancelFunc) {
+				item.DependsOn = []model.ResourceID{"core.missing"}
+			},
+		},
+		{
+			name: "desired install failure",
+			setup: func(_ *testing.T, _ *Engine, _ *state.Store, adapter *fixtureAdapter, _ *model.Resource, _ *model.Operation, _ context.CancelFunc) {
+				adapter.fail["install"] = true
+			},
+		},
+		{name: "success", setup: func(*testing.T, *Engine, *state.Store, *fixtureAdapter, *model.Resource, *model.Operation, context.CancelFunc) {
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			item := transferPkg()
+			if test.name == "privilege failure" {
+				item = model.Resource{ID: "core.mise", Type: model.ResourcePackage, Provider: "homebrew-formula", Package: "mise", VersionPolicy: model.VersionTracked, Metadata: map[string]string{"legacy.apt.package": "mise", "legacy.apt.profile": "vps-shell"}}
+			}
+			adapter := &fixtureAdapter{legacy: true, fail: map[string]bool{}}
+			engine, store := testEngine(t, map[string]*fixtureAdapter{"homebrew-formula": adapter}, item)
+			engine.Profile = model.ProfileVPSShell
+			operation := op(item, "transfer", model.OperationTransfer)
+			if test.name == "privilege failure" {
+				operation.Removes = []string{"mise"}
+			} else {
+				operation.Removes = []string{"aqua:BurntSushi/ripgrep"}
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			test.setup(t, engine, store, adapter, &item, &operation, cancel)
+			engine.Resources[item.ID] = item
+			engine.Enabled = []model.ResourceID{item.ID}
+			summary, err := engine.Apply(ctx, model.Plan{ID: "p", Operations: []model.Operation{operation}})
+			if len(adapter.canceled) != 1 || adapter.canceled[0].ID != operation.ID {
+				t.Fatalf("canceled=%#v", adapter.canceled)
+			}
+			events := strings.Join(adapter.events, ",")
+			switch test.name {
+			case "privilege failure":
+				if err == nil || !strings.Contains(err.Error(), "acquire privilege") || strings.Contains(events, "install-desired") {
+					t.Fatalf("err=%v events=%s", err, events)
+				}
+			case "context cancellation":
+				if !errors.Is(err, context.Canceled) || strings.Contains(events, "install-desired") {
+					t.Fatalf("err=%v events=%s", err, events)
+				}
+			case "journal begin failure":
+				if err == nil || !strings.Contains(err.Error(), "begin journal") || strings.Contains(events, "install-desired") {
+					t.Fatalf("err=%v events=%s", err, events)
+				}
+			case "dependency failure":
+				if err != nil || summary.Unavailable[item.ID] == "" || strings.Contains(events, "install-desired") {
+					t.Fatalf("summary=%#v err=%v events=%s", summary, err, events)
+				}
+			case "desired install failure":
+				if err != nil || summary.Unavailable[item.ID] == "" || !strings.Contains(events, "install-desired") {
+					t.Fatalf("summary=%#v err=%v events=%s", summary, err, events)
+				}
+			case "success":
+				if err != nil || len(summary.Ready) != 1 || !strings.Contains(events, "remove-legacy") {
+					t.Fatalf("summary=%#v err=%v events=%s", summary, err, events)
+				}
+			}
+		})
 	}
 }
 

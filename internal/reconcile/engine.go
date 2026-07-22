@@ -24,6 +24,10 @@ type Simulator interface {
 	Simulate(context.Context, model.Resource, model.Operation) (provider.ChangeSet, error)
 }
 
+type SimulationLifecycle interface {
+	CancelSimulation(model.Operation) error
+}
+
 // TransferAdapter exposes the phases whose ordering must be controlled by the
 // engine. Implementations must re-inspect their legacy source in these calls.
 type TransferAdapter interface {
@@ -141,6 +145,12 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 	indexed := make(map[model.ResourceID]model.Resource, len(plan.Operations))
 	adapters := make(map[model.ResourceID]resource.Adapter, len(plan.Operations))
 	privileged := false
+	var simulationCleanups []func() error
+	defer func() {
+		for index := len(simulationCleanups) - 1; index >= 0; index-- {
+			retErr = errors.Join(retErr, simulationCleanups[index]())
+		}
+	}()
 	seenOperations := make(map[string]struct{}, len(plan.Operations))
 	remaining := make(map[model.ResourceID]int, len(plan.Operations))
 	authorizedRemovals := make(map[model.ResourceID]map[string]struct{})
@@ -207,9 +217,23 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 		if !ok {
 			return summary, fmt.Errorf("reconcile: privileged operation %q has no simulator", operation.ID)
 		}
+		var lifecycle SimulationLifecycle
+		if operation.Kind == model.OperationTransfer {
+			var ok bool
+			lifecycle, ok = adapter.(SimulationLifecycle)
+			if !ok {
+				return summary, fmt.Errorf("reconcile: transfer operation %q has no simulation lifecycle", operation.ID)
+			}
+		}
 		changes, err := simulator.Simulate(ctx, item, operation)
 		if err != nil {
 			return summary, fmt.Errorf("reconcile: simulate %q: %w", operation.ID, err)
+		}
+		if lifecycle != nil {
+			captured := operation
+			simulationCleanups = append(simulationCleanups, func() error {
+				return lifecycle.CancelSimulation(captured)
+			})
 		}
 		if err := provider.ValidateChangeSet(changes, item, operation.Removes); err != nil {
 			return summary, fmt.Errorf("reconcile: unsafe simulation %q: %w", operation.ID, err)

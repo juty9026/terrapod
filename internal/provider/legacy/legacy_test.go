@@ -164,6 +164,61 @@ func TestPreflightRemovalsRunsRealHandlerSimulationWithoutMutation(t *testing.T)
 	}
 }
 
+func TestCancelPreflightRevokesOnlyThisCoordinatorCapability(t *testing.T) {
+	h := &fakeHandler{receipt: Receipt{Present: true, Prefixes: []string{"/legacy/mise"}, Paths: map[string]string{"rg": "/legacy/mise/bin/rg"}}, changes: provider.ChangeSet{Removes: []string{"aqua:BurntSushi/ripgrep"}}}
+	paths := fakePaths{commands: map[string]string{"rg": "/legacy/mise/bin/rg"}}
+	c, err := newCoordinatorForTest(map[Kind]handler{Mise: h}, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := resource(map[string]string{"legacy.mise.package": "aqua:BurntSushi/ripgrep"})
+	inventory, err := c.Detect(context.Background(), model.ProfileMacOSTerminal, item, model.Observation{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	capability, _, err := c.PreflightRemovals(context.Background(), inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := newCoordinatorForTest(map[Kind]handler{Mise: h}, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.CancelPreflight(capability); err == nil {
+		t.Fatal("cross-coordinator cancellation accepted")
+	}
+	if err := c.CancelPreflight(capability); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.CancelPreflight(capability); err != nil {
+		t.Fatalf("idempotent cancellation failed: %v", err)
+	}
+	if err := c.RemovePreflight(context.Background(), capability, inventory); err == nil {
+		t.Fatal("revoked capability replayed")
+	}
+}
+
+func TestCloseRevokesOutstandingPreflights(t *testing.T) {
+	c, err := newCoordinatorForTest(map[Kind]handler{}, fakePaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory := Inventory{resource: model.Resource{ID: "core.alpha"}, issuer: c.issuer, valid: true}
+	capability, _, err := c.PreflightRemovals(context.Background(), inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RemovePreflight(context.Background(), capability, inventory); err == nil {
+		t.Fatal("capability survived coordinator close")
+	}
+	if _, _, err := c.PreflightRemovals(context.Background(), inventory); err == nil {
+		t.Fatal("closed coordinator issued a capability")
+	}
+}
+
 func TestDetectKnownVendorReceipt(t *testing.T) {
 	h := &fakeHandler{receipt: Receipt{Present: true, Paths: map[string]string{"claude": "/Users/test/.local/bin/claude"}}}
 	c, err := newCoordinatorForTest(map[Kind]handler{Vendor: h}, fakePaths{commands: map[string]string{"claude": "/Users/test/.local/bin/claude"}})

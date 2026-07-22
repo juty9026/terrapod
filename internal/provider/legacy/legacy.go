@@ -187,11 +187,24 @@ func (c *Coordinator) Close() error {
 		return nil
 	}
 	c.closed = true
+	clear(c.preflights)
 	var errs []error
 	for _, closeFn := range c.closers {
 		errs = append(errs, closeFn())
 	}
 	return errors.Join(errs...)
+}
+
+// CancelPreflight idempotently revokes a capability issued by this Coordinator.
+// Capabilities from another Coordinator are rejected.
+func (c *Coordinator) CancelPreflight(capability Preflight) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !capability.valid || capability.issuer != c.issuer {
+		return errors.New("legacy: preflight capability belongs to another coordinator")
+	}
+	delete(c.preflights, capability.id)
+	return nil
 }
 
 func ParseDeclarations(resource model.Resource) ([]Declaration, error) {
@@ -403,6 +416,10 @@ func (c *Coordinator) PreflightRemovals(ctx context.Context, inventory Inventory
 	}
 	sort.Strings(combined.Removes)
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return Preflight{}, provider.ChangeSet{}, errors.New("legacy: coordinator is closed")
+	}
 	c.preflights[capability.id] = struct{}{}
 	c.mu.Unlock()
 	return capability, combined, nil
