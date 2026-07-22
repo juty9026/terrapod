@@ -242,6 +242,47 @@ def assert_snapshot(home, state, expected):
 
 real_replace = module.os.replace
 
+home, state = scenario("backup-preparation")
+before = snapshot(home, state)
+real_copy2 = module.shutil.copy2
+snapshot_destinations = []
+def fail_snapshot_preparation(source, destination, *args, **kwargs):
+    destination_path = Path(destination)
+    if destination_path.name == "Jetendard-Regular.ttf":
+        snapshot_destinations.append(destination_path)
+        raise OSError("injected snapshot preparation failure")
+    return real_copy2(source, destination, *args, **kwargs)
+module.shutil.copy2 = fail_snapshot_preparation
+try:
+    module.install(home)
+except OSError as error:
+    assert "injected snapshot preparation failure" in str(error)
+else:
+    raise AssertionError("snapshot preparation failure was not injected")
+finally:
+    module.shutil.copy2 = real_copy2
+assert_snapshot(home, state, before)
+recovery_root = state / "terrapod" / "jetendard" / "recovery"
+assert snapshot_destinations
+assert snapshot_destinations[0].is_relative_to(recovery_root)
+assert not recovery_root.exists() or not list(recovery_root.glob("rollback-*"))
+
+old_state_home = os.environ.get("XDG_STATE_HOME")
+os.environ["XDG_STATE_HOME"] = "relative-state"
+try:
+    assert module.state_root(home) == home.resolve() / ".local" / "state" / "terrapod" / "jetendard"
+    assert module.state_root(home).is_absolute()
+    relative_recovery_root = module.state_root(home) / "recovery"
+    relative_transaction = module.create_transaction(relative_recovery_root)
+    assert relative_transaction.is_absolute()
+    assert relative_transaction.parent == home.resolve() / ".local" / "state" / "terrapod" / "jetendard" / "recovery"
+    module.cleanup_transaction(relative_transaction, relative_recovery_root)
+finally:
+    if old_state_home is None:
+        os.environ.pop("XDG_STATE_HOME", None)
+    else:
+        os.environ["XDG_STATE_HOME"] = old_state_home
+
 home, state = scenario("late-replace")
 before = snapshot(home, state)
 replacement_count = 0
@@ -380,7 +421,7 @@ def fail_forward_and_font_restore(source, destination):
         if replacement_count == 10 and not forward_failed:
             forward_failed = True
             raise OSError("injected forward replacement failure")
-    if forward_failed and "backup" in source_path.parts and destination_path.name == "Jetendard-Regular.ttf" and not restore_failed:
+    if forward_failed and destination_path == home / "Library" / "Fonts" / "Jetendard-Regular.ttf" and not restore_failed:
         restore_failed = True
         raise OSError("injected font restore failure")
     return real_replace(source, destination)
@@ -396,9 +437,14 @@ assert "injected font restore failure" in stderr
 marker = "recovery backups: "
 assert marker in stderr
 recovery = Path(stderr.split(marker, 1)[1].strip())
-assert recovery.parent == state / "terrapod" / "jetendard" / "recovery"
+assert recovery.parent == state.resolve() / "terrapod" / "jetendard" / "recovery"
 assert recovery.stat().st_mode & 0o777 == 0o700
 assert (recovery / "fonts" / "Jetendard-Regular.ttf").read_bytes() == before[0]["Jetendard-Regular.ttf"]
+assert (recovery / "fonts" / "Jetendard-Thin.ttf").read_bytes() == before[0]["Jetendard-Thin.ttf"]
+assert (recovery / "manifest.json").read_bytes() == before[1]
+metadata = json.loads((recovery / "transaction.json").read_text())
+assert metadata["status"] == "rollback_failed"
+assert "Jetendard-Regular.ttf" in metadata["rollback_errors"][0], metadata
 assert (home / "Library" / "Fonts" / "Jetendard-Manual.ttf").read_text() == "manual\n"
 
 home, state = scenario("manifest-restore")
@@ -420,8 +466,7 @@ def fail_cleanup(path, *args, **kwargs):
     return real_unlink(path, *args, **kwargs)
 def fail_manifest_restore(source, destination):
     global restore_failed
-    source_path = Path(source)
-    if forward_failed and "backup" in source_path.parts and Path(destination) == manifest and not restore_failed:
+    if forward_failed and Path(destination) == manifest and not restore_failed:
         restore_failed = True
         raise OSError("injected manifest restore failure")
     return real_replace(source, destination)
@@ -438,8 +483,12 @@ assert "injected forward cleanup failure" in stderr
 assert "injected manifest restore failure" in stderr
 assert marker in stderr
 recovery = Path(stderr.split(marker, 1)[1].strip())
-assert recovery.parent == state / "terrapod" / "jetendard" / "recovery"
+assert recovery.parent == state.resolve() / "terrapod" / "jetendard" / "recovery"
 assert (recovery / "manifest.json").read_bytes() == before[1]
+assert (recovery / "fonts" / "Jetendard-Regular.ttf").read_bytes() == before[0]["Jetendard-Regular.ttf"]
+metadata = json.loads((recovery / "transaction.json").read_text())
+assert metadata["status"] == "rollback_failed"
+assert "manifest.json" in metadata["rollback_errors"][0]
 assert (fonts / "Jetendard-Manual.ttf").read_text() == "manual\n"
 PY
 pass "installer rolls back failures and preserves backups when restore fails"

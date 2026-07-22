@@ -24,7 +24,9 @@ def state_root(home: Path, state_home: str | None = None) -> Path:
     if state_home:
         return Path(state_home) / "terrapod" / "jetendard"
     configured = os.environ.get("XDG_STATE_HOME")
-    return (Path(configured) if configured else home / ".local" / "state") / "terrapod" / "jetendard"
+    configured_path = Path(configured) if configured else None
+    base = configured_path if configured_path and configured_path.is_absolute() else home.resolve() / ".local" / "state"
+    return base / "terrapod" / "jetendard"
 
 
 def manifest_path(home: Path, state_home: str | None = None) -> Path:
@@ -114,44 +116,61 @@ def backup_path(source: Path, destination: Path) -> None:
     shutil.copy2(source, destination, follow_symlinks=False)
 
 
-def preserve_recovery_backups(recovery_root: Path, font_backups: Path, manifest_backup: Path) -> Path:
+def create_transaction(recovery_root: Path) -> Path:
     recovery_root.mkdir(parents=True, exist_ok=True, mode=0o700)
     recovery_root.chmod(0o700)
-    recovery = Path(tempfile.mkdtemp(prefix="rollback-", dir=recovery_root))
-    recovery.chmod(0o700)
-    for backup in sorted(font_backups.glob("*")):
-        backup_path(backup, recovery / "fonts" / backup.name)
-    if manifest_backup.is_file() or manifest_backup.is_symlink():
-        backup_path(manifest_backup, recovery / "manifest.json")
-    return recovery
+    transaction = Path(tempfile.mkdtemp(prefix="rollback-", dir=recovery_root))
+    transaction.chmod(0o700)
+    return transaction
 
 
-def rollback_install(fonts_dir: Path, manifest: Path, touched: list[str], font_backups: Path, manifest_backup: Path, had_manifest: bool, recovery_root: Path) -> tuple[list[OSError], Path | None]:
+def cleanup_transaction(transaction: Path, recovery_root: Path) -> None:
+    shutil.rmtree(transaction)
+    try:
+        recovery_root.rmdir()
+    except OSError:
+        pass
+
+
+def restore_path(backup: Path, destination: Path) -> None:
+    fd, temporary = tempfile.mkstemp(prefix=f".{destination.name}.rollback.", dir=destination.parent)
+    os.close(fd)
+    os.unlink(temporary)
+    try:
+        backup_path(backup, Path(temporary))
+        os.replace(temporary, destination)
+    finally:
+        if os.path.lexists(temporary):
+            os.unlink(temporary)
+
+
+def rollback_install(fonts_dir: Path, manifest: Path, touched: list[str], transaction: Path, had_manifest: bool) -> list[str]:
     errors = []
+    font_backups = transaction / "fonts"
+    manifest_backup = transaction / "manifest.json"
     for basename in touched:
         candidate = fonts_dir / basename
         try:
             if candidate.is_file() or candidate.is_symlink():
                 candidate.unlink()
         except OSError as error:
-            errors.append(error)
+            errors.append(f"{candidate}: {error}")
     for basename in touched:
         backup = font_backups / basename
         if backup.is_file() or backup.is_symlink():
             try:
-                os.replace(backup, fonts_dir / basename)
+                restore_path(backup, fonts_dir / basename)
             except OSError as error:
-                errors.append(error)
+                errors.append(f"{fonts_dir / basename}: {error}")
     try:
         if manifest.is_file() or manifest.is_symlink():
             manifest.unlink()
         if had_manifest:
             manifest.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(manifest_backup, manifest)
+            restore_path(manifest_backup, manifest)
     except OSError as error:
-        errors.append(error)
-    recovery = preserve_recovery_backups(recovery_root, font_backups, manifest_backup) if errors else None
-    return errors, recovery
+        errors.append(f"{manifest}: {error}")
+    return errors
 
 
 def install(home: Path) -> None:
@@ -162,7 +181,6 @@ def install(home: Path) -> None:
     manifest = manifest_path(home)
     old = read_manifest(manifest)
     with tempfile.TemporaryDirectory(prefix="terrapod-jetendard-") as temporary:
-        temporary_path = Path(temporary)
         archive_path = Path(temporary) / ASSET_NAME
         download(asset_url, archive_path)
         actual_digest = sha256(archive_path)
@@ -180,16 +198,27 @@ def install(home: Path) -> None:
         new_files = sorted(entries)
         old_files = list(old.get("files", []))
         touched = sorted(set(old_files) | set(new_files))
-        backup_root = temporary_path / "backup"
-        font_backups = backup_root / "fonts"
-        manifest_backup = backup_root / "manifest.json"
+        recovery_root = state_root(home) / "recovery"
+        transaction = create_transaction(recovery_root)
+        font_backups = transaction / "fonts"
+        manifest_backup = transaction / "manifest.json"
         had_manifest = manifest.is_file() or manifest.is_symlink()
-        for basename in touched:
-            candidate = fonts_dir / basename
-            if candidate.is_file() or candidate.is_symlink():
-                backup_path(candidate, font_backups / basename)
-        if had_manifest:
-            backup_path(manifest, manifest_backup)
+        try:
+            backed_up_files = []
+            for basename in touched:
+                candidate = fonts_dir / basename
+                if candidate.is_file() or candidate.is_symlink():
+                    backup_path(candidate, font_backups / basename)
+                    backed_up_files.append(basename)
+            if had_manifest:
+                backup_path(manifest, manifest_backup)
+            atomic_json(
+                transaction / "transaction.json",
+                {"status": "prepared", "files": backed_up_files, "manifest": had_manifest, "rollback_errors": []},
+            )
+        except BaseException:
+            cleanup_transaction(transaction, recovery_root)
+            raise
         try:
             for basename in new_files:
                 os.replace(staged / basename, fonts_dir / basename)
@@ -200,21 +229,27 @@ def install(home: Path) -> None:
                     if candidate.is_file() or candidate.is_symlink():
                         candidate.unlink()
         except BaseException as forward_error:
-            rollback_errors, recovery = rollback_install(
-                fonts_dir,
-                manifest,
-                touched,
-                font_backups,
-                manifest_backup,
-                had_manifest,
-                state_root(home) / "recovery",
-            )
+            rollback_errors = rollback_install(fonts_dir, manifest, touched, transaction, had_manifest)
             if rollback_errors:
-                rollback_detail = "; ".join(str(error) for error in rollback_errors)
+                try:
+                    atomic_json(
+                        transaction / "transaction.json",
+                        {
+                            "status": "rollback_failed",
+                            "files": backed_up_files,
+                            "manifest": had_manifest,
+                            "rollback_errors": rollback_errors,
+                        },
+                    )
+                except Exception as metadata_error:
+                    rollback_errors.append(f"{transaction / 'transaction.json'}: {metadata_error}")
+                rollback_detail = "; ".join(rollback_errors)
                 raise RuntimeError(
-                    f"install failed: {forward_error}; rollback failed: {rollback_detail}; recovery backups: {recovery}"
+                    f"install failed: {forward_error}; rollback failed: {rollback_detail}; recovery backups: {transaction.resolve()}"
                 ) from forward_error
+            cleanup_transaction(transaction, recovery_root)
             raise
+        cleanup_transaction(transaction, recovery_root)
     print(f"Installed Jetendard {tag} ({len(new_files)} TTF files).")
 
 
