@@ -3,6 +3,7 @@ set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 helper="$repo_root/dot_local/lib/terrapod/executable_jetendard-settings"
+catalog="$repo_root/catalog/v1/resources.json"
 tmp_dir="$(mktemp -d)"
 
 cleanup() {
@@ -18,6 +19,27 @@ fail() {
 pass() {
   printf '%s\n' "ok - $1"
 }
+
+python3 - "$catalog" <<'PY'
+import json
+import pathlib
+import sys
+
+resources = {item["id"]: item for item in json.loads(pathlib.Path(sys.argv[1]).read_text())["resources"]}
+zed = resources["integration.jetendard-zed"]
+orca = resources["integration.jetendard-orca"]
+karabiner = resources["integration.karabiner-opener"]
+assert zed["provider"] == "json-fields" and zed["metadata"]["integration.handler"] == "jetendard-zed"
+assert json.loads(zed["metadata"]["integration.fields"]) == {
+    "/buffer_font_family": "Jetendard",
+    "/terminal/font_family": "Jetendard",
+}
+assert orca["metadata"]["integration.handler"] == "jetendard-orca"
+assert karabiner["provider"] == "karabiner" and set(karabiner["metadata"]) == {"enabledByConfig", "integration.handler"}
+for item in (zed, orca, karabiner):
+    assert not any("script" in key.lower() or "command" in key.lower() for key in item["metadata"])
+PY
+pass "signed catalog declares only compiled Jetendard and Karabiner integration handlers"
 
 home_dir="$tmp_dir/home"
 zed_dir="$home_dir/.config/zed"

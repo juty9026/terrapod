@@ -51,6 +51,40 @@ func TestEnginePersistsArchiveManifestPaths(t *testing.T) {
 	}
 }
 
+func TestEnginePreservesIntegrationPriorValues(t *testing.T) {
+	store, err := state.Open(filepath.Join(t.TempDir(), "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := model.Resource{ID: "integration.test", Type: model.ResourceIntegration, Provider: "json-fields", Package: "settings"}
+	want := json.RawMessage(`{"exists":true,"value":"private"}`)
+	if err := store.PutOwnership(model.Ownership{ResourceID: item.ID, Provider: item.Provider, Package: item.Package, Paths: map[string]string{}, PriorValues: map[string]json.RawMessage{"settings.json#/token": want}}); err != nil {
+		t.Fatal(err)
+	}
+	engine := Engine{State: store, CatalogDigest: "signed"}
+	if err := engine.own(item, model.Observation{}); err != nil {
+		t.Fatal(err)
+	}
+	owned := mustSnapshot(t, store).Ownership[item.ID]
+	if !jsonEqual(owned.PriorValues["settings.json#/token"], want) || owned.CatalogDigest != "signed" {
+		t.Fatalf("ownership = %#v", owned)
+	}
+}
+
+func jsonEqual(left, right []byte) bool {
+	var a, b any
+	return json.Unmarshal(left, &a) == nil && json.Unmarshal(right, &b) == nil && reflect.DeepEqual(a, b)
+}
+
+func mustSnapshot(t *testing.T, store *state.Store) model.Snapshot {
+	t.Helper()
+	snapshot, err := store.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
+
 func (f *fixtureAdapter) event(value string) {
 	f.events = append(f.events, value)
 	if f.shared != nil {

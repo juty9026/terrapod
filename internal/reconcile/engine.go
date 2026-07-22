@@ -845,7 +845,21 @@ func (e *Engine) own(item model.Resource, observed model.Observation) error {
 			}
 		}
 	}
-	return e.State.PutOwnership(model.Ownership{ResourceID: item.ID, CatalogDigest: e.CatalogDigest, Provider: item.Provider, Package: item.Package, Paths: paths, PriorValues: make(map[string]json.RawMessage)})
+	priorValues := make(map[string]json.RawMessage)
+	if item.Type == model.ResourceIntegration {
+		snapshot, err := e.State.Snapshot()
+		if err != nil {
+			return err
+		}
+		current := snapshot.Ownership[item.ID]
+		if current.ResourceID != "" && (current.ResourceID != item.ID || current.Provider != item.Provider || current.Package != item.Package) {
+			return fmt.Errorf("reconcile: integration ownership for %q has mismatched identity", item.ID)
+		}
+		for key, value := range current.PriorValues {
+			priorValues[key] = append(json.RawMessage(nil), value...)
+		}
+	}
+	return e.State.PutOwnership(model.Ownership{ResourceID: item.ID, CatalogDigest: e.CatalogDigest, Provider: item.Provider, Package: item.Package, Paths: paths, PriorValues: priorValues})
 }
 
 func (e *Engine) record(ctx context.Context, operation model.Operation, success bool, detail string) error {

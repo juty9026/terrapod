@@ -187,6 +187,9 @@ func validate(catalog model.Catalog) error {
 		if err := validateLegacyMetadata(resource); err != nil {
 			return err
 		}
+		if err := validateIntegrationMetadata(resource); err != nil {
+			return err
+		}
 
 		profiles := append([]model.Profile(nil), resource.Profiles...)
 		sort.Slice(profiles, func(i, j int) bool { return profiles[i] < profiles[j] })
@@ -224,6 +227,72 @@ func validate(catalog model.Catalog) error {
 			parts[i] = string(cycle[i])
 		}
 		return fmt.Errorf("dependency cycle: %s", strings.Join(parts, " -> "))
+	}
+	return nil
+}
+
+func validateIntegrationMetadata(resource model.Resource) error {
+	if resource.Type != model.ResourceIntegration {
+		return nil
+	}
+	handler := resource.Metadata["integration.handler"]
+	allowed := false
+	switch resource.Provider {
+	case "json-fields":
+		allowed = handler == "fields" || handler == "jetendard-zed" || handler == "jetendard-orca"
+	case "plist-fields":
+		allowed = handler == "fields"
+	case "karabiner":
+		allowed = handler == "karabiner-opener"
+	}
+	if !allowed {
+		return fmt.Errorf("resource %q has unsupported compiled integration handler %q", resource.ID, handler)
+	}
+	allowedKeys := map[string]struct{}{
+		"integration.handler": {}, "integration.path": {}, "integration.pathGlob": {},
+		"integration.format": {}, "integration.fields": {}, "enabledByConfig": {},
+	}
+	for key := range resource.Metadata {
+		if _, ok := allowedKeys[key]; !ok {
+			return fmt.Errorf("resource %q has unsupported integration metadata %q", resource.ID, key)
+		}
+	}
+	if resource.Provider == "karabiner" {
+		for _, key := range []string{"integration.path", "integration.pathGlob", "integration.format", "integration.fields"} {
+			if resource.Metadata[key] != "" {
+				return fmt.Errorf("resource %q Karabiner action cannot own fields", resource.ID)
+			}
+		}
+		return nil
+	}
+	path, pathGlob := resource.Metadata["integration.path"], resource.Metadata["integration.pathGlob"]
+	if (path == "") == (pathGlob == "") {
+		return fmt.Errorf("resource %q must declare exactly one integration path or pathGlob", resource.ID)
+	}
+	for _, value := range []string{path, pathGlob} {
+		if value == "" {
+			continue
+		}
+		clean := pathpkg.Clean(value)
+		if clean != value || strings.HasPrefix(value, "/") || value == ".." || strings.HasPrefix(value, "../") || strings.Contains(value, "\\") {
+			return fmt.Errorf("resource %q has unsafe integration path %q", resource.ID, value)
+		}
+	}
+	format := resource.Metadata["integration.format"]
+	if resource.Provider == "json-fields" && format != "json" && format != "jsonc" {
+		return fmt.Errorf("resource %q has invalid JSON integration format %q", resource.ID, format)
+	}
+	if resource.Provider == "plist-fields" && format != "plist" {
+		return fmt.Errorf("resource %q has invalid plist integration format %q", resource.ID, format)
+	}
+	var fields map[string]json.RawMessage
+	if err := decodeStrict([]byte(resource.Metadata["integration.fields"]), &fields); err != nil || len(fields) == 0 {
+		return fmt.Errorf("resource %q has malformed integration fields", resource.ID)
+	}
+	for pointer := range fields {
+		if !strings.HasPrefix(pointer, "/") || pointer == "/" || strings.Contains(pointer, "//") {
+			return fmt.Errorf("resource %q has invalid integration field path %q", resource.ID, pointer)
+		}
 	}
 	return nil
 }

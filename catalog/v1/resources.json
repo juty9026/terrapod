@@ -520,6 +520,37 @@
       }
     },
     {
+      "id": "integration.jetendard-zed",
+      "type": "integration", "profiles": ["macos-terminal"], "dependsOn": ["font.jetendard"],
+      "versionPolicy": "tracked", "provider": "json-fields", "package": "jetendard-zed", "commands": [],
+      "metadata": {
+        "integration.handler": "jetendard-zed",
+        "integration.path": ".config/zed/settings.json",
+        "integration.format": "jsonc",
+        "integration.fields": "{\"/buffer_font_family\":\"Jetendard\",\"/terminal/font_family\":\"Jetendard\"}"
+      }
+    },
+    {
+      "id": "integration.jetendard-orca",
+      "type": "integration", "profiles": ["macos-terminal"], "dependsOn": ["font.jetendard"],
+      "versionPolicy": "tracked", "provider": "json-fields", "package": "jetendard-orca", "commands": [],
+      "metadata": {
+        "integration.handler": "jetendard-orca",
+        "integration.pathGlob": "Library/Application Support/orca/profiles/*/orca-data.json",
+        "integration.format": "json",
+        "integration.fields": "{\"/settings/terminalFontFamily\":\"Jetendard\"}"
+      }
+    },
+    {
+      "id": "integration.karabiner-opener",
+      "type": "integration", "profiles": ["macos-terminal"], "dependsOn": ["optional-desktop.karabiner-elements"],
+      "versionPolicy": "tracked", "provider": "karabiner", "package": "karabiner-opener", "commands": [],
+      "metadata": {
+        "enabledByConfig": "enableMacosAppGroupAutomation",
+        "integration.handler": "karabiner-opener"
+      }
+    },
+    {
       "id": "shell.oh-my-zsh",
       "type": "git-checkout", "profiles": ["macos-terminal", "vps-shell"], "dependsOn": ["core.git"],
       "versionPolicy": "pinned", "provider": "git", "package": "oh-my-zsh", "commands": [],

