@@ -154,6 +154,35 @@ func TestResolveRejectsRootAndInvalidStableIDBeforePreparing(t *testing.T) {
 	}
 }
 
+func TestResolveRevalidatesContextAndLockImmediatelyBeforeMutation(t *testing.T) {
+	t.Run("context canceled", func(t *testing.T) {
+		backend := blockedBackend()
+		resolver := testResolver(t, backend)
+		ctx, cancel := context.WithCancel(context.Background())
+		backend.onPrivilege = cancel
+		_, err := resolver.Resolve(ctx, "core.alpha", strings.NewReader("yes\n"), &bytes.Buffer{})
+		if !errors.Is(err, context.Canceled) || backend.removeCalls != 0 {
+			t.Fatalf("error=%v remove=%d", err, backend.removeCalls)
+		}
+	})
+
+	t.Run("owner replaced", func(t *testing.T) {
+		backend := blockedBackend()
+		resolver := testResolver(t, backend)
+		backend.onPrivilege = func() {
+			ownerPath := filepath.Join(resolver.StateDir, "lock", "owner.json")
+			contents := []byte(`{"pid":1,"command":"tpod resolve core.alpha","startedAt":"2026-07-23T00:00:00Z","nonce":"abcdefabcdefabcdefabcdefabcdefab"}`)
+			if err := os.WriteFile(ownerPath, contents, 0o600); err != nil {
+				t.Error(err)
+			}
+		}
+		_, err := resolver.Resolve(context.Background(), "core.alpha", strings.NewReader("yes\n"), &bytes.Buffer{})
+		if err == nil || backend.removeCalls != 0 {
+			t.Fatalf("error=%v remove=%d", err, backend.removeCalls)
+		}
+	})
+}
+
 type fakeBackend struct {
 	details        attemptDetails
 	prepareErr     error
@@ -165,6 +194,7 @@ type fakeBackend struct {
 	cancelCalls    int
 	events         []string
 	onPrepare      func()
+	onPrivilege    func()
 }
 
 func blockedBackend() *fakeBackend {
@@ -185,9 +215,12 @@ func (f *fakeBackend) Prepare(_ context.Context, _ model.ResourceID, _ *state.Lo
 func (f *fakeBackend) Describe(Attempt) (attemptDetails, error) { return f.details, nil }
 func (f *fakeBackend) AcquirePrivilege(context.Context, Attempt) error {
 	f.events = append(f.events, "privilege")
+	if f.onPrivilege != nil {
+		f.onPrivilege()
+	}
 	return nil
 }
-func (f *fakeBackend) RemoveBlockers(_ context.Context, _ Attempt, blockers []string) error {
+func (f *fakeBackend) RemoveBlockers(_ context.Context, _ Attempt, blockers []string, _ *state.Lock) error {
 	f.removeCalls++
 	f.events = append(f.events, "remove")
 	if !reflect.DeepEqual(blockers, []string{"dependent-a", "dependent-z"}) {

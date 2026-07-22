@@ -25,8 +25,21 @@ type PackageBackend struct {
 	apt       *apt.Adapter
 	privilege provider.Privilege
 	mu        sync.Mutex
-	attempts  map[[16]byte]*preparedAttempt
+	attempts  map[[16]byte]preparedAttempt
 }
+
+type attemptPhase uint8
+
+const (
+	phasePrepared attemptPhase = iota + 1
+	phasePrivileged
+	phaseRemoving
+	phaseRemoved
+	phaseVerifying
+	phaseVerified
+	phaseReconciling
+	phaseConsumed
+)
 
 type preparedAttempt struct {
 	details   attemptDetails
@@ -34,15 +47,14 @@ type preparedAttempt struct {
 	blockers  []string
 	privilege *oncePrivilege
 	engine    *reconcile.Engine
-	removed   bool
-	verified  bool
+	phase     attemptPhase
 }
 
 func NewPackageBackend(rebuild RebuildFunc, engine *reconcile.Engine, aptAdapter *apt.Adapter, privilege provider.Privilege) (*PackageBackend, error) {
 	if rebuild == nil || engine == nil || aptAdapter == nil || isNilInterface(privilege) {
 		return nil, errors.New("resolve: rebuild, engine, APT adapter, and privilege are required")
 	}
-	return &PackageBackend{rebuild: rebuild, engine: engine, apt: aptAdapter, privilege: privilege, attempts: make(map[[16]byte]*preparedAttempt)}, nil
+	return &PackageBackend{rebuild: rebuild, engine: engine, apt: aptAdapter, privilege: privilege, attempts: make(map[[16]byte]preparedAttempt)}, nil
 }
 
 func (b *PackageBackend) Prepare(ctx context.Context, id model.ResourceID, lock *state.Lock) (Attempt, error) {
@@ -59,6 +71,9 @@ func (b *PackageBackend) Prepare(ctx context.Context, id model.ResourceID, lock 
 	}
 	if _, ok := b.engine.Registry.Lookup(item.Type, item.Provider); !ok {
 		return Attempt{}, fmt.Errorf("resolve: no signed adapter for resource %q", id)
+	}
+	if !operation.RequiresPrivilege {
+		return Attempt{}, errors.New("resolve: APT conflict operation must require privilege")
 	}
 	input = scopeInput(input, id, operation)
 	prune := model.Operation{ID: "resolve-" + operation.ID, ResourceID: item.ID, Kind: model.OperationPrune, Provider: "apt", Package: root, RequiresPrivilege: true, Removes: []string{root}}
@@ -91,7 +106,7 @@ func (b *PackageBackend) Prepare(ctx context.Context, id model.ResourceID, lock 
 		_ = b.apt.CancelResolution(aptCapability)
 		return Attempt{}, errors.New("resolve: duplicate package attempt")
 	}
-	b.attempts[token] = &preparedAttempt{details: details, apt: aptCapability, blockers: blockers, privilege: once, engine: &engineCopy}
+	b.attempts[token] = preparedAttempt{details: details, apt: aptCapability, blockers: blockers, privilege: once, engine: &engineCopy, phase: phasePrepared}
 	b.mu.Unlock()
 	return attempt, nil
 }
@@ -105,20 +120,51 @@ func (b *PackageBackend) Describe(attempt Attempt) (attemptDetails, error) {
 }
 
 func (b *PackageBackend) AcquirePrivilege(ctx context.Context, attempt Attempt) error {
-	prepared, err := b.lookup(attempt)
-	if err != nil {
-		return err
+	if attempt.issuer != b {
+		return errors.New("resolve: invalid package attempt")
+	}
+	b.mu.Lock()
+	prepared, ok := b.attempts[attempt.token]
+	if !ok {
+		b.mu.Unlock()
+		return errors.New("resolve: package attempt is consumed or revoked")
+	}
+	if prepared.phase == phasePrivileged {
+		b.mu.Unlock()
+		return nil
+	}
+	if prepared.phase != phasePrepared {
+		b.mu.Unlock()
+		return fmt.Errorf("resolve: privilege acquisition is invalid in phase %d", prepared.phase)
 	}
 	if err := prepared.privilege.Acquire(ctx); err != nil {
-		b.revoke(attempt)
+		delete(b.attempts, attempt.token)
+		prepared.phase = phaseConsumed
+		b.mu.Unlock()
+		_ = b.apt.CancelResolution(prepared.apt)
 		return err
 	}
+	prepared.phase = phasePrivileged
+	b.attempts[attempt.token] = prepared
+	b.mu.Unlock()
 	return nil
 }
 
-func (b *PackageBackend) RemoveBlockers(ctx context.Context, attempt Attempt, blockers []string) error {
-	prepared, err := b.lookup(attempt)
+func (b *PackageBackend) RemoveBlockers(ctx context.Context, attempt Attempt, blockers []string, lock *state.Lock) error {
+	if err := ctx.Err(); err != nil {
+		b.revoke(attempt)
+		return err
+	}
+	if err := lock.ValidateHeld(b.engine.LockDir); err != nil {
+		b.revoke(attempt)
+		return fmt.Errorf("resolve: validate blocker-removal lock: %w", err)
+	}
+	prepared, err := b.transition(attempt, phasePrivileged, phaseRemoving)
 	if err != nil {
+		if current, lookupErr := b.lookup(attempt); lookupErr == nil && current.phase == phasePrepared {
+			b.revoke(attempt)
+			return errors.New("resolve: privilege must be acquired before blocker removal")
+		}
 		return err
 	}
 	if !exactSorted(blockers, prepared.blockers) {
@@ -129,20 +175,16 @@ func (b *PackageBackend) RemoveBlockers(ctx context.Context, attempt Attempt, bl
 		b.revoke(attempt)
 		return err
 	}
-	b.mu.Lock()
-	if current := b.attempts[attempt.token]; current == prepared {
-		prepared.removed = true
-	}
-	b.mu.Unlock()
-	return nil
+	_, err = b.transition(attempt, phaseRemoving, phaseRemoved)
+	return err
 }
 
 func (b *PackageBackend) VerifyBlockersAbsent(ctx context.Context, attempt Attempt, blockers []string) error {
-	prepared, err := b.lookup(attempt)
+	prepared, err := b.transition(attempt, phaseRemoved, phaseVerifying)
 	if err != nil {
 		return err
 	}
-	if !prepared.removed || !exactSorted(blockers, prepared.blockers) {
+	if !exactSorted(blockers, prepared.blockers) {
 		b.revoke(attempt)
 		return errors.New("resolve: package blockers were not removed by this attempt")
 	}
@@ -150,29 +192,21 @@ func (b *PackageBackend) VerifyBlockersAbsent(ctx context.Context, attempt Attem
 		b.revoke(attempt)
 		return err
 	}
-	b.mu.Lock()
-	if current := b.attempts[attempt.token]; current == prepared {
-		prepared.verified = true
-	}
-	b.mu.Unlock()
-	return nil
+	_, err = b.transition(attempt, phaseVerifying, phaseVerified)
+	return err
 }
 
 func (b *PackageBackend) Reconcile(ctx context.Context, attempt Attempt, lock *state.Lock) (reconcile.Summary, error) {
-	prepared, err := b.lookup(attempt)
+	prepared, err := b.transition(attempt, phaseVerified, phaseReconciling)
 	if err != nil {
 		return reconcile.Summary{}, err
-	}
-	if !prepared.verified {
-		b.revoke(attempt)
-		return reconcile.Summary{}, errors.New("resolve: blockers are not verified absent")
 	}
 	if err := lock.ValidateHeld(b.engine.LockDir); err != nil {
 		b.revoke(attempt)
 		return reconcile.Summary{}, err
 	}
 	summary, applyErr := prepared.engine.ApplyInputHeld(ctx, prepared.details.input, lock)
-	b.revoke(attempt)
+	b.consume(attempt, phaseReconciling)
 	return summary, applyErr
 }
 
@@ -230,17 +264,45 @@ func (b *PackageBackend) selectAPTConflict(id model.ResourceID, input reconcile.
 	return item, operation, root, nil
 }
 
-func (b *PackageBackend) lookup(attempt Attempt) (*preparedAttempt, error) {
+func (b *PackageBackend) lookup(attempt Attempt) (preparedAttempt, error) {
 	if attempt.issuer != b {
-		return nil, errors.New("resolve: invalid package attempt")
+		return preparedAttempt{}, errors.New("resolve: invalid package attempt")
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	prepared := b.attempts[attempt.token]
-	if prepared == nil {
-		return nil, errors.New("resolve: package attempt is consumed or revoked")
+	if prepared.phase == 0 {
+		return preparedAttempt{}, errors.New("resolve: package attempt is consumed or revoked")
 	}
 	return prepared, nil
+}
+
+func (b *PackageBackend) transition(attempt Attempt, from, to attemptPhase) (preparedAttempt, error) {
+	if attempt.issuer != b {
+		return preparedAttempt{}, errors.New("resolve: invalid package attempt")
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	prepared, ok := b.attempts[attempt.token]
+	if !ok {
+		return preparedAttempt{}, errors.New("resolve: package attempt is consumed or revoked")
+	}
+	if prepared.phase != from {
+		return preparedAttempt{}, fmt.Errorf("resolve: package attempt phase is %d, want %d", prepared.phase, from)
+	}
+	prepared.phase = to
+	b.attempts[attempt.token] = prepared
+	return prepared, nil
+}
+
+func (b *PackageBackend) consume(attempt Attempt, from attemptPhase) {
+	b.mu.Lock()
+	prepared, ok := b.attempts[attempt.token]
+	if ok && prepared.phase == from {
+		prepared.phase = phaseConsumed
+		delete(b.attempts, attempt.token)
+	}
+	b.mu.Unlock()
 }
 
 func (b *PackageBackend) revoke(attempt Attempt) {
@@ -248,10 +310,13 @@ func (b *PackageBackend) revoke(attempt Attempt) {
 		return
 	}
 	b.mu.Lock()
-	prepared := b.attempts[attempt.token]
+	prepared, ok := b.attempts[attempt.token]
+	if ok {
+		prepared.phase = phaseConsumed
+	}
 	delete(b.attempts, attempt.token)
 	b.mu.Unlock()
-	if prepared != nil {
+	if ok {
 		_ = b.apt.CancelResolution(prepared.apt)
 	}
 }

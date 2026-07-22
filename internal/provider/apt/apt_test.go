@@ -368,6 +368,36 @@ func TestResolutionCapabilityRejectsBlockerOnlyPlanThatAlsoRemovesLegacyRoot(t *
 	}
 }
 
+func TestResolutionCapabilityHonorsCancellationImmediatelyBeforeMutation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	mutated := false
+	a := newAdapter(t, runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+		if request.Path == DpkgQueryPath {
+			pkg := request.Args[len(request.Args)-1]
+			return execx.Result{Stdout: []byte(pkg + "\tii \t1\tno\n")}, nil
+		}
+		if reflect.DeepEqual(request.Args, []string{"-s", "remove", "--", "dependent-a"}) {
+			cancel()
+			return execx.Result{Stdout: []byte("Remv dependent-a [1]\n0 upgraded, 0 newly installed, 1 to remove and 0 not upgraded.\n")}, nil
+		}
+		if request.Args[0] != "-s" {
+			mutated = true
+			return execx.Result{}, nil
+		}
+		return execx.Result{Stdout: []byte("Remv mise [1]\nRemv dependent-a [1]\n0 upgraded, 0 newly installed, 2 to remove and 0 not upgraded.\n")}, nil
+	}))
+	capability, _, err := a.PrepareResolution(ctx, aptOperation(model.OperationPrune, "mise"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ExecuteResolution(ctx, capability, []string{"dependent-a"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("ExecuteResolution error = %v", err)
+	}
+	if mutated {
+		t.Fatal("canceled resolution mutated")
+	}
+}
+
 func TestRefreshMetadataCachesConcurrentSuccessAndError(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		t.Run(map[bool]string{false: "success", true: "error"}[fail], func(t *testing.T) {

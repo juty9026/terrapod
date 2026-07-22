@@ -38,7 +38,7 @@ type Backend interface {
 	Prepare(context.Context, model.ResourceID, *state.Lock) (Attempt, error)
 	Describe(Attempt) (attemptDetails, error)
 	AcquirePrivilege(context.Context, Attempt) error
-	RemoveBlockers(context.Context, Attempt, []string) error
+	RemoveBlockers(context.Context, Attempt, []string, *state.Lock) error
 	VerifyBlockersAbsent(context.Context, Attempt, []string) error
 	Reconcile(context.Context, Attempt, *state.Lock) (reconcile.Summary, error)
 	Cancel(Attempt) error
@@ -132,7 +132,13 @@ func (r *Resolver) Resolve(ctx context.Context, id model.ResourceID, input io.Re
 			return result, fmt.Errorf("resolve: acquire privilege: %w", err)
 		}
 	}
-	if err := r.Backend.RemoveBlockers(ctx, attempt, blockers); err != nil {
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
+	if err := lock.ValidateHeld(r.StateDir); err != nil {
+		return result, fmt.Errorf("resolve: validate mutation lock: %w", err)
+	}
+	if err := r.Backend.RemoveBlockers(ctx, attempt, blockers, lock); err != nil {
 		return result, fmt.Errorf("resolve: remove blockers: %w", err)
 	}
 	if err := r.Backend.VerifyBlockersAbsent(ctx, attempt, blockers); err != nil {

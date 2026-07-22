@@ -214,6 +214,9 @@ func (a *Adapter) ExecuteResolution(ctx context.Context, capability *Resolution,
 	if len(blockerChanges.Installs) != 0 || len(blockerChanges.Upgrades) != 0 || !exactStrings(blockerChanges.Removes, state.blockers) {
 		return errors.New("apt: blocker-only simulation proposed additional mutations")
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	args := []string{"remove", "-y", "--"}
 	args = append(args, state.blockers...)
 	if _, err := a.runner.Run(ctx, aptGetRequest(args, true)); err != nil {

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/juty9026/terrapod/internal/execx"
@@ -94,8 +95,109 @@ func TestPackageBackendAttemptCancelAndReplayAreRejected(t *testing.T) {
 	if _, err := backend.Describe(attempt); err == nil {
 		t.Fatal("canceled backend attempt described")
 	}
-	if err := backend.RemoveBlockers(context.Background(), attempt, []string{"dependent-a"}); err == nil {
+	if err := backend.RemoveBlockers(context.Background(), attempt, []string{"dependent-a"}, lock); err == nil {
 		t.Fatal("canceled backend attempt executed")
+	}
+}
+
+func TestPackageBackendRequiresSignedPrivilegeAndAcquisitionBeforeRemoval(t *testing.T) {
+	fixture := newPackageIntegration(t, false)
+	backend := fixture.resolver.Backend.(*PackageBackend)
+	lock, err := state.Acquire(fixture.resolver.StateDir, "tpod resolve core.mise")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Release()
+	attempt, err := backend.Prepare(context.Background(), fixture.item.ID, lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := backend.RemoveBlockers(context.Background(), attempt, []string{"dependent-a"}, lock); err == nil {
+		t.Fatal("removal bypassed privilege acquisition")
+	}
+
+	fixture = newPackageIntegration(t, false)
+	backend = fixture.resolver.Backend.(*PackageBackend)
+	original := backend.rebuild
+	backend.rebuild = func(ctx context.Context) (reconcile.ApplyInput, error) {
+		input, err := original(ctx)
+		input.Plan.Operations[0].RequiresPrivilege = false
+		return input, err
+	}
+	lock, err = state.Acquire(fixture.resolver.StateDir, "tpod resolve core.mise")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Release()
+	if _, err := backend.Prepare(context.Background(), fixture.item.ID, lock); err == nil || !strings.Contains(err.Error(), "privilege") {
+		t.Fatalf("unprivileged signed operation error = %v", err)
+	}
+}
+
+func TestPackageBackendConcurrentPhasesHaveExactlyOneWinner(t *testing.T) {
+	t.Run("remove", func(t *testing.T) {
+		fixture, backend, lock, attempt := preparedIntegration(t)
+		if err := backend.AcquirePrivilege(context.Background(), attempt); err != nil {
+			t.Fatal(err)
+		}
+		errs := concurrently(2, func() error {
+			return backend.RemoveBlockers(context.Background(), attempt, []string{"dependent-a"}, lock)
+		})
+		if successCount(errs) != 1 || eventCount(fixture.events, "apt-remove-blockers") != 1 {
+			t.Fatalf("remove errors=%v events=%v", errs, fixture.events)
+		}
+	})
+
+	t.Run("verify", func(t *testing.T) {
+		_, backend, lock, attempt := preparedIntegration(t)
+		if err := backend.AcquirePrivilege(context.Background(), attempt); err != nil {
+			t.Fatal(err)
+		}
+		if err := backend.RemoveBlockers(context.Background(), attempt, []string{"dependent-a"}, lock); err != nil {
+			t.Fatal(err)
+		}
+		errs := concurrently(2, func() error {
+			return backend.VerifyBlockersAbsent(context.Background(), attempt, []string{"dependent-a"})
+		})
+		if successCount(errs) != 1 {
+			t.Fatalf("verify errors=%v", errs)
+		}
+	})
+
+	t.Run("reconcile", func(t *testing.T) {
+		fixture, backend, lock, attempt := preparedIntegration(t)
+		if err := backend.AcquirePrivilege(context.Background(), attempt); err != nil {
+			t.Fatal(err)
+		}
+		if err := backend.RemoveBlockers(context.Background(), attempt, []string{"dependent-a"}, lock); err != nil {
+			t.Fatal(err)
+		}
+		if err := backend.VerifyBlockersAbsent(context.Background(), attempt, []string{"dependent-a"}); err != nil {
+			t.Fatal(err)
+		}
+		errs := concurrently(2, func() error {
+			_, err := backend.Reconcile(context.Background(), attempt, lock)
+			return err
+		})
+		if successCount(errs) != 1 || eventCount(fixture.events, "install-desired") != 1 {
+			t.Fatalf("reconcile errors=%v events=%v", errs, fixture.events)
+		}
+	})
+}
+
+func TestPackageBackendRejectsReleasedLockAtRemovalBoundary(t *testing.T) {
+	fixture, backend, lock, attempt := preparedIntegration(t)
+	if err := backend.AcquirePrivilege(context.Background(), attempt); err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if err := backend.RemoveBlockers(context.Background(), attempt, []string{"dependent-a"}, lock); err == nil {
+		t.Fatal("released lock allowed mutation")
+	}
+	if !fixture.aptInstalled["dependent-a"] || eventCount(fixture.events, "apt-remove-blockers") != 0 {
+		t.Fatalf("released-lock mutation: apt=%v events=%v", fixture.aptInstalled, fixture.events)
 	}
 }
 
@@ -137,6 +239,59 @@ func newPackageIntegration(t *testing.T, essential bool) *packageIntegration {
 	}
 	fixture.resolver = &Resolver{StateDir: dir, Backend: backend, EffectiveUID: func() int { return 501 }}
 	return fixture
+}
+
+func preparedIntegration(t *testing.T) (*packageIntegration, *PackageBackend, *state.Lock, Attempt) {
+	t.Helper()
+	fixture := newPackageIntegration(t, false)
+	backend := fixture.resolver.Backend.(*PackageBackend)
+	lock, err := state.Acquire(fixture.resolver.StateDir, "tpod resolve core.mise")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lock.Release() })
+	attempt, err := backend.Prepare(context.Background(), fixture.item.ID, lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fixture, backend, lock, attempt
+}
+
+func concurrently(count int, call func() error) []error {
+	start := make(chan struct{})
+	errs := make([]error, count)
+	var wait sync.WaitGroup
+	for index := range count {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			errs[index] = call()
+		}()
+	}
+	close(start)
+	wait.Wait()
+	return errs
+}
+
+func successCount(errs []error) int {
+	count := 0
+	for _, err := range errs {
+		if err == nil {
+			count++
+		}
+	}
+	return count
+}
+
+func eventCount(events []string, target string) int {
+	count := 0
+	for _, event := range events {
+		if event == target {
+			count++
+		}
+	}
+	return count
 }
 
 type integrationAPTRunner struct {
