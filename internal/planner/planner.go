@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -43,6 +44,9 @@ func New(registry resource.Registry) *Planner {
 }
 
 func (p *Planner) Build(ctx context.Context, input Input) (model.Plan, error) {
+	if err := ctx.Err(); err != nil {
+		return model.Plan{}, err
+	}
 	current, err := indexResources(input.Catalog.Resources)
 	if err != nil {
 		return model.Plan{}, err
@@ -62,6 +66,9 @@ func (p *Planner) Build(ctx context.Context, input Input) (model.Plan, error) {
 	plan := model.Plan{Release: input.Catalog.Release, Unavailable: make(map[model.ResourceID]string)}
 	operationIDs := make(map[string]model.ResourceID)
 	for _, id := range order {
+		if err := ctx.Err(); err != nil {
+			return model.Plan{}, err
+		}
 		candidate := desired[id]
 		if reason := unavailableDependency(candidate, desired, plan.Unavailable); reason != "" {
 			plan.Unavailable[id] = reason
@@ -74,13 +81,34 @@ func (p *Planner) Build(ctx context.Context, input Input) (model.Plan, error) {
 		}
 		observation, inspectErr := adapter.Inspect(ctx, candidate)
 		if inspectErr != nil {
+			if isContextError(inspectErr) {
+				return model.Plan{}, inspectErr
+			}
+			if err := ctx.Err(); err != nil {
+				return model.Plan{}, err
+			}
 			plan.Unavailable[id] = "inspect: " + inspectErr.Error()
 			continue
 		}
+		if err := ctx.Err(); err != nil {
+			return model.Plan{}, err
+		}
 		operations, planErr := adapter.Plan(ctx, candidate, observation, input.Snapshot.Ownership[id])
 		if planErr != nil {
+			if isContextError(planErr) {
+				return model.Plan{}, planErr
+			}
+			if err := ctx.Err(); err != nil {
+				return model.Plan{}, err
+			}
 			plan.Unavailable[id] = "plan: " + planErr.Error()
 			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return model.Plan{}, err
+		}
+		if err := rejectDesiredPrune(candidate.ID, operations); err != nil {
+			return model.Plan{}, err
 		}
 		operations = normalizeOperations(candidate.ID, operations, input.Upgrade)
 		if err := appendOperations(&plan, operationIDs, operations); err != nil {
@@ -91,6 +119,9 @@ func (p *Planner) Build(ctx context.Context, input Input) (model.Plan, error) {
 	pruneResources := make(map[model.ResourceID]model.Resource)
 	ownedIDs := sortedOwnershipIDs(input.Snapshot.Ownership)
 	for _, id := range ownedIDs {
+		if err := ctx.Err(); err != nil {
+			return model.Plan{}, err
+		}
 		if _, remainsDesired := desired[id]; remainsDesired {
 			continue
 		}
@@ -107,6 +138,9 @@ func (p *Planner) Build(ctx context.Context, input Input) (model.Plan, error) {
 		return model.Plan{}, fmt.Errorf("historical prune graph: %w", err)
 	}
 	for i := len(pruneOrder) - 1; i >= 0; i-- {
+		if err := ctx.Err(); err != nil {
+			return model.Plan{}, err
+		}
 		id := pruneOrder[i]
 		historicalResource := pruneResources[id]
 		adapter, ok := p.registry.Lookup(historicalResource.Type, historicalResource.Provider)
@@ -116,13 +150,31 @@ func (p *Planner) Build(ctx context.Context, input Input) (model.Plan, error) {
 		}
 		observation, inspectErr := adapter.Inspect(ctx, historicalResource)
 		if inspectErr != nil {
+			if isContextError(inspectErr) {
+				return model.Plan{}, inspectErr
+			}
+			if err := ctx.Err(); err != nil {
+				return model.Plan{}, err
+			}
 			plan.Unavailable[id] = "inspect historical resource: " + inspectErr.Error()
 			continue
 		}
+		if err := ctx.Err(); err != nil {
+			return model.Plan{}, err
+		}
 		operations, planErr := adapter.Plan(ctx, historicalResource, observation, input.Snapshot.Ownership[id])
 		if planErr != nil {
+			if isContextError(planErr) {
+				return model.Plan{}, planErr
+			}
+			if err := ctx.Err(); err != nil {
+				return model.Plan{}, err
+			}
 			plan.Unavailable[id] = "plan historical prune: " + planErr.Error()
 			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return model.Plan{}, err
 		}
 		operations = onlyPruneOperations(historicalResource.ID, operations)
 		if err := appendOperations(&plan, operationIDs, operations); err != nil {
@@ -130,11 +182,18 @@ func (p *Planner) Build(ctx context.Context, input Input) (model.Plan, error) {
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return model.Plan{}, err
+	}
 	plan.ID, err = planID(plan)
 	if err != nil {
 		return model.Plan{}, err
 	}
 	return plan, nil
+}
+
+func isContextError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func indexResources(resources []model.Resource) (map[model.ResourceID]model.Resource, error) {
@@ -238,6 +297,15 @@ func normalizeOperations(id model.ResourceID, operations []model.Operation, upgr
 	return normalized
 }
 
+func rejectDesiredPrune(id model.ResourceID, operations []model.Operation) error {
+	for _, operation := range operations {
+		if operation.Kind == model.OperationPrune {
+			return fmt.Errorf("adapter planned prune operation %q for desired resource %q", operation.ID, id)
+		}
+	}
+	return nil
+}
+
 func onlyPruneOperations(id model.ResourceID, operations []model.Operation) []model.Operation {
 	prunes := make([]model.Operation, 0, len(operations))
 	for _, operation := range operations {
@@ -310,7 +378,8 @@ func equalStrings(left, right map[string]string) bool {
 		return false
 	}
 	for key, value := range left {
-		if right[key] != value {
+		rightValue, exists := right[key]
+		if !exists || rightValue != value {
 			return false
 		}
 	}

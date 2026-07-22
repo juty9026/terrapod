@@ -3,6 +3,7 @@ package resource
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/juty9026/terrapod/internal/model"
 )
@@ -30,15 +31,15 @@ func NewRegistry() Registry {
 }
 
 func (r *Registry) Register(resourceType model.ResourceType, provider string, adapter Adapter) error {
+	if isNilAdapter(adapter) {
+		return fmt.Errorf("nil adapter for resource type %q and provider %q", resourceType, provider)
+	}
 	if r.adapters == nil {
 		r.adapters = make(map[registryKey]Adapter)
 	}
 	key := registryKey{resourceType: resourceType, provider: provider}
 	if _, exists := r.adapters[key]; exists {
 		return fmt.Errorf("adapter already registered for resource type %q and provider %q", resourceType, provider)
-	}
-	if adapter == nil {
-		return fmt.Errorf("nil adapter for resource type %q and provider %q", resourceType, provider)
 	}
 	r.adapters[key] = adapter
 	return nil
@@ -47,4 +48,17 @@ func (r *Registry) Register(resourceType model.ResourceType, provider string, ad
 func (r Registry) Lookup(resourceType model.ResourceType, provider string) (Adapter, bool) {
 	adapter, ok := r.adapters[registryKey{resourceType: resourceType, provider: provider}]
 	return adapter, ok
+}
+
+func isNilAdapter(adapter Adapter) bool {
+	if adapter == nil {
+		return true
+	}
+	value := reflect.ValueOf(adapter)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }

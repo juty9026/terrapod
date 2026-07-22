@@ -113,6 +113,10 @@ func TestBuildRejectsPruneWithoutMatchingVerifiedHistoricalCatalog(t *testing.T)
 		"provider mismatch":   func(input *planner.Input) { input.Historical["old"].Resources[0].Provider = "tampered" },
 		"package mismatch":    func(input *planner.Input) { input.Historical["old"].Resources[0].Package = "tampered" },
 		"path scope mismatch": func(input *planner.Input) { input.Historical["old"].Resources[0].Metadata["path.bin"] = "/tampered" },
+		"empty path value with different key": func(input *planner.Input) {
+			input.Historical["old"].Resources[0].Metadata["path.bin"] = ""
+			input.Snapshot.Ownership["core.ripgrep"] = model.Ownership{ResourceID: "core.ripgrep", CatalogDigest: "old", Provider: "brew", Package: "core.ripgrep", Paths: map[string]string{"other": ""}}
+		},
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -218,6 +222,62 @@ func TestBuildRejectsDuplicateOperationIDs(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsPruneFromDesiredAdapter(t *testing.T) {
+	registry, fixture := registryWithFixture(t)
+	fixture.Operations = map[model.ResourceID][]model.Operation{
+		"core.ripgrep": {
+			{ID: "install", Kind: model.OperationInstall},
+			{ID: "prune", Kind: model.OperationPrune},
+		},
+	}
+
+	_, err := planner.New(registry).Build(context.Background(), baseInput([]model.Resource{resourceDef("core.ripgrep", nil)}))
+	if err == nil || err.Error() != `adapter planned prune operation "prune" for desired resource "core.ripgrep"` {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestBuildPropagatesContextErrors(t *testing.T) {
+	t.Run("pre-canceled", func(t *testing.T) {
+		registry, fixture := registryWithFixture(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		_, err := planner.New(registry).Build(ctx, baseInput([]model.Resource{resourceDef("core.ripgrep", nil)}))
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("error = %v", err)
+		}
+		if len(fixture.InspectCalls) != 0 {
+			t.Fatalf("Inspect called with canceled context: %v", fixture.InspectCalls)
+		}
+	})
+
+	t.Run("inspect canceled", func(t *testing.T) {
+		registry, fixture := registryWithFixture(t)
+		fixture.InspectErrors = map[model.ResourceID]error{"core.ripgrep": context.Canceled}
+
+		_, err := planner.New(registry).Build(context.Background(), baseInput([]model.Resource{resourceDef("core.ripgrep", nil)}))
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("error = %v", err)
+		}
+	})
+
+	for name, contextErr := range map[string]error{
+		"plan canceled":          context.Canceled,
+		"plan deadline exceeded": context.DeadlineExceeded,
+	} {
+		t.Run(name, func(t *testing.T) {
+			registry, fixture := registryWithFixture(t)
+			fixture.PlanErrors = map[model.ResourceID]error{"core.ripgrep": contextErr}
+
+			_, err := planner.New(registry).Build(context.Background(), baseInput([]model.Resource{resourceDef("core.ripgrep", nil)}))
+			if !errors.Is(err, contextErr) {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
 func TestBuildIsDeterministicAcrossCatalogAndMapOrder(t *testing.T) {
 	registry, fixture := registryWithFixture(t)
 	fixture.Operations = map[model.ResourceID][]model.Operation{
@@ -265,6 +325,17 @@ func TestRegistryUsesExactTypeProviderKeyAndRejectsDuplicates(t *testing.T) {
 	}
 	if _, ok := registry.Lookup(model.ResourcePackage, "other"); ok {
 		t.Fatal("provider-insensitive lookup succeeded")
+	}
+}
+
+func TestRegistryRejectsTypedNilAdapter(t *testing.T) {
+	registry := resource.NewRegistry()
+	var adapter *resource.Fixture
+	if err := registry.Register(model.ResourcePackage, "brew", adapter); err == nil || !strings.Contains(err.Error(), "nil adapter") {
+		t.Fatalf("error = %v", err)
+	}
+	if _, ok := registry.Lookup(model.ResourcePackage, "brew"); ok {
+		t.Fatal("typed-nil adapter was registered")
 	}
 }
 
