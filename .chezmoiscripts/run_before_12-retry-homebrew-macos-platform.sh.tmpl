@@ -2,6 +2,8 @@
 #!/bin/sh
 set -eu
 
+{{ include "dot_local/lib/terrapod/homebrew-prefix.sh" }}
+
 install_warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
 TERRAPOD_INSTALL_WARNINGS_LOADED=
 if [ -f "$install_warnings_lib" ]; then
@@ -28,11 +30,7 @@ if [ -z "$marker_path" ] || [ ! -f "$marker_path" ]; then
   exit 0
 fi
 
-case "darwin:$(uname -m)" in
-  darwin:arm64) brew_bin=/opt/homebrew/bin/brew ;;
-  darwin:x86_64) brew_bin=/usr/local/bin/brew ;;
-  *) brew_bin= ;;
-esac
+brew_bin="$(terrapod_standard_homebrew_brew_path darwin || true)"
 
 if [ -z "$brew_bin" ] || [ ! -x "$brew_bin" ]; then
   terrapod_install_warning_write \
@@ -49,7 +47,13 @@ if ! brew_shellenv="$("$brew_bin" shellenv)"; then
     "Fix Homebrew shellenv, then rerun tpod apply." || exit 1
   exit 0
 fi
-eval "$brew_shellenv"
+if ! eval "$brew_shellenv"; then
+  terrapod_install_warning_write \
+    "$category" \
+    "$summary" \
+    "Fix Homebrew shellenv, then rerun tpod apply." || exit 1
+  exit 0
+fi
 brew analytics off >/dev/null 2>&1 || true
 
 if [ ! -f "$brewfile" ]; then

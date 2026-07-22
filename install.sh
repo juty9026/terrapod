@@ -93,6 +93,16 @@ machine_arch() {
   fi
 }
 
+darwin_hardware_arch() {
+  process_arch="$1"
+  if [ "$process_arch" = x86_64 ] &&
+    [ "$(sysctl -in sysctl.proc_translated 2>/dev/null || true)" = "1" ]; then
+    printf '%s\n' arm64
+  else
+    printf '%s\n' "$process_arch"
+  fi
+}
+
 expected_homebrew_path() {
   profile="$1"
   arch="$2"
@@ -100,6 +110,10 @@ expected_homebrew_path() {
   if [ -n "${TERRAPOD_EXPECTED_HOMEBREW_PATH:-}" ]; then
     printf '%s\n' "$TERRAPOD_EXPECTED_HOMEBREW_PATH"
     return 0
+  fi
+
+  if [ "$profile" = macos-terminal ]; then
+    arch="$(darwin_hardware_arch "$arch")"
   fi
 
   case "$profile:$arch" in
@@ -124,6 +138,12 @@ expected_homebrew_path() {
 reject_nonstandard_homebrew() {
   expected_brew="$1"
   discovered_brew=""
+
+  # The installer invokes the standard brew by absolute path. A legacy brew on
+  # PATH must not make a valid standard-prefix installation look unsupported.
+  if [ "${TERRAPOD_TEST_BREW_ABSENT:-0}" != 1 ] && [ -x "$expected_brew" ]; then
+    return 0
+  fi
 
   if command -v brew >/dev/null 2>&1; then
     discovered_brew="$(command -v brew)"
@@ -1269,6 +1289,10 @@ print_first_run_warning_completion() {
 
 main() {
   profile="$(detect_profile)"
+  if [ "${TERRAPOD_PRINT_EXPECTED_HOMEBREW_PATH:-}" = 1 ]; then
+    expected_homebrew_path "$profile" "$(machine_arch)"
+    return
+  fi
   label="$(profile_label "$profile")"
   local_bin_dir="$(user_local_bin_dir)"
   source_dir="$(default_source_dir)"

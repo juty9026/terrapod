@@ -368,7 +368,13 @@ mkdir -p "$macos_brew_bin"
 write_stub "$macos_brew_bin/brew" \
   'printf "%s\n" "brew args:$*" >>"$MACOS_BREW_LOG"' \
   'case "$1" in' \
-  '  shellenv) printf "%s\n" ":" ;;' \
+  '  shellenv)' \
+  '    case "${MACOS_BREW_SHELLENV_MODE:-success}" in' \
+  '      command-failure) exit 41 ;;' \
+  '      eval-failure) printf "%s\n" "false" ;;' \
+  '      *) printf "%s\n" ":" ;;' \
+  '    esac' \
+  '    ;;' \
   '  analytics) exit 0 ;;' \
   '  bundle) exit 0 ;;' \
   '  *) exit 64 ;;' \
@@ -387,7 +393,13 @@ write_brew_bundle_stub() {
     'done' \
     'case "$1" in' \
     '  --prefix) printf "%s\n" "${MACOS_BREW_PREFIX:-/opt/homebrew}"; exit 0 ;;' \
-    '  shellenv) printf "%s\n" ":" ;;' \
+    '  shellenv)' \
+    '    case "${MACOS_BREW_SHELLENV_MODE:-success}" in' \
+    '      command-failure) exit 41 ;;' \
+    '      eval-failure) printf "%s\n" "false" ;;' \
+    '      *) printf "%s\n" ":" ;;' \
+    '    esac' \
+    '    ;;' \
     '  analytics) exit 0 ;;' \
     '  bundle)' \
     '    if [ "${MACOS_BREW_ECHO_OUTPUT:-}" = "1" ]; then' \
@@ -457,6 +469,8 @@ run_linux_homebrew_arch_case() {
 
   if [ "$expected_status" = success ]; then
     if [ "$case_status" -ne 0 ]; then
+      sed 's/^/stdout: /' "$case_dir/stdout" >&2
+      sed 's/^/stderr: /' "$case_dir/stderr" >&2
       fail "Ubuntu Homebrew bootstrap accepts $arch"
     fi
   elif [ "$case_status" -eq 0 ]; then
@@ -692,6 +706,48 @@ if [ -e "$core_success_state/terrapod/install-warnings/homebrew-core" ]; then
   fail "successful core Homebrew bundle clears stale homebrew-core marker"
 fi
 pass "successful core Homebrew bundle clears stale homebrew-core marker"
+
+for shellenv_mode in command-failure eval-failure; do
+  shellenv_failure_state="$tmp_dir/core-shellenv-$shellenv_mode-state"
+  shellenv_failure_home="$tmp_dir/core-shellenv-$shellenv_mode-home"
+  shellenv_failure_log="$tmp_dir/core-shellenv-$shellenv_mode-brew.log"
+  shellenv_failure_bin="$tmp_dir/core-shellenv-$shellenv_mode-bin"
+  mkdir -p "$shellenv_failure_home" "$shellenv_failure_bin"
+  write_brew_bundle_stub "$shellenv_failure_bin/brew"
+
+  if ! HOME="$shellenv_failure_home" XDG_STATE_HOME="$shellenv_failure_state" \
+    MACOS_BREW_LOG="$shellenv_failure_log" MACOS_BREW_SHELLENV_MODE="$shellenv_mode" \
+    PATH="$shellenv_failure_bin:/usr/bin:/bin" \
+    sh "$macos_bootstrap_script" >"$tmp_dir/core-shellenv-$shellenv_mode.out" 2>"$tmp_dir/core-shellenv-$shellenv_mode.err"; then
+    fail "core Homebrew $shellenv_mode records a nonblocking warning"
+  fi
+
+  shellenv_failure_marker="$shellenv_failure_state/terrapod/install-warnings/homebrew-core"
+  if [ ! -f "$shellenv_failure_marker" ]; then
+    fail "core Homebrew $shellenv_mode records a homebrew-core marker"
+  fi
+  assert_contains_text "$(cat "$shellenv_failure_marker")" \
+    "Fix Homebrew shellenv, then rerun tpod apply." \
+    "core Homebrew $shellenv_mode marker provides actionable recovery guidance"
+  if grep -F "brew args:bundle" "$shellenv_failure_log" >/dev/null; then
+    fail "core Homebrew $shellenv_mode stops before bundle execution"
+  fi
+  pass "core Homebrew $shellenv_mode is category-scoped"
+done
+
+shellenv_marker_failure_home="$tmp_dir/core-shellenv-marker-failure-home"
+shellenv_marker_failure_state="$tmp_dir/core-shellenv-marker-failure-state"
+shellenv_marker_failure_bin="$tmp_dir/core-shellenv-marker-failure-bin"
+mkdir -p "$shellenv_marker_failure_home" "$shellenv_marker_failure_bin"
+: >"$shellenv_marker_failure_state"
+write_brew_bundle_stub "$shellenv_marker_failure_bin/brew"
+if HOME="$shellenv_marker_failure_home" XDG_STATE_HOME="$shellenv_marker_failure_state" \
+  MACOS_BREW_LOG="$tmp_dir/core-shellenv-marker-failure.log" MACOS_BREW_SHELLENV_MODE=command-failure \
+  PATH="$shellenv_marker_failure_bin:/usr/bin:/bin" \
+  sh "$macos_bootstrap_script" >"$tmp_dir/core-shellenv-marker-failure.out" 2>"$tmp_dir/core-shellenv-marker-failure.err"; then
+  fail "core Homebrew shellenv failure is hard when its warning marker cannot be written"
+fi
+pass "core Homebrew shellenv failure is hard only when its warning marker cannot be written"
 
 core_detail_bin="$tmp_dir/core-detail-bin"
 core_detail_state="$tmp_dir/core-detail-state"
@@ -1039,8 +1095,14 @@ write_stub "$desktop_retry_marker_failure_bin/brew" \
   '  *) exit 64 ;;' \
   'esac'
 
+desktop_retry_marker_failure_script="$tmp_dir/desktop-retry-marker-failure.sh"
+replace_standard_brew_path \
+  "$macos_terminal_apps_desktop_retry_script" \
+  "$desktop_retry_marker_failure_script" \
+  "$desktop_retry_marker_failure_bin/brew"
+
 if HOME="$desktop_retry_marker_failure_home" XDG_STATE_HOME="$desktop_retry_marker_failure_state" DESKTOP_RETRY_MARKER_FAILURE_DIR="$desktop_retry_marker_failure_dir" MACOS_BREW_LOG="$desktop_retry_marker_failure_log" PATH="$desktop_retry_marker_failure_bin:/usr/bin:/bin" \
-  sh "$macos_terminal_apps_desktop_retry_script" >"$tmp_dir/desktop-retry-marker-failure.out" 2>"$tmp_dir/desktop-retry-marker-failure.err"; then
+  sh "$desktop_retry_marker_failure_script" >"$tmp_dir/desktop-retry-marker-failure.out" 2>"$tmp_dir/desktop-retry-marker-failure.err"; then
   fail "macOS desktop retry failure blocks when the warning marker cannot be recorded"
 fi
 pass "macOS desktop retry failure blocks when the warning marker cannot be recorded"
@@ -1461,6 +1523,7 @@ HOME="$mise_tools_home" \
   XDG_STATE_HOME="$mise_tools_state" \
   MISE_TOOLS_LOG="$mise_tools_log" \
   MISE_TOOLS_INSTALL_STATUS=17 \
+  TERRAPOD_MACHINE_ARCH=aarch64 \
   PATH="$mise_tools_bin:/usr/bin:/bin" \
   sh "$mise_tools_installer_script" || mise_tools_install_failure_status=$?
 if [ "$mise_tools_install_failure_status" -ne 0 ]; then
@@ -1484,6 +1547,7 @@ assert_contains_text "$mise_tools_log_text" "mise args:exec --yes -C $mise_tools
 HOME="$mise_tools_home" \
   XDG_STATE_HOME="$mise_tools_state" \
   MISE_TOOLS_LOG="$mise_tools_log" \
+  TERRAPOD_MACHINE_ARCH=aarch64 \
   PATH="$mise_tools_bin:/usr/bin:/bin" \
   sh "$mise_tools_installer_script"
 if [ -e "$mise_tools_marker" ]; then
@@ -1502,6 +1566,7 @@ HOME="$mise_tools_home" \
   XDG_STATE_HOME="$mise_tools_state" \
   MISE_TOOLS_LOG="$mise_tools_log" \
   MISE_TOOLS_COREPACK_STATUS=23 \
+  TERRAPOD_MACHINE_ARCH=aarch64 \
   PATH="$mise_tools_bin:/usr/bin:/bin" \
   sh "$mise_tools_installer_script"
 mise_tools_marker_text="$(cat "$mise_tools_marker")"
@@ -1514,6 +1579,7 @@ assert_contains_text "$mise_tools_marker_text" "updated_at='" "mise tool install
 HOME="$mise_tools_home" \
   XDG_STATE_HOME="$mise_tools_state" \
   MISE_TOOLS_LOG="$mise_tools_log" \
+  TERRAPOD_MACHINE_ARCH=aarch64 \
   PATH="$mise_tools_bin:/usr/bin:/bin" \
   sh "$mise_tools_retry_script"
 if [ -e "$mise_tools_marker" ]; then
@@ -1528,6 +1594,7 @@ HOME="$mise_tools_home" \
   XDG_STATE_HOME="$mise_tools_state" \
   MISE_TOOLS_LOG="$mise_tools_log" \
   MISE_TOOLS_INSTALL_STATUS=17 \
+  TERRAPOD_MACHINE_ARCH=aarch64 \
   PATH="$mise_tools_bin:/usr/bin:/bin" \
   sh "$mise_tools_retry_script"
 if [ -s "$mise_tools_log" ]; then
@@ -1542,6 +1609,7 @@ HOME="$mise_tools_home" XDG_STATE_HOME="$mise_tools_state" sh -c \
 HOME="$mise_tools_home" \
   XDG_STATE_HOME="$mise_tools_state" \
   MISE_TOOLS_LOG="$mise_tools_log" \
+  TERRAPOD_MACHINE_ARCH=aarch64 \
   MISE_TOOLS_INSTALL_STATUS=17 \
   PATH="$mise_tools_bin:/usr/bin:/bin" \
   sh "$mise_tools_retry_script"
@@ -1556,6 +1624,7 @@ assert_contains_text "$mise_tools_marker_text" "Failed step(s): mise install" "m
 HOME="$mise_tools_home" \
   XDG_STATE_HOME="$mise_tools_state" \
   MISE_TOOLS_LOG="$mise_tools_log" \
+  TERRAPOD_MACHINE_ARCH=aarch64 \
   PATH="$mise_tools_bin:/usr/bin:/bin" \
   sh "$mise_tools_retry_script"
 if [ -e "$mise_tools_marker" ]; then

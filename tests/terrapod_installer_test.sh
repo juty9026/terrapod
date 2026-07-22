@@ -1408,6 +1408,34 @@ assert_failure "$installer_status" "Ubuntu arm64 identifier fails before Homebre
 assert_contains "$(cat "$arm64_arch_case/stderr")" "Unsupported CPU architecture: arm64. Supported architectures: x86_64, aarch64." "Ubuntu arm64 identifier is reported as unsupported"
 assert_not_contains "$(cat "$arm64_arch_case/command-calls")" "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh" "Ubuntu arm64 identifier fails before invoking the Homebrew installer"
 
+rosetta_arch_case="$(make_case_dir rosetta-architecture)"
+write_uname_stub "$rosetta_arch_case" "Darwin" "x86_64"
+write_stub "$rosetta_arch_case/bin/sysctl" \
+  'if [ "$*" = "-in sysctl.proc_translated" ]; then printf "%s\n" "1"; exit 0; fi' \
+  'exit 1'
+rosetta_installer_output="$(
+  HOME="$rosetta_arch_case/home" PATH="$rosetta_arch_case/bin:/usr/bin:/bin" \
+    TERRAPOD_PRINT_EXPECTED_HOMEBREW_PATH=1 sh "$repo_root/install.sh"
+)"
+if [ "$rosetta_installer_output" != /opt/homebrew/bin/brew ]; then
+  fail "Rosetta installer selects Apple Silicon Homebrew"
+fi
+pass "Rosetta installer selects Apple Silicon Homebrew"
+assert_not_contains "$rosetta_installer_output" "/usr/local/bin/brew" "Rosetta installer never falls back to Intel Homebrew"
+
+rosetta_installer_functions="$rosetta_arch_case/install-functions.sh"
+sed '$d' "$repo_root/install.sh" >"$rosetta_installer_functions"
+rosetta_standard_brew="$rosetta_arch_case/opt/homebrew/bin/brew"
+rosetta_shadow_brew="$rosetta_arch_case/usr/local/bin/brew"
+mkdir -p "${rosetta_standard_brew%/brew}" "${rosetta_shadow_brew%/brew}"
+write_stub "$rosetta_standard_brew" '#!/bin/sh' 'exit 0'
+write_stub "$rosetta_shadow_brew" '#!/bin/sh' 'exit 0'
+if ! PATH="${rosetta_shadow_brew%/brew}:/usr/bin:/bin" sh -c \
+  '. "$1"; reject_nonstandard_homebrew "$2"' sh "$rosetta_installer_functions" "$rosetta_standard_brew"; then
+  fail "Rosetta installer accepts an existing standard Apple Silicon Homebrew despite an Intel PATH shadow"
+fi
+pass "Rosetta installer accepts an existing standard Apple Silicon Homebrew despite an Intel PATH shadow"
+
 nonstandard_prefix_case="$(make_case_dir nonstandard-homebrew-prefix)"
 write_uname_stub "$nonstandard_prefix_case" "Darwin"
 nonstandard_brew="$nonstandard_prefix_case/opt/custom/bin/brew"

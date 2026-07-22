@@ -2,6 +2,8 @@
 #!/bin/sh
 set -eu
 
+{{ include "dot_local/lib/terrapod/homebrew-prefix.sh" }}
+
 AI_CLI_WARNING_CATEGORY=optional-ai-cli-tools
 install_warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
 TERRAPOD_INSTALL_WARNINGS_LOADED=
@@ -61,12 +63,7 @@ finish_ai_cli_install() {
 }
 
 standard_brew_path() {
-  case "{{ .chezmoi.os }}:$(uname -m)" in
-    darwin:arm64) printf '%s\n' /opt/homebrew/bin/brew ;;
-    darwin:x86_64) printf '%s\n' /usr/local/bin/brew ;;
-    linux:x86_64|linux:aarch64|linux:arm64) printf '%s\n' /home/linuxbrew/.linuxbrew/bin/brew ;;
-    *) return 1 ;;
-  esac
+  terrapod_standard_homebrew_brew_path "{{ .chezmoi.os }}"
 }
 
 setup_brew_environment() {

@@ -2,6 +2,8 @@
 #!/bin/sh
 set -eu
 
+{{ include "dot_local/lib/terrapod/homebrew-prefix.sh" }}
+
 install_warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
 TERRAPOD_INSTALL_WARNINGS_LOADED=
 if [ -f "$install_warnings_lib" ]; then
@@ -69,12 +71,7 @@ finish_mise_tools() {
 }
 
 standard_mise_path() {
-  case "{{ .chezmoi.os }}:$(uname -m)" in
-    darwin:arm64) printf '%s\n' /opt/homebrew/bin/mise ;;
-    darwin:x86_64) printf '%s\n' /usr/local/bin/mise ;;
-    linux:x86_64|linux:aarch64|linux:arm64) printf '%s\n' /home/linuxbrew/.linuxbrew/bin/mise ;;
-    *) return 1 ;;
-  esac
+  terrapod_standard_homebrew_mise_path "{{ .chezmoi.os }}"
 }
 
 mise_bin="$(standard_mise_path || true)"

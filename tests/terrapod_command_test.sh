@@ -566,7 +566,11 @@ copy_desktop_apply_source_fixture() {
     -e "s#/usr/local/bin/brew#$fixture_brew_bin#g" \
     "$repo_root/.chezmoiscripts/run_before_12-retry-homebrew-macos-platform.sh.tmpl" \
     >"$source_dir/.chezmoiscripts/run_before_12-retry-homebrew-macos-platform.sh.tmpl"
-  cp "$repo_root/.chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl" "$source_dir/.chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl"
+  sed \
+    -e "s#/opt/homebrew/bin/brew#$fixture_brew_bin#g" \
+    -e "s#/usr/local/bin/brew#$fixture_brew_bin#g" \
+    "$repo_root/.chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl" \
+    >"$source_dir/.chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl"
   sed \
     -e "s#/opt/homebrew/bin/brew#$fixture_brew_bin#g" \
     -e "s#/usr/local/bin/brew#$fixture_brew_bin#g" \
@@ -575,6 +579,11 @@ copy_desktop_apply_source_fixture() {
   cp "$terrapod" "$source_dir/dot_local/bin/executable_terrapod"
   cp "$tpod_source" "$source_dir/dot_local/bin/symlink_tpod"
   cp "$repo_root/dot_local/lib/terrapod/homebrew-core-bundle.sh" "$source_dir/dot_local/lib/terrapod/homebrew-core-bundle.sh"
+  sed \
+    -e "s#/opt/homebrew/bin/brew#$fixture_brew_bin#g" \
+    -e "s#/usr/local/bin/brew#$fixture_brew_bin#g" \
+    "$repo_root/dot_local/lib/terrapod/homebrew-prefix.sh" \
+    >"$source_dir/dot_local/lib/terrapod/homebrew-prefix.sh"
   cp "$install_warnings_lib" "$source_dir/dot_local/lib/terrapod/install-warnings.sh"
 }
 
@@ -741,6 +750,23 @@ assert_standard_homebrew_prefix_mapping aarch64 0 /home/linuxbrew/.linuxbrew "VP
 assert_standard_homebrew_prefix_mapping arm64 1 "" "VPS arm64 is rejected"
 assert_standard_homebrew_prefix_mapping i686 1 "" "VPS 32-bit architecture is rejected"
 assert_standard_homebrew_prefix_mapping mystery-arch 1 "" "VPS unknown architecture is rejected"
+
+write_stub "$standard_prefix_mapping_path/uname" 'printf "%s\n" "x86_64"'
+write_stub "$standard_prefix_mapping_path/sysctl" \
+  'if [ "$*" = "-in sysctl.proc_translated" ]; then printf "%s\n" "1"; exit 0; fi' \
+  'exit 1'
+set +e
+rosetta_prefix_output="$(
+  TERRAPOD_PRINT_STANDARD_HOMEBREW_PREFIX=1 TERRAPOD_PROFILE=macos-terminal TERRAPOD_MACHINE_ARCH= \
+    PATH="$standard_prefix_mapping_path" /bin/sh "$terrapod"
+)"
+rosetta_prefix_status=$?
+set -e
+assert_status "$rosetta_prefix_status" 0 "Rosetta doctor prefix mapping succeeds"
+if [ "$rosetta_prefix_output" != /opt/homebrew ]; then
+  fail "Rosetta doctor prefix mapping selects Apple Silicon Homebrew"
+fi
+pass "Rosetta doctor prefix mapping selects Apple Silicon Homebrew"
 
 write_stub "$standard_prefix_mapping_path/uname" 'printf "%s\n" "mystery-arch"'
 set +e
@@ -1076,7 +1102,7 @@ chezmoi execute-template \
   | sed "s#/home/linuxbrew/.linuxbrew/bin/brew#$fake_warning_bin/brew#g" \
   >"$fake_ai_cli_installer"
 
-if ! HOME="$fake_ai_cli_home" FAKE_INSTALL_WARNING_CALLS="$fake_warning_calls" PATH="$fake_warning_bin:/usr/bin:/bin" /bin/sh "$fake_ai_cli_installer" >"$tmp_dir/fake-ai-cli-installer.out" 2>"$tmp_dir/fake-ai-cli-installer.err"; then
+if ! HOME="$fake_ai_cli_home" FAKE_INSTALL_WARNING_CALLS="$fake_warning_calls" TERRAPOD_MACHINE_ARCH=aarch64 PATH="$fake_warning_bin:/usr/bin:/bin" /bin/sh "$fake_ai_cli_installer" >"$tmp_dir/fake-ai-cli-installer.out" 2>"$tmp_dir/fake-ai-cli-installer.err"; then
   fail "rendered installer fixture succeeds when the Homebrew AI CLI bundle succeeds and the shared library is missing"
 fi
 
@@ -1103,7 +1129,7 @@ chezmoi execute-template \
   >"$fake_ai_cli_failure_installer"
 
 fake_ai_cli_failure_status=0
-HOME="$fake_ai_cli_failure_home" PATH="$fake_ai_cli_failure_home/.local/bin:/usr/bin:/bin" /bin/sh "$fake_ai_cli_failure_installer" >"$tmp_dir/fake-ai-cli-failure.out" 2>"$tmp_dir/fake-ai-cli-failure.err" || fake_ai_cli_failure_status=$?
+HOME="$fake_ai_cli_failure_home" TERRAPOD_MACHINE_ARCH=aarch64 PATH="$fake_ai_cli_failure_home/.local/bin:/usr/bin:/bin" /bin/sh "$fake_ai_cli_failure_installer" >"$tmp_dir/fake-ai-cli-failure.out" 2>"$tmp_dir/fake-ai-cli-failure.err" || fake_ai_cli_failure_status=$?
 if [ "$fake_ai_cli_failure_status" -eq 0 ]; then
   fail "rendered installer fixture fails when optional AI CLI failures cannot be recorded without the shared library"
 fi
@@ -1138,7 +1164,7 @@ chezmoi execute-template \
   >"$fake_ai_cli_write_failure_installer"
 
 fake_ai_cli_write_failure_status=0
-HOME="$fake_ai_cli_write_failure_home" PATH="$fake_ai_cli_write_failure_home/.local/bin:/usr/bin:/bin" /bin/sh "$fake_ai_cli_write_failure_installer" >"$tmp_dir/fake-ai-cli-write-failure.out" 2>"$tmp_dir/fake-ai-cli-write-failure.err" || fake_ai_cli_write_failure_status=$?
+HOME="$fake_ai_cli_write_failure_home" TERRAPOD_MACHINE_ARCH=aarch64 PATH="$fake_ai_cli_write_failure_home/.local/bin:/usr/bin:/bin" /bin/sh "$fake_ai_cli_write_failure_installer" >"$tmp_dir/fake-ai-cli-write-failure.out" 2>"$tmp_dir/fake-ai-cli-write-failure.err" || fake_ai_cli_write_failure_status=$?
 if [ "$fake_ai_cli_write_failure_status" -eq 0 ]; then
   fail "rendered installer fixture fails when optional AI CLI failures cannot be recorded after marker write failure"
 fi
@@ -1994,7 +2020,9 @@ assert_contains "$core_missing_status_output" "Optional Editor Stack         : d
 assert_contains "$core_missing_status_output" "Optional Development Workspace: disabled" "Terrapod status keeps disabled Optional Development Workspace separate from missing core Zellij"
 assert_contains "$core_missing_status_output" "nvim                          : missing" "Terrapod status reports missing plain Neovim as a key tool"
 assert_contains "$core_missing_status_output" "zellij                        : missing" "Terrapod status reports missing Zellij as a key tool"
-assert_contains "$core_missing_status_output" "Warning: missing key tools: nvim, zellij" "Terrapod status warns about missing core Neovim and Zellij even when optional stacks are disabled"
+assert_not_contains "$core_missing_status_output" "Warning: missing key tools: nvim, zellij" "Terrapod status leaves Homebrew-owned Neovim and Zellij warnings to the ownership registry"
+assert_contains "$core_missing_status_output" "nvim: missing" "Homebrew ownership registry reports missing Neovim"
+assert_contains "$core_missing_status_output" "zellij: missing" "Homebrew ownership registry reports missing Zellij"
 
 status_missing_config="$tmp_dir/status-missing.toml"
 cat >"$status_missing_config" <<'TOML'

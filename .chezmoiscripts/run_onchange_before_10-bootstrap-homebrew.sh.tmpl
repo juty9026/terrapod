@@ -11,6 +11,8 @@
 #!/bin/sh
 set -eu
 
+{{ include "dot_local/lib/terrapod/homebrew-prefix.sh" }}
+
 install_warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
 TERRAPOD_INSTALL_WARNINGS_LOADED=
 if [ -f "$install_warnings_lib" ]; then
@@ -198,7 +200,7 @@ run_desktop_app_bundle() {
   return 1
 }
 
-homebrew_arch="$(uname -m)"
+homebrew_arch="$(terrapod_homebrew_hardware_arch "{{ .chezmoi.os }}" || true)"
 {{ if eq .chezmoi.os "linux" -}}
 case "$homebrew_arch" in
   x86_64|aarch64) ;;
@@ -210,12 +212,7 @@ esac
 {{ end -}}
 
 find_brew() {
-  case "{{ .chezmoi.os }}:$homebrew_arch" in
-    darwin:arm64) brew_bin=/opt/homebrew/bin/brew ;;
-    darwin:x86_64) brew_bin=/usr/local/bin/brew ;;
-    linux:x86_64|linux:aarch64) brew_bin=/home/linuxbrew/.linuxbrew/bin/brew ;;
-    *) brew_bin= ;;
-  esac
+  brew_bin="$(terrapod_standard_homebrew_brew_path "{{ .chezmoi.os }}" || true)"
 
   if [ -n "$brew_bin" ] && [ -x "$brew_bin" ]; then
     printf '%s\n' "$brew_bin"
@@ -279,8 +276,21 @@ if [ -z "$brew_bin" ]; then
   exit_after_install_warning
 fi
 
-eval "$("$brew_bin" shellenv)"
-brew analytics off >/dev/null 2>&1 || true
+if ! brew_shellenv="$("$brew_bin" shellenv)"; then
+  mark_install_warning \
+    homebrew-core \
+    "Homebrew core install needs attention" \
+    "Fix Homebrew shellenv, then rerun tpod apply."
+  exit_after_nonblocking_install_warning
+elif ! eval "$brew_shellenv"; then
+  mark_install_warning \
+    homebrew-core \
+    "Homebrew core install needs attention" \
+    "Fix Homebrew shellenv, then rerun tpod apply."
+  exit_after_nonblocking_install_warning
+else
+  brew analytics off >/dev/null 2>&1 || true
+fi
 
 core_brewfile="{{ .chezmoi.sourceDir }}/Brewfile"
 
