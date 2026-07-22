@@ -42,7 +42,7 @@ find_brew() {
   case "{{ .chezmoi.os }}:$(uname -m)" in
     darwin:arm64) brew_bin=/opt/homebrew/bin/brew ;;
     darwin:x86_64) brew_bin=/usr/local/bin/brew ;;
-    linux:x86_64|linux:aarch64|linux:arm64) brew_bin=/home/linuxbrew/.linuxbrew/bin/brew ;;
+    linux:x86_64|linux:aarch64) brew_bin=/home/linuxbrew/.linuxbrew/bin/brew ;;
     *) brew_bin= ;;
   esac
 

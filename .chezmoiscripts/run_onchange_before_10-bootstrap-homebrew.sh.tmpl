@@ -41,10 +41,6 @@ mark_install_warning() {
 }
 
 exit_after_install_warning() {
-  if [ "${TERRAPOD_FIRST_RUN_APPLY:-}" = "1" ] && [ "$INSTALL_WARNING_RECORDED" -eq 1 ]; then
-    exit 0
-  fi
-
   exit 1
 }
 
@@ -202,11 +198,22 @@ run_desktop_app_bundle() {
   return 1
 }
 
+homebrew_arch="$(uname -m)"
+{{ if eq .chezmoi.os "linux" -}}
+case "$homebrew_arch" in
+  x86_64|aarch64) ;;
+  *)
+    printf '%s\n' "Unsupported CPU architecture: $homebrew_arch. Supported architectures: x86_64, aarch64." >&2
+    exit 1
+    ;;
+esac
+{{ end -}}
+
 find_brew() {
-  case "{{ .chezmoi.os }}:$(uname -m)" in
+  case "{{ .chezmoi.os }}:$homebrew_arch" in
     darwin:arm64) brew_bin=/opt/homebrew/bin/brew ;;
     darwin:x86_64) brew_bin=/usr/local/bin/brew ;;
-    linux:x86_64|linux:aarch64|linux:arm64) brew_bin=/home/linuxbrew/.linuxbrew/bin/brew ;;
+    linux:x86_64|linux:aarch64) brew_bin=/home/linuxbrew/.linuxbrew/bin/brew ;;
     *) brew_bin= ;;
   esac
 

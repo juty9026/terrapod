@@ -270,6 +270,7 @@ macos_terminal_launcher_apps_bootstrap="$(render_template "$macos_terminal_launc
 macos_development_apps_bootstrap="$(render_template "$macos_development_apps_data" ".chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl")"
 macos_development_workspace_bootstrap="$(render_template "$macos_development_workspace_data" ".chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl")"
 macos_core_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_11-retry-homebrew-core.sh.tmpl")"
+ubuntu_core_retry="$(render_template "$ubuntu_data" ".chezmoiscripts/run_before_11-retry-homebrew-core.sh.tmpl")"
 macos_platform_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_12-retry-homebrew-macos-platform.sh.tmpl")"
 macos_desktop_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl")"
 macos_terminal_apps_desktop_retry="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl")"
@@ -289,6 +290,9 @@ assert_not_contains_text "$ubuntu_homebrew_bootstrap" 'Brewfile.macos"' "Ubuntu 
 assert_contains_text "$macos_bootstrap" 'macos_brewfile="' "macOS renders the platform bundle"
 assert_contains_text "$macos_bootstrap" 'homebrew-macos-platform' "macOS uses a separate platform warning category"
 assert_contains_text "$ubuntu_homebrew_bootstrap" 'HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade' "Ubuntu bundle apply disables automatic updates"
+assert_not_contains_text "$ubuntu_homebrew_bootstrap" 'linux:arm64' "Ubuntu Homebrew bootstrap rejects the arm64 identifier"
+assert_not_contains_text "$ubuntu_core_retry" 'linux:arm64' "Ubuntu Homebrew retry rejects the arm64 identifier"
+assert_contains_text "$ubuntu_core_retry" 'linux:x86_64|linux:aarch64)' "Ubuntu Homebrew retry accepts exactly the supported Linux architecture identifiers"
 
 for bundle_source in \
   "$repo_root/.chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl" \
@@ -412,6 +416,63 @@ write_brew_bundle_stub() {
     'esac'
 }
 
+run_linux_homebrew_arch_case() {
+  arch="$1"
+  expected_status="$2"
+  case_dir="$tmp_dir/linux-homebrew-arch-$arch"
+  case_bin="$case_dir/bin"
+  case_script="$case_dir/bootstrap.sh"
+  case_log="$case_dir/commands.log"
+  case_state="$case_dir/state"
+  case_home="$case_dir/home"
+  mkdir -p "$case_bin" "$case_home"
+
+  write_stub "$case_bin/uname" "printf '%s\\n' '$arch'"
+  write_stub "$case_bin/curl" \
+    'printf "%s\n" "curl args:$*" >>"$LINUX_HOMEBREW_ARCH_LOG"' \
+    'exit 97'
+  write_stub "$case_bin/brew" \
+    'printf "%s\n" "brew args:$*" >>"$LINUX_HOMEBREW_ARCH_LOG"' \
+    'case "$1" in' \
+    '  shellenv) printf "%s\n" ":" ;;' \
+    '  analytics|bundle) exit 0 ;;' \
+    '  --prefix) printf "%s\n" "$LINUX_HOMEBREW_ARCH_PREFIX" ;;' \
+    '  *) exit 64 ;;' \
+    'esac'
+
+  printf '%s\n' "$ubuntu_homebrew_bootstrap" |
+    sed "s#/home/linuxbrew/.linuxbrew/bin/brew#$case_bin/brew#g" >"$case_script"
+  sh -n "$case_script" || fail "Ubuntu Homebrew $arch bootstrap test script is valid sh"
+
+  case_status=0
+  HOME="$case_home" \
+    XDG_STATE_HOME="$case_state" \
+    TERRAPOD_FIRST_RUN_APPLY=1 \
+    LINUX_HOMEBREW_ARCH_LOG="$case_log" \
+    LINUX_HOMEBREW_ARCH_PREFIX="$case_dir/prefix" \
+    PATH="$case_bin:/usr/bin:/bin" \
+    sh "$case_script" >"$case_dir/stdout" 2>"$case_dir/stderr" || case_status=$?
+
+  if [ "$expected_status" = success ]; then
+    if [ "$case_status" -ne 0 ]; then
+      fail "Ubuntu Homebrew bootstrap accepts $arch"
+    fi
+  elif [ "$case_status" -eq 0 ]; then
+    fail "Ubuntu Homebrew bootstrap rejects $arch"
+  fi
+
+  if [ -f "$case_log" ] && grep -F 'raw.githubusercontent.com/Homebrew/install' "$case_log" >/dev/null; then
+    fail "Ubuntu Homebrew $arch architecture check runs before the installer download"
+  fi
+  pass "Ubuntu Homebrew bootstrap handles $arch before installer download"
+}
+
+run_linux_homebrew_arch_case x86_64 success
+run_linux_homebrew_arch_case aarch64 success
+run_linux_homebrew_arch_case arm64 failure
+run_linux_homebrew_arch_case i686 failure
+run_linux_homebrew_arch_case unknown failure
+
 replace_standard_brew_path() {
   input_file="$1"
   output_file="$2"
@@ -502,16 +563,58 @@ homebrew_first_run_failure_home="$tmp_dir/homebrew-first-run-failure-home"
 homebrew_first_run_failure_log="$tmp_dir/homebrew-first-run-failure.log"
 mkdir -p "$homebrew_first_run_failure_home"
 
-if ! HOME="$homebrew_first_run_failure_home" XDG_STATE_HOME="$homebrew_first_run_failure_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_first_run_failure_log" PATH="$homebrew_installer_failure_bin:/usr/bin:/bin" \
+if HOME="$homebrew_first_run_failure_home" XDG_STATE_HOME="$homebrew_first_run_failure_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_first_run_failure_log" PATH="$homebrew_installer_failure_bin:/usr/bin:/bin" \
   TERRAPOD_FIRST_RUN_APPLY=1 sh "$homebrew_installer_failure_script" >"$tmp_dir/homebrew-first-run-failure.out" 2>"$tmp_dir/homebrew-first-run-failure.err"; then
-  fail "first-run macOS bootstrap continues when the Homebrew installer warning is recorded"
+  fail "first-run macOS bootstrap hard-fails when the Homebrew installer command fails"
 fi
+pass "first-run macOS bootstrap hard-fails when the Homebrew installer command fails"
 
 homebrew_first_run_failure_marker="$homebrew_first_run_failure_state/terrapod/install-warnings/homebrew-core"
 if [ ! -f "$homebrew_first_run_failure_marker" ]; then
   fail "first-run macOS bootstrap records homebrew-core marker when the Homebrew installer command fails"
 fi
 pass "first-run macOS bootstrap records homebrew-core marker when the Homebrew installer command fails"
+
+homebrew_first_run_download_bin="$tmp_dir/homebrew-first-run-download-bin"
+homebrew_first_run_download_state="$tmp_dir/homebrew-first-run-download-state"
+homebrew_first_run_download_home="$tmp_dir/homebrew-first-run-download-home"
+homebrew_first_run_download_log="$tmp_dir/homebrew-first-run-download.log"
+mkdir -p "$homebrew_first_run_download_bin" "$homebrew_first_run_download_home"
+write_stub "$homebrew_first_run_download_bin/curl" \
+  'printf "%s\n" "curl args:$*" >>"$HOMEBREW_INSTALLER_FAILURE_LOG"' \
+  'exit 42'
+
+if HOME="$homebrew_first_run_download_home" XDG_STATE_HOME="$homebrew_first_run_download_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_first_run_download_log" PATH="$homebrew_first_run_download_bin:/usr/bin:/bin" \
+  TERRAPOD_FIRST_RUN_APPLY=1 sh "$homebrew_installer_failure_script" >"$tmp_dir/homebrew-first-run-download.out" 2>"$tmp_dir/homebrew-first-run-download.err"; then
+  fail "first-run macOS bootstrap hard-fails when the Homebrew installer download fails"
+fi
+if [ ! -f "$homebrew_first_run_download_state/terrapod/install-warnings/homebrew-core" ]; then
+  fail "first-run macOS bootstrap records homebrew-core marker when the Homebrew installer download fails"
+fi
+pass "first-run macOS bootstrap hard-fails and records a marker when the Homebrew installer download fails"
+
+homebrew_first_run_not_found_bin="$tmp_dir/homebrew-first-run-not-found-bin"
+homebrew_first_run_not_found_state="$tmp_dir/homebrew-first-run-not-found-state"
+homebrew_first_run_not_found_home="$tmp_dir/homebrew-first-run-not-found-home"
+homebrew_first_run_not_found_log="$tmp_dir/homebrew-first-run-not-found.log"
+mkdir -p "$homebrew_first_run_not_found_bin" "$homebrew_first_run_not_found_home"
+write_stub "$homebrew_first_run_not_found_bin/curl" \
+  'printf "%s\n" "curl args:$*" >>"$HOMEBREW_INSTALLER_FAILURE_LOG"' \
+  'output_file=' \
+  'while [ "$#" -gt 0 ]; do' \
+  '  if [ "$1" = -o ]; then shift; output_file="$1"; fi' \
+  '  shift' \
+  'done' \
+  'printf "%s\n" "exit 0" >"$output_file"'
+
+if HOME="$homebrew_first_run_not_found_home" XDG_STATE_HOME="$homebrew_first_run_not_found_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_first_run_not_found_log" PATH="$homebrew_first_run_not_found_bin:/usr/bin:/bin" \
+  TERRAPOD_FIRST_RUN_APPLY=1 sh "$homebrew_installer_failure_script" >"$tmp_dir/homebrew-first-run-not-found.out" 2>"$tmp_dir/homebrew-first-run-not-found.err"; then
+  fail "first-run macOS bootstrap hard-fails when brew is not found after installation"
+fi
+if [ ! -f "$homebrew_first_run_not_found_state/terrapod/install-warnings/homebrew-core" ]; then
+  fail "first-run macOS bootstrap records homebrew-core marker when brew is not found after installation"
+fi
+pass "first-run macOS bootstrap hard-fails and records a marker when brew is not found after installation"
 
 core_success_bin="$tmp_dir/core-success-bin"
 core_success_state="$tmp_dir/core-success-state"
