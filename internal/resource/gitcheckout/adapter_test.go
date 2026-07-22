@@ -282,6 +282,47 @@ func TestPartialCheckoutIsBackedUpBeforeReinstall(t *testing.T) {
 	}
 }
 
+func TestPartialBackupFailureKeepsOriginalAndCleansStage(t *testing.T) {
+	a, item, store, destination := newFixture(t, func(_ context.Context, request execx.Request) (execx.Result, error) {
+		args := strings.Join(request.Args, " ")
+		switch {
+		case strings.Contains(args, " init "):
+			return execx.Result{}, os.MkdirAll(filepath.Join(request.Dir, ".git"), 0o700)
+		case strings.Contains(args, "rev-parse FETCH_HEAD"):
+			return execx.Result{Stdout: []byte(testCommit + "\n")}, nil
+		case strings.Contains(args, " checkout "):
+			return execx.Result{}, os.WriteFile(filepath.Join(request.Dir, "zinit.zsh"), []byte("staged"), 0o600)
+		}
+		return execx.Result{}, nil
+	})
+	if err := os.MkdirAll(destination, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	partial := filepath.Join(destination, "partial.txt")
+	if err := os.WriteFile(partial, []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	blockedRoot := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blockedRoot, []byte("blocked"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.Backup.Root = blockedRoot
+	op := operation(item, model.OperationRestore)
+	if _, err := store.Begin(model.Plan{ID: "partial-backup-failure", Operations: []model.Operation{op}}); err != nil {
+		t.Fatal(err)
+	}
+	if result := a.ExecuteResource(context.Background(), item, op); result.Success || !strings.Contains(result.Detail, "backup partial checkout") {
+		t.Fatalf("result=%#v", result)
+	}
+	if got, err := os.ReadFile(partial); err != nil || string(got) != "original" {
+		t.Fatalf("partial=%q err=%v", got, err)
+	}
+	if _, err := os.Lstat(filepath.Join(destination, "zinit.zsh")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("staged replacement committed: %v", err)
+	}
+	assertNoCheckoutArtifacts(t, destination)
+}
+
 func TestPruneRemovesRecordedTrackedFilesButPreservesUntrackedChildren(t *testing.T) {
 	a, item, store, destination := newFixture(t, func(context.Context, execx.Request) (execx.Result, error) {
 		return execx.Result{}, errors.New("git must not run during prune")
