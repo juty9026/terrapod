@@ -143,17 +143,33 @@ func (a *Adapter) Inspect(ctx context.Context, item model.Resource) (model.Obser
 			if err != nil {
 				return model.Observation{}, fmt.Errorf("integration: %s: %w", target.relative, err)
 			}
-			if !current.Exists || !sameValue(current.Value, desired) {
+			matchesDesired, canonicalErr := sameValue(current.Value, desired)
+			if canonicalErr != nil {
+				return model.Observation{}, fmt.Errorf("integration: canonicalize %s%s: %w", target.relative, pointer, canonicalErr)
+			}
+			if !current.Exists || !matchesDesired {
 				matchesPrior := false
 				if pruneReplay {
-					prior, ok, _ := decodePrior(owned.PriorValues[fieldKey(target.relative, pointer)])
-					matchesPrior = ok && sameField(current, prior)
+					prior, ok, priorErr := decodePrior(owned.PriorValues[fieldKey(target.relative, pointer)])
+					if priorErr != nil {
+						return model.Observation{}, priorErr
+					}
+					if ok {
+						matchesPrior, canonicalErr = sameField(current, prior)
+						if canonicalErr != nil {
+							return model.Observation{}, canonicalErr
+						}
+					}
 				}
 				if !matchesPrior {
 					healthy = false
 				}
 			}
-			paths[fieldKey(target.relative, pointer)] = digestValue(current)
+			digest, canonicalErr := digestValue(current)
+			if canonicalErr != nil {
+				return model.Observation{}, canonicalErr
+			}
+			paths[fieldKey(target.relative, pointer)] = digest
 		}
 	}
 	for key, digest := range owned.Paths {
@@ -249,9 +265,19 @@ func (a *Adapter) Plan(ctx context.Context, item model.Resource, _ model.Observa
 				return nil, err
 			}
 			desiredState := fieldValue{Exists: true, Value: desired}
-			desiredDigest := digestValue(desiredState)
-			matchesDesired := sameField(current, desiredState)
-			fieldAuth := model.IntegrationFieldAuthorization{Current: pathState(current), DesiredDigest: desiredDigest}
+			desiredDigest, err := digestValue(desiredState)
+			if err != nil {
+				return nil, err
+			}
+			matchesDesired, err := sameField(current, desiredState)
+			if err != nil {
+				return nil, err
+			}
+			currentState, err := pathState(current)
+			if err != nil {
+				return nil, err
+			}
+			fieldAuth := model.IntegrationFieldAuthorization{Current: currentState, DesiredDigest: desiredDigest}
 			if owned.ResourceID == "" {
 				changed = changed || !matchesDesired
 				authorization.Fields[key] = fieldAuth
@@ -267,13 +293,20 @@ func (a *Adapter) Plan(ctx context.Context, item model.Resource, _ model.Observa
 				if !hasPrior && d.pathGlob == "" {
 					return nil, fmt.Errorf("integration: missing ownership receipt for %s%s", target.relative, pointer)
 				}
-				if hasPrior && !sameField(current, prior) && !matchesDesired {
+				matchesPrior, err := sameField(current, prior)
+				if err != nil {
+					return nil, err
+				}
+				if hasPrior && !matchesPrior && !matchesDesired {
 					return nil, fmt.Errorf("integration conflict at %s%s: field changed during interrupted takeover", target.relative, pointer)
 				}
 				receiptUpdate = true
 				changed = changed || !matchesDesired
 			} else {
-				currentDigest := digestValue(current)
+				currentDigest, err := digestValue(current)
+				if err != nil {
+					return nil, err
+				}
 				if currentDigest != last && !matchesDesired {
 					return nil, fmt.Errorf("integration conflict at %s%s: field differs from last managed value", target.relative, pointer)
 				}
@@ -341,16 +374,31 @@ func (a *Adapter) PlanHistorical(_ context.Context, item model.Resource, _ model
 			if !ok {
 				return nil, fmt.Errorf("integration: missing prior receipt for %s%s", target.relative, pointer)
 			}
-			desiredDigest := digestValue(fieldValue{Exists: true, Value: desired})
+			desiredDigest, err := digestValue(fieldValue{Exists: true, Value: desired})
+			if err != nil {
+				return nil, err
+			}
 			last, hasLast := owned.Paths[key]
 			if !hasLast || last != desiredDigest {
 				return nil, fmt.Errorf("integration: last managed receipt mismatch for %s%s", target.relative, pointer)
 			}
-			if digestValue(current) != last && !sameField(current, prior) {
+			currentDigest, err := digestValue(current)
+			if err != nil {
+				return nil, err
+			}
+			matchesPrior, err := sameField(current, prior)
+			if err != nil {
+				return nil, err
+			}
+			if currentDigest != last && !matchesPrior {
 				return nil, fmt.Errorf("integration conflict at %s%s: refusing to prune a user edit", target.relative, pointer)
 			}
-			needsMutation = needsMutation || !sameField(current, prior)
-			authorization.Fields[key] = model.IntegrationFieldAuthorization{Current: pathState(current), DesiredDigest: desiredDigest, LastManagedDigest: last}
+			needsMutation = needsMutation || !matchesPrior
+			currentState, err := pathState(current)
+			if err != nil {
+				return nil, err
+			}
+			authorization.Fields[key] = model.IntegrationFieldAuthorization{Current: currentState, DesiredDigest: desiredDigest, LastManagedDigest: last}
 		}
 	}
 	if needsMutation && d.handler == HandlerJetendardOrca && a.appRunning("Orca") {
@@ -497,7 +545,10 @@ func (a *Adapter) validateMutation(d declaration, op model.Operation, owned mode
 			if !ok {
 				return fmt.Errorf("integration conflict: operation omits %s", key)
 			}
-			desiredDigest := digestValue(fieldValue{Exists: true, Value: desired})
+			desiredDigest, err := digestValue(fieldValue{Exists: true, Value: desired})
+			if err != nil {
+				return err
+			}
 			if field.DesiredDigest != desiredDigest {
 				return errors.New("integration: operation desired value does not match signed declaration")
 			}
@@ -525,15 +576,28 @@ func (a *Adapter) validateMutation(d declaration, op model.Operation, owned mode
 }
 
 func validateCurrentMutation(key string, current fieldValue, field model.IntegrationFieldAuthorization, owned model.Ownership, prune bool) error {
-	allowed := samePathState(current, field.Current)
+	allowed, err := samePathState(current, field.Current)
+	if err != nil {
+		return err
+	}
 	if prune {
 		prior, ok, err := decodePrior(owned.PriorValues[key])
 		if err != nil {
 			return err
 		}
-		allowed = allowed || (ok && sameField(current, prior))
+		if ok {
+			matches, err := sameField(current, prior)
+			if err != nil {
+				return err
+			}
+			allowed = allowed || matches
+		}
 	} else {
-		allowed = allowed || digestValue(current) == field.DesiredDigest
+		digest, err := digestValue(current)
+		if err != nil {
+			return err
+		}
+		allowed = allowed || digest == field.DesiredDigest
 	}
 	if !allowed {
 		return errors.New("field changed")
@@ -552,7 +616,11 @@ func (a *Adapter) requiresApply(d declaration, targets []target) (bool, error) {
 			if err != nil {
 				return false, err
 			}
-			if !sameField(current, fieldValue{Exists: true, Value: desired}) {
+			matches, err := sameField(current, fieldValue{Exists: true, Value: desired})
+			if err != nil {
+				return false, err
+			}
+			if !matches {
 				return true, nil
 			}
 		}
@@ -581,7 +649,11 @@ func (a *Adapter) requiresRestore(d declaration, owned model.Ownership) (bool, e
 			if err != nil {
 				return false, err
 			}
-			if !sameField(current, prior) {
+			matches, err := sameField(current, prior)
+			if err != nil {
+				return false, err
+			}
+			if !matches {
 				return true, nil
 			}
 		}
@@ -643,7 +715,11 @@ func (a *Adapter) apply(d declaration, targets []target, op model.Operation, own
 			if err := validateCurrentMutation(key, current, field, owned, false); err != nil {
 				return fmt.Errorf("integration conflict at %s%s: field changed immediately before mutation", target.relative, pointer)
 			}
-			if sameField(current, fieldValue{Exists: true, Value: value}) {
+			matches, err := sameField(current, fieldValue{Exists: true, Value: value})
+			if err != nil {
+				return err
+			}
+			if matches {
 				continue
 			}
 			dirty = true
@@ -1282,27 +1358,50 @@ func validateManagedKeys(d declaration, values map[string]string) error {
 	}
 	return nil
 }
-func sameField(a, b fieldValue) bool {
-	return a.Exists == b.Exists && (!a.Exists || sameValue(a.Value, b.Value))
+func sameField(a, b fieldValue) (bool, error) {
+	if a.Exists != b.Exists {
+		return false, nil
+	}
+	if !a.Exists {
+		return true, nil
+	}
+	return sameValue(a.Value, b.Value)
 }
-func sameValue(a, b any) bool {
-	left, _ := json.Marshal(a)
-	right, _ := json.Marshal(b)
-	return string(left) == string(right)
+func sameValue(a, b any) (bool, error) {
+	left, err := json.Marshal(a)
+	if err != nil {
+		return false, fmt.Errorf("canonicalize value: %w", err)
+	}
+	right, err := json.Marshal(b)
+	if err != nil {
+		return false, fmt.Errorf("canonicalize value: %w", err)
+	}
+	return string(left) == string(right), nil
 }
-func digestValue(value fieldValue) string {
-	raw, _ := json.Marshal(struct {
+func digestValue(value fieldValue) (string, error) {
+	raw, err := json.Marshal(struct {
 		Exists bool `json:"exists"`
 		Value  any  `json:"value,omitempty"`
 	}{value.Exists, value.Value})
+	if err != nil {
+		return "", fmt.Errorf("canonicalize field value: %w", err)
+	}
 	sum := sha256.Sum256(raw)
-	return "sha256:" + hex.EncodeToString(sum[:])
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
-func pathState(value fieldValue) model.ManagedFilePathState {
-	return model.ManagedFilePathState{Exists: value.Exists, Digest: digestValue(value)}
+func pathState(value fieldValue) (model.ManagedFilePathState, error) {
+	digest, err := digestValue(value)
+	if err != nil {
+		return model.ManagedFilePathState{}, err
+	}
+	return model.ManagedFilePathState{Exists: value.Exists, Digest: digest}, nil
 }
-func samePathState(value fieldValue, state model.ManagedFilePathState) bool {
-	return value.Exists == state.Exists && digestValue(value) == state.Digest
+func samePathState(value fieldValue, state model.ManagedFilePathState) (bool, error) {
+	digest, err := digestValue(value)
+	if err != nil {
+		return false, err
+	}
+	return value.Exists == state.Exists && digest == state.Digest, nil
 }
 func mustRelative(root, path string) string { relative, _ := filepath.Rel(root, path); return relative }
 func sameStrings(a, b []string) bool {

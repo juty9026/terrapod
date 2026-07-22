@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -502,6 +503,93 @@ func TestPlistRejectsMalformedTokens(t *testing.T) {
 	}
 }
 
+func TestPlistRejectsNonFiniteRealsWithoutMutation(t *testing.T) {
+	for _, literal := range []string{"NaN", "+Inf", "-Inf"} {
+		home := t.TempDir()
+		path := filepath.Join(home, "settings.plist")
+		body := []byte(`<plist><dict><key>number</key><real>` + literal + `</real></dict></plist>`)
+		mustWrite(t, path, body, 0o600)
+		store, _ := state.Open(filepath.Join(t.TempDir(), "state"))
+		a := &Adapter{Home: home, State: store}
+		item := jsonItem("integration.nonfinite", "settings.plist", map[string]any{"/font": "Jetendard"})
+		item.Provider = ProviderPlistFields
+		item.Metadata[MetadataFormat] = "plist"
+		if _, err := a.Inspect(context.Background(), item); err == nil {
+			t.Fatalf("accepted %s", literal)
+		}
+		desiredDigest, err := digestValue(fieldValue{Exists: true, Value: "Jetendard"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		prior, err := encodePrior(fieldValue{Exists: true, Value: 0.5})
+		if err != nil {
+			t.Fatal(err)
+		}
+		owned := model.Ownership{ResourceID: item.ID, Provider: item.Provider, Package: item.Package, Paths: map[string]string{fieldKey("settings.plist", "/font"): desiredDigest}, PriorValues: map[string]json.RawMessage{fieldKey("settings.plist", "/font"): prior}}
+		if _, err := a.PlanHistorical(context.Background(), item, model.Observation{}, owned); err == nil {
+			t.Fatalf("historical prune accepted %s", literal)
+		}
+		if got := mustRead(t, path); string(got) != string(body) {
+			t.Fatalf("%s mutated", literal)
+		}
+	}
+}
+
+func TestCanonicalizationRejectsNonFiniteValues(t *testing.T) {
+	if _, err := sameValue(math.NaN(), math.Inf(1)); err == nil {
+		t.Fatal("non-finite comparison accepted")
+	}
+	if _, err := digestValue(fieldValue{Exists: true, Value: math.Inf(-1)}); err == nil {
+		t.Fatal("non-finite digest accepted")
+	}
+	if _, err := encodePrior(fieldValue{Exists: true, Value: math.NaN()}); err == nil {
+		t.Fatal("non-finite prior accepted")
+	}
+}
+
+func TestHistoricalPruneRejectsNaNPriorAndUserInfinityWithoutMutation(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, "settings.plist")
+	body := []byte(`<plist><dict><key>font</key><real>+Inf</real></dict></plist>`)
+	mustWrite(t, path, body, 0o600)
+	store, _ := state.Open(filepath.Join(t.TempDir(), "state"))
+	a := &Adapter{Home: home, State: store}
+	item := jsonItem("integration.nonfinite-prune", "settings.plist", map[string]any{"/font": 1.0})
+	item.Provider = ProviderPlistFields
+	item.Metadata[MetadataFormat] = "plist"
+	digest, err := digestValue(fieldValue{Exists: true, Value: 1.0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := fieldKey("settings.plist", "/font")
+	owned := model.Ownership{ResourceID: item.ID, Provider: item.Provider, Package: item.Package, Paths: map[string]string{key: digest}, PriorValues: map[string]json.RawMessage{key: json.RawMessage(`{"exists":true,"value":NaN}`)}}
+	if _, err := a.PlanHistorical(context.Background(), item, model.Observation{}, owned); err == nil {
+		t.Fatal("NaN prior and user infinity were accepted")
+	}
+	if got := mustRead(t, path); string(got) != string(body) {
+		t.Fatal("historical conflict mutated file")
+	}
+}
+
+func TestPlistFiniteRealSpellingIsBytePreserved(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, "settings.plist")
+	body := `<plist><dict><key>number</key><real>01.500</real><key>font</key><string>Monaco</string></dict></plist>`
+	mustWrite(t, path, []byte(body), 0o600)
+	store, _ := state.Open(filepath.Join(t.TempDir(), "state"))
+	a := &Adapter{Home: home, State: store}
+	item := jsonItem("integration.finite-real", "settings.plist", map[string]any{"/font": "Jetendard"})
+	item.Provider = ProviderPlistFields
+	item.Metadata[MetadataFormat] = "plist"
+	op := mustSinglePlan(t, a, item, model.Ownership{})
+	if result := executeAuthorized(t, a, store, item, op); !result.Success {
+		t.Fatal(result.Detail)
+	}
+	if got := string(mustRead(t, path)); !strings.Contains(got, "<real>01.500</real>") {
+		t.Fatalf("real spelling changed: %s", got)
+	}
+}
+
 func TestRejectsInvalidJSONPointerEscapes(t *testing.T) {
 	for _, pointer := range []string{"/~2", "/bad~", "/~01~2"} {
 		if _, err := pointerParts(pointer); err == nil {
@@ -595,7 +683,10 @@ func (f *karabinerFixture) Guidance(context.Context) ([]byte, error) {
 func (f *karabinerFixture) Open(context.Context) error { f.opens++; return nil }
 
 func jsonItem(id, path string, fields map[string]any) model.Resource {
-	raw, _ := json.Marshal(fields)
+	raw, err := json.Marshal(fields)
+	if err != nil {
+		panic(err)
+	}
 	return model.Resource{ID: model.ResourceID(id), Type: model.ResourceIntegration, Profiles: []model.Profile{model.ProfileMacOSTerminal}, VersionPolicy: model.VersionTracked, Provider: ProviderJSONFields, Package: "settings", Metadata: map[string]string{MetadataHandler: HandlerFields, MetadataPath: path, MetadataFields: string(raw), MetadataFormat: "json"}}
 }
 

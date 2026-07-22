@@ -403,7 +403,10 @@ func jsoncSet(text, pointer string, desired any) (string, error) {
 		for j := len(parts) - 1; j > i; j-- {
 			nested = map[string]any{parts[j]: nested}
 		}
-		rendered, _ := json.MarshalIndent(nested, "", "  ")
+		rendered, err := json.MarshalIndent(nested, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("canonicalize JSONC value: %w", err)
+		}
 		return jsoncInsert(text, current, part, string(rendered)), nil
 	}
 	return text, nil

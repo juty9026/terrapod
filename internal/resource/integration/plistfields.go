@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -153,7 +154,14 @@ func plistValue(decoder *xml.Decoder, start xml.StartElement) (any, error) {
 		case "integer":
 			return strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
 		default:
-			return strconv.ParseFloat(strings.TrimSpace(raw), 64)
+			value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+			if err != nil {
+				return nil, err
+			}
+			if math.IsNaN(value) || math.IsInf(value, 0) {
+				return nil, errors.New("plist real must be finite")
+			}
+			return value, nil
 		}
 	default:
 		return nil, fmt.Errorf("unsupported plist value %q", start.Name.Local)
@@ -220,6 +228,9 @@ func writePlistValue(e *xml.Encoder, value any) error {
 	case int64:
 		return e.EncodeElement(strconv.FormatInt(v, 10), xml.StartElement{Name: xml.Name{Local: "integer"}})
 	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return errors.New("plist real must be finite")
+		}
 		return e.EncodeElement(strconv.FormatFloat(v, 'g', -1, 64), xml.StartElement{Name: xml.Name{Local: "real"}})
 	case []byte:
 		return e.EncodeElement(base64.StdEncoding.EncodeToString(v), xml.StartElement{Name: xml.Name{Local: "data"}})
@@ -447,6 +458,9 @@ func parsePlistSpanValue(d *xml.Decoder, text string, start xml.StartElement, of
 		}
 		if err != nil {
 			return nil, err
+		}
+		if value, ok := node.value.(float64); ok && (math.IsNaN(value) || math.IsInf(value, 0)) {
+			return nil, errors.New("plist real must be finite")
 		}
 		return node, nil
 	default:
