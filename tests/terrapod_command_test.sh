@@ -514,6 +514,7 @@ EOF
 
 copy_desktop_apply_source_fixture() {
   source_dir="$1"
+  fixture_brew_bin="$2"
 
   # Keep this fixture minimal so real chezmoi apply only runs the Homebrew path under test.
   mkdir -p \
@@ -523,9 +524,23 @@ copy_desktop_apply_source_fixture() {
 
   cp "$repo_root/Brewfile" "$source_dir/Brewfile"
   cp "$repo_root/Brewfile.macos-desktop-apps.tmpl" "$source_dir/Brewfile.macos-desktop-apps.tmpl"
-  cp "$repo_root/.chezmoiscripts/run_before_01-retry-homebrew-core.sh.tmpl" "$source_dir/.chezmoiscripts/run_before_01-retry-homebrew-core.sh.tmpl"
-  cp "$repo_root/.chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl" "$source_dir/.chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl"
-  cp "$repo_root/.chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl" "$source_dir/.chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl"
+  cp "$repo_root/Brewfile.macos" "$source_dir/Brewfile.macos"
+  sed \
+    -e "s#/opt/homebrew/bin/brew#$fixture_brew_bin#g" \
+    -e "s#/usr/local/bin/brew#$fixture_brew_bin#g" \
+    "$repo_root/.chezmoiscripts/run_before_11-retry-homebrew-core.sh.tmpl" \
+    >"$source_dir/.chezmoiscripts/run_before_11-retry-homebrew-core.sh.tmpl"
+  sed \
+    -e "s#/opt/homebrew/bin/brew#$fixture_brew_bin#g" \
+    -e "s#/usr/local/bin/brew#$fixture_brew_bin#g" \
+    "$repo_root/.chezmoiscripts/run_before_12-retry-homebrew-macos-platform.sh.tmpl" \
+    >"$source_dir/.chezmoiscripts/run_before_12-retry-homebrew-macos-platform.sh.tmpl"
+  cp "$repo_root/.chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl" "$source_dir/.chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl"
+  sed \
+    -e "s#/opt/homebrew/bin/brew#$fixture_brew_bin#g" \
+    -e "s#/usr/local/bin/brew#$fixture_brew_bin#g" \
+    "$repo_root/.chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl" \
+    >"$source_dir/.chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl"
   cp "$terrapod" "$source_dir/dot_local/bin/executable_terrapod"
   cp "$tpod_source" "$source_dir/dot_local/bin/symlink_tpod"
   cp "$repo_root/dot_local/lib/terrapod/homebrew-core-bundle.sh" "$source_dir/dot_local/lib/terrapod/homebrew-core-bundle.sh"
@@ -735,7 +750,7 @@ pass "install warning markers honor XDG_STATE_HOME"
 marker_categories="$(
   sh -c '. "$1"; terrapod_install_warning_categories' sh "$install_warnings_lib"
 )"
-expected_marker_categories="$(printf '%s\n' homebrew-core homebrew-desktop-apps ubuntu-bootstrap shell-integrations mise-tools optional-ai-cli-tools)"
+expected_marker_categories="$(printf '%s\n' homebrew-core homebrew-macos-platform homebrew-desktop-apps ubuntu-bootstrap shell-integrations mise-tools optional-ai-cli-tools)"
 
 if [ "$marker_categories" != "$expected_marker_categories" ]; then
   printf '%s\n' "expected marker categories:" >&2
@@ -2850,7 +2865,7 @@ desktop_apply_bin="$tmp_dir/desktop-apply-bin"
 desktop_apply_log="$tmp_dir/desktop-apply-brew.log"
 desktop_apply_config="$tmp_dir/desktop-apply.toml"
 mkdir -p "$desktop_apply_home" "$desktop_apply_bin"
-copy_desktop_apply_source_fixture "$desktop_apply_source"
+copy_desktop_apply_source_fixture "$desktop_apply_source" "$desktop_apply_bin/brew"
 ln -s "$real_chezmoi" "$desktop_apply_bin/chezmoi"
 write_brew_bundle_stub "$desktop_apply_bin/brew"
 
@@ -2919,7 +2934,7 @@ core_apply_config="$tmp_dir/core-apply.toml"
 core_apply_prefix="$tmp_dir/core-apply-prefix"
 mkdir -p "$core_apply_home" "$core_apply_bin" "$core_apply_prefix"
 chmod 555 "$core_apply_prefix"
-copy_desktop_apply_source_fixture "$core_apply_source"
+copy_desktop_apply_source_fixture "$core_apply_source" "$core_apply_bin/brew"
 ln -s "$real_chezmoi" "$core_apply_bin/chezmoi"
 write_brew_bundle_stub "$core_apply_bin/brew"
 write_desktop_apply_config "$core_apply_config" "$core_apply_source" "$core_apply_home" false false
@@ -2955,7 +2970,7 @@ fi
 pass "Terrapod apply clears a core Homebrew marker after retry succeeds"
 
 HOME="$core_apply_home" XDG_STATE_HOME="$core_apply_state" sh -c \
-  '. "$1"; terrapod_install_warning_write homebrew-core "Homebrew core install needs attention" "old apply core warning."' \
+  '. "$1"; terrapod_install_warning_write homebrew-macos-platform "Homebrew macOS platform install needs attention" "old apply platform warning."' \
   sh "$install_warnings_lib"
 
 if ! HOME="$core_apply_home" XDG_STATE_HOME="$core_apply_state" TERRAPOD_CHEZMOI_CONFIG="$core_apply_config" MACOS_BREW_LOG="$core_apply_log" MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_CASKS="font-d2coding" PATH="$core_apply_bin:/usr/bin:/bin" \
@@ -2964,12 +2979,13 @@ if ! HOME="$core_apply_home" XDG_STATE_HOME="$core_apply_state" TERRAPOD_CHEZMOI
   sed 's/^/  /' "$tmp_dir/core-apply-retry-failure.out" >&2
   printf '%s\n' "core apply retry failure stderr:" >&2
   sed 's/^/  /' "$tmp_dir/core-apply-retry-failure.err" >&2
-  fail "Terrapod apply replaces a core Homebrew marker after retry fails"
+  fail "Terrapod apply replaces a macOS platform Homebrew marker after retry fails"
 fi
 
-core_apply_marker_text="$(cat "$core_apply_marker")"
-assert_contains "$core_apply_marker_text" "failed casks: font-d2coding" "Terrapod apply replaces core marker with current failed cask detail"
-assert_not_contains "$core_apply_marker_text" "old apply core warning" "Terrapod apply removes stale core marker guidance after failed retry"
+platform_apply_marker="$core_apply_state/terrapod/install-warnings/homebrew-macos-platform"
+platform_apply_marker_text="$(cat "$platform_apply_marker")"
+assert_contains "$platform_apply_marker_text" "failed casks: font-d2coding" "Terrapod apply replaces macOS platform marker with current failed font detail"
+assert_not_contains "$platform_apply_marker_text" "old apply platform warning" "Terrapod apply removes stale macOS platform marker guidance after failed retry"
 
 rm -f "$CHEZMOI_APPLY_ARGS_FILE" "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
 

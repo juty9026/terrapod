@@ -5,6 +5,7 @@ TERRAPOD_INSTALL_WARNINGS_LOADED=1
 terrapod_install_warning_categories() {
   printf '%s\n' \
     homebrew-core \
+    homebrew-macos-platform \
     homebrew-desktop-apps \
     ubuntu-bootstrap \
     shell-integrations \
@@ -14,7 +15,7 @@ terrapod_install_warning_categories() {
 
 terrapod_install_warning_is_category() {
   case "$1" in
-    homebrew-core|homebrew-desktop-apps|ubuntu-bootstrap|shell-integrations|mise-tools|optional-ai-cli-tools)
+    homebrew-core|homebrew-macos-platform|homebrew-desktop-apps|ubuntu-bootstrap|shell-integrations|mise-tools|optional-ai-cli-tools)
       return 0
       ;;
     *)

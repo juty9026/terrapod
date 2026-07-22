@@ -225,12 +225,24 @@ assert_managed_paths_exclude_prefix \
   "Brewfile.ai-cli-tools.tmpl" \
   "Ubuntu does not manage the rendered AI CLI tools Brewfile"
 
+for entry in \
+  .chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl \
+  .chezmoiscripts/run_before_11-retry-homebrew-core.sh.tmpl \
+  dot_local/lib/terrapod/homebrew-core-bundle.sh
+do
+  printf '%s\n' "$ubuntu_managed" | grep -Fx "$entry" >/dev/null ||
+    fail "Ubuntu manages cross-profile Homebrew entry: $entry"
+done
+pass "Ubuntu manages cross-profile Homebrew core state"
+
+printf '%s\n' "$ubuntu_managed" | grep -Fx '.chezmoiscripts/run_before_12-retry-homebrew-macos-platform.sh.tmpl' >/dev/null &&
+  fail "Ubuntu must not manage macOS platform retry state"
+pass "Ubuntu excludes macOS platform retry state"
+
 macos_only_entries="
-.chezmoiscripts/run_before_01-retry-homebrew-core.sh.tmpl
-.chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl
+.chezmoiscripts/run_before_12-retry-homebrew-macos-platform.sh.tmpl
+.chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl
 .chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl
-.chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl
-dot_local/lib/terrapod/homebrew-core-bundle.sh
 dot_config/ghostty
 dot_config/private_karabiner
 dot_hammerspoon
@@ -251,14 +263,16 @@ automation_apps_brewfile="$(render_template "$macos_automation_apps_data" "Brewf
 launcher_apps_brewfile="$(render_template "$macos_launcher_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 monitoring_apps_brewfile="$(render_template "$macos_monitoring_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 development_apps_brewfile="$(render_template "$macos_development_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
-macos_bootstrap="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
-macos_terminal_apps_bootstrap="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
-macos_terminal_launcher_apps_bootstrap="$(render_template "$macos_terminal_launcher_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
-macos_development_apps_bootstrap="$(render_template "$macos_development_apps_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
-macos_development_workspace_bootstrap="$(render_template "$macos_development_workspace_data" ".chezmoiscripts/run_onchange_before_00-bootstrap-homebrew.sh.tmpl")"
-macos_core_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_01-retry-homebrew-core.sh.tmpl")"
-macos_desktop_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl")"
-macos_terminal_apps_desktop_retry="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_before_01-retry-homebrew-desktop-apps.sh.tmpl")"
+ubuntu_homebrew_bootstrap="$(render_template "$ubuntu_data" ".chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl")"
+macos_bootstrap="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl")"
+macos_terminal_apps_bootstrap="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl")"
+macos_terminal_launcher_apps_bootstrap="$(render_template "$macos_terminal_launcher_apps_data" ".chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl")"
+macos_development_apps_bootstrap="$(render_template "$macos_development_apps_data" ".chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl")"
+macos_development_workspace_bootstrap="$(render_template "$macos_development_workspace_data" ".chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl")"
+macos_core_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_11-retry-homebrew-core.sh.tmpl")"
+macos_platform_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_12-retry-homebrew-macos-platform.sh.tmpl")"
+macos_desktop_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl")"
+macos_terminal_apps_desktop_retry="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl")"
 macos_mise_tools_installer="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_20-install-mise-tools.sh.tmpl")"
 macos_karabiner_opener="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 macos_terminal_apps_karabiner_opener="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
@@ -269,6 +283,24 @@ assert_contains_text \
   "$macos_bootstrap" \
   'terrapod_homebrew_core_run_bundle "$core_brewfile"' \
   "macOS bootstrap always runs the core Brewfile through the core bundle helper"
+
+assert_contains_text "$ubuntu_homebrew_bootstrap" 'core_brewfile="' "Ubuntu renders the mandatory CLI bundle"
+assert_not_contains_text "$ubuntu_homebrew_bootstrap" 'Brewfile.macos"' "Ubuntu excludes the macOS platform bundle"
+assert_contains_text "$macos_bootstrap" 'macos_brewfile="' "macOS renders the platform bundle"
+assert_contains_text "$macos_bootstrap" 'homebrew-macos-platform' "macOS uses a separate platform warning category"
+assert_contains_text "$ubuntu_homebrew_bootstrap" 'HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade' "Ubuntu bundle apply disables automatic updates"
+
+for bundle_source in \
+  "$repo_root/.chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl" \
+  "$repo_root/.chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl" \
+  "$repo_root/dot_local/lib/terrapod/homebrew-core-bundle.sh"
+do
+  unguarded_bundle_calls="$(grep 'brew bundle --no-upgrade' "$bundle_source" | grep -v 'HOMEBREW_NO_AUTO_UPDATE=1' || true)"
+  if [ -n "$unguarded_bundle_calls" ]; then
+    fail "every Homebrew bundle call disables automatic updates: $bundle_source"
+  fi
+done
+pass "every Homebrew bundle call disables automatic updates"
 
 assert_not_contains_text \
   "$macos_bootstrap" \
@@ -299,6 +331,11 @@ macos_core_retry_script="$tmp_dir/macos-core-retry.sh"
 printf '%s\n' "$macos_core_retry" >"$macos_core_retry_script"
 sh -n "$macos_core_retry_script" || fail "macOS core retry script should be valid sh"
 pass "macOS core retry script is valid sh"
+
+macos_platform_retry_script="$tmp_dir/macos-platform-retry.sh"
+printf '%s\n' "$macos_platform_retry" >"$macos_platform_retry_script"
+sh -n "$macos_platform_retry_script" || fail "macOS platform retry script should be valid sh"
+pass "macOS platform retry script is valid sh"
 
 macos_desktop_retry_script="$tmp_dir/macos-desktop-retry-default.sh"
 printf '%s\n' "$macos_desktop_retry" >"$macos_desktop_retry_script"
@@ -375,6 +412,29 @@ write_brew_bundle_stub() {
     'esac'
 }
 
+replace_standard_brew_path() {
+  input_file="$1"
+  output_file="$2"
+  replacement="$3"
+
+  sed \
+    -e "s#/opt/homebrew/bin/brew#$replacement#g" \
+    -e "s#/usr/local/bin/brew#$replacement#g" \
+    "$input_file" >"$output_file"
+}
+
+macos_bootstrap_with_stub="$tmp_dir/macos-bootstrap-default-with-stub.sh"
+replace_standard_brew_path "$macos_bootstrap_script" "$macos_bootstrap_with_stub" "$macos_brew_bin/brew"
+macos_bootstrap_script="$macos_bootstrap_with_stub"
+
+macos_core_retry_with_stub="$tmp_dir/macos-core-retry-with-stub.sh"
+replace_standard_brew_path "$macos_core_retry_script" "$macos_core_retry_with_stub" "$macos_brew_bin/brew"
+macos_core_retry_script="$macos_core_retry_with_stub"
+
+macos_platform_retry_with_stub="$tmp_dir/macos-platform-retry-with-stub.sh"
+replace_standard_brew_path "$macos_platform_retry_script" "$macos_platform_retry_with_stub" "$macos_brew_bin/brew"
+macos_platform_retry_script="$macos_platform_retry_with_stub"
+
 macos_marker_state="$tmp_dir/macos-marker-state"
 macos_marker_home="$tmp_dir/macos-marker-home"
 mkdir -p "$macos_marker_home"
@@ -393,10 +453,10 @@ fi
 pass "macOS bootstrap default cleanup clears stale homebrew-desktop-apps marker"
 
 homebrew_installer_failure_script="$tmp_dir/macos-bootstrap-homebrew-installer-failure.sh"
-sed \
+printf '%s\n' "$macos_bootstrap" | sed \
   -e "s#/opt/homebrew/bin/brew#$tmp_dir/missing-opt-homebrew-brew#g" \
   -e "s#/usr/local/bin/brew#$tmp_dir/missing-usr-local-brew#g" \
-  "$macos_bootstrap_script" >"$homebrew_installer_failure_script"
+  >"$homebrew_installer_failure_script"
 sh -n "$homebrew_installer_failure_script" || fail "macOS bootstrap no-Homebrew test script should be valid sh"
 
 homebrew_installer_failure_bin="$tmp_dir/homebrew-installer-failure-bin"
@@ -483,7 +543,7 @@ mkdir -p "$core_detail_bin" "$core_detail_home" "$core_detail_prefix"
 chmod 555 "$core_detail_prefix"
 write_brew_bundle_stub "$core_detail_bin/brew"
 
-if ! HOME="$core_detail_home" XDG_STATE_HOME="$core_detail_state" MACOS_BREW_LOG="$core_detail_log" MACOS_BREW_PREFIX="$core_detail_prefix" MACOS_BREW_ECHO_OUTPUT=1 MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_FORMULAE="gum" MACOS_BREW_FAIL_CASKS="font-d2coding" PATH="$core_detail_bin:/usr/bin:/bin" \
+if ! HOME="$core_detail_home" XDG_STATE_HOME="$core_detail_state" MACOS_BREW_LOG="$core_detail_log" MACOS_BREW_PREFIX="$core_detail_prefix" MACOS_BREW_ECHO_OUTPUT=1 MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_FORMULAE="gum" PATH="$core_detail_bin:/usr/bin:/bin" \
   sh "$macos_bootstrap_script" >"$tmp_dir/core-detail.out" 2>"$tmp_dir/core-detail.err"; then
   fail "core Homebrew bundle failure records a marker and does not block bootstrap script"
 fi
@@ -500,7 +560,6 @@ core_detail_marker_text="$(cat "$core_detail_marker")"
 assert_contains_text "$core_detail_marker_text" "category='homebrew-core'" "core marker keeps one stable category"
 assert_contains_text "$core_detail_marker_text" "summary='Homebrew core install needs attention'" "core marker keeps stable summary"
 assert_contains_text "$core_detail_marker_text" "failed formulae: gum" "core marker guidance includes reliable failed formula names"
-assert_contains_text "$core_detail_marker_text" "failed casks: font-d2coding" "core marker guidance includes reliable failed cask names"
 assert_contains_text "$core_detail_marker_text" "Homebrew prefix is not writable: $core_detail_prefix" "core marker guidance identifies unwritable shared prefix"
 assert_not_contains_text "$core_detail_marker_text" "btop" "core marker excludes successful formula names"
 assert_not_contains_text "$core_detail_marker_text" "chown" "core marker avoids broad ownership command guidance"
@@ -560,6 +619,35 @@ fi
 core_retry_failure_marker_text="$(cat "$core_retry_failure_state/terrapod/install-warnings/homebrew-core")"
 assert_contains_text "$core_retry_failure_marker_text" "failed formulae: mise" "failed core retry replaces marker with current failed formula detail"
 assert_not_contains_text "$core_retry_failure_marker_text" "old core retry warning" "failed core retry replaces stale marker guidance"
+
+platform_retry_state="$tmp_dir/platform-retry-state"
+platform_retry_home="$tmp_dir/platform-retry-home"
+platform_retry_log="$tmp_dir/platform-retry-brew.log"
+platform_retry_bin="$tmp_dir/platform-retry-bin"
+mkdir -p "$platform_retry_home" "$platform_retry_bin"
+write_brew_bundle_stub "$platform_retry_bin/brew"
+HOME="$platform_retry_home" XDG_STATE_HOME="$platform_retry_state" sh -c \
+  '. "$1"; terrapod_install_warning_write homebrew-macos-platform "Homebrew macOS platform install needs attention" "old platform retry warning."' \
+  sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
+
+if ! HOME="$platform_retry_home" XDG_STATE_HOME="$platform_retry_state" MACOS_BREW_LOG="$platform_retry_log" MACOS_BREW_FAIL_CASKS="font-d2coding" PATH="$platform_retry_bin:/usr/bin:/bin" \
+  sh "$macos_platform_retry_script" >"$tmp_dir/platform-retry-failure.out" 2>"$tmp_dir/platform-retry-failure.err"; then
+  fail "failed macOS platform retry records a replacement marker and exits successfully"
+fi
+
+platform_retry_marker="$platform_retry_state/terrapod/install-warnings/homebrew-macos-platform"
+platform_retry_marker_text="$(cat "$platform_retry_marker")"
+assert_contains_text "$platform_retry_marker_text" "failed casks: font-d2coding" "failed macOS platform retry records the failed font cask"
+assert_not_contains_text "$platform_retry_marker_text" "old platform retry warning" "failed macOS platform retry replaces stale guidance"
+
+if ! HOME="$platform_retry_home" XDG_STATE_HOME="$platform_retry_state" MACOS_BREW_LOG="$platform_retry_log" PATH="$platform_retry_bin:/usr/bin:/bin" \
+  sh "$macos_platform_retry_script" >"$tmp_dir/platform-retry-success.out" 2>"$tmp_dir/platform-retry-success.err"; then
+  fail "successful macOS platform retry succeeds"
+fi
+if [ -e "$platform_retry_marker" ]; then
+  fail "successful macOS platform retry clears its marker"
+fi
+pass "successful macOS platform retry clears its marker"
 assert_contains_text "$core_retry_failure_marker_text" "updated_at='" "failed core retry replacement marker keeps updated_at"
 
 mise_missing_without_core_home="$tmp_dir/mise-missing-without-core-home"
@@ -662,7 +750,10 @@ assert_text_equals \
   "development-apps group renders exactly the expected casks"
 
 development_apps_bootstrap_script="$tmp_dir/macos-development-apps-bootstrap.sh"
-printf '%s\n' "$macos_development_apps_bootstrap" >"$development_apps_bootstrap_script"
+printf '%s\n' "$macos_development_apps_bootstrap" | sed \
+  -e "s#/opt/homebrew/bin/brew#$tmp_dir/development-apps-failure-bin/brew#g" \
+  -e "s#/usr/local/bin/brew#$tmp_dir/development-apps-failure-bin/brew#g" \
+  >"$development_apps_bootstrap_script"
 sh -n "$development_apps_bootstrap_script" || fail "development-apps bootstrap script should be valid sh"
 pass "development-apps bootstrap script is valid sh"
 
@@ -689,7 +780,10 @@ assert_contains_text "$development_apps_failure_marker_text" "failed casks: stab
 assert_contains_text "$development_apps_failure_marker_text" "App Groups: development-apps" "Orca failure attribution identifies the development-apps group"
 
 terminal_launcher_bootstrap_script="$tmp_dir/macos-terminal-launcher-bootstrap.sh"
-printf '%s\n' "$macos_terminal_launcher_apps_bootstrap" >"$terminal_launcher_bootstrap_script"
+printf '%s\n' "$macos_terminal_launcher_apps_bootstrap" | sed \
+  -e "s#/opt/homebrew/bin/brew#$tmp_dir/terminal-launcher-bin/brew#g" \
+  -e "s#/usr/local/bin/brew#$tmp_dir/terminal-launcher-bin/brew#g" \
+  >"$terminal_launcher_bootstrap_script"
 sh -n "$terminal_launcher_bootstrap_script" || fail "terminal and launcher bootstrap script should be valid sh"
 pass "terminal and launcher bootstrap script is valid sh"
 
@@ -725,28 +819,28 @@ core_then_desktop_log="$tmp_dir/core-then-desktop-brew.log"
 mkdir -p "$core_then_desktop_bin" "$core_then_desktop_home"
 write_brew_bundle_stub "$core_then_desktop_bin/brew"
 
-if ! HOME="$core_then_desktop_home" XDG_STATE_HOME="$core_then_desktop_state" MACOS_BREW_LOG="$core_then_desktop_log" MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_FORMULAE="gum" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty raycast" PATH="$core_then_desktop_bin:/usr/bin:/bin" \
+if ! HOME="$core_then_desktop_home" XDG_STATE_HOME="$core_then_desktop_state" MACOS_BREW_LOG="$core_then_desktop_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="font-d2coding ghostty raycast" PATH="$core_then_desktop_bin:/usr/bin:/bin" \
   sh "$terminal_launcher_bootstrap_script" >"$tmp_dir/core-then-desktop.out" 2>"$tmp_dir/core-then-desktop.err"; then
   printf '%s\n' "core then desktop stdout:" >&2
   sed 's/^/  /' "$tmp_dir/core-then-desktop.out" >&2
   printf '%s\n' "core then desktop stderr:" >&2
   sed 's/^/  /' "$tmp_dir/core-then-desktop.err" >&2
-  fail "macOS bootstrap records core and desktop app warnings in one App Groups run"
+  fail "macOS bootstrap records platform and desktop app warnings in one App Groups run"
 fi
 
-core_then_desktop_core_marker="$core_then_desktop_state/terrapod/install-warnings/homebrew-core"
+core_then_desktop_core_marker="$core_then_desktop_state/terrapod/install-warnings/homebrew-macos-platform"
 core_then_desktop_desktop_marker="$core_then_desktop_state/terrapod/install-warnings/homebrew-desktop-apps"
 if [ ! -f "$core_then_desktop_core_marker" ]; then
-  fail "macOS bootstrap keeps homebrew-core marker when desktop App Groups also need attention"
+  fail "macOS bootstrap keeps homebrew-macos-platform marker when desktop App Groups also need attention"
 fi
 if [ ! -f "$core_then_desktop_desktop_marker" ]; then
   fail "macOS bootstrap continues to desktop App Groups after recording a homebrew-core marker"
 fi
-pass "macOS bootstrap records core and desktop app warnings in one App Groups run"
+pass "macOS bootstrap records platform and desktop app warnings in one App Groups run"
 
 core_then_desktop_core_text="$(cat "$core_then_desktop_core_marker")"
 core_then_desktop_desktop_text="$(cat "$core_then_desktop_desktop_marker")"
-assert_contains_text "$core_then_desktop_core_text" "failed formulae: gum" "combined bootstrap core marker keeps failed formula detail"
+assert_contains_text "$core_then_desktop_core_text" "failed casks: font-d2coding" "combined bootstrap platform marker keeps failed font detail"
 assert_contains_text "$core_then_desktop_desktop_text" "failed casks: ghostty, raycast" "combined bootstrap desktop marker keeps failed cask detail"
 
 terminal_launcher_marker_failure_bin="$tmp_dir/terminal-launcher-marker-failure-bin"
@@ -793,7 +887,10 @@ fi
 pass "macOS desktop retry failure blocks when the warning marker cannot be recorded"
 
 bulk_only_bootstrap_script="$tmp_dir/macos-bulk-only-bootstrap.sh"
-printf '%s\n' "$macos_terminal_launcher_apps_bootstrap" >"$bulk_only_bootstrap_script"
+printf '%s\n' "$macos_terminal_launcher_apps_bootstrap" | sed \
+  -e "s#/opt/homebrew/bin/brew#$tmp_dir/bulk-only-bin/brew#g" \
+  -e "s#/usr/local/bin/brew#$tmp_dir/bulk-only-bin/brew#g" \
+  >"$bulk_only_bootstrap_script"
 sh -n "$bulk_only_bootstrap_script" || fail "bulk-only desktop bootstrap script should be valid sh"
 pass "bulk-only desktop bootstrap script is valid sh"
 
@@ -830,7 +927,8 @@ awk '
     next
   }
   { print }
-' "$terminal_launcher_bootstrap_script" >"$fallback_bootstrap_script"
+' "$terminal_launcher_bootstrap_script" |
+  sed "s#$tmp_dir/terminal-launcher-bin/brew#$tmp_dir/fallback-bin/brew#g" >"$fallback_bootstrap_script"
 sh -n "$fallback_bootstrap_script" || fail "fallback desktop bootstrap script should be valid sh"
 pass "fallback desktop bootstrap script is valid sh"
 
@@ -852,7 +950,10 @@ assert_not_contains_text "$fallback_marker_text" "failed casks:" "desktop app fa
 assert_not_contains_text "$fallback_marker_text" "App Groups:" "desktop app fallback marker avoids invented App Group detail"
 
 terminal_only_bootstrap_script="$tmp_dir/macos-terminal-only-bootstrap.sh"
-printf '%s\n' "$macos_terminal_apps_bootstrap" >"$terminal_only_bootstrap_script"
+printf '%s\n' "$macos_terminal_apps_bootstrap" | sed \
+  -e "s#/opt/homebrew/bin/brew#$tmp_dir/terminal-only-bin/brew#g" \
+  -e "s#/usr/local/bin/brew#$tmp_dir/terminal-only-bin/brew#g" \
+  >"$terminal_only_bootstrap_script"
 sh -n "$terminal_only_bootstrap_script" || fail "terminal-only bootstrap script should be valid sh"
 pass "terminal-only bootstrap script is valid sh"
 
@@ -964,12 +1065,12 @@ for cask in \
   font-jetbrains-mono-nerd-font \
   font-d2coding
 do
-  if ! grep -Fx "cask \"$cask\"" "$repo_root/Brewfile" >/dev/null; then
-    fail "core Brewfile contains expected terminal font cask: $cask"
+  if ! grep -Fx "cask \"$cask\"" "$repo_root/Brewfile.macos" >/dev/null; then
+    fail "macOS platform Brewfile contains expected terminal font cask: $cask"
   fi
 done
 
-pass "core Brewfile contains expected terminal font casks"
+pass "macOS platform Brewfile contains expected terminal font casks"
 
 if ! grep -Fx 'brew "gum"' "$repo_root/Brewfile" >/dev/null; then
   fail "core Brewfile declares gum as the setup UI dependency"
@@ -977,11 +1078,11 @@ fi
 
 pass "core Brewfile declares gum as the setup UI dependency"
 
-if awk '/^[[:space:]]*cask[[:space:]]+"/ && $0 !~ /^[[:space:]]*cask[[:space:]]+"font-(jetbrains-mono-nerd-font|d2coding)"$/ { found=1 } END { exit found ? 0 : 1 }' "$repo_root/Brewfile"; then
-  fail "core Brewfile casks are terminal font casks only"
+if grep -E '^[[:space:]]*cask[[:space:]]+"' "$repo_root/Brewfile" >/dev/null; then
+  fail "cross-profile core Brewfile excludes macOS-only casks"
 fi
 
-pass "core Brewfile casks are terminal font casks only"
+pass "cross-profile core Brewfile excludes macOS-only casks"
 
 for app_config in \
   ".config/ghostty/config" \
@@ -1115,17 +1216,24 @@ assert_managed_paths_include_prefix \
 
 ubuntu_mise_config="$(render_template "$ubuntu_data" "dot_config/mise/config.toml.tmpl")"
 
-if ! printf '%s\n' "$ubuntu_mise_config" | grep -F '"aqua:neovim/neovim" = "latest"' >/dev/null; then
-  fail "Ubuntu VPS keeps plain Neovim in the Core Shell Stack"
+if printf '%s\n' "$ubuntu_mise_config" | grep -F '"aqua:neovim/neovim" = "latest"' >/dev/null; then
+  fail "Ubuntu VPS removes duplicate mise-managed Neovim"
 fi
 
-pass "Ubuntu VPS keeps plain Neovim in the Core Shell Stack"
+pass "Ubuntu VPS removes duplicate mise-managed Neovim"
 
-if ! printf '%s\n' "$ubuntu_mise_config" | grep -F '"aqua:cli/cli" = "latest"' >/dev/null; then
-  fail "Ubuntu VPS installs GitHub CLI gh in the Core Shell Stack"
+if printf '%s\n' "$ubuntu_mise_config" | grep -F '"aqua:cli/cli" = "latest"' >/dev/null; then
+  fail "Ubuntu VPS removes duplicate mise-managed GitHub CLI"
 fi
 
-pass "Ubuntu VPS installs GitHub CLI gh in the Core Shell Stack"
+pass "Ubuntu VPS removes duplicate mise-managed GitHub CLI"
+
+for formula in neovim gh; do
+  if ! grep -Fx "brew \"$formula\"" "$repo_root/Brewfile" >/dev/null; then
+    fail "cross-profile Brewfile declares migrated formula: $formula"
+  fi
+done
+pass "cross-profile Brewfile declares migrated Neovim and GitHub CLI"
 
 mise_tools_installer="$(render_template "$ubuntu_data" ".chezmoiscripts/run_onchange_after_20-install-mise-tools.sh.tmpl")"
 mise_tools_retry="$(render_template "$ubuntu_data" ".chezmoiscripts/run_after_21-retry-mise-tools.sh.tmpl")"

@@ -78,11 +78,8 @@ if ! $sudo_cmd apt-get install -y \
   build-essential \
   ca-certificates \
   curl \
-{{ if or (default false (get . "enableAiCliTools")) (default false (get . "enableDevelopmentWorkspace")) }}
   file \
-{{ end }}
   git \
-  gpg \
   libbz2-dev \
   libffi-dev \
   liblzma-dev \
@@ -92,9 +89,7 @@ if ! $sudo_cmd apt-get install -y \
   libssl-dev \
   libxml2-dev \
   libxmlsec1-dev \
-{{ if or (default false (get . "enableAiCliTools")) (default false (get . "enableDevelopmentWorkspace")) }}
   procps \
-{{ end }}
   tk-dev \
   unzip \
   xz-utils \
@@ -103,78 +98,7 @@ if ! $sudo_cmd apt-get install -y \
   mark_install_warning \
     ubuntu-bootstrap \
     "Ubuntu bootstrap needs attention" \
-    "Review APT install output, fix package access, then rerun tpod apply."
-  exit_after_install_warning
-fi
-
-if ! $sudo_cmd install -dm 755 /etc/apt/keyrings; then
-  mark_install_warning \
-    ubuntu-bootstrap \
-    "Ubuntu bootstrap needs attention" \
-    "Check APT keyring permissions, then rerun tpod apply."
-  exit_after_install_warning
-fi
-if ! curl -fSs https://mise.en.dev/gpg-key.pub | $sudo_cmd tee /etc/apt/keyrings/mise-archive-keyring.asc >/dev/null; then
-  mark_install_warning \
-    ubuntu-bootstrap \
-    "Ubuntu bootstrap needs attention" \
-    "Check network access to https://mise.en.dev, then rerun tpod apply."
-  exit_after_install_warning
-fi
-if ! printf '%s\n' "deb [signed-by=/etc/apt/keyrings/mise-archive-keyring.asc] https://mise.en.dev/deb stable main" | $sudo_cmd tee /etc/apt/sources.list.d/mise.list >/dev/null; then
-  mark_install_warning \
-    ubuntu-bootstrap \
-    "Ubuntu bootstrap needs attention" \
-    "Check APT source list permissions, then rerun tpod apply."
-  exit_after_install_warning
-fi
-charm_key_file="$(mktemp "${TMPDIR:-/tmp}/terrapod-charm-key.XXXXXX")"
-if ! curl -fsSL https://repo.charm.sh/apt/gpg.key -o "$charm_key_file"; then
-  echo "Failed to fetch the Charm APT signing key for gum. Check network access to https://repo.charm.sh/apt/gpg.key and rerun Terrapod apply." >&2
-  mark_install_warning \
-    ubuntu-bootstrap \
-    "Ubuntu bootstrap needs attention" \
-    "Check network access to https://repo.charm.sh, then rerun tpod apply."
-  rm -f "$charm_key_file"
-  exit_after_install_warning
-fi
-if ! $sudo_cmd gpg --dearmor --yes -o /etc/apt/keyrings/charm.gpg "$charm_key_file"; then
-  echo "Failed to install the Charm APT signing key for gum. Check APT keyring permissions and rerun Terrapod apply." >&2
-  mark_install_warning \
-    ubuntu-bootstrap \
-    "Ubuntu bootstrap needs attention" \
-    "Check APT keyring permissions, then rerun tpod apply."
-  rm -f "$charm_key_file"
-  exit_after_install_warning
-fi
-rm -f "$charm_key_file"
-if ! printf '%s\n' "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | $sudo_cmd tee /etc/apt/sources.list.d/charm.list >/dev/null; then
-  mark_install_warning \
-    ubuntu-bootstrap \
-    "Ubuntu bootstrap needs attention" \
-    "Check APT source list permissions, then rerun tpod apply."
-  exit_after_install_warning
-fi
-
-if ! $sudo_cmd apt-get update -y; then
-  mark_install_warning \
-    ubuntu-bootstrap \
-    "Ubuntu bootstrap needs attention" \
-    "Review APT update output after adding tool repositories, then rerun tpod apply."
-  exit_after_install_warning
-fi
-if ! $sudo_cmd apt-get install -y mise; then
-  mark_install_warning \
-    ubuntu-bootstrap \
-    "Ubuntu bootstrap needs attention" \
-    "Review APT output for mise installation, then rerun tpod apply."
-  exit_after_install_warning
-fi
-if ! $sudo_cmd apt-get install -y gum; then
-  mark_install_warning \
-    ubuntu-bootstrap \
-    "Ubuntu bootstrap needs attention" \
-    "Review APT output for gum installation, then rerun tpod apply."
+    "Review APT install output for system and Homebrew prerequisites, then rerun tpod apply."
   exit_after_install_warning
 fi
 

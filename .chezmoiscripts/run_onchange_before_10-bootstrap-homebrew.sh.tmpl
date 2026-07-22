@@ -1,10 +1,12 @@
-{{- if eq .chezmoi.os "darwin" -}}
-{{- $enableMacosAppGroups := or
-  (default false (get . "enableMacosAppGroupTerminalApps"))
-  (default false (get . "enableMacosAppGroupAutomation"))
-  (default false (get . "enableMacosAppGroupLauncher"))
-  (default false (get . "enableMacosAppGroupMonitoring"))
-  (default false (get . "enableMacosAppGroupDevelopmentApps"))
+{{- if or (eq .chezmoi.os "darwin") (eq .chezmoi.os "linux") -}}
+{{- $enableMacosAppGroups := and
+  (eq .chezmoi.os "darwin")
+  (or
+    (default false (get . "enableMacosAppGroupTerminalApps"))
+    (default false (get . "enableMacosAppGroupAutomation"))
+    (default false (get . "enableMacosAppGroupLauncher"))
+    (default false (get . "enableMacosAppGroupMonitoring"))
+    (default false (get . "enableMacosAppGroupDevelopmentApps")))
 -}}
 #!/bin/sh
 set -eu
@@ -55,13 +57,11 @@ exit_after_nonblocking_install_warning() {
 }
 
 continue_after_core_install_warning() {
-{{ if $enableMacosAppGroups -}}
   if [ "$INSTALL_WARNING_RECORDED" -ne 1 ]; then
     exit 1
   fi
-{{ else -}}
-  exit_after_nonblocking_install_warning
-{{ end -}}
+
+  return 0
 }
 
 clear_install_warning() {
@@ -123,7 +123,7 @@ run_desktop_app_bundle() {
   brewfile="$1"
   desktop_app_failure_guidance_text="Review Homebrew desktop app bundle output, fix app installation access, then rerun tpod apply."
 
-  if brew bundle --no-upgrade --file="$brewfile"; then
+  if HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="$brewfile"; then
     return 0
   fi
 
@@ -163,7 +163,7 @@ run_desktop_app_bundle() {
       return 1
     fi
 
-    if ! brew bundle --no-upgrade --file="$single_cask_brewfile"; then
+    if ! HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="$single_cask_brewfile"; then
       if ! printf '%s\n' "$cask" >>"$failed_casks_file"; then
         cleanup_desktop_app_bundle_temps
         return 1
@@ -203,19 +203,16 @@ run_desktop_app_bundle() {
 }
 
 find_brew() {
-  if command -v brew >/dev/null 2>&1; then
-    command -v brew
-    return
-  fi
+  case "{{ .chezmoi.os }}:$(uname -m)" in
+    darwin:arm64) brew_bin=/opt/homebrew/bin/brew ;;
+    darwin:x86_64) brew_bin=/usr/local/bin/brew ;;
+    linux:x86_64|linux:aarch64|linux:arm64) brew_bin=/home/linuxbrew/.linuxbrew/bin/brew ;;
+    *) brew_bin= ;;
+  esac
 
-  if [ -x /opt/homebrew/bin/brew ]; then
-    printf '%s\n' /opt/homebrew/bin/brew
-    return
-  fi
-
-  if [ -x /usr/local/bin/brew ]; then
-    printf '%s\n' /usr/local/bin/brew
-    return
+  if [ -n "$brew_bin" ] && [ -x "$brew_bin" ]; then
+    printf '%s\n' "$brew_bin"
+    return 0
   fi
 
   return 1
@@ -276,7 +273,7 @@ if [ -f "$core_brewfile" ]; then
       continue_after_core_install_warning
     fi
   else
-    if brew bundle --no-upgrade --file="$core_brewfile"; then
+    if HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="$core_brewfile"; then
       clear_install_warning homebrew-core
     else
       mark_install_warning \
@@ -287,6 +284,33 @@ if [ -f "$core_brewfile" ]; then
     fi
   fi
 fi
+
+{{ if eq .chezmoi.os "darwin" -}}
+macos_brewfile="{{ .chezmoi.sourceDir }}/Brewfile.macos"
+
+# macOS platform Brewfile checksum: {{ include "Brewfile.macos" | sha256sum }}
+if [ -f "$macos_brewfile" ]; then
+  if [ "${TERRAPOD_HOMEBREW_CORE_BUNDLE_LOADED:-}" = "1" ]; then
+    if ! terrapod_homebrew_core_run_bundle "$macos_brewfile"; then
+      mark_install_warning \
+        homebrew-macos-platform \
+        "Homebrew macOS platform install needs attention" \
+        "$TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT" || exit 1
+    else
+      clear_install_warning homebrew-macos-platform
+    fi
+  else
+    if ! HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="$macos_brewfile"; then
+      mark_install_warning \
+        homebrew-macos-platform \
+        "Homebrew macOS platform install needs attention" \
+        "Review Homebrew macOS platform bundle output, fix package access, then rerun tpod apply." || exit 1
+    else
+      clear_install_warning homebrew-macos-platform
+    fi
+  fi
+fi
+{{ end -}}
 
 {{ if $enableMacosAppGroups -}}
 desktop_brewfile="$(mktemp "${TMPDIR:-/tmp}/terrapod-macos-desktop-apps.XXXXXX")"

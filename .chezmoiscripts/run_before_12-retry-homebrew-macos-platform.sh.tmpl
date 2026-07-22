@@ -1,0 +1,66 @@
+{{- if eq .chezmoi.os "darwin" -}}
+#!/bin/sh
+set -eu
+
+install_warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
+TERRAPOD_INSTALL_WARNINGS_LOADED=
+if [ -f "$install_warnings_lib" ]; then
+  . "$install_warnings_lib"
+fi
+
+homebrew_core_bundle_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/homebrew-core-bundle.sh"
+TERRAPOD_HOMEBREW_CORE_BUNDLE_LOADED=
+if [ -f "$homebrew_core_bundle_lib" ]; then
+  . "$homebrew_core_bundle_lib"
+fi
+
+if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ] ||
+  [ "${TERRAPOD_HOMEBREW_CORE_BUNDLE_LOADED:-}" != "1" ]; then
+  exit 0
+fi
+
+category=homebrew-macos-platform
+brewfile="{{ .chezmoi.sourceDir }}/Brewfile.macos"
+summary="Homebrew macOS platform install needs attention"
+
+marker_path="$(terrapod_install_warning_path "$category" 2>/dev/null || true)"
+if [ -z "$marker_path" ] || [ ! -f "$marker_path" ]; then
+  exit 0
+fi
+
+case "darwin:$(uname -m)" in
+  darwin:arm64) brew_bin=/opt/homebrew/bin/brew ;;
+  darwin:x86_64) brew_bin=/usr/local/bin/brew ;;
+  *) brew_bin= ;;
+esac
+
+if [ -z "$brew_bin" ] || [ ! -x "$brew_bin" ]; then
+  terrapod_install_warning_write \
+    "$category" \
+    "$summary" \
+    "Install Homebrew from https://brew.sh, then rerun tpod apply." || exit 1
+  exit 0
+fi
+
+if ! brew_shellenv="$("$brew_bin" shellenv)"; then
+  terrapod_install_warning_write \
+    "$category" \
+    "$summary" \
+    "Fix Homebrew shellenv, then rerun tpod apply." || exit 1
+  exit 0
+fi
+eval "$brew_shellenv"
+brew analytics off >/dev/null 2>&1 || true
+
+if [ ! -f "$brewfile" ]; then
+  terrapod_install_warning_clear "$category" || true
+  exit 0
+fi
+
+if terrapod_homebrew_core_run_bundle "$brewfile"; then
+  terrapod_install_warning_clear "$category" || true
+  exit 0
+fi
+terrapod_install_warning_write "$category" "$summary" "$TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT" || exit 1
+exit 0
+{{- end }}

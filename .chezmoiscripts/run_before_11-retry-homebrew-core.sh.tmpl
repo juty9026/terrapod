@@ -1,4 +1,4 @@
-{{- if eq .chezmoi.os "darwin" -}}
+{{- if or (eq .chezmoi.os "darwin") (eq .chezmoi.os "linux") -}}
 #!/bin/sh
 set -eu
 
@@ -39,19 +39,16 @@ if [ -z "$core_marker_path" ] || [ ! -f "$core_marker_path" ]; then
 fi
 
 find_brew() {
-  if command -v brew >/dev/null 2>&1; then
-    command -v brew
-    return
-  fi
+  case "{{ .chezmoi.os }}:$(uname -m)" in
+    darwin:arm64) brew_bin=/opt/homebrew/bin/brew ;;
+    darwin:x86_64) brew_bin=/usr/local/bin/brew ;;
+    linux:x86_64|linux:aarch64|linux:arm64) brew_bin=/home/linuxbrew/.linuxbrew/bin/brew ;;
+    *) brew_bin= ;;
+  esac
 
-  if [ -x /opt/homebrew/bin/brew ]; then
-    printf '%s\n' /opt/homebrew/bin/brew
-    return
-  fi
-
-  if [ -x /usr/local/bin/brew ]; then
-    printf '%s\n' /usr/local/bin/brew
-    return
+  if [ -n "$brew_bin" ] && [ -x "$brew_bin" ]; then
+    printf '%s\n' "$brew_bin"
+    return 0
   fi
 
   return 1

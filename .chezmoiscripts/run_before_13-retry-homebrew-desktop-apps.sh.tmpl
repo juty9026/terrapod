@@ -94,7 +94,7 @@ run_desktop_app_bundle() {
   brewfile="$1"
   desktop_app_failure_guidance_text="Review Homebrew desktop app bundle output, fix app installation access, then rerun tpod apply."
 
-  if brew bundle --no-upgrade --file="$brewfile"; then
+  if HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="$brewfile"; then
     return 0
   fi
 
@@ -134,7 +134,7 @@ run_desktop_app_bundle() {
       return 1
     fi
 
-    if ! brew bundle --no-upgrade --file="$single_cask_brewfile"; then
+    if ! HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="$single_cask_brewfile"; then
       if ! printf '%s\n' "$cask" >>"$failed_casks_file"; then
         cleanup_desktop_app_bundle_temps
         return 1
