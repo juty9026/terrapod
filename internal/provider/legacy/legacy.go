@@ -351,10 +351,16 @@ func operationDigest(operation RemovalOperation) [32]byte {
 }
 
 func validateDesiredObservation(resource model.Resource, desired model.Observation, paths PathResolver) error {
-	if desired.Provider != "" && desired.Provider != resource.Provider {
+	if desired.Present && desired.Provider != resource.Provider {
 		return &ErrInvalidDesiredObservation{Detail: "provider mismatch"}
 	}
-	if desired.Package != "" && desired.Package != resource.Package {
+	if desired.Present && desired.Package != resource.Package {
+		return &ErrInvalidDesiredObservation{Detail: "package mismatch"}
+	}
+	if !desired.Present && desired.Provider != "" && desired.Provider != resource.Provider {
+		return &ErrInvalidDesiredObservation{Detail: "provider mismatch"}
+	}
+	if !desired.Present && desired.Package != "" && desired.Package != resource.Package {
 		return &ErrInvalidDesiredObservation{Detail: "package mismatch"}
 	}
 	if !desired.Present {
@@ -512,11 +518,12 @@ func legacyResource(desired model.Resource, declaration Declaration, providerNam
 	legacy := cloneResource(desired)
 	legacy.Provider = providerName
 	legacy.Package = declaration.Package
+	legacy.Commands = nil
 	return legacy
 }
 
 func pruneOperation(desired model.Resource, declaration Declaration, providerName string) model.Operation {
-	return model.Operation{ID: "legacy-prune:" + string(desired.ID) + ":" + string(declaration.Kind), ResourceID: desired.ID, Kind: model.OperationPrune, Provider: providerName, Package: declaration.Package, Removes: []string{declaration.Package}}
+	return model.Operation{ID: "legacy-prune:" + string(desired.ID) + ":" + string(declaration.Kind), ResourceID: desired.ID, Kind: model.OperationPrune, Provider: providerName, Package: declaration.Package, RequiresPrivilege: providerName == "apt", Removes: []string{declaration.Package}}
 }
 
 func observationFromReceipt(declaration Declaration, receipt Receipt) (Observation, error) {

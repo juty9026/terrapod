@@ -324,7 +324,7 @@ func (h *homebrewHandler) inspect(ctx context.Context, desired model.Resource, d
 	if err != nil {
 		return Receipt{}, fmt.Errorf("legacy: list Homebrew-owned files for %q: %w", declaration.Package, err)
 	}
-	owned := make(map[string]string)
+	commandCandidates := make(map[string][]string, len(desired.Commands))
 	for _, line := range strings.Split(strings.TrimSuffix(string(list.Stdout), "\n"), "\n") {
 		if line == "" || !cleanAbsolute(line) {
 			return Receipt{}, errors.New("legacy: invalid Homebrew file receipt")
@@ -333,16 +333,19 @@ func (h *homebrewHandler) inspect(ctx context.Context, desired model.Resource, d
 		if resolveErr != nil || !cleanAbsolute(resolved) || !pathWithin(resolved, h.prefix) {
 			return Receipt{}, errors.New("legacy: Homebrew file receipt escapes trusted prefix")
 		}
-		base := filepath.Base(line)
-		if _, duplicate := owned[base]; duplicate {
-			return Receipt{}, errors.New("legacy: ambiguous Homebrew file receipt")
+		for _, command := range desired.Commands {
+			if line == filepath.Join(h.prefix, "bin", command) || line == filepath.Join(h.prefix, "sbin", command) {
+				commandCandidates[command] = append(commandCandidates[command], line)
+			}
 		}
-		owned[base] = line
 	}
 	paths := make(map[string]string, len(desired.Commands))
 	for _, command := range desired.Commands {
-		if path, ok := owned[command]; ok {
-			paths[command] = path
+		if len(commandCandidates[command]) > 1 {
+			return Receipt{}, errors.New("legacy: ambiguous Homebrew command receipt")
+		}
+		if len(commandCandidates[command]) == 1 {
+			paths[command] = commandCandidates[command][0]
 		}
 	}
 	return Receipt{Present: true, Prefixes: []string{h.prefix}, Paths: paths}, nil

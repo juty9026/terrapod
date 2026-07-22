@@ -86,7 +86,7 @@ jq -r '.resources[] | select(.provider == "homebrew-formula" or .provider == "ho
     (.profiles | join(",")),
     .versionPolicy,
     (if (.commands | length) == 0 then "-" else (.commands | join(",")) end),
-    (if (.metadata | length) == 0 then "-" else (.metadata | to_entries | sort_by(.key) | map("\(.key)=\(.value)") | join(",")) end),
+    (if ([.metadata | to_entries[] | select(.key | startswith("legacy.") | not)] | length) == 0 then "-" else ([.metadata | to_entries[] | select(.key | startswith("legacy.") | not)] | sort_by(.key) | map("\(.key)=\(.value)") | join(",")) end),
     (if (.dependsOn | length) == 0 then "-" else (.dependsOn | sort | join(",")) end)
   ] | @tsv' "$catalog" | LC_ALL=C sort >"$tmp_dir/catalog-homebrew"
 if ! cmp -s "$tmp_dir/expected-catalog-homebrew-sorted" "$tmp_dir/catalog-homebrew"; then
@@ -94,6 +94,59 @@ if ! cmp -s "$tmp_dir/expected-catalog-homebrew-sorted" "$tmp_dir/catalog-homebr
   fail "signed catalog has the exact global Homebrew resource contract"
 fi
 pass "signed catalog has the exact global Homebrew resource contract"
+
+if ! jq -e 'all(.resources[] | select(.provider == "homebrew-formula" or .provider == "homebrew-cask"); .metadata["legacy.homebrew.package"] == .package)' "$catalog" >/dev/null; then
+  fail "every Homebrew resource has exact legacy package identity"
+fi
+pass "every Homebrew resource has exact legacy package identity"
+
+cat >"$tmp_dir/expected-legacy-transitions" <<'EOF'
+core.bat	-	-	aqua:sharkdp/bat	-	-	-
+core.btop	-	-	aqua:aristocratos/btop	vps-shell	-	-
+core.dust	-	-	aqua:bootandy/dust	-	-	-
+core.duf	-	-	aqua:muesli/duf	-	-	-
+core.fastfetch	-	-	aqua:fastfetch-cli/fastfetch	-	-	-
+core.fd	-	-	aqua:sharkdp/fd	-	-	-
+core.fzf	-	-	aqua:junegunn/fzf	-	-	-
+core.gh	-	-	aqua:cli/cli	-	-	-
+core.git-delta	-	-	aqua:dandavison/delta	-	-	-
+core.gum	gum	vps-shell	-	-	-	-
+core.lazygit	-	-	aqua:jesseduffield/lazygit	-	-	-
+core.lsd	-	-	aqua:lsd-rs/lsd	-	-	-
+core.mise	mise	vps-shell	-	-	-	-
+core.neovim	-	-	aqua:neovim/neovim	-	-	-
+core.ripgrep	-	-	aqua:BurntSushi/ripgrep	-	-	-
+core.starship	-	-	aqua:starship/starship	-	-	-
+core.zellij	-	-	aqua:zellij-org/zellij	-	-	-
+core.zoxide	-	-	aqua:ajeetdsouza/zoxide	-	-	-
+optional-ai.antigravity-cli	-	-	-	-	antigravity-native	antigravity-native
+optional-ai.claude-code	-	-	-	-	claude-native	claude-native
+optional-ai.codex	-	-	-	-	codex-standalone	codex-standalone
+EOF
+jq -r '
+  .resources[] |
+  select(
+    .metadata["legacy.apt.package"] != null or
+    .metadata["legacy.mise.package"] != null or
+    .metadata["legacy.vendor.receipt"] != null or
+    .metadata["legacy.vendor.uninstall"] != null
+  ) |
+  [
+    .id,
+    (.metadata["legacy.apt.package"] // "-"),
+    (.metadata["legacy.apt.profile"] // "-"),
+    (.metadata["legacy.mise.package"] // "-"),
+    (.metadata["legacy.mise.profile"] // "-"),
+    (.metadata["legacy.vendor.receipt"] // "-"),
+    (.metadata["legacy.vendor.uninstall"] // "-")
+  ] | @tsv
+' "$catalog" | LC_ALL=C sort >"$tmp_dir/catalog-legacy-transitions"
+LC_ALL=C sort "$tmp_dir/expected-legacy-transitions" >"$tmp_dir/expected-legacy-transitions-sorted"
+if ! cmp -s "$tmp_dir/expected-legacy-transitions-sorted" "$tmp_dir/catalog-legacy-transitions"; then
+  diff -u "$tmp_dir/expected-legacy-transitions-sorted" "$tmp_dir/catalog-legacy-transitions" >&2 || true
+  fail "signed catalog has exact APT, Mise, and Vendor legacy transitions"
+fi
+pass "signed catalog has exact APT, Mise, and Vendor legacy transitions"
 
 jq -r '.resources[] | select(.provider == "homebrew-formula") | .package' "$catalog" |
   LC_ALL=C sort >"$tmp_dir/catalog-formulae"

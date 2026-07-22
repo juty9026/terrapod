@@ -465,6 +465,8 @@ func TestDetectRejectsInvalidDesiredObservationBeforeLegacyInspection(t *testing
 	}{
 		{"provider mismatch", model.Observation{Provider: "apt"}},
 		{"package mismatch", model.Observation{Package: "fd"}},
+		{"missing provider identity", model.Observation{Present: true, Healthy: true, Package: "ripgrep", Paths: map[string]string{"rg": "/opt/homebrew/bin/rg"}}},
+		{"missing package identity", model.Observation{Present: true, Healthy: true, Provider: "homebrew-formula", Paths: map[string]string{"rg": "/opt/homebrew/bin/rg"}}},
 		{"unhealthy present", model.Observation{Present: true, Provider: "homebrew-formula", Package: "ripgrep", Paths: map[string]string{"rg": "/opt/homebrew/bin/rg"}}},
 		{"missing command", model.Observation{Present: true, Healthy: true, Provider: "homebrew-formula", Package: "ripgrep"}},
 		{"undeclared command", model.Observation{Present: true, Healthy: true, Provider: "homebrew-formula", Package: "ripgrep", Paths: map[string]string{"rg": "/opt/homebrew/bin/rg", "fd": "/opt/homebrew/bin/fd"}}},
