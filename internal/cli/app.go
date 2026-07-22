@@ -37,20 +37,21 @@ const (
 var beforeOpenLockOwner = func() {}
 
 type Dependencies struct {
-	Stdin          io.Reader
-	Stdout         io.Writer
-	Stderr         io.Writer
-	Geteuid        func() int
-	Paths          paths.Layout
-	LoadCatalog    func() (catalog.Verified, error)
-	LoadConfig     func() (model.Config, error)
-	OpenState      func() (*state.Store, error)
-	Planner        *planner.Planner
-	LoadHistorical func() (map[string]model.Catalog, error)
-	Apply          func(context.Context, reconcile.ApplyInput) (reconcile.Summary, error)
-	Diff           func(context.Context) ([]byte, error)
-	Resolve        func(context.Context, model.ResourceID, io.Reader, io.Writer) (resolve.Result, error)
-	Chezmoi        func(context.Context, string, []string) (execx.Result, error)
+	Stdin           io.Reader
+	Stdout          io.Writer
+	Stderr          io.Writer
+	Geteuid         func() int
+	Paths           paths.Layout
+	LoadCatalog     func() (catalog.Verified, error)
+	LoadConfig      func() (model.Config, error)
+	OpenState       func() (*state.Store, error)
+	Planner         *planner.Planner
+	PlannerForState func(*state.Store) (*planner.Planner, error)
+	LoadHistorical  func() (map[string]model.Catalog, error)
+	Apply           func(context.Context, reconcile.ApplyInput) (reconcile.Summary, error)
+	Diff            func(context.Context) ([]byte, error)
+	Resolve         func(context.Context, model.ResourceID, io.Reader, io.Writer) (resolve.Result, error)
+	Chezmoi         func(context.Context, string, []string) (execx.Result, error)
 }
 
 // AdapterSet is the composition boundary for every typed provider introduced
@@ -322,7 +323,14 @@ func buildReconciliation(ctx context.Context, deps Dependencies, upgrade bool) (
 	if err != nil {
 		return reconciliation{}, fmt.Errorf("read state snapshot: %w", err)
 	}
-	if deps.Planner == nil {
+	activePlanner := deps.Planner
+	if deps.PlannerForState != nil {
+		activePlanner, err = deps.PlannerForState(store)
+		if err != nil {
+			return reconciliation{}, fmt.Errorf("compose state-bound planner: %w", err)
+		}
+	}
+	if activePlanner == nil {
 		return reconciliation{}, errors.New("internal error: planner is not configured")
 	}
 	historical := map[string]model.Catalog{}
@@ -339,7 +347,7 @@ func buildReconciliation(ctx context.Context, deps Dependencies, upgrade bool) (
 	if err != nil {
 		return reconciliation{}, err
 	}
-	built, err := deps.Planner.Build(ctx, planner.Input{
+	built, err := activePlanner.Build(ctx, planner.Input{
 		Catalog:       verified.Catalog,
 		CatalogDigest: verified.Digest,
 		Config:        cfg,

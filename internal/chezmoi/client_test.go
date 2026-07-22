@@ -377,6 +377,79 @@ func TestClientRunsScriptFixtureWithoutAShell(t *testing.T) {
 	}
 }
 
+func TestRealRunnerRecordsConstrainedArgvForEveryClientMethod(t *testing.T) {
+	home, source, config, _ := clientPaths(t)
+	root := t.TempDir()
+	logPath := filepath.Join(root, "argv.log")
+	binary := filepath.Join(root, "chezmoi")
+	script := `#!/bin/sh
+printf 'CALL\n' >>'` + logPath + `'
+printf '%s\n' "$@" >>'` + logPath + `'
+command=
+last=
+for arg do
+  last="$arg"
+  case "$arg" in managed|dump|diff|apply|status|cat|data|execute-template) command="$arg";; esac
+done
+case "$command" in
+  dump) printf '{}\n';;
+  apply) mkdir -p "$(dirname "$last")"; printf 'desired' >"$last";;
+esac
+`
+	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	client := Client{Runner: execx.NewRunner([]string{"HOME"}, nil, func() int { return 501 }), Binary: binary, Source: source, Config: config, Destination: home}
+	ctx := context.Background()
+	if _, err := client.Managed(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.TargetState(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Diff(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ApplyTargets(ctx, []string{"target"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range []struct {
+		command  string
+		operands []string
+	}{{"status", nil}, {"cat", []string{"target"}}, {"data", nil}, {"execute-template", []string{"literal"}}} {
+		if _, err := client.InspectCommand(ctx, call.command, call.operands); err != nil {
+			t.Fatal(err)
+		}
+	}
+	contents, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls []string
+	for _, call := range strings.Split(strings.TrimSpace(string(contents)), "CALL\n") {
+		if strings.TrimSpace(call) != "" {
+			calls = append(calls, call)
+		}
+	}
+	if len(calls) != 8 {
+		t.Fatalf("recorded calls = %d, want 8: %q", len(calls), contents)
+	}
+	for _, raw := range calls {
+		args := strings.Fields(raw)
+		if !contains(args, "--source") || !contains(args, "--override-data-file") {
+			t.Fatalf("unconstrained argv: %q", raw)
+		}
+		command := commandIn(args)
+		needsExclude := command == "managed" || command == "dump" || command == "diff" || command == "apply" || command == "status"
+		if contains(args, "--exclude") != needsExclude {
+			t.Fatalf("%s exclude mismatch: %q", command, raw)
+		}
+		if needsExclude && indexOf(args, "--exclude") < indexOf(args, command) {
+			t.Fatalf("%s exclude is not command-positioned: %q", command, raw)
+		}
+	}
+}
+
 func TestRealChezmoiV271TargetSchemaAndCompatibleReadCommands(t *testing.T) {
 	binary, err := exec.LookPath("chezmoi")
 	if err != nil {

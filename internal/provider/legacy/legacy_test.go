@@ -568,6 +568,23 @@ func TestWithHomebrewAuthoritativelyRepresentsMissingCandidate(t *testing.T) {
 	}
 }
 
+func TestWithAbsentHomebrewDoesNotResolveOrExecuteMachinePaths(t *testing.T) {
+	paths := &countingPaths{}
+	c, err := New(paths, WithAbsentHomebrew())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if paths.calls != 0 {
+		t.Fatalf("path resolver called %d times", paths.calls)
+	}
+}
+
+type countingPaths struct{ calls int }
+
+func (p *countingPaths) ResolveCommand(string) (string, error) { p.calls++; return "", os.ErrNotExist }
+func (p *countingPaths) EvalSymlinks(string) (string, error)   { p.calls++; return "", os.ErrNotExist }
+
 func TestDetectRejectsInvalidDesiredObservationBeforeLegacyInspection(t *testing.T) {
 	tests := []struct {
 		name    string

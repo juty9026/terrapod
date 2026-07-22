@@ -54,6 +54,11 @@ func WithHomebrew(trustedPrefix string, runner Runner) Option {
 	}
 }
 
+// WithAbsentHomebrew authoritatively records that no separate legacy
+// Homebrew prefix is in scope. It avoids treating a user-controlled path as an
+// executable provider while still satisfying signed legacy declarations.
+func WithAbsentHomebrew() Option { return withHandler(Homebrew, absentHandler{}) }
+
 type miseHandler struct {
 	path, resolvedDataRoot string
 	runner                 Runner

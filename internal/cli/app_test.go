@@ -183,6 +183,24 @@ func TestPlanRendersStableSectionsAndNeverExecutes(t *testing.T) {
 	}
 }
 
+func TestBuildReconciliationUsesStateBoundPlannerFactory(t *testing.T) {
+	deps, _ := fixtureDependencies(t, "ready.json")
+	want := deps.Planner
+	deps.Planner = nil
+	called := false
+	deps.PlannerForState = func(store *state.Store) (*planner.Planner, error) {
+		called = true
+		if store == nil {
+			t.Fatal("planner factory received nil state")
+		}
+		return want, nil
+	}
+	code, _, stderr := run(t, []string{"plan"}, deps)
+	if code != 0 || !called || stderr != "" {
+		t.Fatalf("Run(plan)=%d called=%v stderr=%q", code, called, stderr)
+	}
+}
+
 func TestStatusDistinguishesReadyAndUnavailable(t *testing.T) {
 	deps, fixture := fixtureDependencies(t, "drifted.json")
 	store, err := deps.OpenState()

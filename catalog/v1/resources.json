@@ -518,6 +518,17 @@
       "metadata": {"managedFiles.scope": "."}
     },
     {
+      "id": "management.homebrew",
+      "type": "management-core",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "terrapod",
+      "package": "homebrew",
+      "commands": ["brew"],
+      "metadata": {}
+    },
+    {
       "id": "font.jetendard",
       "type": "archive", "profiles": ["macos-terminal"], "dependsOn": [],
       "versionPolicy": "pinned", "provider": "jetendard", "package": "jetendard", "commands": [],
