@@ -51,6 +51,20 @@ if ! cmp -s "$tmp_dir/expected-record-formulae" "$tmp_dir/record-formulae"; then
 fi
 pass "doctor command ownership records stay synchronized with Brewfile"
 
+ubuntu_smoke_fixture="$repo_root/tests/fixtures/homebrew-ubuntu-24.04.Dockerfile"
+if ! grep -F 'args: ["force-bottle"]' "$ubuntu_smoke_fixture" >/dev/null ||
+   ! grep -F 'brew bundle --no-upgrade --file=/tmp/Brewfile.bottles' "$ubuntu_smoke_fixture" >/dev/null; then
+  fail "Ubuntu smoke bundle requires bottles through the supported Brewfile args mechanism"
+fi
+pass "Ubuntu smoke bundle requires bottles through the supported Brewfile args mechanism"
+
+if grep -F '| tee /tmp/mise.toml' "$ubuntu_smoke_fixture" >/dev/null ||
+   ! grep -F -- '--file /workspace/dot_config/mise/config.toml.tmpl > /tmp/mise.toml' "$ubuntu_smoke_fixture" >/dev/null ||
+   ! grep -F '&& cat /tmp/mise.toml' "$ubuntu_smoke_fixture" >/dev/null; then
+  fail "Ubuntu smoke template render fails before output and assertions"
+fi
+pass "Ubuntu smoke template render fails before output and assertions"
+
 expected_macos="$tmp_dir/expected-macos"
 actual_macos="$tmp_dir/actual-macos"
 printf '%s\n' \

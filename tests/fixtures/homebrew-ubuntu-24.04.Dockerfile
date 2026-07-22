@@ -15,7 +15,9 @@ RUN NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.co
 COPY --chown=terrapod:terrapod . /workspace
 
 RUN eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" \
-  && HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file=/workspace/Brewfile
+  && sed '/^brew "[^"]*"$/s/"$/, args: ["force-bottle"]/' \
+       /workspace/Brewfile > /tmp/Brewfile.bottles \
+  && HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file=/tmp/Brewfile.bottles
 
 RUN eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" \
   && records=/tmp/homebrew-cli-records \
@@ -33,7 +35,7 @@ RUN eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" \
   && chezmoi execute-template \
        --source /workspace \
        --override-data '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}}}' \
-       --file /workspace/dot_config/mise/config.toml.tmpl \
-     | tee /tmp/mise.toml \
+       --file /workspace/dot_config/mise/config.toml.tmpl > /tmp/mise.toml \
+  && cat /tmp/mise.toml \
   && ! grep -F 'aqua:' /tmp/mise.toml \
   && grep -Fx 'node = "24"' /tmp/mise.toml
