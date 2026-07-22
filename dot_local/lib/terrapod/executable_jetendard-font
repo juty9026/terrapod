@@ -6,7 +6,6 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
-import stat
 import tempfile
 import urllib.request
 import zipfile
@@ -14,6 +13,11 @@ import zipfile
 RELEASE_API_URL = "https://api.github.com/repos/kuskhan/jetendard/releases/latest"
 ASSET_NAME = "Jetendard-TTF.zip"
 FONT_NAME = re.compile(r"Jetendard-[A-Za-z0-9]+\.ttf\Z")
+
+
+class ArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        raise ValueError(message)
 
 
 def state_root(home: Path, state_home: str | None = None) -> Path:
@@ -153,14 +157,14 @@ def check(home: Path, state_home: str | None) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
+    parser = ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("install")
     checker = subparsers.add_parser("check")
     checker.add_argument("--home")
     checker.add_argument("--state-home")
-    args = parser.parse_args()
     try:
+        args = parser.parse_args()
         if args.command == "install":
             install(Path(os.environ.get("HOME", str(Path.home()))))
         else:

@@ -14,6 +14,14 @@ state_dir="$tmp_dir/state"
 fixture_dir="$tmp_dir/fixture"
 mkdir -p "$home_dir/Library/Fonts" "$state_dir" "$fixture_dir/ttf"
 
+if python3 "$helper" >"$tmp_dir/arguments.out" 2>"$tmp_dir/arguments.err"; then
+  fail "missing command is rejected"
+fi
+[ ! -s "$tmp_dir/arguments.out" ] || fail "missing command writes no stdout"
+[ "$(wc -l <"$tmp_dir/arguments.err" | tr -d ' ')" = 1 ] || fail "missing command writes one stderr line"
+[ "$(cat "$tmp_dir/arguments.err")" = "Jetendard font: the following arguments are required: command" ] || fail "missing command writes an actionable error"
+pass "invalid CLI arguments use the single-line error contract"
+
 for variant in Thin ThinItalic ExtraLight ExtraLightItalic Light LightItalic Regular Italic Medium MediumItalic SemiBold SemiBoldItalic Bold BoldItalic ExtraBold ExtraBoldItalic; do
   printf 'font:%s\n' "$variant" >"$fixture_dir/ttf/Jetendard-$variant.ttf"
 done
@@ -120,3 +128,44 @@ if HOME="$home_dir" XDG_STATE_HOME="$state_dir" TERRAPOD_JETENDARD_RELEASE_API_U
 fi
 [ -e "$home_dir/Library/Fonts/Jetendard-Regular.ttf" ] || fail "failed replacement preserves working fonts"
 pass "digest failure preserves the previous installation"
+
+printf 'not a zip archive\n' >"$fixture_dir/Jetendard-TTF-corrupt.zip"
+corrupt_digest="$(shasum -a 256 "$fixture_dir/Jetendard-TTF-corrupt.zip" | awk '{print $1}')"
+corrupt_asset_url="$(python3 - "$fixture_dir/Jetendard-TTF-corrupt.zip" <<'PY'
+import pathlib
+import sys
+print(pathlib.Path(sys.argv[1]).resolve().as_uri())
+PY
+)"
+python3 - "$fixture_dir/release-corrupt.json" "$corrupt_asset_url" "$corrupt_digest" <<'PY'
+import json
+import pathlib
+import sys
+
+path, asset_url, digest = sys.argv[1:]
+pathlib.Path(path).write_text(json.dumps({
+    "tag_name": "v10.0.1",
+    "draft": False,
+    "prerelease": False,
+    "assets": [{
+        "name": "Jetendard-TTF.zip",
+        "state": "uploaded",
+        "digest": f"sha256:{digest}",
+        "browser_download_url": asset_url,
+    }],
+}), encoding="utf-8")
+PY
+corrupt_api_url="$(python3 - "$fixture_dir/release-corrupt.json" <<'PY'
+import pathlib
+import sys
+print(pathlib.Path(sys.argv[1]).resolve().as_uri())
+PY
+)"
+
+if HOME="$home_dir" XDG_STATE_HOME="$state_dir" TERRAPOD_JETENDARD_RELEASE_API_URL="$corrupt_api_url" \
+  python3 "$helper" install; then
+  fail "installer rejects a corrupt archive"
+fi
+[ -e "$home_dir/Library/Fonts/Jetendard-Regular.ttf" ] || fail "corrupt archive preserves working fonts"
+python3 "$helper" check --home "$home_dir" --state-home "$state_dir" || fail "corrupt archive preserves the working manifest"
+pass "corrupt archive preserves the previous installation"
