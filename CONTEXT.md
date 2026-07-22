@@ -45,8 +45,12 @@ A command-line UI tool that Terrapod requires before **Terrapod Setup** so first
 _Avoid_: optional UI tool, setup-only helper, plain fallback enhancement, Core Shell Stack synonym
 
 **Modern CLI Provider**:
-The shared tool provider for modern command-line tools across supported machine profiles.
-_Avoid_: Homebrew replacement, standalone aqua
+Homebrew, the shared package provider for mandatory user-facing CLI tools across the macOS Terminal Profile and VPS Shell Profile.
+_Avoid_: mise CLI provider, aqua provider, platform-specific CLI source
+
+**Development Runtime Manager**:
+mise, which installs and selects Bun, Node.js, Python, and uv independently from Homebrew-managed user-facing CLI tools.
+_Avoid_: Modern CLI Provider, Homebrew runtime manager, aqua tool provider
 
 **macOS Desktop App Stack**:
 The opt-in macOS cask set for GUI apps, system-style desktop apps, and cask-delivered desktop support tools.
@@ -100,7 +104,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Maintainer remotes may use the SSH **Terrapod Source Repository** URL `git@github.com:juty9026/terrapod.git`.
 - The legacy `juty9026/dotfiles` slug is not a supported **Terrapod** installation path after repository renaming.
 - **Terrapod** and its first-run installer are implemented as POSIX shell entry points.
-- The first-run **Terrapod** installer delegates chezmoi binary installation to the official `get.chezmoi.io` installer and installs it under `~/.local/bin`.
+- The first-run **Terrapod** installer installs standard-prefix Homebrew on both supported profiles, then installs chezmoi and the gum **Bootstrap UI Dependency** through Homebrew before **Terrapod Setup**.
 - The first-run **Terrapod** installer uses `https://github.com/juty9026/terrapod.git` as the default source repository URL.
 - The first-run **Terrapod** installer resumes from an existing default chezmoi source directory when it is a checked-out **Terrapod Source Repository** that has not completed initial apply.
 - A resumable **Terrapod Source Repository** checkout must contain the checked-out **Terrapod** command, expected recovery-core source files, and repository identity for `juty9026/terrapod`; an arbitrary chezmoi source directory is not resumable.
@@ -117,19 +121,18 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - The first-run **Terrapod** installer stops with guidance when the default chezmoi source directory already exists but is not a resumable **Terrapod Source Repository** checkout.
 - The first-run **Terrapod** installer invokes **Terrapod Setup** before the initial apply instead of asking users to run a second setup command manually.
 - A **Bootstrap UI Dependency** is not a temporary setup-only helper; it remains available after first-run so later **Terrapod Setup** runs can use the same interaction model.
-- The first **Bootstrap UI Dependency** is gum, installed through the platform **Bootstrap Package Manager** before **Terrapod Setup**.
+- The first **Bootstrap UI Dependency** is gum, installed through the **Modern CLI Provider** before **Terrapod Setup**.
 - Failure to install a **Bootstrap UI Dependency** fails first-run installation before **Terrapod Setup** rather than falling back to a separate plain text interaction model.
 - **Terrapod Setup** uses gum for Preset selection, setting customization, and final confirmation instead of maintaining parallel rich and plain interaction models.
 - **Terrapod Setup** should place concise Preset explanations beside or near each selectable Preset instead of printing a separate Preset guide before the gum choice prompt.
 - **Terrapod Setup** should print concise optional stack and **macOS App Group** explanations immediately before the related gum confirmation prompt instead of making the confirm prompt verbose or printing a separate option guide before sequential confirmations.
 - gum-backed setting customization uses sequential questions rather than a stateful toggle menu.
-- gum belongs to the declared machine state as well as the first-run bootstrap path, so **Terrapod** restores it through the macOS `Brewfile` and Ubuntu bootstrap scripts after initial apply.
+- gum belongs to the declared machine state as well as the first-run bootstrap path, so **Terrapod** restores it through the cross-profile `Brewfile` after initial apply.
 - Cancelling gum-backed **Terrapod Setup** preserves the existing setup cancellation contract: no config write, non-zero exit, and `terrapod: setup cancelled` guidance.
 - The first-run installer explains **Bootstrap UI Dependency** bootstrap failures before **Terrapod Setup**, and `terrapod setup` also explains missing gum when run directly after bootstrap.
-- On the **macOS Terminal Profile**, the first-run installer may run a best-effort Homebrew and gum bootstrap before **Terrapod Setup** for setup UI only; the declared-state Homebrew bootstrap still belongs to the initial apply.
-- On the **macOS Terminal Profile**, pre-Setup **Bootstrap UI Dependency** bootstrap does not install Homebrew itself; if Homebrew or gum cannot be made available for **Terrapod Setup**, first-run fails with manual guidance.
-- On the **VPS Shell Profile**, the first-run installer may add the Charm APT repository and install gum before **Terrapod Setup** for setup UI only; failure stops first-run installation with guidance.
-- On the **VPS Shell Profile**, pre-Setup **Bootstrap UI Dependency** bootstrap may use interactive `sudo` prompts, but non-interactive `sudo` failure prevents **Terrapod Setup** and remains a hard first-run failure.
+- On both supported profiles, the first-run installer requires standard-prefix Homebrew and installs `chezmoi` and `gum` with Homebrew before **Terrapod Setup**; bootstrap failure stops first-run with guidance.
+- On the **VPS Shell Profile**, APT installs only Ubuntu system and Homebrew bootstrap prerequisites and does not add Charm or mise repositories.
+- On the **VPS Shell Profile**, pre-Setup Homebrew prerequisite installation may use interactive `sudo` prompts, but missing or unusable sudo prevents **Terrapod Setup** and remains a hard first-run failure.
 - A gum bootstrap failure before **Terrapod Setup** is a hard first-run failure, while a later declared-state package-manager failure involving gum is a machine profile readiness warning after the recovery core is available.
 - chezmoi remains the internal apply engine for the **Dotfiles Management Tool**, not the primary workflow users need to remember.
 - The **Dotfiles Management Tool** exposes first-class maintenance commands when they add profile, preset, installer, or validation context around chezmoi behavior.
@@ -172,28 +175,30 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - The **VPS Shell Profile** includes the **Core Shell Stack**.
 - The **VPS Shell Profile** includes the **Development Runtime Stack**.
 - The **Core Shell Stack** includes Oh My Zsh and modern CLI tools such as fd, ripgrep, zoxide, lazygit, GitHub CLI (`gh`), and plain Neovim.
-- The **Development Runtime Stack** includes mise-managed Bun, Node.js, Python, and uv.
+- The **Development Runtime Stack** includes Bun, Node.js 24, Python 3.13, and uv managed by the **Development Runtime Manager**.
 - pnpm belongs to the **Development Runtime Stack** through Node.js Corepack, not as a mise-managed tool.
 - Rich Neovim configuration belongs to the **Optional Editor Stack**, not the **Core Shell Stack**, and is opt-in for every machine profile.
 - Antigravity CLI, Claude Code, and Codex belong to the **Optional AI Tool Stack**, not the **Core Shell Stack**.
 - The **Optional AI Tool Stack** installs Homebrew casks `antigravity-cli`, `claude-code`, and `codex` on both supported machine profiles.
 - `Brewfile.ai-cli-tools.tmpl` is the canonical cross-profile declaration for Optional AI Tool Stack packages.
-- The VPS Shell Profile bootstraps Homebrew only when the **Optional AI Tool Stack** is effectively enabled.
-- APT remains the Ubuntu **Bootstrap Package Manager**, while conditional Linux Homebrew owns only the Optional AI Tool Stack casks.
-- mise remains the **Modern CLI Provider** for all other shared CLI tools and development runtimes.
+- The **Modern CLI Provider** installs the 20 mandatory formulae declared in `Brewfile` on both supported profiles and owns the three Optional AI Tool Stack casks when that stack is enabled.
+- The **VPS Shell Profile** installs Homebrew at `/home/linuxbrew/.linuxbrew` for every **Preset** on supported `x86_64` and `aarch64` systems.
+- The **VPS Shell Profile** supports one non-root management user with initial sudo access; it does not manage multi-user Homebrew prefix ownership.
+- The recommended **VPS Shell Profile** floor is 1 vCPU, 1 GiB RAM, and 3 GiB free disk, with 2 GiB RAM comfortable; the installer warns below 3 GiB but does not make this recommendation a hard gate.
+- APT remains Ubuntu's **Bootstrap Package Manager** and installs only system and Homebrew bootstrap prerequisites; the **Modern CLI Provider** owns user-facing CLI tools, including Git after bootstrap.
+- The **Development Runtime Manager** installs and selects Bun, Node.js, Python, and uv and does not own shared user-facing CLI tools.
 - **Optional AI Tool Stack** installer failures do not block first-run declared-state apply; missing optional AI tools are reported by `tpod status` and `tpod doctor`.
-- **Optional AI Tool Stack** apply uses `brew bundle --no-upgrade`; Terrapod apply is not an AI CLI upgrade mechanism.
+- Homebrew bundle apply uses `HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade`; Terrapod apply restores missing declared packages without auto-updating or upgrading.
 - `tpod status` and `tpod doctor` compare resolved AI commands with the active Homebrew prefix and warn when legacy commands shadow managed casks.
 - When the **Optional AI Tool Stack** is disabled, `tpod apply` clears the optional AI CLI tools warning marker because those tools are no longer part of desired machine readiness.
-- Existing vendor-installed AI CLIs are unmanaged legacy tools; Terrapod does not uninstall them automatically.
+- Existing mise-, APT-, and vendor-installed payloads are unmanaged legacy tools; Terrapod does not uninstall them automatically.
 - Enabling only the **Optional AI Tool Stack** does not imply the **Optional Editor Stack** or **Optional Development Workspace**.
 - Development-specific terminal layouts belong to the **Optional Development Workspace**, not the **Core Shell Stack**.
 - Enabling the **Optional Development Workspace** also enables the **Optional Editor Stack** and **Optional AI Tool Stack**.
 - The **Optional Development Workspace** is a stack bundle that takes precedence over disabled optional stack flags.
 - Zellij and its general launcher alias belong to the **Core Shell Stack**, while development-specific Zellij layouts and aliases belong to the **Optional Development Workspace**.
 - Disabling an optional stack excludes its files from management but does not remove files already present on a machine.
-- Homebrew and APT prepare platform bootstrap state; Homebrew also owns the three cross-profile Optional AI Tool Stack casks.
-- mise with its aqua backend is the **Modern CLI Provider**.
+- Homebrew is the **Modern CLI Provider** on both supported profiles; APT prepares Ubuntu system/bootstrap state, and mise is the **Development Runtime Manager**.
 - **Terrapod** applies this repository's declared dotfiles state; it does not act as the package manager for OS packages or mise-managed tool upgrades.
 - **Terrapod** may install declared dependencies needed to reach the target state, but it does not run broad version upgrade commands such as `brew upgrade`, `apt upgrade`, or `mise upgrade`.
 - After **Terrapod Setup** writes concrete settings, first-run declared-state apply should prioritize installing the **Terrapod** command surface and managed dotfiles so the machine reaches a recoverable state.
@@ -209,7 +214,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Mandatory stack warning markers such as Homebrew core, Ubuntu bootstrap, shell integrations, and mise tools are cleared only by successful reruns because their desired state cannot be disabled by optional settings.
 - Optional stack or app-group warning marker content may be cleared or reduced when the corresponding desired optional setting is disabled.
 - Terrapod install warnings are updated by both first-run installation and routine `tpod apply` because routine apply is the recovery path for previously failed installer categories.
-- Terrapod install warning categories include stable filename slugs for Homebrew core bundle (`homebrew-core`), Homebrew desktop app bundle (`homebrew-desktop-apps`), Ubuntu bootstrap (`ubuntu-bootstrap`), shell integrations (`shell-integrations`), mise tools (`mise-tools`), and optional AI CLI tools (`optional-ai-cli-tools`); best-effort UI nudges such as opening Karabiner do not need install warning markers.
+- Terrapod install warning categories include stable filename slugs for Homebrew core bundle (`homebrew-core`), macOS Homebrew platform bundle (`homebrew-macos-platform`), Homebrew desktop app bundle (`homebrew-desktop-apps`), Ubuntu bootstrap (`ubuntu-bootstrap`), shell integrations (`shell-integrations`), mise runtime tools (`mise-tools`), and optional AI CLI tools (`optional-ai-cli-tools`); best-effort UI nudges such as opening Karabiner do not need install warning markers.
 - Terrapod install warning markers use shell-friendly key/value content with stable category, summary, guidance, and `updated_at` fields instead of free-form logs or captured stack traces.
 - Terrapod install warning marker values stay single-line so shell parsing remains predictable; longer human-readable explanations belong in `tpod doctor` output.
 - Terrapod install warning marker `updated_at` values use UTC ISO 8601 timestamps such as `2026-06-02T03:12:45Z`.
@@ -232,7 +237,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - `tpod apply` should surface remaining Terrapod install warnings after apply, while `tpod help` stays free of install warning state.
 - `tpod apply` exit status reflects whether the declared-state apply command itself succeeded; unresolved install warning markers after apply are surfaced in output but do not make apply fail.
 - `tpod doctor` recovery guidance points to `tpod apply` as the general retry path; category-specific retry commands are outside the current command surface.
-- `mise-tools` install warning guidance may mention temporary `GITHUB_TOKEN` or GitHub CLI authentication when GitHub API rate limits affect mise aqua resolution.
+- `mise-tools` install warning guidance covers failures while the **Development Runtime Manager** installs the declared runtime versions.
 - First-run initial apply runs a forced recovery-core apply for managed shell startup files and the **Terrapod** command surface before the full declared-state apply.
 - First-run recovery-core apply failure is a hard installer failure because users do not yet have a reliable `tpod` command surface for recovery.
 - First-run recovery-core validation requires the installed `terrapod` executable, the installed `tpod` alias, and a successful `~/.local/bin/tpod help` invocation; file presence alone is not enough to mark the installer recoverable.
@@ -327,7 +332,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 ## Example Dialogue
 
 > **Dev:** "Should the VPS just reuse the macOS terminal setup?"
-> **Domain expert:** "No. The **VPS Shell Profile** should share the **Core Shell Stack** and **Development Runtime Stack**, exclude macOS-only applications, and use Homebrew only when the **Optional AI Tool Stack** is enabled."
+> **Domain expert:** "No. The **VPS Shell Profile** should share the Homebrew-managed **Core Shell Stack** and mise-managed **Development Runtime Stack**, while excluding macOS-only applications."
 
 ## Flagged Ambiguities
 

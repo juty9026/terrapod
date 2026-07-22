@@ -15,10 +15,11 @@ Run the Terrapod first-run installer on a supported machine.
 sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/install.sh)"
 ```
 
-The installer installs `chezmoi` into `~/.local/bin` when needed, initializes
-`https://github.com/juty9026/terrapod.git`, launches Terrapod Setup from the
-checked-out source repository, and runs the initial declared-state apply only
-after setup succeeds. After the initial apply completes, the installer prints
+The first-run installer installs standard-prefix Homebrew, then installs
+`chezmoi` and `gum` through Homebrew before Terrapod Setup. It initializes
+`https://github.com/juty9026/terrapod.git`, launches Setup from the checked-out
+source repository, and runs the initial declared-state apply only after setup
+succeeds. After the initial apply completes, the installer prints
 `tpod help` so the short day-to-day command is immediately visible.
 
 Terrapod Setup is the first-run review step. It asks you to choose a Preset,
@@ -115,7 +116,18 @@ terrapod chezmoi -- cd
 terrapod chezmoi -- status
 ```
 
+`tpod status` is a human-readable snapshot. It reports missing or shadowed
+mandatory Homebrew commands but still exits successfully. `tpod doctor` is the
+readiness gate: it exits non-zero when a mandatory command is missing, resolves
+outside the standard Homebrew prefix, or another enabled requirement or install
+warning remains unresolved.
+
 ## Platform Details
+
+Homebrew is the Modern CLI Provider for the Core Shell Stack on both supported profiles.
+mise is the Development Runtime Manager for Bun, Node.js, Python, and uv.
+The first-run installer installs `chezmoi` and `gum` through Homebrew before Terrapod Setup.
+The shared `Brewfile` declares the 20 mandatory CLI formulae for both profiles.
 
 ### macOS
 
@@ -125,19 +137,13 @@ Run the installer on macOS.
 sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/install.sh)"
 ```
 
-Before Terrapod Setup, the first-run installer prepares `gum` as the required
-Bootstrap UI Dependency with Homebrew when `gum` is missing. That setup UI
-bootstrap is limited to `gum`; it does not run broad Homebrew upgrades.
-
 On macOS, the initial apply also runs setup scripts under `.chezmoiscripts` for the initial terminal environment:
 
-- Homebrew bootstrap and the macOS `Brewfile` bundle
-- mise
-- CLI tools such as ripgrep, neovim, zellij, lazygit, GitHub CLI (`gh`), and starship via mise
-- btop via Homebrew, because its mise-managed release assets do not support macOS arm64
+- Standard-prefix Homebrew and the shared 20-formula `Brewfile` bundle
+- Core Shell Stack CLIs such as ripgrep, neovim, zellij, lazygit, GitHub CLI (`gh`), starship, and mise through Homebrew
 - Terminal font casks
 - Oh My Zsh, zinit, and SCM Breeze
-- Bun, Python, uv/uvx, and Node.js via `~/.config/mise/config.toml`
+- Bun, Node.js 24, Python 3.13, and uv/uvx through mise
 - pnpm through Node.js Corepack
 - Optional AI Tool Stack casks through Homebrew when that stack is enabled
 
@@ -158,38 +164,39 @@ Machine-specific Homebrew packages should live outside the tracked `Brewfile`.
 
 ### Ubuntu 24.04 VPS
 
-Ubuntu support targets 24.04 LTS only. The VPS profile is read-only by
-default, so no GitHub authentication is required for the initial setup. Run the
-installer.
+Ubuntu support targets 24.04 LTS only on `x86_64` and `aarch64`. Use one
+non-root management user with initial sudo access; Terrapod uses the standard
+Homebrew prefix and does not manage a shared multi-user Linuxbrew installation.
+We recommend 1 vCPU, 1 GiB RAM, and at least 3 GiB of free disk space before installation;
+2 GiB RAM is comfortable. This is not an installer hard gate: below 3 GiB the
+installer warns and continues. The VPS profile is read-only by default, so no
+GitHub authentication is required for the initial setup. Run the installer.
 
 ```sh
 sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/install.sh)"
 ```
 
-The installer adds `~/.local/bin` to `PATH` for the bootstrap process. After
-the first apply, managed zsh sessions keep `~/.local/bin` on `PATH` so
-user-local binaries such as `chezmoi` remain available after reconnecting.
-
-Before Terrapod Setup, the first-run installer prepares `gum` as the required
-Bootstrap UI Dependency from APT with the Charm APT repository when `gum` is
-missing. That setup UI bootstrap is limited to `gum`; it does not run broad APT
-upgrades.
+Ubuntu 24.04 installs Homebrew at `/home/linuxbrew/.linuxbrew` for every Preset.
+Before Terrapod Setup, APT installs only Ubuntu system and Homebrew bootstrap
+prerequisites; Terrapod adds no third-party APT repository. Homebrew then
+installs `chezmoi` and `gum`. The installer adds Homebrew and `~/.local/bin` to
+`PATH` for bootstrap, and managed zsh sessions restore those paths after reconnecting.
 
 On Ubuntu, the initial apply runs setup scripts for the VPS shell profile:
 
-- APT bootstrap packages: zsh, git, curl, ca-certificates, gpg, unzip, and build-essential
+- APT system and Homebrew bootstrap prerequisites only
 - Python build dependencies required by the mise-managed Python runtime
-- mise from the official mise APT repository
+- Standard-prefix Homebrew and the shared 20-formula `Brewfile` bundle
 - Oh My Zsh, zinit, and SCM Breeze
-- CLI tools such as ripgrep, neovim, zellij, lazygit, GitHub CLI (`gh`), and starship via mise
-- Bun, Python, uv/uvx, and Node.js via mise
+- Core Shell Stack CLIs such as ripgrep, neovim, zellij, lazygit, GitHub CLI (`gh`), starship, and mise through Homebrew
+- Bun, Node.js 24, Python 3.13, and uv/uvx through mise
 - pnpm through Node.js Corepack
 - Login shell switch to zsh
-- Conditional Linux Homebrew and the Optional AI Tool Stack casks when that stack is enabled
+- Optional AI Tool Stack casks through Homebrew when that stack is enabled
 
+The VPS Shell Profile is headless: macOS App Groups and other GUI applications
+remain in the optional macOS Desktop App Stack and are never installed on Ubuntu.
 Only configure GitHub authentication on a VPS if write access is needed later.
-If the first mise install hits GitHub API rate limits while resolving aqua
-tools, export a temporary `GITHUB_TOKEN` and rerun `chezmoi apply`.
 
 If the login shell could not be changed automatically, switch it after the first apply and reconnect.
 
@@ -204,8 +211,13 @@ result.
 
 ### Intentional Upgrades
 
-Homebrew and APT prepare platform bootstrap state. Homebrew also owns the three cross-profile Optional AI Tool Stack casks.
-mise is the Modern CLI Provider for shared command-line tools and development runtimes.
+Homebrew owns shared user-facing CLI tools and the enabled Optional AI Tool
+Stack on both profiles. APT owns only Ubuntu system and bootstrap prerequisites.
+mise owns only the Development Runtime Stack.
+
+`tpod apply` restores missing Homebrew packages with
+`HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade`; it never performs an
+automatic update, upgrade, or removal. Existing mise, APT, and vendor-installed payloads are not removed automatically.
 
 Use OS package managers directly only when intentionally updating OS-managed packages.
 
@@ -219,14 +231,16 @@ sudo apt update
 sudo apt upgrade
 ```
 
-Upgrade only the Homebrew-managed AI CLI tools explicitly on either profile.
+Intentional CLI upgrades are explicit Homebrew operations. Upgrade all
+Homebrew-managed CLIs with `brew update` and `brew upgrade`, or target only the
+AI CLI casks when that is the intended scope.
 
 ```sh
 brew update
 brew upgrade --cask claude-code codex antigravity-cli
 ```
 
-Use mise directly when intentionally updating modern CLI tools or development runtimes.
+Use mise directly when intentionally updating development runtimes.
 
 ```sh
 mise outdated
@@ -295,7 +309,10 @@ because desktop casks can affect shared applications outside one user's home dir
 
 Opting out of an optional stack excludes its files from chezmoi management; it does not remove files already present on a machine.
 
-Terrapod does not remove legacy vendor-installed AI CLI binaries. When one shadows a Homebrew-managed command, `tpod status` and `tpod doctor` provide manual cleanup guidance.
+Terrapod preserves existing mise-, APT-, and vendor-installed payloads. When a
+legacy command shadows a mandatory Homebrew command, `tpod status` reports the
+ownership warning and `tpod doctor` fails with manual cleanup guidance. Legacy
+AI CLI shadowing remains advisory. Terrapod does not remove legacy vendor-installed AI CLI binaries.
 
 `enableMacosAppGroupAiApps` is deprecated and is not treated as an alias for `enableMacosAppGroupDevelopmentApps`. Run `tpod setup` or `terrapod configure <Preset>` to migrate explicitly; Terrapod does not install Zed based on the old selection.
 
