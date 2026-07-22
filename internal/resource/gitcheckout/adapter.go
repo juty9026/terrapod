@@ -49,6 +49,9 @@ type Runner interface {
 	Run(context.Context, execx.Request) (execx.Result, error)
 }
 
+// Adapter operations are serialized by the caller. Terrapod fails closed when
+// normal concurrent edits are observed, but does not defend against an
+// adversarial same-UID process swapping paths between individual syscalls.
 type Adapter struct {
 	Runner  Runner
 	Git     string
@@ -72,7 +75,10 @@ var afterMetadataOldRename func() error
 var afterMetadataNewRename func() error
 
 type metadataIntent struct {
-	Token, OldDigest, NewDigest string
+	Token, OldDigest, NewDigest    string
+	JournalID, OperationID, Commit string
+	ResourceID                     model.ResourceID
+	Destination                    string
 }
 
 type metadataPendingError struct{ err error }
@@ -341,7 +347,7 @@ func (a *Adapter) execute(ctx context.Context, item model.Resource, op model.Ope
 	if len(op.Removes) != 0 {
 		return errors.New("git-checkout: non-prune operation cannot remove packages")
 	}
-	if err := a.recoverMetadataTransaction(d); err != nil {
+	if err := a.recoverMetadataTransaction(d, snapshot.ActiveJournal.ID, op); err != nil {
 		return err
 	}
 	current, err := a.inspect(ctx, d) // close the plan/apply race
@@ -388,7 +394,7 @@ func (a *Adapter) execute(ctx context.Context, item model.Resource, op model.Ope
 		if !current.exists || !current.git || current.remote != d.remote {
 			return errors.New("git-checkout: checkout changed before update")
 		}
-		return a.update(ctx, d)
+		return a.update(ctx, item, op, *snapshot.ActiveJournal, d)
 	default:
 		return fmt.Errorf("git-checkout: unsupported operation %q", op.Kind)
 	}
@@ -866,7 +872,7 @@ func (a *Adapter) materializeGitSnapshot(d declaration, snapshot *gitSnapshot) (
 	return cap, nil
 }
 
-func (a *Adapter) commitGitSnapshot(d declaration, snapshot *gitSnapshot, cap stagingCapability) error {
+func (a *Adapter) commitGitSnapshot(d declaration, snapshot *gitSnapshot, cap stagingCapability, intent metadataIntent) error {
 	if err := snapshot.verifySource(); err != nil {
 		return err
 	}
@@ -897,7 +903,7 @@ func (a *Adapter) commitGitSnapshot(d declaration, snapshot *gitSnapshot, cap st
 	if err != nil {
 		return err
 	}
-	intent := metadataIntent{Token: cap.token, OldDigest: oldDigest, NewDigest: newDigest}
+	intent.Token, intent.OldDigest, intent.NewDigest = cap.token, oldDigest, newDigest
 	if err := writeMetadataIntent(home.root, intentPath, intent); err != nil {
 		return err
 	}
@@ -1052,7 +1058,7 @@ func readMetadataIntent(root *os.Root, path string) (metadataIntent, error) {
 		return metadataIntent{}, errors.Join(readErr, closeErr, errors.New("git-checkout: invalid metadata transaction intent"))
 	}
 	var intent metadataIntent
-	if err := json.Unmarshal(contents, &intent); err != nil || !regexp.MustCompile(`^[0-9a-f]{16}$`).MatchString(intent.Token) || len(intent.OldDigest) != 64 || len(intent.NewDigest) != 64 {
+	if err := json.Unmarshal(contents, &intent); err != nil || !regexp.MustCompile(`^[0-9a-f]{16}$`).MatchString(intent.Token) || len(intent.OldDigest) != 64 || len(intent.NewDigest) != 64 || intent.JournalID == "" || intent.OperationID == "" || intent.ResourceID == "" || intent.Commit == "" || intent.Destination == "" {
 		return metadataIntent{}, errors.New("git-checkout: invalid metadata transaction intent")
 	}
 	return intent, nil
@@ -1074,7 +1080,7 @@ func removeTreeByDigest(root *os.Root, path, expected, token string) error {
 	return root.RemoveAll(quarantine)
 }
 
-func (a *Adapter) recoverMetadataTransaction(d declaration) error {
+func (a *Adapter) recoverMetadataTransaction(d declaration, journalID string, op model.Operation) error {
 	home, err := a.openHome()
 	if err != nil {
 		return err
@@ -1090,6 +1096,9 @@ func (a *Adapter) recoverMetadataTransaction(d declaration) error {
 	intent, err := readMetadataIntent(home.root, intentPath)
 	if err != nil {
 		return err
+	}
+	if intent.JournalID != journalID || intent.OperationID != op.ID || intent.ResourceID != op.ResourceID || intent.Commit != d.commit || intent.Destination != d.destination {
+		return errors.New("git-checkout: metadata transaction is not authorized by the active journal")
 	}
 	gitPath := filepath.Join(destination, ".git")
 	oldPath := filepath.Join(destination, ".git.tpod-old-"+intent.Token)
@@ -1424,7 +1433,7 @@ func syncRootDirectory(root *os.Root, relative string) error {
 	return directory.Sync()
 }
 
-func (a *Adapter) update(ctx context.Context, d declaration) error {
+func (a *Adapter) update(ctx context.Context, item model.Resource, op model.Operation, journal model.Journal, d declaration) error {
 	destination := filepath.Join(a.Home, filepath.FromSlash(d.destination))
 	before, err := a.inspect(ctx, d)
 	if err != nil || !before.git || before.remote != d.remote {
@@ -1518,7 +1527,8 @@ func (a *Adapter) update(ctx context.Context, d declaration) error {
 			return err
 		}
 	}
-	if err := a.commitGitSnapshot(d, snapshot, cap); err != nil {
+	intent := metadataIntent{JournalID: journal.ID, OperationID: op.ID, ResourceID: item.ID, Commit: d.commit, Destination: d.destination}
+	if err := a.commitGitSnapshot(d, snapshot, cap, intent); err != nil {
 		var pending metadataPendingError
 		if errors.As(err, &pending) {
 			committed = true

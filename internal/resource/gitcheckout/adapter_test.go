@@ -2,6 +2,7 @@ package gitcheckout
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -166,6 +167,63 @@ func TestExecuteCloneUsesOnlyConstrainedGitCommands(t *testing.T) {
 	}
 }
 
+func TestFailedInstallLeavesNoCheckoutArtifacts(t *testing.T) {
+	a, item, store, destination := newFixture(t, func(_ context.Context, request execx.Request) (execx.Result, error) {
+		args := strings.Join(request.Args, " ")
+		if strings.Contains(args, " init ") {
+			return execx.Result{}, os.MkdirAll(filepath.Join(request.Dir, ".git"), 0o700)
+		}
+		if strings.Contains(args, " fetch ") {
+			return execx.Result{}, errors.New("simulated fetch failure")
+		}
+		return execx.Result{}, nil
+	})
+	op := operation(item, model.OperationInstall)
+	if _, err := store.Begin(model.Plan{ID: "failed-install-cleanup", Operations: []model.Operation{op}}); err != nil {
+		t.Fatal(err)
+	}
+	if result := a.ExecuteResource(context.Background(), item, op); result.Success || !strings.Contains(result.Detail, "simulated fetch failure") {
+		t.Fatalf("result=%#v", result)
+	}
+	if _, err := os.Lstat(destination); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed destination remains: %v", err)
+	}
+	assertNoCheckoutArtifacts(t, destination)
+}
+
+func TestCheckoutLocalIntentRequiresActiveJournalBinding(t *testing.T) {
+	a, item, store, destination := newFixture(t, func(context.Context, execx.Request) (execx.Result, error) {
+		return execx.Result{}, errors.New("Git must not run for unauthorized recovery")
+	})
+	if err := os.MkdirAll(filepath.Join(destination, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(destination, ".git", "marker")
+	if err := os.WriteFile(marker, []byte("unchanged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	op := operation(item, model.OperationUpgrade)
+	if _, err := store.Begin(model.Plan{ID: "authorized", Operations: []model.Operation{op}}); err != nil {
+		t.Fatal(err)
+	}
+	intent := metadataIntent{
+		Token: strings.Repeat("a", 16), OldDigest: strings.Repeat("b", 64), NewDigest: strings.Repeat("c", 64),
+		JournalID: "stale-journal", OperationID: op.ID, ResourceID: item.ID,
+		Commit: item.Metadata[MetadataCommit], Destination: item.Metadata[MetadataDestination],
+	}
+	contents, _ := json.Marshal(intent)
+	if err := os.WriteFile(filepath.Join(destination, ".git.tpod-transaction.json"), contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := a.ExecuteResource(context.Background(), item, op)
+	if result.Success || !strings.Contains(result.Detail, "not authorized") {
+		t.Fatalf("result=%#v", result)
+	}
+	if got, err := os.ReadFile(marker); err != nil || string(got) != "unchanged" {
+		t.Fatalf("metadata=%q err=%v", got, err)
+	}
+}
+
 func TestPartialCheckoutIsBackedUpBeforeReinstall(t *testing.T) {
 	var journalID string
 	stagedBeforeDestructive := false
@@ -198,6 +256,9 @@ func TestPartialCheckoutIsBackedUpBeforeReinstall(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(destination, "partial.txt"), []byte("partial"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Symlink("partial.txt", filepath.Join(destination, "partial-link")); err != nil {
+		t.Fatal(err)
+	}
 	op := operation(item, model.OperationRestore)
 	journal, err := store.Begin(model.Plan{ID: "partial-restore", Operations: []model.Operation{op}})
 	if err != nil {
@@ -211,6 +272,10 @@ func TestPartialCheckoutIsBackedUpBeforeReinstall(t *testing.T) {
 	captured := filepath.Join(a.Backup.Root, journalID, ".local", "share", "zinit", "zinit.git", "partial.txt")
 	if contents, err := os.ReadFile(captured); err != nil || string(contents) != "partial" {
 		t.Fatalf("recovery=%q err=%v", contents, err)
+	}
+	link := filepath.Join(a.Backup.Root, journalID, ".local", "share", "zinit", "zinit.git", "partial-link")
+	if target, err := os.Readlink(link); err != nil || target != "partial.txt" {
+		t.Fatalf("recovery link=%q err=%v", target, err)
 	}
 	if _, err := os.Stat(filepath.Join(destination, "zinit.zsh")); err != nil {
 		t.Fatal(err)
@@ -731,6 +796,7 @@ func TestRealHomebrewGitInstallUpdateAndConfigIsolation(t *testing.T) {
 	if result := a.ExecuteResource(context.Background(), item, upgrade); result.Success || !strings.Contains(result.Detail, "simulated crash") {
 		t.Fatalf("pre-metadata crash=%#v", result)
 	}
+	assertNoCheckoutArtifacts(t, checkout)
 	beforeGitMetadataCommit = nil
 	defer func() { beforeGitMetadataCommit = nil }()
 	if got := strings.TrimSpace(runGitTest(t, git, "-C", checkout, "rev-parse", "HEAD")); got != first {
@@ -781,6 +847,17 @@ func TestRealHomebrewGitInstallUpdateAndConfigIsolation(t *testing.T) {
 	if err := store.Complete(journal.ID); err != nil {
 		t.Fatal(err)
 	}
+	journal, err = store.Begin(model.Plan{ID: "real-update-repeat", Operations: []model.Operation{upgrade}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := a.ExecuteResource(context.Background(), item, upgrade); !result.Success {
+		t.Fatalf("repeated update=%#v", result)
+	}
+	if err := store.Complete(journal.ID); err != nil {
+		t.Fatal(err)
+	}
+	assertNoCheckoutArtifacts(t, checkout)
 	if contents, err := os.ReadFile(untracked); err != nil || string(contents) != "user" {
 		t.Fatalf("untracked update content=%q err=%v", contents, err)
 	}
@@ -879,6 +956,21 @@ func runGitTest(t *testing.T, git string, args ...string) string {
 		t.Fatalf("git %v: %v: %s", args, err, output)
 	}
 	return string(output)
+}
+
+func assertNoCheckoutArtifacts(t *testing.T, checkout string) {
+	t.Helper()
+	inside, err := filepath.Glob(filepath.Join(checkout, ".git.tpod-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	siblings, err := filepath.Glob(checkout + ".tpod-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inside)+len(siblings) != 0 {
+		t.Fatalf("checkout artifacts remain: inside=%v siblings=%v", inside, siblings)
+	}
 }
 
 func gitInspector(t *testing.T, remote, head, status string) runnerFunc {
