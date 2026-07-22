@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path, PurePosixPath
+import re
+import shutil
+import stat
+import tempfile
+import urllib.request
+import zipfile
+
+RELEASE_API_URL = "https://api.github.com/repos/kuskhan/jetendard/releases/latest"
+ASSET_NAME = "Jetendard-TTF.zip"
+FONT_NAME = re.compile(r"Jetendard-[A-Za-z0-9]+\.ttf\Z")
+
+
+def state_root(home: Path, state_home: str | None = None) -> Path:
+    if state_home:
+        return Path(state_home) / "terrapod" / "jetendard"
+    configured = os.environ.get("XDG_STATE_HOME")
+    return (Path(configured) if configured else home / ".local" / "state") / "terrapod" / "jetendard"
+
+
+def manifest_path(home: Path, state_home: str | None = None) -> Path:
+    return state_root(home, state_home) / "manifest.json"
+
+
+def load_json_url(url: str) -> dict:
+    request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "terrapod-jetendard"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return json.load(response)
+
+
+def select_asset(release: dict) -> tuple[str, str, str]:
+    if release.get("draft") or release.get("prerelease"):
+        raise ValueError("latest GitHub release is not a stable published release")
+    tag = release.get("tag_name")
+    assets = [asset for asset in release.get("assets", []) if asset.get("name") == ASSET_NAME and asset.get("state") == "uploaded"]
+    if not isinstance(tag, str) or not tag or len(assets) != 1:
+        raise ValueError("latest GitHub release must contain one uploaded Jetendard-TTF.zip asset")
+    asset = assets[0]
+    digest = asset.get("digest")
+    url = asset.get("browser_download_url")
+    if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest):
+        raise ValueError("Jetendard-TTF.zip does not publish a SHA-256 digest")
+    if not isinstance(url, str) or not url:
+        raise ValueError("Jetendard-TTF.zip does not publish a download URL")
+    return tag, digest.lower(), url
+
+
+def download(url: str, destination: Path) -> None:
+    request = urllib.request.Request(url, headers={"User-Agent": "terrapod-jetendard"})
+    with urllib.request.urlopen(request, timeout=60) as response, destination.open("wb") as output:
+        shutil.copyfileobj(response, output)
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return "sha256:" + digest.hexdigest()
+
+
+def font_entries(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
+    selected: dict[str, zipfile.ZipInfo] = {}
+    for info in archive.infolist():
+        path = PurePosixPath(info.filename)
+        if info.is_dir() or "__MACOSX" in path.parts:
+            continue
+        basename = path.name
+        if not FONT_NAME.fullmatch(basename):
+            continue
+        if basename in selected:
+            raise ValueError(f"release archive contains duplicate font: {basename}")
+        selected[basename] = info
+    if not selected:
+        raise ValueError("release archive contains no Jetendard TTF files")
+    return selected
+
+
+def read_manifest(path: Path) -> dict:
+    if not path.is_file():
+        return {"tag": "", "digest": "", "files": []}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    files = data.get("files")
+    if not isinstance(files, list) or not all(isinstance(name, str) and FONT_NAME.fullmatch(name) for name in files):
+        raise ValueError("Jetendard manifest contains an invalid files list")
+    return data
+
+
+def atomic_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=".manifest.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(data, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def install(home: Path) -> None:
+    api_url = os.environ.get("TERRAPOD_JETENDARD_RELEASE_API_URL", RELEASE_API_URL)
+    tag, digest, asset_url = select_asset(load_json_url(api_url))
+    fonts_dir = home / "Library" / "Fonts"
+    fonts_dir.mkdir(parents=True, exist_ok=True)
+    manifest = manifest_path(home)
+    old = read_manifest(manifest)
+    with tempfile.TemporaryDirectory(prefix="terrapod-jetendard-") as temporary:
+        archive_path = Path(temporary) / ASSET_NAME
+        download(asset_url, archive_path)
+        actual_digest = sha256(archive_path)
+        if actual_digest != digest:
+            raise ValueError(f"Jetendard archive digest mismatch: expected {digest}, got {actual_digest}")
+        with zipfile.ZipFile(archive_path) as archive:
+            entries = font_entries(archive)
+            staged = Path(temporary) / "fonts"
+            staged.mkdir()
+            for basename, info in entries.items():
+                destination = staged / basename
+                with archive.open(info) as source, destination.open("wb") as output:
+                    shutil.copyfileobj(source, output)
+                destination.chmod(0o644)
+            for basename in sorted(entries):
+                os.replace(staged / basename, fonts_dir / basename)
+    new_files = sorted(entries)
+    atomic_json(manifest, {"tag": tag, "digest": digest, "files": new_files})
+    for basename in old.get("files", []):
+        if basename not in new_files:
+            candidate = fonts_dir / basename
+            if candidate.is_file() or candidate.is_symlink():
+                candidate.unlink()
+    print(f"Installed Jetendard {tag} ({len(new_files)} TTF files).")
+
+
+def check(home: Path, state_home: str | None) -> None:
+    manifest = read_manifest(manifest_path(home, state_home))
+    tag = manifest.get("tag")
+    digest = manifest.get("digest")
+    files = manifest.get("files", [])
+    if not isinstance(tag, str) or not tag or not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest) or not files:
+        raise ValueError("Jetendard install manifest is missing or incomplete")
+    missing = [name for name in files if not (home / "Library" / "Fonts" / name).is_file()]
+    if missing:
+        raise ValueError("Jetendard manifest-owned font files are missing: " + ", ".join(missing))
+    print(f"Jetendard {tag} is installed ({len(files)} TTF files).")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers.add_parser("install")
+    checker = subparsers.add_parser("check")
+    checker.add_argument("--home")
+    checker.add_argument("--state-home")
+    args = parser.parse_args()
+    try:
+        if args.command == "install":
+            install(Path(os.environ.get("HOME", str(Path.home()))))
+        else:
+            check(Path(args.home or os.environ.get("HOME", str(Path.home()))), args.state_home)
+    except Exception as error:
+        print(f"Jetendard font: {error}", file=__import__("sys").stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
