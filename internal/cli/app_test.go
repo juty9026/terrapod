@@ -32,8 +32,8 @@ func TestHelpDescribesShadowCommandSurfaceWithoutDependencies(t *testing.T) {
 	for _, want := range []string{
 		"Personal Development Environment Manager",
 		"plan", "status", "doctor", "diff",
-		"apply      Reconcile package resources",
-		"resolve    Confirm unmanaged blockers for one resource",
+		"apply      Reconcile managed resources",
+		"resolve    Resolve one unavailable resource",
 		"update (unavailable until activation)",
 		"setup (unavailable until activation)",
 		"configure (unavailable until activation)",
@@ -480,11 +480,21 @@ func TestInspectLiveLockClassifiesProcessProbeResults(t *testing.T) {
 	}
 }
 
-func TestDiffReturnsShadowModeExitCode(t *testing.T) {
-	deps := Dependencies{Geteuid: func() int { return 501 }}
-	code, _, stderr := run(t, []string{"diff"}, deps)
-	if code != 69 || stderr != "shadow mode: managed-file adapter is not active\n" {
-		t.Fatalf("Run(diff) = %d, stderr=%q", code, stderr)
+func TestDiffUsesManagedFileClientAndPreservesOutput(t *testing.T) {
+	called := false
+	deps := Dependencies{Geteuid: func() int { return 501 }, Diff: func(context.Context) ([]byte, error) {
+		called = true
+		return []byte("diff --git a/.zshrc b/.zshrc\n"), nil
+	}}
+	code, stdout, stderr := run(t, []string{"diff"}, deps)
+	if code != 0 || !called || stdout != "diff --git a/.zshrc b/.zshrc\n" || stderr != "" {
+		t.Fatalf("Run(diff) = %d, called=%v stdout=%q stderr=%q", code, called, stdout, stderr)
+	}
+
+	deps.Diff = func(context.Context) ([]byte, error) { return nil, errors.New("diff failed") }
+	code, _, stderr = run(t, []string{"diff"}, deps)
+	if code != exitUnavailable || !strings.Contains(stderr, "diff failed") {
+		t.Fatalf("failed diff = %d, stderr=%q", code, stderr)
 	}
 }
 

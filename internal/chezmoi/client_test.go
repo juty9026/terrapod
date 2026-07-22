@@ -422,6 +422,31 @@ func TestApplyTargetsEmptyDoesNotInvokeChezmoi(t *testing.T) {
 	}
 }
 
+func TestApplyTargetsCheckedRunsPreconditionAfterStagingAndBeforeInstall(t *testing.T) {
+	home, source, config, binary := clientPaths(t)
+	staged := false
+	c := Client{Runner: runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+		target := request.Args[len(request.Args)-1]
+		if err := os.WriteFile(target, []byte("desired"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		staged = true
+		return execx.Result{}, nil
+	}), Binary: binary, Source: source, Config: config, Destination: home}
+	err := c.ApplyTargetsChecked(context.Background(), []string{"target"}, func(path string) error {
+		if !staged || path != filepath.Join(home, "target") {
+			t.Fatalf("precondition staged=%v path=%q", staged, path)
+		}
+		return errors.New("content changed")
+	})
+	if err == nil || !strings.Contains(err.Error(), "content changed") {
+		t.Fatalf("ApplyTargetsChecked error = %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(home, "target")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target mutated after failed precondition: %v", err)
+	}
+}
+
 func TestClientPreservesStderrOnFailure(t *testing.T) {
 	home, source, config, binary := clientPaths(t)
 	c := Client{Runner: runnerFunc(func(context.Context, execx.Request) (execx.Result, error) {

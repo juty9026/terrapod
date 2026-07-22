@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -692,6 +693,14 @@ func validateHistoricalOwnership(item model.Resource, digest string, owned model
 	if digest == "" || owned.ResourceID != item.ID || owned.Provider != item.Provider || owned.Package != item.Package || owned.CatalogDigest != digest {
 		return fmt.Errorf("reconcile: historical ownership for %q does not match signed authority", item.ID)
 	}
+	if item.Type == model.ResourceManagedFiles {
+		for path, receipt := range owned.Paths {
+			if !filepath.IsAbs(path) || receipt == "" {
+				return fmt.Errorf("reconcile: historical managed-file ownership for %q is malformed", item.ID)
+			}
+		}
+		return nil
+	}
 	expected := make(map[string]string)
 	for key, value := range item.Metadata {
 		if strings.HasPrefix(key, "path.") {
@@ -761,11 +770,17 @@ func validResult(operation model.Operation, result model.OperationResult) error 
 	return nil
 }
 
-func (e *Engine) own(item model.Resource, _ model.Observation) error {
+func (e *Engine) own(item model.Resource, observed model.Observation) error {
 	paths := make(map[string]string)
-	for key, value := range item.Metadata {
-		if strings.HasPrefix(key, "path.") {
-			paths[strings.TrimPrefix(key, "path.")] = value
+	if item.Type == model.ResourceManagedFiles {
+		for path, digest := range observed.Paths {
+			paths[path] = digest
+		}
+	} else {
+		for key, value := range item.Metadata {
+			if strings.HasPrefix(key, "path.") {
+				paths[strings.TrimPrefix(key, "path.")] = value
+			}
 		}
 	}
 	return e.State.PutOwnership(model.Ownership{ResourceID: item.ID, CatalogDigest: e.CatalogDigest, Provider: item.Provider, Package: item.Package, Paths: paths, PriorValues: make(map[string]json.RawMessage)})

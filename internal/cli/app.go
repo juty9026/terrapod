@@ -46,6 +46,7 @@ type Dependencies struct {
 	Planner        *planner.Planner
 	LoadHistorical func() (map[string]model.Catalog, error)
 	Apply          func(context.Context, reconcile.ApplyInput) (reconcile.Summary, error)
+	Diff           func(context.Context) ([]byte, error)
 	Resolve        func(context.Context, model.ResourceID, io.Reader, io.Writer) (resolve.Result, error)
 }
 
@@ -111,8 +112,20 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 		return exitUnavailable
 	}
 	if command == "diff" {
-		fmt.Fprintln(stderr, "shadow mode: managed-file adapter is not active")
-		return exitUnavailable
+		if deps.Diff == nil {
+			fmt.Fprintln(stderr, "internal error: managed-file diff is not configured")
+			return exitFailure
+		}
+		diff, err := deps.Diff(ctx)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return exitUnavailable
+		}
+		if _, err := stdout.Write(diff); err != nil {
+			fmt.Fprintln(stderr, err)
+			return exitFailure
+		}
+		return 0
 	}
 	if command == "resolve" {
 		if deps.Resolve == nil {

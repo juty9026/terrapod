@@ -190,6 +190,13 @@ func (c Client) Diff(ctx context.Context, targets []string) ([]byte, error) {
 }
 
 func (c Client) ApplyTargets(ctx context.Context, targets []string) error {
+	return c.ApplyTargetsChecked(ctx, targets, nil)
+}
+
+// ApplyTargetsChecked invokes check for each destination immediately before
+// the staged object is installed. It lets typed resource adapters bind the
+// mutation to the exact content hash they planned without weakening staging.
+func (c Client) ApplyTargetsChecked(ctx context.Context, targets []string, check func(string) error) error {
 	if len(targets) == 0 {
 		return nil
 	}
@@ -237,13 +244,18 @@ func (c Client) ApplyTargets(ctx context.Context, targets []string) error {
 	}
 	for i := range staged {
 		rel, _ := filepath.Rel(c.Destination, absolute[i])
-		check := func() error {
+		precondition := func() error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
+			if check != nil {
+				if err := check(absolute[i]); err != nil {
+					return err
+				}
+			}
 			return verifyIdentities(append(inv.identities, parentIdentities...))
 		}
-		if err := installStaged(c.Destination, rel, staged[i], check); err != nil {
+		if err := installStaged(c.Destination, rel, staged[i], precondition); err != nil {
 			return fmt.Errorf("chezmoi: install target %q: %w", absolute[i], err)
 		}
 	}

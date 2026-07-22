@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -26,6 +27,7 @@ type fixtureAdapter struct {
 	onExecute                    func()
 	onSimulate                   func()
 	canceled                     []model.Operation
+	observationPaths             map[string]string
 }
 
 func (f *fixtureAdapter) event(value string) {
@@ -107,7 +109,11 @@ func (f *fixtureAdapter) result(op model.Operation, phase string) model.Operatio
 	return model.OperationResult{OperationID: op.ID, ResourceID: op.ResourceID, Success: !f.fail[phase]}
 }
 func (f *fixtureAdapter) observation(item model.Resource) model.Observation {
-	return model.Observation{Present: f.present, Healthy: f.present, Provider: item.Provider, Package: item.Package, Paths: map[string]string{"bin": "/safe/bin"}}
+	paths := f.observationPaths
+	if paths == nil {
+		paths = map[string]string{"bin": "/safe/bin"}
+	}
+	return model.Observation{Present: f.present, Healthy: f.present, Provider: item.Provider, Package: item.Package, Paths: paths}
 }
 
 type privilegeFixture struct {
@@ -173,7 +179,7 @@ func TestApplyInstallsVerifiesAndCommitsOwnership(t *testing.T) {
 
 func TestDynamicObservationPathsRoundTripToHistoricalPrune(t *testing.T) {
 	item := pkg("core.alpha", "fixture")
-	adapter := &fixtureAdapter{fail: map[string]bool{}}
+	adapter := &fixtureAdapter{fail: map[string]bool{}, observationPaths: map[string]string{"/home/me/.zshrc": "file:digest"}}
 	engine, store := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
 	if _, err := engine.Apply(context.Background(), model.Plan{ID: "install", Operations: []model.Operation{op(item, "install", model.OperationInstall)}}); err != nil {
 		t.Fatal(err)
@@ -188,6 +194,26 @@ func TestDynamicObservationPathsRoundTripToHistoricalPrune(t *testing.T) {
 	}
 	if adapter.present {
 		t.Fatal("historical prune failed")
+	}
+}
+
+func TestManagedFileObservationPathsBecomeExactOwnership(t *testing.T) {
+	item := model.Resource{ID: "dotfiles.home", Type: model.ResourceManagedFiles, Provider: "fixture", Package: "home", VersionPolicy: model.VersionTracked}
+	adapter := &fixtureAdapter{fail: map[string]bool{}, observationPaths: map[string]string{"/home/me/.zshrc": "file:digest"}}
+	engine, store := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
+	if _, err := engine.Apply(context.Background(), model.Plan{ID: "install-managed", Operations: []model.Operation{op(item, "install-managed", model.OperationInstall)}}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := store.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := snapshot.Ownership[item.ID].Paths; !reflect.DeepEqual(got, adapter.observationPaths) {
+		t.Fatalf("managed ownership paths = %#v", got)
+	}
+	engine.Enabled = nil
+	if _, err := engine.Apply(context.Background(), model.Plan{ID: "prune-managed", Operations: []model.Operation{op(item, "prune-managed", model.OperationPrune)}}); err != nil {
+		t.Fatalf("dynamic managed-file receipt rejected for historical prune: %v", err)
 	}
 }
 
