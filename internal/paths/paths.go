@@ -3,6 +3,7 @@ package paths
 import "path/filepath"
 
 type Layout struct {
+	HomeDir       string
 	ConfigFile    string
 	StateDir      string
 	DataDir       string
@@ -19,6 +20,7 @@ func Resolve(home string, env map[string]string) Layout {
 	dataDir := filepath.Join(dataHome, "terrapod")
 
 	return Layout{
+		HomeDir:       home,
 		ConfigFile:    filepath.Join(configHome, "terrapod", "config.json"),
 		StateDir:      filepath.Join(stateHome, "terrapod"),
 		DataDir:       dataDir,

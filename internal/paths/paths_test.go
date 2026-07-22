@@ -10,6 +10,7 @@ func TestResolveDefaults(t *testing.T) {
 	home := filepath.Join(string(filepath.Separator), "home", "minu")
 	dataDir := filepath.Join(home, ".local", "share", "terrapod")
 	want := Layout{
+		HomeDir:       home,
 		ConfigFile:    filepath.Join(home, ".config", "terrapod", "config.json"),
 		StateDir:      filepath.Join(home, ".local", "state", "terrapod"),
 		DataDir:       dataDir,
@@ -33,6 +34,7 @@ func TestResolveOverrides(t *testing.T) {
 	}
 	dataDir := filepath.Join(env["XDG_DATA_HOME"], "terrapod")
 	want := Layout{
+		HomeDir:       home,
 		ConfigFile:    filepath.Join(env["XDG_CONFIG_HOME"], "terrapod", "config.json"),
 		StateDir:      filepath.Join(env["XDG_STATE_HOME"], "terrapod"),
 		DataDir:       dataDir,
