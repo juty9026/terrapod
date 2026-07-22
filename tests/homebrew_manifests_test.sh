@@ -42,6 +42,58 @@ fi
 pass "root Brewfile declares exactly the mandatory cross-profile CLI formulae"
 
 catalog="$repo_root/catalog/v1/resources.json"
+cat >"$tmp_dir/expected-catalog-homebrew" <<'EOF'
+core.bat	package	homebrew-formula	bat	macos-terminal,vps-shell	tracked	bat	-
+core.btop	package	homebrew-formula	btop	macos-terminal,vps-shell	tracked	btop	-
+core.chezmoi	package	homebrew-formula	chezmoi	macos-terminal,vps-shell	tracked	chezmoi	-
+core.dust	package	homebrew-formula	dust	macos-terminal,vps-shell	tracked	dust	-
+core.duf	package	homebrew-formula	duf	macos-terminal,vps-shell	tracked	duf	-
+core.fastfetch	package	homebrew-formula	fastfetch	macos-terminal,vps-shell	tracked	fastfetch	-
+core.fd	package	homebrew-formula	fd	macos-terminal,vps-shell	tracked	fd	-
+core.fzf	package	homebrew-formula	fzf	macos-terminal,vps-shell	tracked	fzf	-
+core.gh	package	homebrew-formula	gh	macos-terminal,vps-shell	tracked	gh	-
+core.git	package	homebrew-formula	git	macos-terminal,vps-shell	tracked	git	-
+core.git-delta	package	homebrew-formula	git-delta	macos-terminal,vps-shell	tracked	delta	-
+core.gum	package	homebrew-formula	gum	macos-terminal,vps-shell	tracked	gum	-
+core.lazygit	package	homebrew-formula	lazygit	macos-terminal,vps-shell	tracked	lazygit	-
+core.lsd	package	homebrew-formula	lsd	macos-terminal,vps-shell	tracked	lsd	-
+core.mise	package	homebrew-formula	mise	macos-terminal,vps-shell	tracked	mise	-
+core.neovim	package	homebrew-formula	neovim	macos-terminal,vps-shell	tracked	nvim	-
+core.ripgrep	package	homebrew-formula	ripgrep	macos-terminal,vps-shell	tracked	rg	-
+core.starship	package	homebrew-formula	starship	macos-terminal,vps-shell	tracked	starship	-
+core.zellij	package	homebrew-formula	zellij	macos-terminal,vps-shell	tracked	zellij	-
+core.zoxide	package	homebrew-formula	zoxide	macos-terminal,vps-shell	tracked	zoxide	-
+optional-ai.antigravity-cli	package	homebrew-cask	antigravity-cli	macos-terminal,vps-shell	tracked	agy	enabledByAnyConfig.enableAiCliTools=true,enabledByAnyConfig.enableDevelopmentWorkspace=true
+optional-ai.claude-code	package	homebrew-cask	claude-code	macos-terminal,vps-shell	tracked	claude	enabledByAnyConfig.enableAiCliTools=true,enabledByAnyConfig.enableDevelopmentWorkspace=true
+optional-ai.codex	package	homebrew-cask	codex	macos-terminal,vps-shell	tracked	codex	enabledByAnyConfig.enableAiCliTools=true,enabledByAnyConfig.enableDevelopmentWorkspace=true
+optional-desktop.ghostty	package	homebrew-cask	ghostty	macos-terminal	tracked	-	enabledByConfig=enableMacosAppGroupTerminalApps
+optional-desktop.hammerspoon	package	homebrew-cask	hammerspoon	macos-terminal	tracked	-	enabledByConfig=enableMacosAppGroupAutomation
+optional-desktop.istat-menus	package	homebrew-cask	istat-menus	macos-terminal	tracked	-	enabledByConfig=enableMacosAppGroupMonitoring
+optional-desktop.karabiner-elements	package	homebrew-cask	karabiner-elements	macos-terminal	tracked	-	enabledByConfig=enableMacosAppGroupAutomation
+optional-desktop.one-password-cli	package	homebrew-cask	1password-cli	macos-terminal	tracked	-	enabledByConfig=enableMacosAppGroupLauncher
+optional-desktop.orca	package	homebrew-cask	stablyai/orca/orca	macos-terminal	tracked	-	enabledByConfig=enableMacosAppGroupDevelopmentApps
+optional-desktop.raycast	package	homebrew-cask	raycast	macos-terminal	tracked	-	enabledByConfig=enableMacosAppGroupLauncher
+optional-desktop.scroll-reverser	package	homebrew-cask	scroll-reverser	macos-terminal	tracked	-	enabledByConfig=enableMacosAppGroupAutomation
+optional-desktop.zed	package	homebrew-cask	zed	macos-terminal	tracked	-	enabledByConfig=enableMacosAppGroupDevelopmentApps
+EOF
+LC_ALL=C sort "$tmp_dir/expected-catalog-homebrew" >"$tmp_dir/expected-catalog-homebrew-sorted"
+jq -r '.resources[] | select(.provider == "homebrew-formula" or .provider == "homebrew-cask") |
+  [
+    .id,
+    .type,
+    .provider,
+    .package,
+    (.profiles | join(",")),
+    .versionPolicy,
+    (if (.commands | length) == 0 then "-" else (.commands | join(",")) end),
+    (if (.metadata | length) == 0 then "-" else (.metadata | to_entries | sort_by(.key) | map("\(.key)=\(.value)") | join(",")) end)
+  ] | @tsv' "$catalog" | LC_ALL=C sort >"$tmp_dir/catalog-homebrew"
+if ! cmp -s "$tmp_dir/expected-catalog-homebrew-sorted" "$tmp_dir/catalog-homebrew"; then
+  diff -u "$tmp_dir/expected-catalog-homebrew-sorted" "$tmp_dir/catalog-homebrew" >&2 || true
+  fail "signed catalog has the exact global Homebrew resource contract"
+fi
+pass "signed catalog has the exact global Homebrew resource contract"
+
 jq -r '.resources[] | select(.provider == "homebrew-formula") | .package' "$catalog" |
   LC_ALL=C sort >"$tmp_dir/catalog-formulae"
 sed 's/^brew "//; s/"$//' "$expected_formulae" >"$tmp_dir/expected-formula-packages"

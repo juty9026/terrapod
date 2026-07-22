@@ -39,6 +39,31 @@ func TestConstructorsUseExactNamesAndStandardBrewPaths(t *testing.T) {
 	}
 }
 
+func TestConstructorRejectsTypedNilDependencies(t *testing.T) {
+	var nilRunner *pointerRunner
+	var nilFS *pointerFS
+	var nilInspector *pointerInspector
+	var nilRunning *pointerRunning
+	tests := []struct {
+		name   string
+		runner Runner
+		policy AppPolicy
+		want   string
+	}{
+		{name: "runner", runner: nilRunner, want: "required"},
+		{name: "filesystem", runner: runnerFunc(noCommand), policy: AppPolicy{FS: nilFS}, want: "nil"},
+		{name: "inspector", runner: runnerFunc(noCommand), policy: AppPolicy{Inspector: nilInspector}, want: "nil"},
+		{name: "running checker", runner: runnerFunc(noCommand), policy: AppPolicy{Running: nilRunning}, want: "nil"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := New(Cask, "/opt/homebrew/bin/brew", t.TempDir(), tc.runner, tc.policy); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
 func TestFormulaInspectUsesFixedInventoryCommandsAndVerifiesProvidedCommands(t *testing.T) {
 	var calls []execx.Request
 	runner := runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
@@ -80,10 +105,14 @@ func TestInspectRejectsPackageMismatchAndMalformedJSON(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		json string
+		want string
 	}{
-		{name: "mismatch", json: `{"formulae":[{"name":"wget","full_name":"wget","installed":[]}],"casks":[]}`},
-		{name: "malformed", json: `{"formulae":`},
-		{name: "multiple", json: `{"formulae":[{"name":"ripgrep"},{"name":"wget"}],"casks":[]}`},
+		{name: "mismatch", json: `{"formulae":[{"name":"wget","full_name":"wget","installed":[]}],"casks":[]}`, want: "mismatch"},
+		{name: "malformed", json: `{"formulae":`, want: "unexpected EOF"},
+		{name: "multiple", json: `{"formulae":[{"name":"ripgrep"},{"name":"wget"}],"casks":[]}`, want: "exactly one"},
+		{name: "unknown top-level field", json: `{"formulae":[{"name":"ripgrep","full_name":"ripgrep","installed":[]}],"casks":[],"unknown":true}`, want: "unknown"},
+		{name: "unknown formula field", json: `{"formulae":[{"name":"ripgrep","full_name":"ripgrep","installed":[],"unknown":true}],"casks":[]}`, want: "unknown"},
+		{name: "trailing value", json: `{"formulae":[{"name":"ripgrep","full_name":"ripgrep","installed":[]}],"casks":[]} {}`, want: "trailing"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			adapter, err := New(Formula, "/opt/homebrew/bin/brew", t.TempDir(), runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
@@ -92,10 +121,90 @@ func TestInspectRejectsPackageMismatchAndMalformedJSON(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := adapter.Inspect(context.Background(), formulaResource("ripgrep")); err == nil {
-				t.Fatal("Inspect succeeded")
+			if _, err := adapter.Inspect(context.Background(), formulaResource("ripgrep")); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want containing %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestInspectRejectsUnknownCaskRecordField(t *testing.T) {
+	adapter, err := New(Cask, "/opt/homebrew/bin/brew", t.TempDir(), runnerFunc(func(context.Context, execx.Request) (execx.Result, error) {
+		return execx.Result{Stdout: []byte(`{"formulae":[],"casks":[{"token":"codex","full_token":"homebrew/cask/codex","installed":null,"unknown":true}]}`)}, nil
+	}), AppPolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource := caskResource("codex", "")
+	resource.Metadata = map[string]string{}
+	if _, err := adapter.Inspect(context.Background(), resource); err == nil || !strings.Contains(err.Error(), "unknown") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestInspectRejectsWrongTapWithSameBasename(t *testing.T) {
+	for _, kind := range []Kind{Formula, Cask} {
+		t.Run(string(kind), func(t *testing.T) {
+			adapter, err := New(kind, "/opt/homebrew/bin/brew", t.TempDir(), runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+				if request.Args[0] == "info" {
+					if kind == Formula {
+						return execx.Result{Stdout: []byte(`{"formulae":[{"name":"tool","full_name":"other/tap/tool","installed":[]}],"casks":[]}`)}, nil
+					}
+					return execx.Result{Stdout: []byte(`{"formulae":[],"casks":[{"token":"tool","full_token":"other/tap/tool","installed":null}]}`)}, nil
+				}
+				return execx.Result{}, errors.New("not installed")
+			}), AppPolicy{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			resource := formulaResource("wanted/tap/tool")
+			resource.Provider = adapter.Name()
+			if _, err := adapter.Inspect(context.Background(), resource); err == nil || !strings.Contains(err.Error(), "mismatch") {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
+func TestQualifiedCaskUsesCanonicalInfoBeforeBasenameOnlyInventory(t *testing.T) {
+	var calls [][]string
+	adapter, err := New(Cask, "/opt/homebrew/bin/brew", t.TempDir(), runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+		calls = append(calls, request.Args)
+		switch strings.Join(request.Args, " ") {
+		case "info --json=v2 stablyai/orca/orca":
+			return execx.Result{Stdout: []byte(`{"formulae":[],"casks":[{"token":"orca","full_token":"stablyai/orca/orca","installed":"1.0"}]}`)}, nil
+		case "list --versions stablyai/orca/orca":
+			return execx.Result{Stdout: []byte("orca 1.0\n")}, nil
+		case "outdated --json=v2 stablyai/orca/orca":
+			return execx.Result{Stdout: []byte(`{"formulae":[],"casks":[{"name":"orca","current_version":"1.1","installed_versions":["1.0"],"pinned":false,"pinned_version":null}]}`)}, nil
+		default:
+			return execx.Result{}, errors.New("unexpected command")
+		}
+	}), AppPolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource := caskResource("stablyai/orca/orca", "")
+	resource.ID = "optional-desktop.orca"
+	resource.Metadata = map[string]string{}
+	if _, err := adapter.Inspect(context.Background(), resource); err != nil {
+		t.Fatal(err)
+	}
+	changes, err := adapter.Simulate(context.Background(), model.Operation{Kind: model.OperationUpgrade, Provider: adapter.Name(), Package: resource.Package})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(changes.Upgrades, []string{resource.Package}) {
+		t.Fatalf("changes = %#v", changes)
+	}
+	want := [][]string{
+		{"info", "--json=v2", resource.Package},
+		{"list", "--versions", resource.Package},
+		{"info", "--json=v2", resource.Package},
+		{"outdated", "--json=v2", resource.Package},
+	}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("calls = %#v, want %#v", calls, want)
 	}
 }
 
@@ -124,6 +233,35 @@ func TestCLICaskInspectVerifiesProvidedCommandAtBrewPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !observation.Healthy || observation.Paths["codex"] != "/home/linuxbrew/.linuxbrew/bin/codex" {
+		t.Fatalf("observation = %#v", observation)
+	}
+}
+
+func TestInspectRejectsProvidedCommandSymlinkEscapingBrewPrefix(t *testing.T) {
+	commandPath := "/opt/homebrew/bin/rg"
+	escapedPath := "/tmp/attacker/rg"
+	adapter, err := New(Formula, "/opt/homebrew/bin/brew", t.TempDir(), runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+		if request.Args[0] == "info" {
+			return execx.Result{Stdout: []byte(`{"formulae":[{"name":"ripgrep","full_name":"ripgrep","installed":[{"version":"14.1.1"}]}],"casks":[]}`)}, nil
+		}
+		return execx.Result{Stdout: []byte("ripgrep 14.1.1\n")}, nil
+	}), AppPolicy{FS: fakeFS{
+		files: map[string]os.FileInfo{
+			commandPath: fakeInfo{name: "rg", mode: os.ModeSymlink | 0o777},
+			escapedPath: fakeInfo{name: "rg", mode: 0o755},
+		},
+		resolved: map[string]string{commandPath: escapedPath},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource := formulaResource("ripgrep")
+	resource.Commands = []string{"rg"}
+	observation, err := adapter.Inspect(context.Background(), resource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observation.Healthy || !strings.Contains(observation.Detail, "prefix") {
 		t.Fatalf("observation = %#v", observation)
 	}
 }
@@ -173,6 +311,46 @@ func TestSimulateAndExecuteUseOnlyTargetedFormulaCommands(t *testing.T) {
 	}
 	if got := requestArgs(calls); !reflect.DeepEqual(got, wantArgs) {
 		t.Fatalf("args = %#v, want %#v", got, wantArgs)
+	}
+}
+
+func TestHomebrewRejectsPrivilegedOperationsWithoutRunning(t *testing.T) {
+	for _, kind := range []Kind{Formula, Cask} {
+		for _, operationKind := range []model.OperationKind{model.OperationInstall, model.OperationAdopt, model.OperationUpgrade, model.OperationPrune} {
+			t.Run(string(kind)+"/"+string(operationKind), func(t *testing.T) {
+				calls := 0
+				adapter, err := New(kind, "/opt/homebrew/bin/brew", t.TempDir(), runnerFunc(func(context.Context, execx.Request) (execx.Result, error) {
+					calls++
+					return execx.Result{}, nil
+				}), AppPolicy{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				operation := model.Operation{Kind: operationKind, Provider: adapter.Name(), Package: "ripgrep", RequiresPrivilege: true}
+				if _, err := adapter.Simulate(context.Background(), operation); err == nil || !strings.Contains(err.Error(), "privilege") {
+					t.Fatalf("Simulate error = %v", err)
+				}
+				if err := adapter.Execute(context.Background(), operation); err == nil || !strings.Contains(err.Error(), "privilege") {
+					t.Fatalf("Execute error = %v", err)
+				}
+				if calls != 0 {
+					t.Fatalf("runner called %d times", calls)
+				}
+			})
+		}
+	}
+}
+
+func TestSimulateRejectsUnknownOutdatedFields(t *testing.T) {
+	adapter, err := New(Formula, "/opt/homebrew/bin/brew", t.TempDir(), runnerFunc(func(context.Context, execx.Request) (execx.Result, error) {
+		return execx.Result{Stdout: []byte(`{"formulae":[{"name":"ripgrep","unknown":true}],"casks":[]}`)}, nil
+	}), AppPolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = adapter.Simulate(context.Background(), model.Operation{Kind: model.OperationUpgrade, Provider: adapter.Name(), Package: "ripgrep"})
+	if err == nil || !strings.Contains(err.Error(), "unknown") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -336,6 +514,108 @@ func TestCaskReplacementRestoresOriginalOnVerificationFailure(t *testing.T) {
 	}
 }
 
+func TestAbsentDeclaredAppInstallVerifiesIdentityBeforeSuccess(t *testing.T) {
+	homeApps := canonicalDir(t, filepath.Join(t.TempDir(), "Applications"))
+	artifact := filepath.Join(homeApps, "Vendor.app")
+	installed := false
+	adapter, err := New(Cask, "/opt/homebrew/bin/brew", t.TempDir(), runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+		switch strings.Join(request.Args, " ") {
+		case "info --json=v2 vendor":
+			if installed {
+				return caskInfo("vendor", "1.0"), nil
+			}
+			return execx.Result{Stdout: []byte(`{"formulae":[],"casks":[{"token":"vendor","full_token":"vendor","installed":null}]}`)}, nil
+		case "list --versions vendor":
+			if installed {
+				return execx.Result{Stdout: []byte("vendor 1.0\n")}, nil
+			}
+			return execx.Result{}, errors.New("not installed")
+		case "install --cask vendor":
+			installed = true
+			if err := os.MkdirAll(artifact, 0o755); err != nil {
+				return execx.Result{}, err
+			}
+			return execx.Result{}, nil
+		default:
+			return execx.Result{}, errors.New("unexpected command")
+		}
+	}), AppPolicy{
+		HomeApplications: homeApps,
+		Inspector: inspectorFunc(func(context.Context, string) (AppIdentity, error) {
+			return AppIdentity{BundleID: "wrong.bundle", SigningID: "Wrong Signer"}, nil
+		}),
+		Running: runningFunc(func(context.Context, string) (bool, error) { return false, nil }),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource := caskResource("vendor", artifact)
+	if _, err := adapter.Inspect(context.Background(), resource); err != nil {
+		t.Fatal(err)
+	}
+	err = adapter.Execute(context.Background(), model.Operation{ResourceID: resource.ID, Kind: model.OperationInstall, Provider: adapter.Name(), Package: "vendor"})
+	if err == nil || !strings.Contains(err.Error(), "verify") || !strings.Contains(err.Error(), "vendor") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestRollbackIgnoresPreexistingLegacyFailedArtifactAndRestoresOriginal(t *testing.T) {
+	homeApps := canonicalDir(t, filepath.Join(t.TempDir(), "Applications"))
+	artifact := filepath.Join(homeApps, "Vendor.app")
+	if err := os.MkdirAll(artifact, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(artifact, "original")
+	if err := os.WriteFile(marker, []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recovery := canonicalDir(t, t.TempDir())
+	legacyFailed := filepath.Join(recovery, "optional-ai.vendor", "Vendor.app.failed")
+	if err := os.MkdirAll(legacyFailed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	adapter := replacementFailureAdapter(t, homeApps, artifact, recovery, nil)
+	resource := caskResource("vendor", artifact)
+	if _, err := adapter.Inspect(context.Background(), resource); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.Execute(context.Background(), model.Operation{ResourceID: resource.ID, Kind: model.OperationInstall, Provider: adapter.Name(), Package: "vendor"}); err == nil {
+		t.Fatal("Execute succeeded")
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("original not restored: %v", err)
+	}
+	if _, err := os.Stat(legacyFailed); err != nil {
+		t.Fatalf("legacy failed artifact changed: %v", err)
+	}
+}
+
+func TestRollbackAttemptsOriginalRestoreAfterFailedReplacementMove(t *testing.T) {
+	homeApps := canonicalDir(t, filepath.Join(t.TempDir(), "Applications"))
+	artifact := filepath.Join(homeApps, "Vendor.app")
+	if err := os.MkdirAll(artifact, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(artifact, "original")
+	if err := os.WriteFile(marker, []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recovery := canonicalDir(t, t.TempDir())
+	fs := &failReplacementMoveFS{artifact: artifact}
+	adapter := replacementFailureAdapter(t, homeApps, artifact, recovery, fs)
+	resource := caskResource("vendor", artifact)
+	if _, err := adapter.Inspect(context.Background(), resource); err != nil {
+		t.Fatal(err)
+	}
+	err := adapter.Execute(context.Background(), model.Operation{ResourceID: resource.ID, Kind: model.OperationInstall, Provider: adapter.Name(), Package: "vendor"})
+	if err == nil || !strings.Contains(err.Error(), "stage failed replacement") {
+		t.Fatalf("error = %v", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("original not restored after move failure: %v", err)
+	}
+}
+
 func TestCaskAdoptionRejectsRunningOrUnsafeArtifact(t *testing.T) {
 	homeApps := filepath.Join(t.TempDir(), "Applications")
 	artifact := filepath.Join(homeApps, "Vendor.app")
@@ -384,7 +664,10 @@ func (f runningFunc) IsRunning(ctx context.Context, bundleID string) (bool, erro
 	return f(ctx, bundleID)
 }
 
-type fakeFS struct{ files map[string]os.FileInfo }
+type fakeFS struct {
+	files    map[string]os.FileInfo
+	resolved map[string]string
+}
 
 func (f fakeFS) Lstat(path string) (os.FileInfo, error) {
 	info, ok := f.files[path]
@@ -393,9 +676,15 @@ func (f fakeFS) Lstat(path string) (os.FileInfo, error) {
 	}
 	return info, nil
 }
-func (f fakeFS) EvalSymlinks(path string) (string, error) { return path, nil }
-func (fakeFS) MkdirAll(string, os.FileMode) error         { return nil }
-func (fakeFS) Rename(string, string) error                { return nil }
+func (f fakeFS) EvalSymlinks(path string) (string, error) {
+	if resolved, ok := f.resolved[path]; ok {
+		return resolved, nil
+	}
+	return path, nil
+}
+func (fakeFS) Mkdir(string, os.FileMode) error    { return nil }
+func (fakeFS) MkdirAll(string, os.FileMode) error { return nil }
+func (fakeFS) Rename(string, string) error        { return nil }
 
 type fakeInfo struct {
 	name string
@@ -461,5 +750,96 @@ func canonicalPath(t *testing.T, path string) string {
 	}
 	return resolved
 }
+
+func canonicalDir(t *testing.T, path string) string {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return canonicalPath(t, path)
+}
+
+func replacementFailureAdapter(t *testing.T, homeApps, artifact, recovery string, fs FileSystem) *Adapter {
+	t.Helper()
+	adapter, err := New(Cask, "/opt/homebrew/bin/brew", recovery, runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+		switch strings.Join(request.Args, " ") {
+		case "info --json=v2 vendor":
+			return caskInfo("vendor", "1.0"), nil
+		case "list --versions vendor":
+			return execx.Result{Stdout: []byte("vendor 1.0\n")}, nil
+		case "install --cask --adopt vendor":
+			return execx.Result{}, errors.New("adopt unsupported")
+		case "install --cask vendor":
+			if err := os.MkdirAll(artifact, 0o755); err != nil {
+				return execx.Result{}, err
+			}
+			return execx.Result{}, nil
+		default:
+			return execx.Result{}, errors.New("unexpected command")
+		}
+	}), AppPolicy{
+		HomeApplications: homeApps,
+		FS:               fs,
+		Inspector: inspectorFunc(func(_ context.Context, path string) (AppIdentity, error) {
+			if _, err := os.Stat(filepath.Join(path, "original")); err == nil {
+				return AppIdentity{BundleID: "com.example.vendor", SigningID: "Developer ID Application: Vendor"}, nil
+			}
+			return AppIdentity{BundleID: "wrong.bundle", SigningID: "Wrong Signer"}, nil
+		}),
+		Running: runningFunc(func(context.Context, string) (bool, error) { return false, nil }),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return adapter
+}
+
+type failReplacementMoveFS struct{ artifact string }
+
+func (f *failReplacementMoveFS) Lstat(path string) (os.FileInfo, error) { return os.Lstat(path) }
+func (f *failReplacementMoveFS) EvalSymlinks(path string) (string, error) {
+	return filepath.EvalSymlinks(path)
+}
+func (f *failReplacementMoveFS) MkdirAll(path string, mode os.FileMode) error {
+	return os.MkdirAll(path, mode)
+}
+func (f *failReplacementMoveFS) Mkdir(path string, mode os.FileMode) error {
+	return os.Mkdir(path, mode)
+}
+func (f *failReplacementMoveFS) Rename(oldPath, newPath string) error {
+	if oldPath == f.artifact {
+		if _, err := os.Stat(filepath.Join(oldPath, "original")); errors.Is(err, os.ErrNotExist) {
+			if removeErr := os.Remove(oldPath); removeErr != nil {
+				return removeErr
+			}
+			return errors.New("injected replacement move failure")
+		}
+	}
+	return os.Rename(oldPath, newPath)
+}
+
+type pointerRunner struct{}
+
+func (*pointerRunner) Run(context.Context, execx.Request) (execx.Result, error) {
+	return execx.Result{}, nil
+}
+
+type pointerFS struct{}
+
+func (*pointerFS) Lstat(string) (os.FileInfo, error)        { return nil, os.ErrNotExist }
+func (*pointerFS) EvalSymlinks(path string) (string, error) { return path, nil }
+func (*pointerFS) Mkdir(string, os.FileMode) error          { return nil }
+func (*pointerFS) MkdirAll(string, os.FileMode) error       { return nil }
+func (*pointerFS) Rename(string, string) error              { return nil }
+
+type pointerInspector struct{}
+
+func (*pointerInspector) Inspect(context.Context, string) (AppIdentity, error) {
+	return AppIdentity{}, nil
+}
+
+type pointerRunning struct{}
+
+func (*pointerRunning) IsRunning(context.Context, string) (bool, error) { return false, nil }
 
 var _ provider.Provider = (*Adapter)(nil)
