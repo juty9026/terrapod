@@ -131,6 +131,7 @@ def insert_member(text: str, obj: Node, key: str, value_text: str) -> str:
     close = obj.end - 1
     closing_line = text.rfind("\n", 0, close) + 1
     closing_indent = line_indent(text, close)
+    closing_on_own_line = not text[closing_line:close].strip()
     child_indent = closing_indent + "  "
     rendered = f'{child_indent}{json.dumps(key)}: {value_text},\n'
     members = obj.members or {}
@@ -143,7 +144,10 @@ def insert_member(text: str, obj: Node, key: str, value_text: str) -> str:
     if not any(token.kind == "," for token in tokens(between)):
         text = text[:last.end] + "," + text[last.end:]
         close += 1
-        closing_line += 1
+        if closing_on_own_line:
+            closing_line += 1
+    if not closing_on_own_line:
+        return text[:close] + "\n" + rendered + closing_indent + text[close:]
     return text[:closing_line] + rendered + text[closing_line:]
 
 

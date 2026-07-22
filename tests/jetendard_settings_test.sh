@@ -126,6 +126,28 @@ python3 "$helper" check-zed --home "$empty_home" || fail "minimal Zed settings a
 [ ! -e "$empty_home/Library/Application Support/orca/profiles" ] || fail "apply does not create Orca profiles"
 pass "empty home receives only minimal Zed settings"
 
+inline_home="$tmp_dir/inline-home"
+mkdir -p "$inline_home/.config/zed"
+cat >"$inline_home/.config/zed/settings.json" <<'JSON'
+{
+  "buffer_font_family": "Jetendard",
+  "terminal": {"shell": "zsh"},
+  "unrelated": true
+}
+JSON
+HOME="$inline_home" TERRAPOD_ORCA_RUNNING=0 python3 "$helper" apply
+python3 "$helper" check-zed --home "$inline_home" || fail "inline nested terminal font is applied"
+grep -F '  "terminal": {"shell": "zsh",' "$inline_home/.config/zed/settings.json" >/dev/null || fail "inline nested unrelated member survives"
+grep -F '    "font_family": "Jetendard",' "$inline_home/.config/zed/settings.json" >/dev/null || fail "inline nested font stays inside terminal"
+if grep -E '^  "font_family"' "$inline_home/.config/zed/settings.json" >/dev/null; then
+  fail "inline nested font is not inserted at the root"
+fi
+grep -F '  "unrelated": true' "$inline_home/.config/zed/settings.json" >/dev/null || fail "inline fixture unrelated root data survives"
+inline_first="$(shasum "$inline_home/.config/zed/settings.json")"
+HOME="$inline_home" TERRAPOD_ORCA_RUNNING=0 python3 "$helper" apply
+[ "$inline_first" = "$(shasum "$inline_home/.config/zed/settings.json")" ] || fail "inline nested object apply is idempotent"
+pass "inline nested objects receive members inside the object"
+
 ghostty_home="$tmp_dir/ghostty-home"
 mkdir -p "$ghostty_home/.config/ghostty"
 printf '%s\n' 'font-family = "Jetendard"' >"$ghostty_home/.config/ghostty/config"
