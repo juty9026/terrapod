@@ -19,6 +19,11 @@ import (
 
 const maxInputSize = 4 * 1024 * 1024
 
+const (
+	enabledByConfigMetadataKey       = "enabledByConfig"
+	enabledByAnyConfigMetadataPrefix = "enabledByAnyConfig."
+)
+
 type SignatureSet struct {
 	PublicKeys map[string]ed25519.PublicKey
 }
@@ -149,6 +154,10 @@ func validate(catalog model.Catalog) error {
 	if catalog.Config.Version != 1 {
 		return fmt.Errorf("unsupported config schema version %d", catalog.Config.Version)
 	}
+	configKinds := make(map[string]string, len(catalog.Config.Fields))
+	for _, field := range catalog.Config.Fields {
+		configKinds[field.ID] = field.Kind
+	}
 
 	resources := append([]model.Resource(nil), catalog.Resources...)
 	sort.SliceStable(resources, func(i, j int) bool { return resources[i].ID < resources[j].ID })
@@ -169,6 +178,9 @@ func validate(catalog model.Catalog) error {
 		}
 		if !safePackageIdentifier(resource.Package) {
 			return fmt.Errorf("resource %q has unsafe package identifier %q", resource.ID, resource.Package)
+		}
+		if err := validateConfigGateMetadata(resource, configKinds); err != nil {
+			return err
 		}
 
 		profiles := append([]model.Profile(nil), resource.Profiles...)
@@ -204,6 +216,48 @@ func validate(catalog model.Catalog) error {
 			parts[i] = string(cycle[i])
 		}
 		return fmt.Errorf("dependency cycle: %s", strings.Join(parts, " -> "))
+	}
+	return nil
+}
+
+func validateConfigGateMetadata(resource model.Resource, configKinds map[string]string) error {
+	singleField, hasSingle := resource.Metadata[enabledByConfigMetadataKey]
+	hasAny := false
+	anyKeys := make([]string, 0)
+	for key := range resource.Metadata {
+		if strings.HasPrefix(key, enabledByAnyConfigMetadataPrefix) {
+			hasAny = true
+			anyKeys = append(anyKeys, key)
+		}
+	}
+	if hasSingle && hasAny {
+		return fmt.Errorf("resource %q mixes %q and %q metadata", resource.ID, enabledByConfigMetadataKey, "enabledByAnyConfig.*")
+	}
+	if hasSingle {
+		if err := validateBoolConfigReference(resource.ID, singleField, configKinds); err != nil {
+			return err
+		}
+	}
+	sort.Strings(anyKeys)
+	for _, key := range anyKeys {
+		if resource.Metadata[key] != "true" {
+			return fmt.Errorf("resource %q metadata %q must have value %q", resource.ID, key, "true")
+		}
+		field := strings.TrimPrefix(key, enabledByAnyConfigMetadataPrefix)
+		if err := validateBoolConfigReference(resource.ID, field, configKinds); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateBoolConfigReference(resourceID model.ResourceID, field string, configKinds map[string]string) error {
+	kind, ok := configKinds[field]
+	if !ok {
+		return fmt.Errorf("resource %q references unknown config field %q", resourceID, field)
+	}
+	if kind != "bool" {
+		return fmt.Errorf("resource %q references non-bool config field %q", resourceID, field)
 	}
 	return nil
 }

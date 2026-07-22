@@ -39,7 +39,7 @@ func TestLoadVerified(t *testing.T) {
 	}
 }
 
-func TestSeedCatalogHasCurrentConfigSchemaAndNoResources(t *testing.T) {
+func TestSeedCatalogHasCurrentConfigSchemaAndHomebrewResources(t *testing.T) {
 	contents, err := os.ReadFile(filepath.Join("..", "..", "catalog", "v1", "resources.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -49,8 +49,8 @@ func TestSeedCatalogHasCurrentConfigSchemaAndNoResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Catalog.Resources) != 0 {
-		t.Fatalf("Resources = %#v, want none", got.Catalog.Resources)
+	if len(got.Catalog.Resources) != 32 {
+		t.Fatalf("Resources count = %d, want 32", len(got.Catalog.Resources))
 	}
 	wantFields := []model.ConfigField{
 		{ID: "profile", Kind: "string", Required: true},
@@ -248,6 +248,84 @@ func TestLoadVerifiedRejectsUnsafePackageIdentifiers(t *testing.T) {
 			resourcesOf(input)[0]["package"] = identifier
 			assertCatalogError(t, input, "unsafe package identifier")
 		})
+	}
+}
+
+func TestLoadVerifiedValidatesConfigGateMetadata(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(map[string]any)
+		want string
+	}{
+		{
+			name: "single gate unknown field",
+			edit: func(input map[string]any) {
+				resourcesOf(input)[0]["metadata"] = map[string]any{"enabledByConfig": "missing"}
+			},
+			want: `references unknown config field "missing"`,
+		},
+		{
+			name: "single gate non-bool field",
+			edit: func(input map[string]any) {
+				resourcesOf(input)[0]["metadata"] = map[string]any{"enabledByConfig": "profile"}
+			},
+			want: `references non-bool config field "profile"`,
+		},
+		{
+			name: "any gate unknown field",
+			edit: func(input map[string]any) {
+				resourcesOf(input)[0]["metadata"] = map[string]any{"enabledByAnyConfig.missing": "true"}
+			},
+			want: `references unknown config field "missing"`,
+		},
+		{
+			name: "any gate non-bool field",
+			edit: func(input map[string]any) {
+				resourcesOf(input)[0]["metadata"] = map[string]any{"enabledByAnyConfig.profile": "true"}
+			},
+			want: `references non-bool config field "profile"`,
+		},
+		{
+			name: "any gate non-true value",
+			edit: func(input map[string]any) {
+				resourcesOf(input)[0]["metadata"] = map[string]any{"enabledByAnyConfig.enableAiCliTools": "false"}
+			},
+			want: `metadata "enabledByAnyConfig.enableAiCliTools" must have value "true"`,
+		},
+		{
+			name: "mixed gate kinds",
+			edit: func(input map[string]any) {
+				resourcesOf(input)[0]["metadata"] = map[string]any{
+					"enabledByConfig":                      "enableAiCliTools",
+					"enabledByAnyConfig.enableEditorStack": "true",
+				}
+			},
+			want: `mixes "enabledByConfig" and "enabledByAnyConfig.*" metadata`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := catalogObject(t)
+			tt.edit(input)
+			assertCatalogError(t, input, tt.want)
+		})
+	}
+}
+
+func TestLoadVerifiedAllowsAnyConfigGateAndUnrelatedProviderMetadata(t *testing.T) {
+	input := catalogObject(t)
+	resourcesOf(input)[0]["metadata"] = map[string]any{
+		"enabledByAnyConfig.enableAiCliTools":           "true",
+		"enabledByAnyConfig.enableDevelopmentWorkspace": "true",
+		"providerSpecific":                              "permitted",
+	}
+	contents, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, signatures := writeSignedCatalog(t, contents, testKeyID)
+	if _, err := LoadVerified(path, signatures); err != nil {
+		t.Fatal(err)
 	}
 }
 

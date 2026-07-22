@@ -19,6 +19,10 @@ const (
 	// carrying this key is enabled only when the named Config.Terrapod value is
 	// exactly bool true. Resources without the key are enabled.
 	EnabledByConfigMetadataKey = "enabledByConfig"
+	// EnabledByAnyConfigMetadataPrefix gates a resource on the logical OR of
+	// bool config fields named by metadata key suffixes. Each value must be
+	// exactly "true" in a validated catalog.
+	EnabledByAnyConfigMetadataPrefix = "enabledByAnyConfig."
 	// OwnedPathMetadataPrefix identifies historical catalog path-scope entries.
 	// The complete path.* key/value set must equal the ownership receipt Paths.
 	OwnedPathMetadataPrefix = "path."
@@ -49,6 +53,9 @@ func (p *Planner) Build(ctx context.Context, input Input) (model.Plan, error) {
 	}
 	current, err := indexResources(input.Catalog.Resources)
 	if err != nil {
+		return model.Plan{}, err
+	}
+	if err := validateConfigGateKinds(current); err != nil {
 		return model.Plan{}, err
 	}
 
@@ -221,15 +228,52 @@ func matchesProfile(candidate model.Resource, profile model.Profile) bool {
 
 func enabledByConfig(candidate model.Resource, config model.Config) bool {
 	field, gated := candidate.Metadata[EnabledByConfigMetadataKey]
-	if !gated {
-		return true
+	if gated {
+		value, ok := config.Terrapod[field]
+		if !ok {
+			return false
+		}
+		enabled, ok := value.(bool)
+		return ok && enabled
 	}
-	value, ok := config.Terrapod[field]
-	if !ok {
-		return false
+	hasAnyGate := false
+	for key, declared := range candidate.Metadata {
+		if !strings.HasPrefix(key, EnabledByAnyConfigMetadataPrefix) {
+			continue
+		}
+		hasAnyGate = true
+		if declared != "true" {
+			continue
+		}
+		field := strings.TrimPrefix(key, EnabledByAnyConfigMetadataPrefix)
+		if enabled, ok := config.Terrapod[field].(bool); ok && enabled {
+			return true
+		}
 	}
-	enabled, ok := value.(bool)
-	return ok && enabled
+	return !hasAnyGate
+}
+
+func validateConfigGateKinds(resources map[model.ResourceID]model.Resource) error {
+	ids := make([]model.ResourceID, 0, len(resources))
+	for id := range resources {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	for _, id := range ids {
+		candidate := resources[id]
+		_, hasSingle := candidate.Metadata[EnabledByConfigMetadataKey]
+		hasAny := false
+		for key := range candidate.Metadata {
+			if strings.HasPrefix(key, EnabledByAnyConfigMetadataPrefix) {
+				hasAny = true
+				break
+			}
+		}
+		if hasSingle && hasAny {
+			return fmt.Errorf("resource %q mixes %q and %q metadata", id, EnabledByConfigMetadataKey, "enabledByAnyConfig.*")
+		}
+	}
+	return nil
 }
 
 func dependencyOrder(resources map[model.ResourceID]model.Resource) ([]model.ResourceID, error) {

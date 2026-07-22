@@ -9,8 +9,12 @@ func TestResourceValidate(t *testing.T) {
 		wantErr bool
 	}{
 		{"valid", Resource{ID: "core.ripgrep", Type: ResourcePackage, VersionPolicy: VersionTracked}, false},
+		{"valid hyphenated namespace", Resource{ID: "optional-ai.codex", Type: ResourcePackage, VersionPolicy: VersionTracked}, false},
 		{"missing id", Resource{Type: ResourcePackage, VersionPolicy: VersionTracked}, true},
 		{"bad id", Resource{ID: "Rip Grep", Type: ResourcePackage, VersionPolicy: VersionTracked}, true},
+		{"leading hyphen", Resource{ID: "-optional.ai", Type: ResourcePackage, VersionPolicy: VersionTracked}, true},
+		{"uppercase namespace", Resource{ID: "Optional-ai.codex", Type: ResourcePackage, VersionPolicy: VersionTracked}, true},
+		{"space in namespace", Resource{ID: "optional ai.codex", Type: ResourcePackage, VersionPolicy: VersionTracked}, true},
 		{"bad policy", Resource{ID: "core.ripgrep", Type: ResourcePackage, VersionPolicy: "rolling"}, true},
 	}
 	for _, tt := range tests {

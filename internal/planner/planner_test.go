@@ -210,6 +210,70 @@ func TestResourceWithoutConfigGateIsEnabled(t *testing.T) {
 	assertOperationIDs(t, plan, "install")
 }
 
+func TestAnyConfigGateEnablesWhenAnyReferencedBooleanIsTrue(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		config  map[string]any
+		enabled bool
+	}{
+		{name: "none", config: map[string]any{}, enabled: false},
+		{name: "all false", config: map[string]any{"enableAiCliTools": false, "enableDevelopmentWorkspace": false}, enabled: false},
+		{name: "first true", config: map[string]any{"enableAiCliTools": true, "enableDevelopmentWorkspace": false}, enabled: true},
+		{name: "second true", config: map[string]any{"enableAiCliTools": false, "enableDevelopmentWorkspace": true}, enabled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			registry, fixture := registryWithFixture(t)
+			fixture.Operations = map[model.ResourceID][]model.Operation{"core.ripgrep": {{ID: "install", Kind: model.OperationInstall}}}
+			r := resourceDef("core.ripgrep", nil)
+			r.Metadata = map[string]string{
+				planner.EnabledByAnyConfigMetadataPrefix + "enableAiCliTools":           "true",
+				planner.EnabledByAnyConfigMetadataPrefix + "enableDevelopmentWorkspace": "true",
+			}
+			input := baseInput([]model.Resource{r})
+			input.Config.Terrapod = tc.config
+
+			plan, err := planner.New(registry).Build(context.Background(), input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := len(plan.Operations) == 1; got != tc.enabled {
+				t.Fatalf("enabled = %v, want %v; plan=%#v", got, tc.enabled, plan)
+			}
+		})
+	}
+}
+
+func TestBuildRejectsMixedConfigGateKindsDeterministically(t *testing.T) {
+	registry, _ := registryWithFixture(t)
+	r := resourceDef("core.ripgrep", nil)
+	r.Metadata = map[string]string{
+		planner.EnabledByConfigMetadataKey:                             "enableAiCliTools",
+		planner.EnabledByAnyConfigMetadataPrefix + "enableEditorStack": "true",
+	}
+
+	_, err := planner.New(registry).Build(context.Background(), baseInput([]model.Resource{r}))
+	if err == nil || err.Error() != `resource "core.ripgrep" mixes "enabledByConfig" and "enabledByAnyConfig.*" metadata` {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestAnyConfigGateRequiresExactTrueMetadataValue(t *testing.T) {
+	registry, fixture := registryWithFixture(t)
+	fixture.Operations = map[model.ResourceID][]model.Operation{"core.ripgrep": {{ID: "install", Kind: model.OperationInstall}}}
+	r := resourceDef("core.ripgrep", nil)
+	r.Metadata = map[string]string{planner.EnabledByAnyConfigMetadataPrefix + "enableAiCliTools": "false"}
+	input := baseInput([]model.Resource{r})
+	input.Config.Terrapod["enableAiCliTools"] = true
+
+	plan, err := planner.New(registry).Build(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Operations) != 0 {
+		t.Fatalf("non-true metadata enabled resource: %#v", plan.Operations)
+	}
+}
+
 func TestBuildRejectsDuplicateOperationIDs(t *testing.T) {
 	registry, fixture := registryWithFixture(t)
 	fixture.Operations = map[model.ResourceID][]model.Operation{

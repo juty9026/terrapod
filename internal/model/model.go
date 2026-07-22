@@ -86,7 +86,7 @@ type Resource struct {
 	Metadata      map[string]string `json:"metadata"`
 }
 
-var resourceIDPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(\.[a-z][a-z0-9-]*)+$`)
+var resourceIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$`)
 
 func (r Resource) Validate() error {
 	if !resourceIDPattern.MatchString(string(r.ID)) {

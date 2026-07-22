@@ -15,5 +15,367 @@
       {"id": "enableMacosAppGroupDevelopmentApps", "kind": "bool", "required": false, "default": false}
     ]
   },
-  "resources": []
+  "resources": [
+    {
+      "id": "core.bat",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "bat",
+      "commands": ["bat"],
+      "metadata": {}
+    },
+    {
+      "id": "core.btop",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "btop",
+      "commands": ["btop"],
+      "metadata": {}
+    },
+    {
+      "id": "core.chezmoi",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "chezmoi",
+      "commands": ["chezmoi"],
+      "metadata": {}
+    },
+    {
+      "id": "core.dust",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "dust",
+      "commands": ["dust"],
+      "metadata": {}
+    },
+    {
+      "id": "core.duf",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "duf",
+      "commands": ["duf"],
+      "metadata": {}
+    },
+    {
+      "id": "core.fastfetch",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "fastfetch",
+      "commands": ["fastfetch"],
+      "metadata": {}
+    },
+    {
+      "id": "core.fd",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "fd",
+      "commands": ["fd"],
+      "metadata": {}
+    },
+    {
+      "id": "core.fzf",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "fzf",
+      "commands": ["fzf"],
+      "metadata": {}
+    },
+    {
+      "id": "core.gh",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "gh",
+      "commands": ["gh"],
+      "metadata": {}
+    },
+    {
+      "id": "core.git",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "git",
+      "commands": ["git"],
+      "metadata": {}
+    },
+    {
+      "id": "core.git-delta",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "git-delta",
+      "commands": ["delta"],
+      "metadata": {}
+    },
+    {
+      "id": "core.gum",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "gum",
+      "commands": ["gum"],
+      "metadata": {}
+    },
+    {
+      "id": "core.lazygit",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "lazygit",
+      "commands": ["lazygit"],
+      "metadata": {}
+    },
+    {
+      "id": "core.lsd",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "lsd",
+      "commands": ["lsd"],
+      "metadata": {}
+    },
+    {
+      "id": "core.mise",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "mise",
+      "commands": ["mise"],
+      "metadata": {}
+    },
+    {
+      "id": "core.neovim",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "neovim",
+      "commands": ["nvim"],
+      "metadata": {}
+    },
+    {
+      "id": "core.ripgrep",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "ripgrep",
+      "commands": ["rg"],
+      "metadata": {}
+    },
+    {
+      "id": "core.starship",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "starship",
+      "commands": ["starship"],
+      "metadata": {}
+    },
+    {
+      "id": "core.zellij",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "zellij",
+      "commands": ["zellij"],
+      "metadata": {}
+    },
+    {
+      "id": "core.zoxide",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "zoxide",
+      "commands": ["zoxide"],
+      "metadata": {}
+    },
+    {
+      "id": "optional-ai.antigravity-cli",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "antigravity-cli",
+      "commands": ["agy"],
+      "metadata": {
+        "enabledByAnyConfig.enableAiCliTools": "true",
+        "enabledByAnyConfig.enableDevelopmentWorkspace": "true"
+      }
+    },
+    {
+      "id": "optional-ai.claude-code",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "claude-code",
+      "commands": ["claude"],
+      "metadata": {
+        "enabledByAnyConfig.enableAiCliTools": "true",
+        "enabledByAnyConfig.enableDevelopmentWorkspace": "true"
+      }
+    },
+    {
+      "id": "optional-ai.codex",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "codex",
+      "commands": ["codex"],
+      "metadata": {
+        "enabledByAnyConfig.enableAiCliTools": "true",
+        "enabledByAnyConfig.enableDevelopmentWorkspace": "true"
+      }
+    },
+    {
+      "id": "optional-desktop.ghostty",
+      "type": "package",
+      "profiles": ["macos-terminal"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "ghostty",
+      "commands": [],
+      "metadata": {"enabledByConfig": "enableMacosAppGroupTerminalApps"}
+    },
+    {
+      "id": "optional-desktop.hammerspoon",
+      "type": "package",
+      "profiles": ["macos-terminal"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "hammerspoon",
+      "commands": [],
+      "metadata": {"enabledByConfig": "enableMacosAppGroupAutomation"}
+    },
+    {
+      "id": "optional-desktop.karabiner-elements",
+      "type": "package",
+      "profiles": ["macos-terminal"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "karabiner-elements",
+      "commands": [],
+      "metadata": {"enabledByConfig": "enableMacosAppGroupAutomation"}
+    },
+    {
+      "id": "optional-desktop.scroll-reverser",
+      "type": "package",
+      "profiles": ["macos-terminal"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "scroll-reverser",
+      "commands": [],
+      "metadata": {"enabledByConfig": "enableMacosAppGroupAutomation"}
+    },
+    {
+      "id": "optional-desktop.raycast",
+      "type": "package",
+      "profiles": ["macos-terminal"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "raycast",
+      "commands": [],
+      "metadata": {"enabledByConfig": "enableMacosAppGroupLauncher"}
+    },
+    {
+      "id": "optional-desktop.one-password-cli",
+      "type": "package",
+      "profiles": ["macos-terminal"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "1password-cli",
+      "commands": [],
+      "metadata": {"enabledByConfig": "enableMacosAppGroupLauncher"}
+    },
+    {
+      "id": "optional-desktop.istat-menus",
+      "type": "package",
+      "profiles": ["macos-terminal"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "istat-menus",
+      "commands": [],
+      "metadata": {"enabledByConfig": "enableMacosAppGroupMonitoring"}
+    },
+    {
+      "id": "optional-desktop.zed",
+      "type": "package",
+      "profiles": ["macos-terminal"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "zed",
+      "commands": [],
+      "metadata": {"enabledByConfig": "enableMacosAppGroupDevelopmentApps"}
+    },
+    {
+      "id": "optional-desktop.orca",
+      "type": "package",
+      "profiles": ["macos-terminal"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "stablyai/orca/orca",
+      "commands": [],
+      "metadata": {"enabledByConfig": "enableMacosAppGroupDevelopmentApps"}
+    }
+  ]
 }

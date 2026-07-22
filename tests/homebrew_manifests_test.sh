@@ -41,6 +41,54 @@ if ! cmp -s "$expected_formulae" "$actual_formulae"; then
 fi
 pass "root Brewfile declares exactly the mandatory cross-profile CLI formulae"
 
+catalog="$repo_root/catalog/v1/resources.json"
+jq -r '.resources[] | select(.provider == "homebrew-formula") | .package' "$catalog" |
+  LC_ALL=C sort >"$tmp_dir/catalog-formulae"
+sed 's/^brew "//; s/"$//' "$expected_formulae" >"$tmp_dir/expected-formula-packages"
+if ! cmp -s "$tmp_dir/expected-formula-packages" "$tmp_dir/catalog-formulae"; then
+  diff -u "$tmp_dir/expected-formula-packages" "$tmp_dir/catalog-formulae" >&2 || true
+  fail "signed catalog formula roots match the mandatory Brewfile"
+fi
+pass "signed catalog formula roots match the mandatory Brewfile"
+
+sed -n 's/^cask "\([^"]*\)".*/\1/p' "$repo_root/Brewfile.ai-cli-tools.tmpl" |
+  LC_ALL=C sort >"$tmp_dir/expected-ai-casks"
+jq -r '.resources[] | select(.id | startswith("optional-ai.")) |
+  select(.provider == "homebrew-cask") |
+  select(.profiles == ["macos-terminal", "vps-shell"]) |
+  select(.metadata["enabledByAnyConfig.enableAiCliTools"] == "true") |
+  select(.metadata["enabledByAnyConfig.enableDevelopmentWorkspace"] == "true") |
+  .package' "$catalog" | LC_ALL=C sort >"$tmp_dir/catalog-ai-casks"
+if ! cmp -s "$tmp_dir/expected-ai-casks" "$tmp_dir/catalog-ai-casks"; then
+  diff -u "$tmp_dir/expected-ai-casks" "$tmp_dir/catalog-ai-casks" >&2 || true
+  fail "signed catalog AI casks and OR conditions match the AI Brewfile"
+fi
+pass "signed catalog AI casks and OR conditions match the AI Brewfile"
+
+awk '
+  /get \. "/ {
+    gate = $0
+    sub(/^.*get \. "/, "", gate)
+    sub(/".*$/, "", gate)
+  }
+  /^cask "/ {
+    package_name = $0
+    sub(/^cask "/, "", package_name)
+    sub(/".*$/, "", package_name)
+    print package_name "\t" gate
+  }
+' "$repo_root/Brewfile.macos-desktop-apps.tmpl" | LC_ALL=C sort >"$tmp_dir/expected-desktop-casks"
+jq -r '.resources[] | select(.id | startswith("optional-desktop.")) |
+  select(.provider == "homebrew-cask") |
+  select(.profiles == ["macos-terminal"]) |
+  [.package, .metadata.enabledByConfig] | @tsv' "$catalog" |
+  LC_ALL=C sort >"$tmp_dir/catalog-desktop-casks"
+if ! cmp -s "$tmp_dir/expected-desktop-casks" "$tmp_dir/catalog-desktop-casks"; then
+  diff -u "$tmp_dir/expected-desktop-casks" "$tmp_dir/catalog-desktop-casks" >&2 || true
+  fail "signed catalog desktop casks and group conditions match the desktop Brewfile"
+fi
+pass "signed catalog desktop casks and group conditions match the desktop Brewfile"
+
 records="$tmp_dir/records"
 TERRAPOD_PRINT_HOMEBREW_CLI_RECORDS=1 "$repo_root/dot_local/bin/executable_terrapod" >"$records"
 cut -f1 "$records" | LC_ALL=C sort >"$tmp_dir/record-formulae"
