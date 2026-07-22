@@ -15,7 +15,7 @@ RUN NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.co
 COPY --chown=terrapod:terrapod . /workspace
 
 RUN eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" \
-  && sed '/^brew "[^"]*"$/s/"$/, args: ["force-bottle"]/' \
+  && sed -n '/^brew "[^"]*"$/s/"$/", args: ["force-bottle"]/p' \
        /workspace/Brewfile > /tmp/Brewfile.bottles \
   && HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file=/tmp/Brewfile.bottles
 

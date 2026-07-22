@@ -58,6 +58,28 @@ if ! grep -F 'args: ["force-bottle"]' "$ubuntu_smoke_fixture" >/dev/null ||
 fi
 pass "Ubuntu smoke bundle requires bottles through the supported Brewfile args mechanism"
 
+expected_bottle_brewfile="$tmp_dir/expected-bottle-brewfile"
+actual_bottle_brewfile="$tmp_dir/actual-bottle-brewfile"
+actual_bottle_brewfile_sorted="$tmp_dir/actual-bottle-brewfile-sorted"
+sed 's/"$/", args: ["force-bottle"]/' "$expected_formulae" >"$expected_bottle_brewfile"
+fixture_transform="$(sed -n '/^[[:space:]]*&& sed / {
+  s/^[[:space:]]*&& //
+  s/[[:space:]]*\\$//
+  p
+  q
+}' "$ubuntu_smoke_fixture")"
+if [ -z "$fixture_transform" ]; then
+  fail "Ubuntu smoke bottle Brewfile transformation is discoverable"
+fi
+eval "$fixture_transform \"$repo_root/Brewfile\" >\"$actual_bottle_brewfile\""
+LC_ALL=C sort "$actual_bottle_brewfile" >"$actual_bottle_brewfile_sorted"
+if [ "$(wc -l <"$actual_bottle_brewfile")" -ne 20 ] ||
+   ! cmp -s "$expected_bottle_brewfile" "$actual_bottle_brewfile_sorted"; then
+  diff -u "$expected_bottle_brewfile" "$actual_bottle_brewfile_sorted" >&2 || true
+  fail "Ubuntu smoke bottle Brewfile preserves all formula names and closing quotes"
+fi
+pass "Ubuntu smoke bottle Brewfile preserves all formula names and closing quotes"
+
 if grep -F '| tee /tmp/mise.toml' "$ubuntu_smoke_fixture" >/dev/null ||
    ! grep -F -- '--file /workspace/dot_config/mise/config.toml.tmpl > /tmp/mise.toml' "$ubuntu_smoke_fixture" >/dev/null ||
    ! grep -F '&& cat /tmp/mise.toml' "$ubuntu_smoke_fixture" >/dev/null; then
