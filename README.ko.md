@@ -133,11 +133,13 @@ macOS에서는 initial apply가 초기 terminal environment를 위해 `.chezmois
 - mise
 - mise를 통한 ripgrep, neovim, zellij, lazygit, GitHub CLI (`gh`), starship 같은 CLI tool
 - btop. mise-managed release asset이 macOS arm64를 지원하지 않기 때문에 Homebrew로 설치합니다.
-- Terminal font cask
+- 최신 안정 GitHub release에서 제공하는 Jetendard terminal font
 - Oh My Zsh, zinit, SCM Breeze
 - `~/.config/mise/config.toml`을 통한 Bun, Python, uv/uvx, Node.js
 - Node.js Corepack을 통한 pnpm
 - 해당 stack이 활성화된 경우 Homebrew를 통한 Optional AI Tool Stack cask
+
+Terrapod은 해당 Jetendard release의 모든 TTF를 설치하고 GitHub에서 제공하는 asset digest를 검증합니다. Terrapod은 managed font installer source가 변경되거나 실패한 설치를 재시도할 때만 최신 Jetendard release를 확인합니다. Ghostty, Zed buffer와 terminal, Orca terminal에서 사용하는 font-family key만 설정합니다. Jetendard 설정 적용이 보류되면 Orca를 종료한 뒤 `tpod apply`를 다시 실행합니다. Terrapod은 기존에 설치된 JetBrains Mono Nerd Font 또는 D2Coding을 제거하지 않습니다. 기존 window가 cached font를 계속 사용하면 Ghostty, Zed 또는 Orca를 다시 시작해야 할 수 있습니다.
 
 macOS desktop application은 machine-local data key로 제어되는 opt-in App Group으로 나뉩니다. Homebrew bootstrap 중 chezmoi는 선택한 group을 `Brewfile.macos-desktop-apps.tmpl`에서 temporary Brewfile로 render하고, 그 rendered bundle을 설치합니다.
 

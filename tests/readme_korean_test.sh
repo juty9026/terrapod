@@ -147,6 +147,16 @@ assert_contains "$korean_readme" '| `enableMacosAppGroupDevelopmentApps` | `fals
   "README.ko.md documents Zed and Orca ADE on the development-apps option row"
 assert_contains "$korean_readme" 'Terrapod은 Orca를 설치할 때 fully-qualified `stablyai/orca/orca` cask만 trust하며, `stablyai/orca` tap 전체를 trust하지 않습니다.' \
   "README.ko.md documents Orca's cask-specific trust boundary"
+assert_not_contains "$korean_readme" 'Terminal font cask' \
+  "README.ko.md no longer documents terminal font casks"
+assert_contains "$korean_readme" '최신 안정 GitHub release에서 제공하는 Jetendard terminal font' \
+  "README.ko.md documents the Jetendard release source"
+assert_contains "$korean_readme" 'Terrapod은 managed font installer source가 변경되거나 실패한 설치를 재시도할 때만 최신 Jetendard release를 확인합니다.' \
+  "README.ko.md documents the Jetendard release-check trigger"
+assert_contains "$korean_readme" 'Terrapod은 기존에 설치된 JetBrains Mono Nerd Font 또는 D2Coding을 제거하지 않습니다.' \
+  "README.ko.md documents non-destructive legacy font migration"
+assert_contains "$korean_readme" 'Jetendard 설정 적용이 보류되면 Orca를 종료한 뒤 `tpod apply`를 다시 실행합니다.' \
+  "README.ko.md documents Orca font-setting recovery"
 assert_contains "$korean_readme" 'brew upgrade --cask claude-code codex antigravity-cli' \
   "README.ko.md documents targeted AI CLI upgrades"
 assert_contains "$korean_readme" '`enableMacosAppGroupAiApps`는 deprecated key이며 alias로 해석하지 않습니다.' \
