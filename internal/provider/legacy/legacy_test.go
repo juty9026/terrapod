@@ -138,8 +138,25 @@ func TestPreflightRemovalsRunsRealHandlerSimulationWithoutMutation(t *testing.T)
 	}
 	empty := inventory
 	empty.legacy = nil
-	if err := c.RemovePreflight(context.Background(), capability, empty); err != nil {
+	if err := c.RemovePreflight(context.Background(), capability, empty); err == nil {
+		t.Fatal("consumed failed capability replayed")
+	}
+	emptyCapability, _, err := c.PreflightRemovals(context.Background(), inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := newCoordinatorForTest(map[Kind]handler{Mise: h}, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.RemovePreflight(context.Background(), emptyCapability, empty); err == nil {
+		t.Fatal("cross coordinator capability accepted")
+	}
+	if err := c.RemovePreflight(context.Background(), emptyCapability, empty); err != nil {
 		t.Fatalf("empty resume rejected: %v", err)
+	}
+	if err := c.RemovePreflight(context.Background(), emptyCapability, empty); err == nil {
+		t.Fatal("empty capability replayed")
 	}
 	h.changes = provider.ChangeSet{Removes: []string{"unmanaged"}}
 	if _, _, err := c.PreflightRemovals(context.Background(), inventory); err == nil {

@@ -199,10 +199,10 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 				return summary, fmt.Errorf("reconcile: operation %q names unauthorized removal %q", operation.ID, removal)
 			}
 		}
-		if !operation.RequiresPrivilege {
+		if !operation.RequiresPrivilege && operation.Kind != model.OperationTransfer {
 			continue
 		}
-		privileged = true
+		privileged = privileged || operation.RequiresPrivilege
 		simulator, ok := adapter.(Simulator)
 		if !ok {
 			return summary, fmt.Errorf("reconcile: privileged operation %q has no simulator", operation.ID)

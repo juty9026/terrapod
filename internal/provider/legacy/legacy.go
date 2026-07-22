@@ -89,6 +89,7 @@ type Preflight struct {
 	inventory  Inventory
 	operations []RemovalOperation
 	issuer     [32]byte
+	id         [32]byte
 	valid      bool
 }
 
@@ -121,13 +122,14 @@ func (e *ErrUnknownProvenance) Error() string {
 }
 
 type Coordinator struct {
-	handlers  map[Kind]handler
-	paths     PathResolver
-	issuer    [32]byte
-	mu        sync.Mutex
-	closed    bool
-	completed map[[32]byte]struct{}
-	closers   []func() error
+	handlers   map[Kind]handler
+	paths      PathResolver
+	issuer     [32]byte
+	mu         sync.Mutex
+	closed     bool
+	completed  map[[32]byte]struct{}
+	preflights map[[32]byte]struct{}
+	closers    []func() error
 }
 
 type Option func(*Coordinator) error
@@ -161,7 +163,7 @@ func New(paths PathResolver, options ...Option) (*Coordinator, error) {
 	if isNil(paths) {
 		return nil, errors.New("legacy: path resolver is required")
 	}
-	c := &Coordinator{handlers: make(map[Kind]handler), paths: paths, completed: make(map[[32]byte]struct{})}
+	c := &Coordinator{handlers: make(map[Kind]handler), paths: paths, completed: make(map[[32]byte]struct{}), preflights: make(map[[32]byte]struct{})}
 	if _, err := rand.Read(c.issuer[:]); err != nil {
 		return nil, fmt.Errorf("legacy: create coordinator identity: %w", err)
 	}
@@ -355,6 +357,9 @@ func (c *Coordinator) PreflightRemovals(ctx context.Context, inventory Inventory
 		return Preflight{}, provider.ChangeSet{}, err
 	}
 	capability := Preflight{inventory: inventory, operations: make([]RemovalOperation, 0, len(operations)), issuer: c.issuer, valid: true}
+	if _, err := rand.Read(capability.id[:]); err != nil {
+		return Preflight{}, provider.ChangeSet{}, err
+	}
 	combined := provider.ChangeSet{}
 	for _, operation := range operations {
 		c.mu.Lock()
@@ -397,11 +402,20 @@ func (c *Coordinator) PreflightRemovals(ctx context.Context, inventory Inventory
 		combined.Removes = append(combined.Removes, changes.Removes...)
 	}
 	sort.Strings(combined.Removes)
+	c.mu.Lock()
+	c.preflights[capability.id] = struct{}{}
+	c.mu.Unlock()
 	return capability, combined, nil
 }
 
 func (c *Coordinator) RemovePreflight(ctx context.Context, capability Preflight, current Inventory) error {
-	if !capability.valid || capability.issuer != c.issuer || !current.valid || current.issuer != c.issuer || current.resource.ID != capability.inventory.resource.ID {
+	c.mu.Lock()
+	_, issued := c.preflights[capability.id]
+	if issued {
+		delete(c.preflights, capability.id)
+	}
+	c.mu.Unlock()
+	if !issued || !capability.valid || capability.issuer != c.issuer || !current.valid || current.issuer != c.issuer || current.resource.ID != capability.inventory.resource.ID {
 		return errors.New("legacy: invalid preflight capability")
 	}
 	baseline := make(map[string]RemovalOperation, len(capability.operations))

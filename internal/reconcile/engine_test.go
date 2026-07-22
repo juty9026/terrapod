@@ -207,7 +207,7 @@ func TestApplyTransferControlsSafePhaseOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "inspect:core.ripgrep,install-desired,verify:core.ripgrep,remove-legacy,verify-legacy-absent,verify:core.ripgrep,verify:core.ripgrep"
+	want := "simulate:transfer,inspect:core.ripgrep,install-desired,verify:core.ripgrep,remove-legacy,verify-legacy-absent,verify:core.ripgrep,verify:core.ripgrep"
 	if got := strings.Join(adapter.events, ","); got != want {
 		t.Fatalf("events = %s, want %s", got, want)
 	}

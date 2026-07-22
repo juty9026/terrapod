@@ -9,18 +9,91 @@ import (
 	"github.com/juty9026/terrapod/internal/provider"
 	"github.com/juty9026/terrapod/internal/provider/legacy"
 	"github.com/juty9026/terrapod/internal/resource"
+	"github.com/juty9026/terrapod/internal/state"
 )
 
 type transferProvider struct {
-	present bool
-	removes []string
+	present             bool
+	removes             []string
+	simulated, executed []model.Operation
+	name, pkg           string
 }
 
-func (*transferProvider) Name() string { return "fixture" }
-func (p *transferProvider) Inspect(context.Context, model.Resource) (model.Observation, error) {
-	return model.Observation{Present: p.present, Healthy: p.present, Provider: "fixture", Package: "alpha", Paths: map[string]string{}}, nil
+func (p *transferProvider) Name() string {
+	if p.name != "" {
+		return p.name
+	}
+	return "fixture"
 }
-func (p *transferProvider) Simulate(context.Context, model.Operation) (provider.ChangeSet, error) {
+func (p *transferProvider) Inspect(context.Context, model.Resource) (model.Observation, error) {
+	pkg := p.pkg
+	if pkg == "" {
+		pkg = "alpha"
+	}
+	return model.Observation{Present: p.present, Healthy: p.present, Provider: p.Name(), Package: pkg, Paths: map[string]string{}}, nil
+}
+
+func TestEngineRunsRealTransferPreflightWithoutPrivilege(t *testing.T) {
+	home := t.TempDir()
+	backend := &transferProvider{name: "homebrew-cask", pkg: "claude-code"}
+	desired, _ := resource.NewProviderAdapter(backend, func(context.Context, model.Resource, model.Observation, model.Ownership) ([]model.Operation, error) {
+		return nil, nil
+	})
+	coordinator, err := legacy.New(transferPaths{}, legacy.WithVendor(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer coordinator.Close()
+	adapter, err := NewProviderTransferAdapter(desired, coordinator, model.ProfileMacOSTerminal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := resource.NewRegistry()
+	if err := registry.Register(model.ResourcePackage, "homebrew-cask", adapter); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	store, err := state.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := model.Resource{ID: "optional-ai.claude-code", Type: model.ResourcePackage, Provider: "homebrew-cask", Package: "claude-code", VersionPolicy: model.VersionTracked, Metadata: map[string]string{"legacy.vendor.receipt": "claude-native", "legacy.vendor.uninstall": "claude-native"}}
+	operation := model.Operation{ID: "transfer", ResourceID: item.ID, Kind: model.OperationTransfer, Provider: item.Provider, Package: item.Package, Removes: []string{"claude-code"}}
+	engine := Engine{Registry: registry, State: store, LockDir: dir, EffectiveUID: func() int { return 501 }}
+	input := ApplyInput{Plan: model.Plan{ID: "p", Operations: []model.Operation{operation}}, CurrentResources: []model.Resource{item}, EnabledIDs: []model.ResourceID{item.ID}, HistoricalResources: map[model.ResourceID]HistoricalResource{}, CatalogDigest: "signed", Profile: model.ProfileMacOSTerminal}
+	if _, err := engine.ApplyInput(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	if len(backend.simulated) != 1 {
+		t.Fatalf("simulate calls=%d", len(backend.simulated))
+	}
+}
+
+func TestTransferDesiredPhaseUsesDesiredProviderPrivilege(t *testing.T) {
+	backend := &transferProvider{}
+	desired, _ := resource.NewProviderAdapter(backend, func(context.Context, model.Resource, model.Observation, model.Ownership) ([]model.Operation, error) {
+		return nil, nil
+	})
+	coordinator, _ := legacy.New(transferPaths{})
+	defer coordinator.Close()
+	adapter, _ := NewProviderTransferAdapter(desired, coordinator, model.ProfileVPSShell)
+	item := model.Resource{ID: "core.alpha", Type: model.ResourcePackage, Provider: "fixture", Package: "alpha"}
+	op := model.Operation{ID: "transfer", ResourceID: item.ID, Kind: model.OperationTransfer, Provider: item.Provider, Package: item.Package, RequiresPrivilege: true}
+	if _, err := adapter.Simulate(context.Background(), item, op); err != nil {
+		t.Fatal(err)
+	}
+	if backend.simulated[0].RequiresPrivilege {
+		t.Fatal("legacy aggregate privilege leaked into desired simulation")
+	}
+	if result := adapter.InstallDesired(context.Background(), item, op); !result.Success {
+		t.Fatal(result.Detail)
+	}
+	if backend.executed[0].RequiresPrivilege {
+		t.Fatal("legacy aggregate privilege leaked into desired install")
+	}
+}
+func (p *transferProvider) Simulate(_ context.Context, operation model.Operation) (provider.ChangeSet, error) {
+	p.simulated = append(p.simulated, operation)
 	return provider.ChangeSet{Installs: []string{"alpha"}, Removes: append([]string(nil), p.removes...)}, nil
 }
 
@@ -38,7 +111,8 @@ func TestTransferSimulationRejectsDesiredProviderRemoval(t *testing.T) {
 		t.Fatal("desired removal accepted")
 	}
 }
-func (p *transferProvider) Execute(context.Context, model.Operation) error {
+func (p *transferProvider) Execute(_ context.Context, operation model.Operation) error {
+	p.executed = append(p.executed, operation)
 	p.present = true
 	return nil
 }

@@ -59,10 +59,14 @@ func (a *ProviderTransferAdapter) Verify(ctx context.Context, item model.Resourc
 	return a.desired.Verify(ctx, item)
 }
 func (a *ProviderTransferAdapter) Simulate(ctx context.Context, item model.Resource, op model.Operation) (provider.ChangeSet, error) {
+	a.mu.Lock()
+	delete(a.preflights, op.ID)
+	a.mu.Unlock()
 	desired := op
 	if desired.Kind == model.OperationTransfer {
 		desired.Kind = model.OperationInstall
 		desired.Removes = nil
+		desired.RequiresPrivilege = item.Provider == "apt"
 	}
 	changes, err := a.desired.Simulate(ctx, item, desired)
 	if err != nil {
@@ -98,6 +102,7 @@ func (a *ProviderTransferAdapter) InstallDesired(ctx context.Context, item model
 	desired := op
 	desired.Kind = model.OperationInstall
 	desired.Removes = nil
+	desired.RequiresPrivilege = item.Provider == "apt"
 	return a.desired.Execute(ctx, desired)
 }
 func (a *ProviderTransferAdapter) RemoveLegacy(ctx context.Context, item model.Resource, op model.Operation) model.OperationResult {
