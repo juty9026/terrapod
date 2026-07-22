@@ -85,6 +85,12 @@ type RemovalOperation struct {
 	issuer      [32]byte
 	digest      [32]byte
 }
+type Preflight struct {
+	inventory  Inventory
+	operations []RemovalOperation
+	issuer     [32]byte
+	valid      bool
+}
 
 type ErrUnknownProvenance struct {
 	ResourceID model.ResourceID
@@ -343,27 +349,28 @@ func (c *Coordinator) Remove(ctx context.Context, operation RemovalOperation) er
 
 // PreflightRemovals re-inspects opaque removal capabilities and runs the real
 // handler simulations without mutating any provider.
-func (c *Coordinator) PreflightRemovals(ctx context.Context, inventory Inventory) (provider.ChangeSet, error) {
+func (c *Coordinator) PreflightRemovals(ctx context.Context, inventory Inventory) (Preflight, provider.ChangeSet, error) {
 	operations, err := c.RemovalOperations(inventory)
 	if err != nil {
-		return provider.ChangeSet{}, err
+		return Preflight{}, provider.ChangeSet{}, err
 	}
+	capability := Preflight{inventory: inventory, operations: make([]RemovalOperation, 0, len(operations)), issuer: c.issuer, valid: true}
 	combined := provider.ChangeSet{}
 	for _, operation := range operations {
 		c.mu.Lock()
 		if c.closed {
 			c.mu.Unlock()
-			return provider.ChangeSet{}, errors.New("legacy: coordinator is closed")
+			return Preflight{}, provider.ChangeSet{}, errors.New("legacy: coordinator is closed")
 		}
 		handler, ok := c.handlers[operation.declaration.Kind]
 		if !ok {
 			c.mu.Unlock()
-			return provider.ChangeSet{}, &ErrUnsupportedSource{Kind: operation.declaration.Kind}
+			return Preflight{}, provider.ChangeSet{}, &ErrUnsupportedSource{Kind: operation.declaration.Kind}
 		}
 		fresh, inspectErr := handler.inspect(ctx, operation.resource, operation.declaration)
 		if inspectErr != nil {
 			c.mu.Unlock()
-			return provider.ChangeSet{}, fmt.Errorf("legacy: preflight receipt: %w", inspectErr)
+			return Preflight{}, provider.ChangeSet{}, fmt.Errorf("legacy: preflight receipt: %w", inspectErr)
 		}
 		if !fresh.Present {
 			c.mu.Unlock()
@@ -372,24 +379,52 @@ func (c *Coordinator) PreflightRemovals(ctx context.Context, inventory Inventory
 		observed, observationErr := observationFromReceipt(operation.declaration, fresh)
 		if observationErr != nil || !observationsEqual(observed, operation.observation) {
 			c.mu.Unlock()
-			return provider.ChangeSet{}, &ErrStaleReceipt{Kind: operation.declaration.Kind, Package: operation.declaration.Package}
+			return Preflight{}, provider.ChangeSet{}, &ErrStaleReceipt{Kind: operation.declaration.Kind, Package: operation.declaration.Package}
 		}
 		changes, simulateErr := handler.simulateRemoval(ctx, operation.resource, operation.declaration)
 		c.mu.Unlock()
 		if simulateErr != nil {
-			return provider.ChangeSet{}, fmt.Errorf("legacy: preflight removal: %w", simulateErr)
+			return Preflight{}, provider.ChangeSet{}, fmt.Errorf("legacy: preflight removal: %w", simulateErr)
 		}
 		legacyResource := model.Resource{ID: operation.resource.ID, Type: model.ResourcePackage, Provider: string(operation.declaration.Kind), Package: operation.declaration.Package}
 		if err := provider.ValidateChangeSet(changes, legacyResource, nil); err != nil {
-			return provider.ChangeSet{}, err
+			return Preflight{}, provider.ChangeSet{}, err
 		}
 		if len(changes.Installs) != 0 || len(changes.Upgrades) != 0 || len(changes.Removes) != 1 || changes.Removes[0] != operation.declaration.Package {
-			return provider.ChangeSet{}, fmt.Errorf("legacy: preflight for %q is not an exact package removal", operation.declaration.Package)
+			return Preflight{}, provider.ChangeSet{}, fmt.Errorf("legacy: preflight for %q is not an exact package removal", operation.declaration.Package)
 		}
+		capability.operations = append(capability.operations, operation)
 		combined.Removes = append(combined.Removes, changes.Removes...)
 	}
 	sort.Strings(combined.Removes)
-	return combined, nil
+	return capability, combined, nil
+}
+
+func (c *Coordinator) RemovePreflight(ctx context.Context, capability Preflight, current Inventory) error {
+	if !capability.valid || capability.issuer != c.issuer || !current.valid || current.issuer != c.issuer || current.resource.ID != capability.inventory.resource.ID {
+		return errors.New("legacy: invalid preflight capability")
+	}
+	baseline := make(map[string]RemovalOperation, len(capability.operations))
+	for _, operation := range capability.operations {
+		baseline[declarationKey(operation.declaration)] = operation
+	}
+	for _, observed := range current.legacy {
+		declaration := Declaration{Kind: observed.Kind, Package: observed.Package, ReceiptKind: observed.ReceiptKind, UninstallKind: observed.UninstallKind}
+		if _, ok := baseline[declarationKey(declaration)]; !ok {
+			return errors.New("legacy: source appeared after preflight")
+		}
+	}
+	for _, observed := range current.legacy {
+		declaration := Declaration{Kind: observed.Kind, Package: observed.Package, ReceiptKind: observed.ReceiptKind, UninstallKind: observed.UninstallKind}
+		operation, ok := baseline[declarationKey(declaration)]
+		if !ok {
+			return errors.New("legacy: source appeared after preflight")
+		}
+		if err := c.Remove(ctx, operation); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func operationDigest(operation RemovalOperation) [32]byte {

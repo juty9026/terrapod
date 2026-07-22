@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"sync"
 	"time"
 
 	"github.com/juty9026/terrapod/internal/model"
@@ -14,17 +16,22 @@ import (
 
 type LegacyCoordinator interface {
 	Detect(context.Context, model.Profile, model.Resource, model.Observation) (legacy.Inventory, error)
-	RemovalOperations(legacy.Inventory) ([]legacy.RemovalOperation, error)
-	Remove(context.Context, legacy.RemovalOperation) error
-	PreflightRemovals(context.Context, legacy.Inventory) (provider.ChangeSet, error)
+	PreflightRemovals(context.Context, legacy.Inventory) (legacy.Preflight, provider.ChangeSet, error)
+	RemovePreflight(context.Context, legacy.Preflight, legacy.Inventory) error
 }
 
 // ProviderTransferAdapter composes a desired package provider with the opaque,
 // re-inspecting legacy removal capability.
 type ProviderTransferAdapter struct {
-	desired *resource.ProviderAdapter
-	legacy  LegacyCoordinator
-	profile model.Profile
+	desired    *resource.ProviderAdapter
+	legacy     LegacyCoordinator
+	profile    model.Profile
+	mu         sync.Mutex
+	preflights map[string]transferPreflight
+}
+type transferPreflight struct {
+	operation  model.Operation
+	capability legacy.Preflight
 }
 
 func NewProviderTransferAdapter(desired *resource.ProviderAdapter, coordinator LegacyCoordinator, profile model.Profile) (*ProviderTransferAdapter, error) {
@@ -34,7 +41,7 @@ func NewProviderTransferAdapter(desired *resource.ProviderAdapter, coordinator L
 	if !profile.Supported() {
 		return nil, fmt.Errorf("reconcile: unsupported transfer profile %q", profile)
 	}
-	return &ProviderTransferAdapter{desired: desired, legacy: coordinator, profile: profile}, nil
+	return &ProviderTransferAdapter{desired: desired, legacy: coordinator, profile: profile, preflights: make(map[string]transferPreflight)}, nil
 }
 func (a *ProviderTransferAdapter) Inspect(ctx context.Context, item model.Resource) (model.Observation, error) {
 	return a.desired.Inspect(ctx, item)
@@ -62,6 +69,9 @@ func (a *ProviderTransferAdapter) Simulate(ctx context.Context, item model.Resou
 		return provider.ChangeSet{}, err
 	}
 	if op.Kind == model.OperationTransfer {
+		if len(changes.Removes) != 0 {
+			return provider.ChangeSet{}, errors.New("reconcile: desired transfer simulation proposed removals")
+		}
 		observation, inspectErr := a.desired.Inspect(ctx, item)
 		if inspectErr != nil {
 			return provider.ChangeSet{}, inspectErr
@@ -73,11 +83,14 @@ func (a *ProviderTransferAdapter) Simulate(ctx context.Context, item model.Resou
 		if err := authorizedLegacySubset(inventory.Legacy(), op.Removes); err != nil {
 			return provider.ChangeSet{}, err
 		}
-		legacyChanges, preflightErr := a.legacy.PreflightRemovals(ctx, inventory)
+		capability, legacyChanges, preflightErr := a.legacy.PreflightRemovals(ctx, inventory)
 		if preflightErr != nil {
 			return provider.ChangeSet{}, preflightErr
 		}
 		changes.Removes = legacyChanges.Removes
+		a.mu.Lock()
+		a.preflights[op.ID] = transferPreflight{operation: op, capability: capability}
+		a.mu.Unlock()
 	}
 	return changes, nil
 }
@@ -96,25 +109,24 @@ func (a *ProviderTransferAdapter) RemoveLegacy(ctx context.Context, item model.R
 	if err != nil {
 		return failedPhase(op, err.Error())
 	}
-	want := make(map[string]struct{}, len(op.Removes))
-	for _, id := range op.Removes {
-		want[id] = struct{}{}
-	}
 	observed := inventory.Legacy()
 	if err := authorizedLegacySubset(observed, op.Removes); err != nil {
 		return failedPhase(op, err.Error())
 	}
-	operations, err := a.legacy.RemovalOperations(inventory)
-	if err != nil {
+	a.mu.Lock()
+	preflight, ok := a.preflights[op.ID]
+	if ok {
+		delete(a.preflights, op.ID)
+	}
+	a.mu.Unlock()
+	if !ok || !reflect.DeepEqual(preflight.operation, op) {
+		return failedPhase(op, "legacy transfer was not preflighted")
+	}
+	if err := ctx.Err(); err != nil {
 		return failedPhase(op, err.Error())
 	}
-	for _, removal := range operations {
-		if err := ctx.Err(); err != nil {
-			return failedPhase(op, err.Error())
-		}
-		if err := a.legacy.Remove(ctx, removal); err != nil {
-			return failedPhase(op, err.Error())
-		}
+	if err := a.legacy.RemovePreflight(ctx, preflight.capability, inventory); err != nil {
+		return failedPhase(op, err.Error())
 	}
 	return model.OperationResult{OperationID: op.ID, ResourceID: op.ResourceID, Success: true, FinishedAt: time.Now().UTC()}
 }

@@ -675,6 +675,24 @@ func TestTransferRemovalAuthorityHonorsDeclarationProfile(t *testing.T) {
 	}
 }
 
+func TestDerivedAPTPrivilegeRejectsForgedFalse(t *testing.T) {
+	aptItem := pkg("core.apt", "apt")
+	adapter := &fixtureAdapter{fail: map[string]bool{}}
+	engine, _ := testEngine(t, map[string]*fixtureAdapter{"apt": adapter}, aptItem)
+	if _, err := engine.Apply(context.Background(), model.Plan{ID: "apt", Operations: []model.Operation{op(aptItem, "install", model.OperationInstall)}}); err == nil || !strings.Contains(err.Error(), "required privilege") {
+		t.Fatalf("apt err=%v", err)
+	}
+	legacyItem := model.Resource{ID: "core.mise", Type: model.ResourcePackage, Provider: "homebrew-formula", Package: "mise", VersionPolicy: model.VersionTracked, Metadata: map[string]string{"legacy.apt.package": "mise", "legacy.apt.profile": "vps-shell"}}
+	legacyAdapter := &fixtureAdapter{legacy: true, fail: map[string]bool{}}
+	legacyEngine, _ := testEngine(t, map[string]*fixtureAdapter{"homebrew-formula": legacyAdapter}, legacyItem)
+	legacyEngine.Profile = model.ProfileVPSShell
+	operation := op(legacyItem, "transfer", model.OperationTransfer)
+	operation.Removes = []string{"mise"}
+	if _, err := legacyEngine.Apply(context.Background(), model.Plan{ID: "transfer", Operations: []model.Operation{operation}}); err == nil || !strings.Contains(err.Error(), "required privilege") {
+		t.Fatalf("legacy apt err=%v", err)
+	}
+}
+
 func TestApplyRejectsRootAndUnsignedOperationBeforeMutation(t *testing.T) {
 	item := pkg("core.alpha", "fixture")
 	adapter := &fixtureAdapter{fail: map[string]bool{}}

@@ -182,6 +182,9 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 		for _, declaration := range declarations {
 			allowed[declaration.Package] = struct{}{}
 		}
+		if derivedPrivilege(item, operation, declarations, e.Profile) && !operation.RequiresPrivilege {
+			return summary, fmt.Errorf("reconcile: operation %q omits required privilege", operation.ID)
+		}
 		if err := validateRemoves(item, operation, declarations, e.Profile); err != nil {
 			return summary, err
 		}
@@ -389,6 +392,27 @@ func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, r
 	}
 	sort.Slice(summary.Ready, func(i, j int) bool { return summary.Ready[i] < summary.Ready[j] })
 	return summary, nil
+}
+
+func derivedPrivilege(item model.Resource, operation model.Operation, declarations []legacydecl.Declaration, profile model.Profile) bool {
+	if item.Provider == "apt" {
+		return true
+	}
+	if operation.Kind != model.OperationTransfer {
+		return false
+	}
+	removed := make(map[string]struct{}, len(operation.Removes))
+	for _, id := range operation.Removes {
+		removed[id] = struct{}{}
+	}
+	for _, declaration := range declarations {
+		if declaration.Kind == legacydecl.APT && (declaration.Profile == "" || declaration.Profile == profile) {
+			if _, ok := removed[declaration.Package]; ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (e *Engine) authorize(operation model.Operation) (model.Resource, resource.Adapter, error) {

@@ -121,15 +121,28 @@ func TestPreflightRemovalsRunsRealHandlerSimulationWithoutMutation(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	changes, err := c.PreflightRemovals(context.Background(), inventory)
+	capability, changes, err := c.PreflightRemovals(context.Background(), inventory)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(changes.Removes) != 1 || h.simulateCalls != 1 || h.removeCalls != 0 {
 		t.Fatalf("changes=%#v handler=%#v", changes, h)
 	}
+	appeared := inventory
+	appeared.legacy = append(append([]Observation(nil), inventory.legacy...), Observation{Kind: Vendor, Package: "new-source", Present: true})
+	if err := c.RemovePreflight(context.Background(), capability, appeared); err == nil {
+		t.Fatal("new source after preflight accepted")
+	}
+	if h.removeCalls != 0 {
+		t.Fatal("baseline removed after new source appeared")
+	}
+	empty := inventory
+	empty.legacy = nil
+	if err := c.RemovePreflight(context.Background(), capability, empty); err != nil {
+		t.Fatalf("empty resume rejected: %v", err)
+	}
 	h.changes = provider.ChangeSet{Removes: []string{"unmanaged"}}
-	if _, err := c.PreflightRemovals(context.Background(), inventory); err == nil {
+	if _, _, err := c.PreflightRemovals(context.Background(), inventory); err == nil {
 		t.Fatal("unmanaged removal accepted")
 	}
 }

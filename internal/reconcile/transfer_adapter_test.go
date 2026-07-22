@@ -11,14 +11,32 @@ import (
 	"github.com/juty9026/terrapod/internal/resource"
 )
 
-type transferProvider struct{ present bool }
+type transferProvider struct {
+	present bool
+	removes []string
+}
 
 func (*transferProvider) Name() string { return "fixture" }
 func (p *transferProvider) Inspect(context.Context, model.Resource) (model.Observation, error) {
 	return model.Observation{Present: p.present, Healthy: p.present, Provider: "fixture", Package: "alpha", Paths: map[string]string{}}, nil
 }
-func (*transferProvider) Simulate(context.Context, model.Operation) (provider.ChangeSet, error) {
-	return provider.ChangeSet{Installs: []string{"alpha"}}, nil
+func (p *transferProvider) Simulate(context.Context, model.Operation) (provider.ChangeSet, error) {
+	return provider.ChangeSet{Installs: []string{"alpha"}, Removes: append([]string(nil), p.removes...)}, nil
+}
+
+func TestTransferSimulationRejectsDesiredProviderRemoval(t *testing.T) {
+	backend := &transferProvider{removes: []string{"legacy-looking"}}
+	desired, _ := resource.NewProviderAdapter(backend, func(context.Context, model.Resource, model.Observation, model.Ownership) ([]model.Operation, error) {
+		return nil, nil
+	})
+	coordinator, _ := legacy.New(transferPaths{})
+	defer coordinator.Close()
+	adapter, _ := NewProviderTransferAdapter(desired, coordinator, model.ProfileVPSShell)
+	item := model.Resource{ID: "core.alpha", Type: model.ResourcePackage, Provider: "fixture", Package: "alpha"}
+	op := model.Operation{ID: "transfer", ResourceID: item.ID, Kind: model.OperationTransfer, Provider: item.Provider, Package: item.Package, Removes: []string{"legacy-looking"}}
+	if _, err := adapter.Simulate(context.Background(), item, op); err == nil {
+		t.Fatal("desired removal accepted")
+	}
 }
 func (p *transferProvider) Execute(context.Context, model.Operation) error {
 	p.present = true
@@ -52,6 +70,9 @@ func TestProviderTransferAdapterComposesRealOpaqueCoordinator(t *testing.T) {
 	}
 	item := model.Resource{ID: "core.alpha", Type: model.ResourcePackage, Provider: "fixture", Package: "alpha", VersionPolicy: model.VersionTracked}
 	op := model.Operation{ID: "transfer", ResourceID: item.ID, Kind: model.OperationTransfer, Provider: item.Provider, Package: item.Package}
+	if _, err := adapter.Simulate(context.Background(), item, op); err != nil {
+		t.Fatal(err)
+	}
 	if result := adapter.InstallDesired(context.Background(), item, op); !result.Success {
 		t.Fatalf("install=%#v", result)
 	}
