@@ -146,7 +146,7 @@
       "provider": "homebrew-formula",
       "package": "gum",
       "commands": ["gum"],
-      "metadata": {"legacy.apt.package": "gum", "legacy.homebrew.package": "gum"}
+      "metadata": {"legacy.apt.package": "gum", "legacy.apt.profile": "vps-shell", "legacy.homebrew.package": "gum"}
     },
     {
       "id": "core.lazygit",
@@ -179,7 +179,7 @@
       "provider": "homebrew-formula",
       "package": "mise",
       "commands": ["mise"],
-      "metadata": {"legacy.apt.package": "mise", "legacy.homebrew.package": "mise"}
+      "metadata": {"legacy.apt.package": "mise", "legacy.apt.profile": "vps-shell", "legacy.homebrew.package": "mise"}
     },
     {
       "id": "core.neovim",
@@ -296,7 +296,7 @@
       "provider": "homebrew-cask",
       "package": "ghostty",
       "commands": [],
-      "metadata": {"enabledByConfig": "enableMacosAppGroupTerminalApps"}
+      "metadata": {"enabledByConfig": "enableMacosAppGroupTerminalApps", "legacy.homebrew.package": "ghostty"}
     },
     {
       "id": "optional-desktop.hammerspoon",
@@ -307,7 +307,7 @@
       "provider": "homebrew-cask",
       "package": "hammerspoon",
       "commands": [],
-      "metadata": {"enabledByConfig": "enableMacosAppGroupAutomation"}
+      "metadata": {"enabledByConfig": "enableMacosAppGroupAutomation", "legacy.homebrew.package": "hammerspoon"}
     },
     {
       "id": "optional-desktop.karabiner-elements",
@@ -318,7 +318,7 @@
       "provider": "homebrew-cask",
       "package": "karabiner-elements",
       "commands": [],
-      "metadata": {"enabledByConfig": "enableMacosAppGroupAutomation"}
+      "metadata": {"enabledByConfig": "enableMacosAppGroupAutomation", "legacy.homebrew.package": "karabiner-elements"}
     },
     {
       "id": "optional-desktop.scroll-reverser",
@@ -329,7 +329,7 @@
       "provider": "homebrew-cask",
       "package": "scroll-reverser",
       "commands": [],
-      "metadata": {"enabledByConfig": "enableMacosAppGroupAutomation"}
+      "metadata": {"enabledByConfig": "enableMacosAppGroupAutomation", "legacy.homebrew.package": "scroll-reverser"}
     },
     {
       "id": "optional-desktop.raycast",
@@ -340,7 +340,7 @@
       "provider": "homebrew-cask",
       "package": "raycast",
       "commands": [],
-      "metadata": {"enabledByConfig": "enableMacosAppGroupLauncher"}
+      "metadata": {"enabledByConfig": "enableMacosAppGroupLauncher", "legacy.homebrew.package": "raycast"}
     },
     {
       "id": "optional-desktop.one-password-cli",
@@ -351,7 +351,7 @@
       "provider": "homebrew-cask",
       "package": "1password-cli",
       "commands": [],
-      "metadata": {"enabledByConfig": "enableMacosAppGroupLauncher"}
+      "metadata": {"enabledByConfig": "enableMacosAppGroupLauncher", "legacy.homebrew.package": "1password-cli"}
     },
     {
       "id": "optional-desktop.istat-menus",
@@ -362,7 +362,7 @@
       "provider": "homebrew-cask",
       "package": "istat-menus",
       "commands": [],
-      "metadata": {"enabledByConfig": "enableMacosAppGroupMonitoring"}
+      "metadata": {"enabledByConfig": "enableMacosAppGroupMonitoring", "legacy.homebrew.package": "istat-menus"}
     },
     {
       "id": "optional-desktop.zed",
@@ -373,7 +373,7 @@
       "provider": "homebrew-cask",
       "package": "zed",
       "commands": [],
-      "metadata": {"enabledByConfig": "enableMacosAppGroupDevelopmentApps"}
+      "metadata": {"enabledByConfig": "enableMacosAppGroupDevelopmentApps", "legacy.homebrew.package": "zed"}
     },
     {
       "id": "optional-desktop.orca",
@@ -384,7 +384,7 @@
       "provider": "homebrew-cask",
       "package": "stablyai/orca/orca",
       "commands": [],
-      "metadata": {"enabledByConfig": "enableMacosAppGroupDevelopmentApps"}
+      "metadata": {"enabledByConfig": "enableMacosAppGroupDevelopmentApps", "legacy.homebrew.package": "stablyai/orca/orca"}
     },
     {
       "id": "bootstrap-apt.build-essential",

@@ -4,6 +4,9 @@ package legacy
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -11,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/juty9026/terrapod/internal/execx"
 	"github.com/juty9026/terrapod/internal/legacydecl"
 	"github.com/juty9026/terrapod/internal/model"
 	"github.com/juty9026/terrapod/internal/provider"
@@ -33,10 +37,10 @@ type Receipt struct {
 	Paths    map[string]string
 }
 
-type Handler interface {
-	Inspect(context.Context, model.Resource, Declaration) (Receipt, error)
-	SimulateRemoval(context.Context, model.Resource, Declaration) (provider.ChangeSet, error)
-	Remove(context.Context, model.Resource, Declaration) error
+type handler interface {
+	inspect(context.Context, model.Resource, Declaration) (Receipt, error)
+	simulateRemoval(context.Context, model.Resource, Declaration) (provider.ChangeSet, error)
+	remove(context.Context, model.Resource, Declaration) error
 }
 
 type PathResolver interface {
@@ -55,16 +59,30 @@ type Observation struct {
 }
 
 type Inventory struct {
-	Resource model.Resource
-	Profile  model.Profile
-	Desired  model.Observation
-	Legacy   []Observation
+	resource model.Resource
+	profile  model.Profile
+	desired  model.Observation
+	legacy   []Observation
+	issuer   [32]byte
+	valid    bool
+}
+
+func (i Inventory) Resource() model.Resource   { return cloneResource(i.resource) }
+func (i Inventory) Desired() model.Observation { return cloneModelObservation(i.desired) }
+func (i Inventory) Legacy() []Observation {
+	result := make([]Observation, len(i.legacy))
+	for index, item := range i.legacy {
+		result[index] = cloneObservation(item)
+	}
+	return result
 }
 
 type RemovalOperation struct {
 	resource    model.Resource
 	declaration Declaration
 	observation Observation
+	issuer      [32]byte
+	digest      [32]byte
 }
 
 type ErrUnknownProvenance struct {
@@ -86,25 +104,60 @@ func (e *ErrUnknownProvenance) Error() string {
 }
 
 type Coordinator struct {
-	handlers map[Kind]Handler
+	handlers map[Kind]handler
 	paths    PathResolver
+	issuer   [32]byte
 }
 
-func New(handlers map[Kind]Handler, paths PathResolver) (*Coordinator, error) {
+type Option func(*Coordinator) error
+
+func withHandler(kind Kind, source handler) Option {
+	return func(c *Coordinator) error {
+		if isNil(source) {
+			return fmt.Errorf("legacy: nil handler for %q", kind)
+		}
+		if _, exists := c.handlers[kind]; exists {
+			return fmt.Errorf("legacy: duplicate handler for %q", kind)
+		}
+		c.handlers[kind] = source
+		return nil
+	}
+}
+
+type absentHandler struct{}
+
+func (absentHandler) inspect(context.Context, model.Resource, Declaration) (Receipt, error) {
+	return Receipt{}, nil
+}
+func (absentHandler) simulateRemoval(context.Context, model.Resource, Declaration) (provider.ChangeSet, error) {
+	return provider.ChangeSet{}, errors.New("legacy: absent source cannot be removed")
+}
+func (absentHandler) remove(context.Context, model.Resource, Declaration) error {
+	return errors.New("legacy: absent source cannot be removed")
+}
+
+func WithoutAPT() Option      { return withHandler(APT, absentHandler{}) }
+func WithoutMise() Option     { return withHandler(Mise, absentHandler{}) }
+func WithoutHomebrew() Option { return withHandler(Homebrew, absentHandler{}) }
+func WithoutVendor() Option   { return withHandler(Vendor, absentHandler{}) }
+
+func New(paths PathResolver, options ...Option) (*Coordinator, error) {
 	if isNil(paths) {
 		return nil, errors.New("legacy: path resolver is required")
 	}
-	copyHandlers := make(map[Kind]Handler, len(handlers))
-	for kind, handler := range handlers {
-		if kind != APT && kind != Mise && kind != Homebrew && kind != Vendor {
-			return nil, fmt.Errorf("legacy: unsupported handler kind %q", kind)
-		}
-		if isNil(handler) {
-			return nil, fmt.Errorf("legacy: nil handler for %q", kind)
-		}
-		copyHandlers[kind] = handler
+	c := &Coordinator{handlers: make(map[Kind]handler), paths: paths}
+	if _, err := rand.Read(c.issuer[:]); err != nil {
+		return nil, fmt.Errorf("legacy: create coordinator identity: %w", err)
 	}
-	return &Coordinator{handlers: copyHandlers, paths: paths}, nil
+	for _, option := range options {
+		if option == nil {
+			return nil, errors.New("legacy: nil option")
+		}
+		if err := option(c); err != nil {
+			return nil, err
+		}
+	}
+	return c, nil
 }
 
 func ParseDeclarations(resource model.Resource) ([]Declaration, error) {
@@ -112,10 +165,10 @@ func ParseDeclarations(resource model.Resource) ([]Declaration, error) {
 }
 
 func (c *Coordinator) Detect(ctx context.Context, profile model.Profile, resource model.Resource, desired model.Observation) (Inventory, error) {
-	inventory := Inventory{Resource: cloneResource(resource), Profile: profile, Desired: cloneModelObservation(desired)}
+	inventory := Inventory{resource: cloneResource(resource), profile: profile, desired: cloneModelObservation(desired), issuer: c.issuer, valid: true}
 	declarations, err := ParseDeclarations(resource)
 	if err != nil {
-		return inventory, err
+		return Inventory{}, err
 	}
 	for _, declaration := range declarations {
 		if declaration.Profile != "" && declaration.Profile != profile {
@@ -123,35 +176,38 @@ func (c *Coordinator) Detect(ctx context.Context, profile model.Profile, resourc
 		}
 		handler, ok := c.handlers[declaration.Kind]
 		if !ok {
-			return inventory, &ErrUnsupportedSource{Kind: declaration.Kind}
+			return Inventory{}, &ErrUnsupportedSource{Kind: declaration.Kind}
 		}
-		receipt, err := handler.Inspect(ctx, resource, declaration)
+		receipt, err := handler.inspect(ctx, resource, declaration)
 		if err != nil {
-			return inventory, fmt.Errorf("legacy: inspect %s source for %q: %w", declaration.Kind, resource.ID, err)
+			return Inventory{}, fmt.Errorf("legacy: inspect %s source for %q: %w", declaration.Kind, resource.ID, err)
 		}
 		if !receipt.Present {
 			continue
 		}
 		observation, err := observationFromReceipt(declaration, receipt)
 		if err != nil {
-			return inventory, fmt.Errorf("legacy: invalid %s receipt for %q: %w", declaration.Kind, resource.ID, err)
+			return Inventory{}, fmt.Errorf("legacy: invalid %s receipt for %q: %w", declaration.Kind, resource.ID, err)
 		}
-		inventory.Legacy = append(inventory.Legacy, observation)
+		inventory.legacy = append(inventory.legacy, observation)
 	}
-	if err := c.validateCommandProvenance(resource, desired, inventory.Legacy); err != nil {
+	if err := c.validateCommandProvenance(resource, desired, inventory.legacy); err != nil {
 		return Inventory{}, err
 	}
 	return inventory, nil
 }
 
 func (c *Coordinator) RemovalOperations(inventory Inventory) ([]RemovalOperation, error) {
-	declarations, err := ParseDeclarations(inventory.Resource)
+	if !inventory.valid || inventory.issuer != c.issuer {
+		return nil, errors.New("legacy: inventory was not issued by this coordinator")
+	}
+	declarations, err := ParseDeclarations(inventory.resource)
 	if err != nil {
 		return nil, err
 	}
 	authorized := make(map[string]Declaration, len(declarations))
 	for _, declaration := range declarations {
-		if declaration.Profile != "" && declaration.Profile != inventory.Profile {
+		if declaration.Profile != "" && declaration.Profile != inventory.profile {
 			continue
 		}
 		key := declarationKey(declaration)
@@ -160,9 +216,9 @@ func (c *Coordinator) RemovalOperations(inventory Inventory) ([]RemovalOperation
 		}
 		authorized[key] = declaration
 	}
-	operations := make([]RemovalOperation, 0, len(inventory.Legacy))
-	seen := make(map[string]struct{}, len(inventory.Legacy))
-	for _, observation := range inventory.Legacy {
+	operations := make([]RemovalOperation, 0, len(inventory.legacy))
+	seen := make(map[string]struct{}, len(inventory.legacy))
+	for _, observation := range inventory.legacy {
 		if !observation.Present {
 			continue
 		}
@@ -175,16 +231,22 @@ func (c *Coordinator) RemovalOperations(inventory Inventory) ([]RemovalOperation
 		if _, ok := authorized[key]; !ok {
 			return nil, fmt.Errorf("legacy: observation for %s package %q is not authorized by catalog", observation.Kind, observation.Package)
 		}
-		operations = append(operations, RemovalOperation{
-			resource:    cloneResource(inventory.Resource),
+		operation := RemovalOperation{
+			resource:    cloneResource(inventory.resource),
 			declaration: declaration,
 			observation: cloneObservation(observation),
-		})
+			issuer:      c.issuer,
+		}
+		operation.digest = operationDigest(operation)
+		operations = append(operations, operation)
 	}
 	return operations, nil
 }
 
 func (c *Coordinator) Remove(ctx context.Context, operation RemovalOperation) error {
+	if operation.issuer != c.issuer || operation.digest != operationDigest(operation) {
+		return errors.New("legacy: removal capability is invalid or belongs to another coordinator")
+	}
 	if operation.resource.ID == "" || !operation.observation.Present || operation.declaration.Kind != operation.observation.Kind || operation.declaration.Package != operation.observation.Package {
 		return errors.New("legacy: invalid removal operation")
 	}
@@ -192,7 +254,7 @@ func (c *Coordinator) Remove(ctx context.Context, operation RemovalOperation) er
 	if !ok {
 		return &ErrUnsupportedSource{Kind: operation.declaration.Kind}
 	}
-	fresh, err := handler.Inspect(ctx, operation.resource, operation.declaration)
+	fresh, err := handler.inspect(ctx, operation.resource, operation.declaration)
 	if err != nil {
 		return fmt.Errorf("legacy: refresh receipt for %q: %w", operation.declaration.Package, err)
 	}
@@ -206,7 +268,7 @@ func (c *Coordinator) Remove(ctx context.Context, operation RemovalOperation) er
 	if !observationsEqual(freshObservation, operation.observation) {
 		return &ErrStaleReceipt{Kind: operation.declaration.Kind, Package: operation.declaration.Package}
 	}
-	changes, err := handler.SimulateRemoval(ctx, operation.resource, operation.declaration)
+	changes, err := handler.simulateRemoval(ctx, operation.resource, operation.declaration)
 	if err != nil {
 		return fmt.Errorf("legacy: simulate removal of %q from %s: %w", operation.declaration.Package, operation.declaration.Kind, err)
 	}
@@ -217,10 +279,10 @@ func (c *Coordinator) Remove(ctx context.Context, operation RemovalOperation) er
 	if len(changes.Installs) != 0 || len(changes.Upgrades) != 0 || len(changes.Removes) != 1 || changes.Removes[0] != operation.declaration.Package {
 		return fmt.Errorf("legacy: removal simulation for %q is not an exact package removal", operation.declaration.Package)
 	}
-	if err := handler.Remove(ctx, operation.resource, operation.declaration); err != nil {
+	if err := handler.remove(ctx, operation.resource, operation.declaration); err != nil {
 		return fmt.Errorf("legacy: remove %q from %s: %w", operation.declaration.Package, operation.declaration.Kind, err)
 	}
-	receipt, err := handler.Inspect(ctx, operation.resource, operation.declaration)
+	receipt, err := handler.inspect(ctx, operation.resource, operation.declaration)
 	if err != nil {
 		return fmt.Errorf("legacy: re-inventory %q from %s: %w", operation.declaration.Package, operation.declaration.Kind, err)
 	}
@@ -228,6 +290,15 @@ func (c *Coordinator) Remove(ctx context.Context, operation RemovalOperation) er
 		return fmt.Errorf("legacy: %q remains present in %s after removal", operation.declaration.Package, operation.declaration.Kind)
 	}
 	return nil
+}
+
+func operationDigest(operation RemovalOperation) [32]byte {
+	payload, _ := json.Marshal(struct {
+		Resource    model.Resource
+		Declaration Declaration
+		Observation Observation
+	}{operation.resource, operation.declaration, operation.observation})
+	return sha256.Sum256(payload)
 }
 
 func (c *Coordinator) validateCommandProvenance(resource model.Resource, desired model.Observation, legacy []Observation) error {
@@ -272,19 +343,30 @@ func (c *Coordinator) validateCommandProvenance(resource model.Resource, desired
 	return nil
 }
 
-// APTHandler narrows the current APT adapter to the two historical bootstrap
-// packages declared by the catalog.
-type APTHandler struct{ adapter provider.Provider }
-
-func NewAPTHandler(adapter provider.Provider) (*APTHandler, error) {
-	if isNil(adapter) || adapter.Name() != "apt" {
-		return nil, errors.New("legacy: APT provider adapter is required")
-	}
-	return &APTHandler{adapter: adapter}, nil
+type aptHandler struct {
+	adapter provider.Provider
+	runner  Runner
+	paths   PathResolver
 }
 
-func (h *APTHandler) Inspect(ctx context.Context, desired model.Resource, declaration Declaration) (Receipt, error) {
-	if declaration.Kind != APT || (declaration.Package != "gum" && declaration.Package != "mise") {
+func WithAPT(adapter provider.Provider, runner Runner) Option {
+	return func(c *Coordinator) error {
+		handler, err := newAPTHandler(adapter, runner, c.paths)
+		if err != nil {
+			return err
+		}
+		return withHandler(APT, handler)(c)
+	}
+}
+func newAPTHandler(adapter provider.Provider, runner Runner, paths PathResolver) (*aptHandler, error) {
+	if isNil(adapter) || adapter.Name() != "apt" || isNil(runner) || isNil(paths) {
+		return nil, errors.New("legacy: APT provider adapter, runner, and paths are required")
+	}
+	return &aptHandler{adapter: adapter, runner: runner, paths: paths}, nil
+}
+
+func (h *aptHandler) inspect(ctx context.Context, desired model.Resource, declaration Declaration) (Receipt, error) {
+	if declaration.Kind != APT || !exactDeclaration(desired, declaration) {
 		return Receipt{}, fmt.Errorf("legacy: unsupported APT package %q", declaration.Package)
 	}
 	legacy := legacyResource(desired, declaration, h.adapter.Name())
@@ -293,18 +375,49 @@ func (h *APTHandler) Inspect(ctx context.Context, desired model.Resource, declar
 	if err != nil {
 		return Receipt{}, err
 	}
-	paths := map[string]string{}
-	if observation.Present {
-		paths[declaration.Package] = "/usr/bin/" + declaration.Package
+	if !observation.Present {
+		return Receipt{}, nil
 	}
-	return Receipt{Present: observation.Present, Paths: paths}, nil
+	result, err := h.runner.Run(ctx, execx.Request{Path: "/usr/bin/dpkg-query", Args: []string{"--listfiles", declaration.Package}, Env: map[string]string{"LC_ALL": "C"}})
+	if err != nil {
+		return Receipt{}, fmt.Errorf("legacy: query APT files for %q: %w", declaration.Package, err)
+	}
+	owned := make(map[string]struct{})
+	for _, line := range strings.Split(strings.TrimSuffix(string(result.Stdout), "\n"), "\n") {
+		if line == "" || !cleanAbsolute(line) {
+			return Receipt{}, errors.New("legacy: invalid APT file receipt")
+		}
+		if _, duplicate := owned[line]; duplicate {
+			return Receipt{}, errors.New("legacy: duplicate APT file receipt")
+		}
+		owned[line] = struct{}{}
+	}
+	paths := make(map[string]string)
+	for _, command := range desired.Commands {
+		candidate := "/usr/bin/" + command
+		if _, ok := owned[candidate]; !ok {
+			continue
+		}
+		resolved, resolveErr := h.paths.EvalSymlinks(candidate)
+		if resolveErr != nil || !cleanAbsolute(resolved) {
+			return Receipt{}, fmt.Errorf("legacy: resolve APT-owned command %q", command)
+		}
+		paths[command] = candidate
+	}
+	return Receipt{Present: true, Paths: paths}, nil
 }
 
-func (h *APTHandler) SimulateRemoval(ctx context.Context, desired model.Resource, declaration Declaration) (provider.ChangeSet, error) {
+func (h *aptHandler) simulateRemoval(ctx context.Context, desired model.Resource, declaration Declaration) (provider.ChangeSet, error) {
+	if !exactDeclaration(desired, declaration) {
+		return provider.ChangeSet{}, errors.New("legacy: APT declaration is not authorized for resource")
+	}
 	return h.adapter.Simulate(ctx, pruneOperation(desired, declaration, h.adapter.Name()))
 }
 
-func (h *APTHandler) Remove(ctx context.Context, desired model.Resource, declaration Declaration) error {
+func (h *aptHandler) remove(ctx context.Context, desired model.Resource, declaration Declaration) error {
+	if !exactDeclaration(desired, declaration) {
+		return errors.New("legacy: APT declaration is not authorized for resource")
+	}
 	return h.adapter.Execute(ctx, pruneOperation(desired, declaration, h.adapter.Name()))
 }
 

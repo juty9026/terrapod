@@ -59,7 +59,7 @@ var (
 
 func Parse(resource model.Resource) ([]Declaration, error) {
 	known := map[string]struct{}{
-		"legacy.apt.package": {}, "legacy.mise.package": {}, "legacy.mise.profile": {},
+		"legacy.apt.package": {}, "legacy.apt.profile": {}, "legacy.mise.package": {}, "legacy.mise.profile": {},
 		"legacy.homebrew.package": {}, "legacy.vendor.receipt": {}, "legacy.vendor.uninstall": {},
 	}
 	for key := range resource.Metadata {
@@ -83,6 +83,12 @@ func Parse(resource model.Resource) ([]Declaration, error) {
 			return nil, fmt.Errorf("resource %q has unsupported legacy APT transition %q", resource.ID, pkg)
 		}
 		declarations = append(declarations, Declaration{Kind: APT, Package: pkg})
+		if scope := resource.Metadata["legacy.apt.profile"]; scope != string(model.ProfileVPSShell) {
+			return nil, fmt.Errorf("resource %q requires legacy APT profile %q", resource.ID, model.ProfileVPSShell)
+		}
+		declarations[len(declarations)-1].Profile = model.ProfileVPSShell
+	} else if _, scoped := resource.Metadata["legacy.apt.profile"]; scoped {
+		return nil, fmt.Errorf("resource %q has legacy APT profile without package", resource.ID)
 	}
 	if pkg, ok := resource.Metadata["legacy.mise.package"]; ok {
 		if resource.Provider != "homebrew-formula" || misePackages[resource.ID] != pkg {

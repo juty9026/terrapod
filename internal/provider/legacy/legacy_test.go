@@ -21,18 +21,26 @@ type fakeHandler struct {
 	removeCalls   int
 }
 
-func (f *fakeHandler) Inspect(context.Context, model.Resource, Declaration) (Receipt, error) {
+func newCoordinatorForTest(handlers map[Kind]handler, paths PathResolver) (*Coordinator, error) {
+	options := make([]Option, 0, len(handlers))
+	for kind, source := range handlers {
+		options = append(options, withHandler(kind, source))
+	}
+	return New(paths, options...)
+}
+
+func (f *fakeHandler) inspect(context.Context, model.Resource, Declaration) (Receipt, error) {
 	f.inspectCalls++
 	if f.removed {
 		return Receipt{}, nil
 	}
 	return f.receipt, nil
 }
-func (f *fakeHandler) SimulateRemoval(context.Context, model.Resource, Declaration) (provider.ChangeSet, error) {
+func (f *fakeHandler) simulateRemoval(context.Context, model.Resource, Declaration) (provider.ChangeSet, error) {
 	f.simulateCalls++
 	return f.changes, nil
 }
-func (f *fakeHandler) Remove(context.Context, model.Resource, Declaration) error {
+func (f *fakeHandler) remove(context.Context, model.Resource, Declaration) error {
 	f.removeCalls++
 	f.removed = true
 	return nil
@@ -73,7 +81,7 @@ func TestDetectDesiredOnlyLegacyOnlyAndBoth(t *testing.T) {
 			if tt.desired {
 				paths.commands["rg"] = "/opt/homebrew/bin/rg"
 			}
-			c, err := New(map[Kind]Handler{Mise: h}, paths)
+			c, err := newCoordinatorForTest(map[Kind]handler{Mise: h}, paths)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -85,8 +93,8 @@ func TestDetectDesiredOnlyLegacyOnlyAndBoth(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(got.Legacy) != tt.wantLegacy {
-				t.Fatalf("Legacy = %#v, want %d item(s)", got.Legacy, tt.wantLegacy)
+			if len(got.Legacy()) != tt.wantLegacy {
+				t.Fatalf("Legacy = %#v, want %d item(s)", got.Legacy(), tt.wantLegacy)
 			}
 			operations, err := c.RemovalOperations(got)
 			if err != nil || len(operations) != tt.wantLegacy {
@@ -98,7 +106,7 @@ func TestDetectDesiredOnlyLegacyOnlyAndBoth(t *testing.T) {
 
 func TestDetectKnownVendorReceipt(t *testing.T) {
 	h := &fakeHandler{receipt: Receipt{Present: true, Paths: map[string]string{"claude": "/Users/test/.local/bin/claude"}}}
-	c, err := New(map[Kind]Handler{Vendor: h}, fakePaths{commands: map[string]string{"claude": "/Users/test/.local/bin/claude"}})
+	c, err := newCoordinatorForTest(map[Kind]handler{Vendor: h}, fakePaths{commands: map[string]string{"claude": "/Users/test/.local/bin/claude"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,8 +115,8 @@ func TestDetectKnownVendorReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Legacy) != 1 || got.Legacy[0].ReceiptKind != "claude-native" {
-		t.Fatalf("legacy = %#v", got.Legacy)
+	if len(got.Legacy()) != 1 || got.Legacy()[0].ReceiptKind != "claude-native" {
+		t.Fatalf("legacy = %#v", got.Legacy())
 	}
 }
 
@@ -123,7 +131,7 @@ func TestDetectRejectsUnknownAndEscapingPaths(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := &fakeHandler{receipt: Receipt{Present: true, Prefixes: []string{"/legacy/mise"}, Paths: map[string]string{"rg": "/legacy/mise/bin/rg"}}}
-			c, err := New(map[Kind]Handler{Mise: h}, fakePaths{commands: map[string]string{"rg": tt.command}, resolved: tt.resolved})
+			c, err := newCoordinatorForTest(map[Kind]handler{Mise: h}, fakePaths{commands: map[string]string{"rg": tt.command}, resolved: tt.resolved})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -141,12 +149,15 @@ func TestDetectRejectsUnknownAndEscapingPaths(t *testing.T) {
 
 func TestRemoveValidatesChangesAndReinventories(t *testing.T) {
 	h := &fakeHandler{receipt: Receipt{Present: true}, changes: provider.ChangeSet{Removes: []string{"ripgrep", "unmanaged"}}}
-	c, err := New(map[Kind]Handler{APT: h}, fakePaths{})
+	c, err := newCoordinatorForTest(map[Kind]handler{APT: h}, fakePaths{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	aptResource := model.Resource{ID: "core.gum", Type: model.ResourcePackage, Provider: "homebrew-formula", Package: "gum", Commands: []string{"gum"}, Metadata: map[string]string{"legacy.apt.package": "gum"}}
-	inv := Inventory{Resource: aptResource, Profile: model.ProfileVPSShell, Legacy: []Observation{{Kind: APT, Package: "gum", Present: true}}}
+	aptResource := model.Resource{ID: "core.gum", Type: model.ResourcePackage, Provider: "homebrew-formula", Package: "gum", Commands: []string{"gum"}, Metadata: map[string]string{"legacy.apt.package": "gum", "legacy.apt.profile": "vps-shell"}}
+	inv, err := c.Detect(context.Background(), model.ProfileVPSShell, aptResource, model.Observation{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ops, err := c.RemovalOperations(inv)
 	if err != nil {
 		t.Fatal(err)
@@ -165,7 +176,7 @@ func TestRemoveValidatesChangesAndReinventories(t *testing.T) {
 	if err := c.Remove(context.Background(), op); err != nil {
 		t.Fatal(err)
 	}
-	if !h.removed || h.inspectCalls != 3 {
+	if !h.removed || h.inspectCalls != 4 {
 		t.Fatalf("removed=%v inspectCalls=%d", h.removed, h.inspectCalls)
 	}
 }
@@ -202,7 +213,7 @@ func TestParseDeclarationsRejectsUnknownVendorKind(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	h := &fakeHandler{}
-	c, newErr := New(map[Kind]Handler{Vendor: h}, fakePaths{})
+	c, newErr := newCoordinatorForTest(map[Kind]handler{Vendor: h}, fakePaths{})
 	if newErr != nil {
 		t.Fatal(newErr)
 	}
@@ -220,30 +231,60 @@ func TestParseDeclarationsRejectsUnknownVendorKind(t *testing.T) {
 }
 
 func TestDetectWithoutTypedVendorHandlerFailsClosed(t *testing.T) {
-	c, err := New(nil, fakePaths{commands: map[string]string{"codex": "/Users/test/.local/bin/codex"}})
+	c, err := New(fakePaths{commands: map[string]string{"codex": "/Users/test/.local/bin/codex"}}, WithoutVendor())
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := model.Resource{ID: "optional-ai.codex", Type: model.ResourcePackage, Provider: "homebrew-cask", Package: "codex", Commands: []string{"codex"}, Metadata: map[string]string{"legacy.vendor.receipt": "codex-standalone", "legacy.vendor.uninstall": "codex-standalone"}}
 	inventory, err := c.Detect(context.Background(), model.ProfileMacOSTerminal, r, model.Observation{})
-	var unsupported *ErrUnsupportedSource
-	if !errors.As(err, &unsupported) {
-		t.Fatalf("error = %v, want ErrUnsupportedSource", err)
+	var provenance *ErrUnknownProvenance
+	if !errors.As(err, &provenance) {
+		t.Fatalf("error = %v, want ErrUnknownProvenance", err)
 	}
 	if operations, _ := c.RemovalOperations(inventory); len(operations) != 0 {
 		t.Fatalf("operations = %#v", operations)
 	}
 }
 
+func TestDesiredOnlyDoesNotRequireAbsentOptionalLegacyHandler(t *testing.T) {
+	paths := fakePaths{commands: map[string]string{"codex": "/opt/homebrew/bin/codex"}}
+	c, err := New(paths, WithoutHomebrew(), WithoutVendor())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := model.Resource{ID: "optional-ai.codex", Type: model.ResourcePackage, Provider: "homebrew-cask", Package: "codex", Commands: []string{"codex"}, Metadata: map[string]string{"legacy.homebrew.package": "codex", "legacy.vendor.receipt": "codex-standalone", "legacy.vendor.uninstall": "codex-standalone"}}
+	inventory, err := c.Detect(context.Background(), model.ProfileMacOSTerminal, r, model.Observation{Present: true, Provider: "homebrew-cask", Package: "codex", Paths: map[string]string{"codex": "/opt/homebrew/bin/codex"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inventory.Legacy()) != 0 {
+		t.Fatalf("legacy=%#v", inventory.Legacy())
+	}
+}
+
+func TestMacOSDesiredOnlyDoesNotRequireVPSScopedAPTHandler(t *testing.T) {
+	paths := fakePaths{commands: map[string]string{"gum": "/opt/homebrew/bin/gum"}}
+	c, err := New(paths, WithoutHomebrew())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := model.Resource{ID: "core.gum", Type: model.ResourcePackage, Provider: "homebrew-formula", Package: "gum", Commands: []string{"gum"}, Metadata: map[string]string{"legacy.apt.package": "gum", "legacy.apt.profile": "vps-shell", "legacy.homebrew.package": "gum"}}
+	_, err = c.Detect(context.Background(), model.ProfileMacOSTerminal, r, model.Observation{Present: true, Provider: "homebrew-formula", Package: "gum", Paths: map[string]string{"gum": "/opt/homebrew/bin/gum"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRemovalOperationsRejectsForgedInventory(t *testing.T) {
-	c, err := New(map[Kind]Handler{APT: &fakeHandler{}}, fakePaths{})
+	c, err := newCoordinatorForTest(map[Kind]handler{APT: &fakeHandler{}}, fakePaths{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	tests := []Inventory{
-		{Resource: resource(map[string]string{"legacy.mise.package": "aqua:BurntSushi/ripgrep"}), Legacy: []Observation{{Kind: APT, Package: "ripgrep", Present: true}}},
-		{Resource: resource(map[string]string{"legacy.mise.package": "aqua:BurntSushi/ripgrep"}), Legacy: []Observation{{Kind: Mise, Package: "aqua:sharkdp/fd", Present: true}}},
-		{Resource: model.Resource{ID: "optional-ai.claude-code", Type: model.ResourcePackage, Provider: "homebrew-cask", Package: "claude-code", Metadata: map[string]string{"legacy.vendor.receipt": "claude-native", "legacy.vendor.uninstall": "claude-native"}}, Legacy: []Observation{{Kind: Vendor, Package: "claude-code", ReceiptKind: "codex-standalone", UninstallKind: "codex-standalone", Present: true}}},
+		{},
+		{resource: resource(map[string]string{"legacy.mise.package": "aqua:BurntSushi/ripgrep"}), legacy: []Observation{{Kind: APT, Package: "ripgrep", Present: true}}},
+		{resource: resource(map[string]string{"legacy.mise.package": "aqua:BurntSushi/ripgrep"}), legacy: []Observation{{Kind: Mise, Package: "aqua:sharkdp/fd", Present: true}}},
+		{resource: model.Resource{ID: "optional-ai.claude-code", Type: model.ResourcePackage, Provider: "homebrew-cask", Package: "claude-code", Metadata: map[string]string{"legacy.vendor.receipt": "claude-native", "legacy.vendor.uninstall": "claude-native"}}, legacy: []Observation{{Kind: Vendor, Package: "claude-code", ReceiptKind: "codex-standalone", UninstallKind: "codex-standalone", Present: true}}},
 	}
 	for _, inventory := range tests {
 		operations, err := c.RemovalOperations(inventory)
@@ -255,7 +296,7 @@ func TestRemovalOperationsRejectsForgedInventory(t *testing.T) {
 
 func TestRemoveRejectsChangedReceiptBeforeMutation(t *testing.T) {
 	h := &fakeHandler{receipt: Receipt{Present: true, Paths: map[string]string{"rg": "/legacy/bin/rg"}}, changes: provider.ChangeSet{Removes: []string{"aqua:BurntSushi/ripgrep"}}}
-	c, err := New(map[Kind]Handler{Mise: h}, fakePaths{commands: map[string]string{"rg": "/legacy/bin/rg"}})
+	c, err := newCoordinatorForTest(map[Kind]handler{Mise: h}, fakePaths{commands: map[string]string{"rg": "/legacy/bin/rg"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +319,7 @@ func TestRemoveRejectsChangedReceiptBeforeMutation(t *testing.T) {
 
 func TestPrefixAloneNeverAuthorizesActiveCommand(t *testing.T) {
 	h := &fakeHandler{receipt: Receipt{Present: true, Prefixes: []string{"/legacy"}, Paths: map[string]string{"rg": "/legacy/bin/other"}}}
-	c, err := New(map[Kind]Handler{Mise: h}, fakePaths{commands: map[string]string{"rg": "/legacy/bin/rg"}})
+	c, err := newCoordinatorForTest(map[Kind]handler{Mise: h}, fakePaths{commands: map[string]string{"rg": "/legacy/bin/rg"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,32 +332,37 @@ func TestPrefixAloneNeverAuthorizesActiveCommand(t *testing.T) {
 
 func TestBtopLegacyMiseIsVPSShellOnly(t *testing.T) {
 	h := &fakeHandler{receipt: Receipt{Present: true, Paths: map[string]string{"btop": "/legacy/bin/btop"}}}
-	c, err := New(map[Kind]Handler{Mise: h}, fakePaths{})
+	c, err := newCoordinatorForTest(map[Kind]handler{Mise: h}, fakePaths{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := model.Resource{ID: "core.btop", Type: model.ResourcePackage, Provider: "homebrew-formula", Package: "btop", Commands: []string{"btop"}, Metadata: map[string]string{"legacy.mise.package": "aqua:aristocratos/btop", "legacy.mise.profile": "vps-shell"}}
 	mac, err := c.Detect(context.Background(), model.ProfileMacOSTerminal, r, model.Observation{})
-	if err != nil || len(mac.Legacy) != 0 || h.inspectCalls != 0 {
+	if err != nil || len(mac.Legacy()) != 0 || h.inspectCalls != 0 {
 		t.Fatalf("mac inventory=%#v calls=%d error=%v", mac, h.inspectCalls, err)
 	}
-	c, err = New(map[Kind]Handler{Mise: h}, fakePaths{commands: map[string]string{"btop": "/legacy/bin/btop"}})
+	c, err = newCoordinatorForTest(map[Kind]handler{Mise: h}, fakePaths{commands: map[string]string{"btop": "/legacy/bin/btop"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	vps, err := c.Detect(context.Background(), model.ProfileVPSShell, r, model.Observation{})
-	if err != nil || len(vps.Legacy) != 1 || h.inspectCalls != 1 {
+	if err != nil || len(vps.Legacy()) != 1 || h.inspectCalls != 1 {
 		t.Fatalf("vps inventory=%#v calls=%d error=%v", vps, h.inspectCalls, err)
 	}
 }
 
 func TestRemovalOperationsRejectsDuplicateObservation(t *testing.T) {
-	c, err := New(map[Kind]Handler{Mise: &fakeHandler{}}, fakePaths{})
+	c, err := newCoordinatorForTest(map[Kind]handler{Mise: &fakeHandler{}}, fakePaths{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation := Observation{Kind: Mise, Package: "aqua:BurntSushi/ripgrep", Present: true}
-	inventory := Inventory{Resource: resource(map[string]string{"legacy.mise.package": "aqua:BurntSushi/ripgrep"}), Profile: model.ProfileMacOSTerminal, Legacy: []Observation{observation, observation}}
+	h := &fakeHandler{receipt: Receipt{Present: true}}
+	c, err = newCoordinatorForTest(map[Kind]handler{Mise: h}, fakePaths{})
+	inventory, err := c.Detect(context.Background(), model.ProfileMacOSTerminal, resource(map[string]string{"legacy.mise.package": "aqua:BurntSushi/ripgrep"}), model.Observation{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory.legacy = append(inventory.legacy, inventory.legacy[0])
 	operations, err := c.RemovalOperations(inventory)
 	if err == nil || len(operations) != 0 {
 		t.Fatalf("operations=%#v error=%v", operations, err)
@@ -324,19 +370,59 @@ func TestRemovalOperationsRejectsDuplicateObservation(t *testing.T) {
 }
 
 func TestRemoveIsIdempotentWhenFreshReceiptDisappeared(t *testing.T) {
-	h := &fakeHandler{receipt: Receipt{Present: false}, changes: provider.ChangeSet{Removes: []string{"gum"}}}
-	c, err := New(map[Kind]Handler{APT: h}, fakePaths{})
+	h := &fakeHandler{receipt: Receipt{Present: true}, changes: provider.ChangeSet{Removes: []string{"gum"}}}
+	c, err := newCoordinatorForTest(map[Kind]handler{APT: h}, fakePaths{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := model.Resource{ID: "core.gum", Type: model.ResourcePackage, Provider: "homebrew-formula", Package: "gum", Metadata: map[string]string{"legacy.apt.package": "gum"}}
-	inventory := Inventory{Resource: r, Profile: model.ProfileVPSShell, Legacy: []Observation{{Kind: APT, Package: "gum", Present: true}}}
+	r := model.Resource{ID: "core.gum", Type: model.ResourcePackage, Provider: "homebrew-formula", Package: "gum", Metadata: map[string]string{"legacy.apt.package": "gum", "legacy.apt.profile": "vps-shell"}}
+	inventory, err := c.Detect(context.Background(), model.ProfileVPSShell, r, model.Observation{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	operations, err := c.RemovalOperations(inventory)
 	if err != nil {
 		t.Fatal(err)
 	}
+	h.receipt = Receipt{}
 	if err := c.Remove(context.Background(), operations[0]); err != nil {
 		t.Fatal(err)
+	}
+	if h.simulateCalls != 0 || h.removeCalls != 0 {
+		t.Fatalf("simulate=%d remove=%d", h.simulateCalls, h.removeCalls)
+	}
+}
+
+func TestRemovalCapabilityRejectsCrossCoordinatorAndTampering(t *testing.T) {
+	h := &fakeHandler{receipt: Receipt{Present: true}, changes: provider.ChangeSet{Removes: []string{"gum"}}}
+	c1, err := newCoordinatorForTest(map[Kind]handler{APT: h}, fakePaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := model.Resource{ID: "core.gum", Type: model.ResourcePackage, Provider: "homebrew-formula", Package: "gum", Metadata: map[string]string{"legacy.apt.package": "gum", "legacy.apt.profile": "vps-shell"}}
+	inventory, err := c1.Detect(context.Background(), model.ProfileVPSShell, r, model.Observation{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resourceCopy := inventory.Resource()
+	resourceCopy.Package = "mise"
+	legacyCopy := inventory.Legacy()
+	legacyCopy[0].Package = "mise"
+	operations, err := c1.RemovalOperations(inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2, err := newCoordinatorForTest(map[Kind]handler{APT: h}, fakePaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c2.Remove(context.Background(), operations[0]); err == nil {
+		t.Fatal("cross-coordinator capability accepted")
+	}
+	mutated := operations[0]
+	mutated.resource.Package = "mise"
+	if err := c1.Remove(context.Background(), mutated); err == nil {
+		t.Fatal("mutated capability accepted")
 	}
 	if h.simulateCalls != 0 || h.removeCalls != 0 {
 		t.Fatalf("simulate=%d remove=%d", h.simulateCalls, h.removeCalls)

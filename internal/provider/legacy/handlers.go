@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -20,23 +21,53 @@ import (
 type Runner interface {
 	Run(context.Context, execx.Request) (execx.Result, error)
 }
-type PathEvaluator interface{ EvalSymlinks(string) (string, error) }
+type pathEvaluator interface{ EvalSymlinks(string) (string, error) }
 
-type MiseHandler struct {
-	path, resolvedDataRoot string
-	runner                 Runner
-	paths                  PathEvaluator
-	mu                     sync.Mutex
-	versions               map[string]string
+func WithMise(path, dataRoot string, runner Runner) Option {
+	return func(c *Coordinator) error {
+		handler, err := newMiseHandler(path, dataRoot, runner, c.paths)
+		if err != nil {
+			return err
+		}
+		return withHandler(Mise, handler)(c)
+	}
 }
 
-func NewMiseHandler(path, dataRoot string, runner Runner, paths PathEvaluator) (*MiseHandler, error) {
+func WithHomebrew(trustedPrefix string, runner Runner) Option {
+	return func(c *Coordinator) error {
+		if !cleanAbsolute(trustedPrefix) {
+			return fmt.Errorf("legacy: trusted Homebrew prefix must be clean and absolute: %q", trustedPrefix)
+		}
+		if strings.HasPrefix(trustedPrefix, "/tmp/") || strings.HasPrefix(trustedPrefix, "/private/tmp/") || trustedPrefix == "/tmp" || trustedPrefix == "/private/tmp" {
+			return fmt.Errorf("legacy: temporary Homebrew prefix is not trusted: %q", trustedPrefix)
+		}
+		handler, err := newHomebrewHandler(filepath.Join(trustedPrefix, "bin", "brew"), runner, c.paths)
+		if err != nil {
+			return err
+		}
+		return withHandler(Homebrew, handler)(c)
+	}
+}
+
+type miseHandler struct {
+	path, resolvedDataRoot string
+	runner                 Runner
+	paths                  PathResolver
+	mu                     sync.Mutex
+	versions               map[string][]string
+}
+
+func newMiseHandler(path, dataRoot string, runner Runner, paths PathResolver) (*miseHandler, error) {
 	standard := map[string]struct{}{"/opt/homebrew/bin/mise": {}, "/usr/local/bin/mise": {}, "/home/linuxbrew/.linuxbrew/bin/mise": {}}
 	if _, ok := standard[path]; !ok {
 		return nil, fmt.Errorf("legacy: unsupported mise executable %q", path)
 	}
 	if !cleanAbsolute(dataRoot) || isNil(runner) || isNil(paths) {
 		return nil, errors.New("legacy: mise requires an absolute data root, runner, and path evaluator")
+	}
+	unsafeRoots := map[string]struct{}{"/": {}, "/usr": {}, "/usr/local": {}, "/opt": {}, "/home": {}, "/Users": {}, "/var": {}, "/tmp": {}, "/private/tmp": {}}
+	if _, unsafe := unsafeRoots[dataRoot]; unsafe || strings.HasPrefix(dataRoot, "/tmp/") || strings.HasPrefix(dataRoot, "/private/tmp/") {
+		return nil, fmt.Errorf("legacy: unsafe mise data root %q", dataRoot)
 	}
 	resolvedPath, err := paths.EvalSymlinks(path)
 	if err != nil || !cleanAbsolute(resolvedPath) {
@@ -50,10 +81,13 @@ func NewMiseHandler(path, dataRoot string, runner Runner, paths PathEvaluator) (
 	if err != nil || !cleanAbsolute(resolvedData) {
 		return nil, fmt.Errorf("legacy: resolve mise data root %q", dataRoot)
 	}
-	return &MiseHandler{path: path, resolvedDataRoot: resolvedData, runner: runner, paths: paths, versions: make(map[string]string)}, nil
+	return &miseHandler{path: path, resolvedDataRoot: resolvedData, runner: runner, paths: paths, versions: make(map[string][]string)}, nil
 }
 
-func (h *MiseHandler) Inspect(ctx context.Context, _ model.Resource, declaration Declaration) (Receipt, error) {
+func (h *miseHandler) inspect(ctx context.Context, desired model.Resource, declaration Declaration) (Receipt, error) {
+	if !exactDeclaration(desired, declaration) {
+		return Receipt{}, errors.New("legacy: mise declaration is not authorized for resource")
+	}
 	commands, ok := legacydecl.Commands(declaration.Package)
 	if declaration.Kind != Mise || !ok {
 		return Receipt{}, fmt.Errorf("legacy: unsupported mise package %q", declaration.Package)
@@ -62,102 +96,135 @@ func (h *MiseHandler) Inspect(ctx context.Context, _ model.Resource, declaration
 	if err != nil {
 		return Receipt{}, fmt.Errorf("legacy: inspect mise package %q: %w", declaration.Package, err)
 	}
-	version, present, err := parseMiseInventory(result.Stdout, declaration.Package)
+	versions, present, err := parseMiseInventory(result.Stdout, declaration.Package)
 	if err != nil {
 		return Receipt{}, err
 	}
 	if !present {
-		h.setVersion(declaration.Package, "")
+		h.setVersions(declaration.Package, nil)
 		return Receipt{}, nil
 	}
-	qualified := declaration.Package + "@" + version
-	where, err := h.run(ctx, "where", qualified)
-	if err != nil {
-		return Receipt{}, fmt.Errorf("legacy: locate mise package %q: %w", declaration.Package, err)
-	}
-	root := strings.TrimSuffix(string(where.Stdout), "\n")
-	resolvedRoot, err := h.paths.EvalSymlinks(root)
-	if err != nil || !cleanAbsolute(root) || !cleanAbsolute(resolvedRoot) || !pathWithin(resolvedRoot, h.resolvedDataRoot) {
-		return Receipt{}, fmt.Errorf("legacy: mise package root %q escapes data root", root)
+	prefixes := make([]string, 0, len(versions))
+	candidates := make(map[string][]string, len(commands))
+	for _, version := range versions {
+		qualified := declaration.Package + "@" + version
+		where, runErr := h.run(ctx, "where", qualified)
+		if runErr != nil {
+			return Receipt{}, fmt.Errorf("legacy: locate mise package %q: %w", declaration.Package, runErr)
+		}
+		root := strings.TrimSuffix(string(where.Stdout), "\n")
+		resolvedRoot, resolveErr := h.paths.EvalSymlinks(root)
+		if resolveErr != nil || !cleanAbsolute(root) || !cleanAbsolute(resolvedRoot) || !pathWithin(resolvedRoot, h.resolvedDataRoot) {
+			return Receipt{}, fmt.Errorf("legacy: mise package root %q escapes data root", root)
+		}
+		prefixes = append(prefixes, root)
+		for _, command := range commands {
+			which, whichErr := h.run(ctx, "exec", "--yes", qualified, "--", "/usr/bin/which", command)
+			if whichErr != nil {
+				return Receipt{}, fmt.Errorf("legacy: locate mise command %q: %w", command, whichErr)
+			}
+			commandPath := strings.TrimSuffix(string(which.Stdout), "\n")
+			resolvedCommand, pathErr := h.paths.EvalSymlinks(commandPath)
+			if pathErr != nil || !cleanAbsolute(commandPath) || !cleanAbsolute(resolvedCommand) || !pathWithin(resolvedCommand, resolvedRoot) {
+				return Receipt{}, fmt.Errorf("legacy: mise command %q escapes package root", command)
+			}
+			candidates[command] = append(candidates[command], commandPath)
+		}
 	}
 	receiptPaths := make(map[string]string, len(commands))
 	for _, command := range commands {
-		which, runErr := h.run(ctx, "exec", "--yes", qualified, "--", "/usr/bin/which", command)
-		if runErr != nil {
-			return Receipt{}, fmt.Errorf("legacy: locate mise command %q: %w", command, runErr)
+		active, _ := h.paths.ResolveCommand(command)
+		for _, candidate := range candidates[command] {
+			if active == "" && len(candidates[command]) == 1 {
+				receiptPaths[command] = candidate
+				break
+			}
+			resolvedActive, aerr := h.paths.EvalSymlinks(active)
+			resolvedCandidate, cerr := h.paths.EvalSymlinks(candidate)
+			if aerr == nil && cerr == nil && resolvedActive == resolvedCandidate {
+				receiptPaths[command] = candidate
+				break
+			}
 		}
-		commandPath := strings.TrimSuffix(string(which.Stdout), "\n")
-		resolvedCommand, resolveErr := h.paths.EvalSymlinks(commandPath)
-		if resolveErr != nil || !cleanAbsolute(commandPath) || !cleanAbsolute(resolvedCommand) || !pathWithin(resolvedCommand, resolvedRoot) {
-			return Receipt{}, fmt.Errorf("legacy: mise command %q escapes package root", command)
-		}
-		receiptPaths[command] = commandPath
 	}
-	h.setVersion(declaration.Package, version)
-	return Receipt{Present: true, Prefixes: []string{root}, Paths: receiptPaths}, nil
+	h.setVersions(declaration.Package, versions)
+	return Receipt{Present: true, Prefixes: prefixes, Paths: receiptPaths}, nil
 }
-func (h *MiseHandler) SimulateRemoval(_ context.Context, _ model.Resource, declaration Declaration) (provider.ChangeSet, error) {
+func (h *miseHandler) simulateRemoval(_ context.Context, desired model.Resource, declaration Declaration) (provider.ChangeSet, error) {
+	if !exactDeclaration(desired, declaration) {
+		return provider.ChangeSet{}, errors.New("legacy: mise declaration is not authorized for resource")
+	}
 	if _, ok := legacydecl.Commands(declaration.Package); declaration.Kind != Mise || !ok {
 		return provider.ChangeSet{}, fmt.Errorf("legacy: unsupported mise package %q", declaration.Package)
 	}
-	if h.version(declaration.Package) == "" {
+	if len(h.packageVersions(declaration.Package)) == 0 {
 		return provider.ChangeSet{}, errors.New("legacy: mise package must be inspected before removal")
 	}
 	return provider.ChangeSet{Removes: []string{declaration.Package}}, nil
 }
-func (h *MiseHandler) Remove(ctx context.Context, _ model.Resource, declaration Declaration) error {
-	version := h.version(declaration.Package)
-	if version == "" {
+func (h *miseHandler) remove(ctx context.Context, desired model.Resource, declaration Declaration) error {
+	if !exactDeclaration(desired, declaration) {
+		return errors.New("legacy: mise declaration is not authorized for resource")
+	}
+	versions := h.packageVersions(declaration.Package)
+	if len(versions) == 0 {
 		return errors.New("legacy: mise package must be inspected before removal")
 	}
-	_, err := h.run(ctx, "uninstall", "--yes", declaration.Package+"@"+version)
-	if err != nil {
-		return fmt.Errorf("legacy: uninstall mise package %q: %w", declaration.Package, err)
+	for _, version := range versions {
+		if _, err := h.run(ctx, "uninstall", "--yes", declaration.Package+"@"+version); err != nil {
+			return fmt.Errorf("legacy: uninstall mise package %q version %q: %w", declaration.Package, version, err)
+		}
 	}
-	h.setVersion(declaration.Package, "")
+	h.setVersions(declaration.Package, nil)
 	return nil
 }
-func (h *MiseHandler) run(ctx context.Context, args ...string) (execx.Result, error) {
+func (h *miseHandler) run(ctx context.Context, args ...string) (execx.Result, error) {
 	return h.runner.Run(ctx, execx.Request{Path: h.path, Args: args, Env: map[string]string{"LC_ALL": "C"}})
 }
-func (h *MiseHandler) setVersion(pkg, version string) {
+func (h *miseHandler) setVersions(pkg string, versions []string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if version == "" {
+	if len(versions) == 0 {
 		delete(h.versions, pkg)
 	} else {
-		h.versions[pkg] = version
+		h.versions[pkg] = append([]string(nil), versions...)
 	}
 }
-func (h *MiseHandler) version(pkg string) string {
+func (h *miseHandler) packageVersions(pkg string) []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.versions[pkg]
+	return append([]string(nil), h.versions[pkg]...)
 }
 
-func parseMiseInventory(contents []byte, target string) (string, bool, error) {
+func parseMiseInventory(contents []byte, target string) ([]string, bool, error) {
 	var document map[string][]struct {
 		Version   string `json:"version"`
 		Installed bool   `json:"installed"`
 	}
 	if err := json.Unmarshal(contents, &document); err != nil {
-		return "", false, fmt.Errorf("legacy: parse mise inventory: %w", err)
+		return nil, false, fmt.Errorf("legacy: parse mise inventory: %w", err)
 	}
 	entries, ok := document[target]
 	if !ok || len(document) != 1 {
-		return "", false, errors.New("legacy: mise inventory identity mismatch")
+		return nil, false, errors.New("legacy: mise inventory identity mismatch")
 	}
-	version := ""
+	versions := make([]string, 0, len(entries))
+	seen := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
 		if !entry.Installed {
 			continue
 		}
-		if !safeMiseVersion(entry.Version) || version != "" {
-			return "", false, errors.New("legacy: ambiguous mise installed version")
+		if !safeMiseVersion(entry.Version) {
+			return nil, false, errors.New("legacy: unsafe mise installed version")
 		}
-		version = entry.Version
+		if _, duplicate := seen[entry.Version]; duplicate {
+			return nil, false, errors.New("legacy: duplicate mise installed version")
+		}
+		seen[entry.Version] = struct{}{}
+		versions = append(versions, entry.Version)
 	}
-	return version, version != "", nil
+	sort.Strings(versions)
+	return versions, len(versions) != 0, nil
 }
 
 func safeMiseVersion(version string) bool {
@@ -173,20 +240,33 @@ func safeMiseVersion(version string) bool {
 	return true
 }
 
-type HomebrewPackageKind string
-
-const (
-	BrewFormula HomebrewPackageKind = "formula"
-	BrewCask    HomebrewPackageKind = "cask"
-)
-
-type HomebrewHandler struct {
-	path, prefix string
-	runner       Runner
-	paths        PathEvaluator
+func exactDeclaration(resource model.Resource, declaration Declaration) bool {
+	declarations, err := legacydecl.Parse(resource)
+	if err != nil {
+		return false
+	}
+	for _, candidate := range declarations {
+		if declarationKey(candidate) == declarationKey(declaration) {
+			return true
+		}
+	}
+	return false
 }
 
-func NewHomebrewHandler(path string, runner Runner, paths PathEvaluator) (*HomebrewHandler, error) {
+type homebrewPackageKind string
+
+const (
+	brewFormula homebrewPackageKind = "formula"
+	brewCask    homebrewPackageKind = "cask"
+)
+
+type homebrewHandler struct {
+	path, prefix string
+	runner       Runner
+	paths        pathEvaluator
+}
+
+func newHomebrewHandler(path string, runner Runner, paths pathEvaluator) (*homebrewHandler, error) {
 	if !cleanAbsolute(path) || isNil(runner) || isNil(paths) {
 		return nil, errors.New("legacy: Homebrew requires an absolute path, runner, and path evaluator")
 	}
@@ -203,10 +283,10 @@ func NewHomebrewHandler(path string, runner Runner, paths PathEvaluator) (*Homeb
 	if err != nil || !cleanAbsolute(resolved) || !pathWithin(resolved, prefix) {
 		return nil, fmt.Errorf("legacy: Homebrew executable escapes prefix %q", prefix)
 	}
-	return &HomebrewHandler{path: path, prefix: prefix, runner: runner, paths: paths}, nil
+	return &homebrewHandler{path: path, prefix: prefix, runner: runner, paths: paths}, nil
 }
-func (h *HomebrewHandler) Inspect(ctx context.Context, desired model.Resource, declaration Declaration) (Receipt, error) {
-	if declaration.Kind != Homebrew || declaration.Package != desired.Package {
+func (h *homebrewHandler) inspect(ctx context.Context, desired model.Resource, declaration Declaration) (Receipt, error) {
+	if declaration.Kind != Homebrew || declaration.Package != desired.Package || !exactDeclaration(desired, declaration) {
 		return Receipt{}, errors.New("legacy: Homebrew declaration identity mismatch")
 	}
 	kind, err := homebrewKind(desired)
@@ -224,19 +304,35 @@ func (h *HomebrewHandler) Inspect(ctx context.Context, desired model.Resource, d
 	if !present {
 		return Receipt{}, nil
 	}
+	list, err := h.run(ctx, "list", "--verbose", "--"+string(kind), declaration.Package)
+	if err != nil {
+		return Receipt{}, fmt.Errorf("legacy: list Homebrew-owned files for %q: %w", declaration.Package, err)
+	}
+	owned := make(map[string]string)
+	for _, line := range strings.Split(strings.TrimSuffix(string(list.Stdout), "\n"), "\n") {
+		if line == "" || !cleanAbsolute(line) {
+			return Receipt{}, errors.New("legacy: invalid Homebrew file receipt")
+		}
+		resolved, resolveErr := h.paths.EvalSymlinks(line)
+		if resolveErr != nil || !cleanAbsolute(resolved) || !pathWithin(resolved, h.prefix) {
+			return Receipt{}, errors.New("legacy: Homebrew file receipt escapes trusted prefix")
+		}
+		base := filepath.Base(line)
+		if _, duplicate := owned[base]; duplicate {
+			return Receipt{}, errors.New("legacy: ambiguous Homebrew file receipt")
+		}
+		owned[base] = line
+	}
 	paths := make(map[string]string, len(desired.Commands))
 	for _, command := range desired.Commands {
-		path := filepath.Join(h.prefix, "bin", command)
-		resolved, resolveErr := h.paths.EvalSymlinks(path)
-		if resolveErr != nil || !cleanAbsolute(resolved) || !pathWithin(resolved, h.prefix) {
-			return Receipt{}, fmt.Errorf("legacy: Homebrew command %q escapes prefix", command)
+		if path, ok := owned[command]; ok {
+			paths[command] = path
 		}
-		paths[command] = path
 	}
 	return Receipt{Present: true, Prefixes: []string{h.prefix}, Paths: paths}, nil
 }
-func (h *HomebrewHandler) SimulateRemoval(_ context.Context, desired model.Resource, declaration Declaration) (provider.ChangeSet, error) {
-	if declaration.Kind != Homebrew {
+func (h *homebrewHandler) simulateRemoval(_ context.Context, desired model.Resource, declaration Declaration) (provider.ChangeSet, error) {
+	if declaration.Kind != Homebrew || !exactDeclaration(desired, declaration) {
 		return provider.ChangeSet{}, errors.New("legacy: Homebrew declaration kind mismatch")
 	}
 	if _, err := homebrewKind(desired); err != nil {
@@ -244,7 +340,10 @@ func (h *HomebrewHandler) SimulateRemoval(_ context.Context, desired model.Resou
 	}
 	return provider.ChangeSet{Removes: []string{declaration.Package}}, nil
 }
-func (h *HomebrewHandler) Remove(ctx context.Context, desired model.Resource, declaration Declaration) error {
+func (h *homebrewHandler) remove(ctx context.Context, desired model.Resource, declaration Declaration) error {
+	if !exactDeclaration(desired, declaration) {
+		return errors.New("legacy: Homebrew declaration is not authorized for resource")
+	}
 	kind, err := homebrewKind(desired)
 	if err != nil {
 		return err
@@ -255,21 +354,21 @@ func (h *HomebrewHandler) Remove(ctx context.Context, desired model.Resource, de
 	}
 	return nil
 }
-func homebrewKind(resource model.Resource) (HomebrewPackageKind, error) {
+func homebrewKind(resource model.Resource) (homebrewPackageKind, error) {
 	switch resource.Provider {
 	case "homebrew-formula":
-		return BrewFormula, nil
+		return brewFormula, nil
 	case "homebrew-cask":
-		return BrewCask, nil
+		return brewCask, nil
 	default:
 		return "", fmt.Errorf("legacy: unsupported desired Homebrew provider %q", resource.Provider)
 	}
 }
-func (h *HomebrewHandler) run(ctx context.Context, args ...string) (execx.Result, error) {
+func (h *homebrewHandler) run(ctx context.Context, args ...string) (execx.Result, error) {
 	return h.runner.Run(ctx, execx.Request{Path: h.path, Args: args, Env: map[string]string{"HOMEBREW_NO_AUTO_UPDATE": "1", "LC_ALL": "C"}})
 }
 
-func parseBrewReceipt(contents []byte, kind HomebrewPackageKind, target string) (bool, error) {
+func parseBrewReceipt(contents []byte, kind homebrewPackageKind, target string) (bool, error) {
 	decoder := json.NewDecoder(bytes.NewReader(contents))
 	decoder.DisallowUnknownFields()
 	var envelope struct {
@@ -284,7 +383,7 @@ func parseBrewReceipt(contents []byte, kind HomebrewPackageKind, target string) 
 		return false, errors.New("legacy: trailing Homebrew JSON")
 	}
 	records := envelope.Formulae
-	if kind == BrewCask {
+	if kind == brewCask {
 		records = envelope.Casks
 		if len(envelope.Formulae) != 0 {
 			return false, errors.New("legacy: unexpected formula receipt")
@@ -307,7 +406,7 @@ func parseBrewReceipt(contents []byte, kind HomebrewPackageKind, target string) 
 	}
 	name := item.Name
 	full := item.FullName
-	if kind == BrewCask {
+	if kind == brewCask {
 		name = item.Token
 		if name == "" {
 			name = item.Name

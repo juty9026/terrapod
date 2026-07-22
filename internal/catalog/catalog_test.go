@@ -102,10 +102,8 @@ func TestSeedCatalogDeclaresOnlyKnownLegacyPackageSources(t *testing.T) {
 		if resource.Provider != "homebrew-formula" && resource.Provider != "homebrew-cask" {
 			continue
 		}
-		if strings.HasPrefix(string(resource.ID), "core.") || strings.HasPrefix(string(resource.ID), "optional-ai.") {
-			if got := resource.Metadata["legacy.homebrew.package"]; got != resource.Package {
-				t.Fatalf("resource %q legacy Homebrew package = %q, want %q", resource.ID, got, resource.Package)
-			}
+		if got := resource.Metadata["legacy.homebrew.package"]; got != resource.Package {
+			t.Fatalf("resource %q legacy Homebrew package = %q, want %q", resource.ID, got, resource.Package)
 		}
 		if want, ok := wantMise[resource.ID]; ok {
 			seenMise++
@@ -120,6 +118,9 @@ func TestSeedCatalogDeclaresOnlyKnownLegacyPackageSources(t *testing.T) {
 			seenAPT++
 			if got := resource.Metadata["legacy.apt.package"]; got != want {
 				t.Fatalf("resource %q legacy APT package = %q, want %q", resource.ID, got, want)
+			}
+			if resource.Metadata["legacy.apt.profile"] != string(model.ProfileVPSShell) {
+				t.Fatalf("resource %q legacy APT scope = %q", resource.ID, resource.Metadata["legacy.apt.profile"])
 			}
 		}
 		if want, ok := wantVendor[resource.ID]; ok {
@@ -488,6 +489,16 @@ func TestLoadVerifiedRejectsInvalidCatalog(t *testing.T) {
 				resource["metadata"] = map[string]any{"legacy.apt.package": "gum;rm"}
 			},
 			want: `unsupported legacy APT transition "gum;rm"`,
+		},
+		{
+			name: "unscoped APT transition",
+			edit: func(input map[string]any) {
+				resource := resourcesOf(input)[0]
+				resource["id"] = "core.gum"
+				resource["package"] = "gum"
+				resource["metadata"] = map[string]any{"legacy.apt.package": "gum"}
+			},
+			want: `requires legacy APT profile "vps-shell"`,
 		},
 		{
 			name: "mismatched mise declaration",
