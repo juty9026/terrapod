@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	pathpkg "path"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -53,6 +55,9 @@ func (p *Planner) Build(ctx context.Context, input Input) (model.Plan, error) {
 	}
 	current, err := indexResources(input.Catalog.Resources)
 	if err != nil {
+		return model.Plan{}, err
+	}
+	if err := validateManagedAuthorities(input, current); err != nil {
 		return model.Plan{}, err
 	}
 	if err := validateConfigGateKinds(current); err != nil {
@@ -406,6 +411,17 @@ func historicalAuthority(historical map[string]model.Catalog, id model.ResourceI
 	if !found || match.Provider != ownership.Provider || match.Package != ownership.Package {
 		return model.Resource{}, false
 	}
+	if match.Type == model.ResourceManagedFiles {
+		if _, ok := safeManagedScope(match); !ok {
+			return model.Resource{}, false
+		}
+		for path, receipt := range ownership.Paths {
+			if !filepath.IsAbs(path) || receipt == "" {
+				return model.Resource{}, false
+			}
+		}
+		return match, true
+	}
 	paths := make(map[string]string)
 	for key, value := range match.Metadata {
 		if strings.HasPrefix(key, OwnedPathMetadataPrefix) {
@@ -416,6 +432,72 @@ func historicalAuthority(historical map[string]model.Catalog, id model.ResourceI
 		return model.Resource{}, false
 	}
 	return match, true
+}
+
+func validateManagedAuthorities(input Input, current map[model.ResourceID]model.Resource) error {
+	type scoped struct {
+		id    model.ResourceID
+		scope string
+	}
+	var scopes []scoped
+	managedIDs := make(map[model.ResourceID]struct{})
+	for id, item := range current {
+		if item.Type != model.ResourceManagedFiles {
+			continue
+		}
+		scope, ok := safeManagedScope(item)
+		if !ok {
+			return fmt.Errorf("managed-file resource %q has unsafe or missing signed scope", id)
+		}
+		scopes = append(scopes, scoped{id, scope})
+		managedIDs[id] = struct{}{}
+	}
+	for id, ownership := range input.Snapshot.Ownership {
+		catalog, ok := input.Historical[ownership.CatalogDigest]
+		if !ok {
+			continue
+		}
+		for _, item := range catalog.Resources {
+			if item.ID != id || item.Type != model.ResourceManagedFiles {
+				continue
+			}
+			scope, ok := safeManagedScope(item)
+			if !ok {
+				return fmt.Errorf("historical managed-file resource %q has unsafe or missing signed scope", id)
+			}
+			scopes = append(scopes, scoped{id, scope})
+			managedIDs[id] = struct{}{}
+		}
+	}
+	owner := make(map[string]model.ResourceID)
+	for id, ownership := range input.Snapshot.Ownership {
+		if _, managed := managedIDs[id]; !managed {
+			continue
+		}
+		for path := range ownership.Paths {
+			if prior, duplicate := owner[path]; duplicate && prior != id {
+				return fmt.Errorf("duplicate managed-file ownership path %q for %q and %q", path, prior, id)
+			}
+			owner[path] = id
+		}
+	}
+	for i := 0; i < len(scopes); i++ {
+		for j := i + 1; j < len(scopes); j++ {
+			if scopes[i].id != scopes[j].id && managedScopesOverlap(scopes[i].scope, scopes[j].scope) {
+				return fmt.Errorf("overlapping managed-file authority for %q and %q", scopes[i].id, scopes[j].id)
+			}
+		}
+	}
+	return nil
+}
+
+func safeManagedScope(item model.Resource) (string, bool) {
+	scope, ok := item.Metadata[model.ManagedFilesScopeMetadataKey]
+	return scope, ok && scope != "" && scope == pathpkg.Clean(scope) && !strings.HasPrefix(scope, "/") && scope != ".." && !strings.HasPrefix(scope, "../") && !strings.Contains(scope, "\\")
+}
+
+func managedScopesOverlap(left, right string) bool {
+	return left == "." || right == "." || left == right || strings.HasPrefix(left, right+"/") || strings.HasPrefix(right, left+"/")
 }
 
 func equalStrings(left, right map[string]string) bool {

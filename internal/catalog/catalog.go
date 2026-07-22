@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	pathpkg "path"
 	"sort"
 	"strings"
 
@@ -214,6 +215,9 @@ func validate(catalog model.Catalog) error {
 			}
 		}
 	}
+	if err := validateManagedFileScopes(resources); err != nil {
+		return err
+	}
 	if cycle := findCycle(resources, byID); len(cycle) != 0 {
 		parts := make([]string, len(cycle))
 		for i := range cycle {
@@ -222,6 +226,39 @@ func validate(catalog model.Catalog) error {
 		return fmt.Errorf("dependency cycle: %s", strings.Join(parts, " -> "))
 	}
 	return nil
+}
+
+func validateManagedFileScopes(resources []model.Resource) error {
+	type scoped struct {
+		id    model.ResourceID
+		scope string
+	}
+	var managed []scoped
+	for _, resource := range resources {
+		if resource.Type != model.ResourceManagedFiles {
+			continue
+		}
+		scope, ok := resource.Metadata[model.ManagedFilesScopeMetadataKey]
+		if !ok || scope == "" {
+			return fmt.Errorf("resource %q requires %s metadata", resource.ID, model.ManagedFilesScopeMetadataKey)
+		}
+		if scope != pathpkg.Clean(scope) || strings.HasPrefix(scope, "/") || scope == ".." || strings.HasPrefix(scope, "../") || strings.Contains(scope, "\\") || strings.IndexByte(scope, 0) >= 0 {
+			return fmt.Errorf("resource %q has unsafe managed-file scope %q", resource.ID, scope)
+		}
+		managed = append(managed, scoped{resource.ID, scope})
+	}
+	for i := 0; i < len(managed); i++ {
+		for j := i + 1; j < len(managed); j++ {
+			if scopesOverlap(managed[i].scope, managed[j].scope) {
+				return fmt.Errorf("resources %q and %q have overlapping managed-file scopes", managed[i].id, managed[j].id)
+			}
+		}
+	}
+	return nil
+}
+
+func scopesOverlap(left, right string) bool {
+	return left == "." || right == "." || left == right || strings.HasPrefix(left, right+"/") || strings.HasPrefix(right, left+"/")
 }
 
 func validateLegacyMetadata(resource model.Resource) error {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -482,6 +483,11 @@ func (e *Engine) authorize(operation model.Operation) (model.Resource, resource.
 	if item.ID != operation.ResourceID {
 		return model.Resource{}, nil, fmt.Errorf("reconcile: signed resource index mismatch for %q", operation.ResourceID)
 	}
+	if item.Type == model.ResourceManagedFiles {
+		if _, ok := signedManagedScope(item); !ok {
+			return model.Resource{}, nil, fmt.Errorf("reconcile: managed-file resource %q lacks safe signed scope", item.ID)
+		}
+	}
 	switch operation.Kind {
 	case model.OperationAdopt, model.OperationInstall, model.OperationUpgrade, model.OperationTransfer, model.OperationPrune, model.OperationRestore, model.OperationVerify:
 	default:
@@ -515,7 +521,7 @@ func (e *Engine) execute(ctx context.Context, item model.Resource, operation mod
 		if err := ctx.Err(); err != nil {
 			return model.Observation{}, err
 		}
-		result := adapter.Execute(ctx, operation)
+		result := executeResource(ctx, adapter, item, operation)
 		if err := validResult(operation, result); err != nil {
 			return model.Observation{}, err
 		}
@@ -583,11 +589,18 @@ func (e *Engine) execute(ctx context.Context, item model.Resource, operation mod
 	if err := ctx.Err(); err != nil {
 		return model.Observation{}, err
 	}
-	result := adapter.Execute(ctx, operation)
+	result := executeResource(ctx, adapter, item, operation)
 	if err := validResult(operation, result); err != nil {
 		return model.Observation{}, err
 	}
 	return verifyDesired(ctx, adapter, item)
+}
+
+func executeResource(ctx context.Context, adapter resource.Adapter, item model.Resource, operation model.Operation) model.OperationResult {
+	if bound, ok := adapter.(resource.BoundExecutor); ok {
+		return bound.ExecuteResource(ctx, item, operation)
+	}
+	return adapter.Execute(ctx, operation)
 }
 
 func isNil(value any) bool {
@@ -694,6 +707,9 @@ func validateHistoricalOwnership(item model.Resource, digest string, owned model
 		return fmt.Errorf("reconcile: historical ownership for %q does not match signed authority", item.ID)
 	}
 	if item.Type == model.ResourceManagedFiles {
+		if _, ok := signedManagedScope(item); !ok {
+			return fmt.Errorf("reconcile: historical managed-file ownership for %q lacks signed scope", item.ID)
+		}
 		for path, receipt := range owned.Paths {
 			if !filepath.IsAbs(path) || receipt == "" {
 				return fmt.Errorf("reconcile: historical managed-file ownership for %q is malformed", item.ID)
@@ -711,6 +727,11 @@ func validateHistoricalOwnership(item model.Resource, digest string, owned model
 		return fmt.Errorf("reconcile: historical ownership paths for %q do not match signed authority", item.ID)
 	}
 	return nil
+}
+
+func signedManagedScope(item model.Resource) (string, bool) {
+	scope, ok := item.Metadata[model.ManagedFilesScopeMetadataKey]
+	return scope, ok && scope != "" && scope == pathpkg.Clean(scope) && !strings.HasPrefix(scope, "/") && scope != ".." && !strings.HasPrefix(scope, "../") && !strings.Contains(scope, "\\")
 }
 
 func dependencyOrder(ids []model.ResourceID, resources map[model.ResourceID]model.Resource) []model.ResourceID {

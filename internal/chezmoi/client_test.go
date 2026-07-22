@@ -2,6 +2,8 @@ package chezmoi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"os/exec"
@@ -433,7 +435,8 @@ func TestApplyTargetsCheckedRunsPreconditionAfterStagingAndBeforeInstall(t *test
 		staged = true
 		return execx.Result{}, nil
 	}), Binary: binary, Source: source, Config: config, Destination: home}
-	err := c.ApplyTargetsChecked(context.Background(), []string{"target"}, func(path string) error {
+	sum := sha256.Sum256([]byte("desired"))
+	err := c.ApplyTargetsChecked(context.Background(), []ExpectedTarget{{Path: filepath.Join(home, "target"), Kind: "file", Digest: hex.EncodeToString(sum[:])}}, func(path string) error {
 		if !staged || path != filepath.Join(home, "target") {
 			t.Fatalf("precondition staged=%v path=%q", staged, path)
 		}
@@ -444,6 +447,91 @@ func TestApplyTargetsCheckedRunsPreconditionAfterStagingAndBeforeInstall(t *test
 	}
 	if _, err := os.Lstat(filepath.Join(home, "target")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("target mutated after failed precondition: %v", err)
+	}
+}
+
+func TestApplyTargetsCheckedRejectsRenderedContentDifferentFromExpected(t *testing.T) {
+	home, source, config, binary := clientPaths(t)
+	c := Client{Runner: runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+		target := request.Args[len(request.Args)-1]
+		if err := os.WriteFile(target, []byte("changed source output"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return execx.Result{}, nil
+	}), Binary: binary, Source: source, Config: config, Destination: home}
+	sum := sha256.Sum256([]byte("planned output"))
+	err := c.ApplyTargetsChecked(context.Background(), []ExpectedTarget{{Path: filepath.Join(home, "target"), Kind: "file", Digest: hex.EncodeToString(sum[:])}}, func(string) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "does not match expected") {
+		t.Fatalf("error=%v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(home, "target")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("wrong content installed: %v", err)
+	}
+}
+
+func TestApplyTargetsCheckedAllowsOnlyAuthorizedSameKindSymlinkReplacement(t *testing.T) {
+	home, source, config, binary := clientPaths(t)
+	path := filepath.Join(home, "link")
+	if err := os.Symlink("old", path); err != nil {
+		t.Fatal(err)
+	}
+	c := Client{Runner: runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+		target := request.Args[len(request.Args)-1]
+		if err := os.Symlink("new", target); err != nil {
+			t.Fatal(err)
+		}
+		return execx.Result{}, nil
+	}), Binary: binary, Source: source, Config: config, Destination: home}
+	sum := sha256.Sum256([]byte("new"))
+	expected := []ExpectedTarget{{Path: path, Kind: "symlink", Digest: hex.EncodeToString(sum[:])}}
+	if err := c.ApplyTargetsChecked(context.Background(), expected, func(got string) error {
+		if got != path {
+			t.Fatalf("path=%q", got)
+		}
+		target, err := os.Readlink(got)
+		if err != nil || target != "old" {
+			t.Fatalf("old link=%q,%v", target, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.Readlink(path); err != nil || got != "new" {
+		t.Fatalf("new link=%q,%v", got, err)
+	}
+}
+
+func TestApplyTargetsCheckedNeverReplacesAcrossFileAndSymlinkKinds(t *testing.T) {
+	for _, existingSymlink := range []bool{true, false} {
+		t.Run(map[bool]string{true: "symlink-to-file", false: "file-to-symlink"}[existingSymlink], func(t *testing.T) {
+			home, source, config, binary := clientPaths(t)
+			path := filepath.Join(home, "target")
+			if existingSymlink {
+				if err := os.Symlink("old", path); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			kind, contents := "symlink", []byte("new")
+			if existingSymlink {
+				kind, contents = "file", []byte("new")
+			}
+			c := Client{Runner: runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+				staged := request.Args[len(request.Args)-1]
+				if kind == "symlink" {
+					return execx.Result{}, os.Symlink(string(contents), staged)
+				}
+				return execx.Result{}, os.WriteFile(staged, contents, 0o600)
+			}), Binary: binary, Source: source, Config: config, Destination: home}
+			sum := sha256.Sum256(contents)
+			err := c.ApplyTargetsChecked(context.Background(), []ExpectedTarget{{Path: path, Kind: kind, Digest: hex.EncodeToString(sum[:])}}, func(string) error { return nil })
+			if err == nil {
+				t.Fatal("cross-kind replacement succeeded")
+			}
+		})
 	}
 }
 

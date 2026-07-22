@@ -25,7 +25,7 @@ type Client interface {
 	TargetState(context.Context) ([]chezmoi.Target, error)
 	Diff(context.Context, []string) ([]byte, error)
 	ApplyTargets(context.Context, []string) error
-	ApplyTargetsChecked(context.Context, []string, func(string) error) error
+	ApplyTargetsChecked(context.Context, []chezmoi.ExpectedTarget, func(string) error) error
 }
 
 type Adapter struct {
@@ -41,6 +41,14 @@ type pathState struct {
 	exists bool
 }
 
+type homeFS struct {
+	root *os.Root
+	path string
+	info os.FileInfo
+}
+
+var beforeManagedRemove func()
+
 func Digest(_ string, data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
@@ -50,7 +58,7 @@ func (a *Adapter) Inspect(ctx context.Context, desired model.Resource) (model.Ob
 	if err := a.validate(); err != nil {
 		return model.Observation{}, err
 	}
-	targets, err := a.targets(ctx)
+	targets, err := a.targets(ctx, desired)
 	if err != nil {
 		return model.Observation{}, err
 	}
@@ -59,6 +67,9 @@ func (a *Adapter) Inspect(ctx context.Context, desired model.Resource) (model.Ob
 		return model.Observation{}, err
 	}
 	owned := snapshot.Ownership[desired.ID]
+	if err := a.validateOwnershipScope(desired, owned.Paths); err != nil {
+		return model.Observation{}, err
+	}
 	present, healthy := false, true
 	if len(targets) == 0 && len(owned.Paths) != 0 {
 		for path, receipt := range owned.Paths {
@@ -90,7 +101,10 @@ func (a *Adapter) Inspect(ctx context.Context, desired model.Resource) (model.Ob
 }
 
 func (a *Adapter) Plan(ctx context.Context, desired model.Resource, _ model.Observation, owned model.Ownership) ([]model.Operation, error) {
-	targets, err := a.targets(ctx)
+	if err := a.validateOwnershipScope(desired, owned.Paths); err != nil {
+		return nil, err
+	}
+	targets, err := a.targets(ctx, desired)
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +119,9 @@ func (a *Adapter) Plan(ctx context.Context, desired model.Resource, _ model.Obse
 			allIdentical = allIdentical && current.exists && current.kind == target.Kind && current.digest == target.Digest
 			if current.exists && current.kind != target.Kind {
 				return nil, fmt.Errorf("managed-files conflict at %s: refusing %s replacement with %s", path, current.kind, target.Kind)
+			}
+			if current.exists && current.kind == "symlink" && current.digest != target.Digest {
+				return nil, fmt.Errorf("managed-files conflict at %s: refusing unowned symlink replacement", path)
 			}
 		}
 		kind := model.OperationAdopt
@@ -144,7 +161,7 @@ func (a *Adapter) Plan(ctx context.Context, desired model.Resource, _ model.Obse
 		}
 		matchesOwned := ok && current.exists && current.kind == ownedKind && current.digest == ownedDigest
 		matchesDesired := desiredNow && current.exists && current.kind == target.Kind && current.digest == target.Digest
-		if desiredNow && current.kind == "symlink" && !matchesDesired {
+		if desiredNow && current.kind == "symlink" && !matchesDesired && !matchesOwned {
 			return nil, fmt.Errorf("managed-files conflict at %s: refusing symlink replacement", path)
 		}
 		if current.exists && !matchesOwned && !matchesDesired {
@@ -163,8 +180,12 @@ func (a *Adapter) Plan(ctx context.Context, desired model.Resource, _ model.Obse
 }
 
 func (a *Adapter) Execute(ctx context.Context, operation model.Operation) model.OperationResult {
+	return model.OperationResult{OperationID: operation.ID, ResourceID: operation.ResourceID, Detail: "managed-files: signed resource scope is required", FinishedAt: time.Now().UTC()}
+}
+
+func (a *Adapter) ExecuteResource(ctx context.Context, desired model.Resource, operation model.Operation) model.OperationResult {
 	result := model.OperationResult{OperationID: operation.ID, ResourceID: operation.ResourceID, FinishedAt: time.Now().UTC()}
-	if err := a.execute(ctx, operation); err != nil {
+	if err := a.execute(ctx, desired, operation); err != nil {
 		result.Detail = err.Error()
 		return result
 	}
@@ -172,7 +193,7 @@ func (a *Adapter) Execute(ctx context.Context, operation model.Operation) model.
 	return result
 }
 
-func (a *Adapter) execute(ctx context.Context, operation model.Operation) error {
+func (a *Adapter) execute(ctx context.Context, desired model.Resource, operation model.Operation) error {
 	if err := a.validate(); err != nil {
 		return err
 	}
@@ -184,13 +205,21 @@ func (a *Adapter) execute(ctx context.Context, operation model.Operation) error 
 		return errors.New("managed-files: active journal is required")
 	}
 	owned := snapshot.Ownership[operation.ResourceID]
+	if err := a.validateOwnershipScope(desired, owned.Paths); err != nil {
+		return err
+	}
+	home, err := a.openHome()
+	if err != nil {
+		return err
+	}
+	defer home.root.Close()
 	if operation.Kind == model.OperationPrune {
-		return a.removeOwned(ctx, owned.Paths)
+		return a.removeOwned(ctx, home, owned.Paths)
 	}
 	if operation.Kind != model.OperationInstall && operation.Kind != model.OperationAdopt && operation.Kind != model.OperationUpgrade && operation.Kind != model.OperationRestore {
 		return fmt.Errorf("managed-files: unsupported operation %q", operation.Kind)
 	}
-	targets, err := a.targets(ctx)
+	targets, err := a.targets(ctx, desired)
 	if err != nil {
 		return err
 	}
@@ -199,14 +228,14 @@ func (a *Adapter) execute(ctx context.Context, operation model.Operation) error 
 	applyPaths := make([]string, 0, len(paths))
 	for _, path := range paths {
 		target := targets[path]
-		current, err := a.inspectPath(path)
+		current, err := home.inspect(path)
 		if err != nil {
 			return err
 		}
 		if current.exists && current.kind != target.Kind {
 			return fmt.Errorf("managed-files: unsafe type replacement at %s", path)
 		}
-		if len(owned.Paths) == 0 && current.exists && current.digest != target.Digest {
+		if owned.Paths[path] == "" && current.exists && current.digest != target.Digest {
 			if err := a.Backup.Save(snapshot.ActiveJournal.ID, path); err != nil {
 				return fmt.Errorf("managed-files: backup %s: %w", path, err)
 			}
@@ -217,15 +246,15 @@ func (a *Adapter) execute(ctx context.Context, operation model.Operation) error 
 		}
 	}
 	for _, path := range applyPaths {
-		if err := a.authorizeDesiredMutation(path, targets[path], owned.Paths[path], authorized[path]); err != nil {
+		if err := a.authorizeDesiredMutation(home, path, targets[path], owned.Paths[path], authorized[path]); err != nil {
 			return err
 		}
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := a.Client.ApplyTargetsChecked(ctx, applyPaths, func(path string) error {
-		return a.authorizeDesiredMutation(path, targets[path], owned.Paths[path], authorized[path])
+	if err := a.Client.ApplyTargetsChecked(ctx, expectedTargets(targets, applyPaths), func(path string) error {
+		return a.authorizeDesiredMutation(home, path, targets[path], owned.Paths[path], authorized[path])
 	}); err != nil {
 		return fmt.Errorf("managed-files: apply desired targets: %w", err)
 	}
@@ -235,7 +264,7 @@ func (a *Adapter) execute(ctx context.Context, operation model.Operation) error 
 			obsolete[path] = receipt
 		}
 	}
-	return a.removeOwned(ctx, obsolete)
+	return a.removeOwned(ctx, home, obsolete)
 }
 
 func (a *Adapter) Verify(ctx context.Context, desired model.Resource) (model.Observation, error) {
@@ -255,14 +284,19 @@ func (a *Adapter) ResolveConflict(ctx context.Context, desired model.Resource, j
 	if desired.Type != model.ResourceManagedFiles || desired.Provider != "chezmoi" || desired.ID == "" {
 		return errors.New("managed-files: resolve requires an exact managed-files/chezmoi resource")
 	}
-	targets, err := a.targets(ctx)
+	targets, err := a.targets(ctx, desired)
 	if err != nil {
 		return err
 	}
 	var paths []string
 	authorized := make(map[string]pathState)
+	home, err := a.openHome()
+	if err != nil {
+		return err
+	}
+	defer home.root.Close()
 	for _, path := range sortedTargetPaths(targets) {
-		current, err := a.inspectPath(path)
+		current, err := home.inspect(path)
 		if err != nil {
 			return err
 		}
@@ -278,11 +312,38 @@ func (a *Adapter) ResolveConflict(ctx context.Context, desired model.Resource, j
 		paths = append(paths, path)
 		authorized[path] = current
 	}
-	if len(paths) == 0 {
+	snapshot, err := a.State.Snapshot()
+	if err != nil {
+		return err
+	}
+	owned := snapshot.Ownership[desired.ID]
+	if err := a.validateOwnershipScope(desired, owned.Paths); err != nil {
+		return err
+	}
+	var obsolete []string
+	for path := range owned.Paths {
+		if _, remains := targets[path]; remains {
+			continue
+		}
+		current, err := home.inspect(path)
+		if err != nil {
+			return err
+		}
+		if !current.exists {
+			continue
+		}
+		if err := a.Backup.Save(journal, path); err != nil {
+			return err
+		}
+		obsolete = append(obsolete, path)
+		authorized[path] = current
+	}
+	sort.Strings(obsolete)
+	if len(paths) == 0 && len(obsolete) == 0 {
 		return errors.New("managed-files: resource has no resolvable conflict")
 	}
 	for _, path := range paths {
-		current, err := a.inspectPath(path)
+		current, err := home.inspect(path)
 		if err != nil {
 			return err
 		}
@@ -290,8 +351,8 @@ func (a *Adapter) ResolveConflict(ctx context.Context, desired model.Resource, j
 			return fmt.Errorf("managed-files: conflict changed immediately before resolution at %s", path)
 		}
 	}
-	return a.Client.ApplyTargetsChecked(ctx, paths, func(path string) error {
-		current, err := a.inspectPath(path)
+	if err := a.Client.ApplyTargetsChecked(ctx, expectedTargets(targets, paths), func(path string) error {
+		current, err := home.inspect(path)
 		if err != nil {
 			return err
 		}
@@ -299,7 +360,26 @@ func (a *Adapter) ResolveConflict(ctx context.Context, desired model.Resource, j
 			return fmt.Errorf("managed-files: conflict changed immediately before resolution at %s", path)
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	for _, path := range obsolete {
+		current, err := home.inspect(path)
+		if err != nil {
+			return err
+		}
+		if current != authorized[path] {
+			return fmt.Errorf("managed-files: obsolete conflict changed immediately before resolution at %s", path)
+		}
+		if beforeManagedRemove != nil {
+			beforeManagedRemove()
+		}
+		if err := home.removeExact(path, authorized[path]); err != nil {
+			return err
+		}
+		home.removeEmptyParents(filepath.Dir(path))
+	}
+	return nil
 }
 
 func (a *Adapter) Diff(ctx context.Context) ([]byte, error) {
@@ -337,7 +417,11 @@ func isNil(value any) bool {
 	}
 }
 
-func (a *Adapter) targets(ctx context.Context) (map[string]chezmoi.Target, error) {
+func (a *Adapter) targets(ctx context.Context, desired model.Resource) (map[string]chezmoi.Target, error) {
+	scope, err := managedScope(desired)
+	if err != nil {
+		return nil, err
+	}
 	list, err := a.Client.TargetState(ctx)
 	if err != nil {
 		return nil, err
@@ -348,6 +432,9 @@ func (a *Adapter) targets(ctx context.Context) (map[string]chezmoi.Target, error
 		rel, err := filepath.Rel(filepath.Clean(a.Home), path)
 		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return nil, fmt.Errorf("managed-files: target %q escapes home", target.Path)
+		}
+		if !scopeContains(scope, filepath.ToSlash(rel)) {
+			continue
 		}
 		if target.Kind != "file" && target.Kind != "symlink" {
 			return nil, fmt.Errorf("managed-files: unsupported target kind %q", target.Kind)
@@ -366,8 +453,34 @@ func (a *Adapter) targets(ctx context.Context) (map[string]chezmoi.Target, error
 	return targets, nil
 }
 
-func (a *Adapter) authorizeDesiredMutation(path string, target chezmoi.Target, receipt string, expected pathState) error {
-	current, err := a.inspectPath(path)
+func managedScope(item model.Resource) (string, error) {
+	scope, ok := item.Metadata[model.ManagedFilesScopeMetadataKey]
+	if !ok || scope == "" || filepath.IsAbs(scope) || filepath.ToSlash(filepath.Clean(scope)) != scope || scope == ".." || strings.HasPrefix(scope, "../") || strings.Contains(scope, "\\") {
+		return "", fmt.Errorf("managed-files: resource %q has no safe signed target scope", item.ID)
+	}
+	return scope, nil
+}
+
+func scopeContains(scope, relative string) bool {
+	return scope == "." || relative == scope || strings.HasPrefix(relative, scope+"/")
+}
+
+func (a *Adapter) validateOwnershipScope(item model.Resource, paths map[string]string) error {
+	scope, err := managedScope(item)
+	if err != nil {
+		return err
+	}
+	for path := range paths {
+		rel, err := filepath.Rel(filepath.Clean(a.Home), filepath.Clean(path))
+		if err != nil || !scopeContains(scope, filepath.ToSlash(rel)) {
+			return fmt.Errorf("managed-files: ownership path %q is outside signed scope %q", path, scope)
+		}
+	}
+	return nil
+}
+
+func (a *Adapter) authorizeDesiredMutation(home *homeFS, path string, target chezmoi.Target, receipt string, expected pathState) error {
+	current, err := home.inspect(path)
 	if err != nil {
 		return err
 	}
@@ -393,7 +506,7 @@ func (a *Adapter) authorizeDesiredMutation(path string, target chezmoi.Target, r
 	return nil
 }
 
-func (a *Adapter) removeOwned(ctx context.Context, paths map[string]string) error {
+func (a *Adapter) removeOwned(ctx context.Context, home *homeFS, paths map[string]string) error {
 	ordered := make([]string, 0, len(paths))
 	for path := range paths {
 		if !within(a.Home, path) {
@@ -406,7 +519,7 @@ func (a *Adapter) removeOwned(ctx context.Context, paths map[string]string) erro
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		current, err := a.inspectPath(path)
+		current, err := home.inspect(path)
 		if err != nil {
 			return err
 		}
@@ -417,45 +530,69 @@ func (a *Adapter) removeOwned(ctx context.Context, paths map[string]string) erro
 		if !ok || current.kind != kind || current.digest != digest {
 			return fmt.Errorf("managed-files: refusing to prune modified path %s", path)
 		}
-		current, err = a.inspectPath(path)
+		current, err = home.inspect(path)
 		if err != nil || !current.exists || current.kind != kind || current.digest != digest {
 			return fmt.Errorf("managed-files: path changed immediately before prune at %s", path)
 		}
-		if err := os.Remove(path); err != nil {
+		if beforeManagedRemove != nil {
+			beforeManagedRemove()
+		}
+		if err := home.removeExact(path, current); err != nil {
 			return fmt.Errorf("managed-files: prune %s: %w", path, err)
 		}
-		a.removeEmptyParents(filepath.Dir(path))
+		home.removeEmptyParents(filepath.Dir(path))
 	}
 	return nil
 }
 
-func (a *Adapter) removeEmptyParents(path string) {
-	home := filepath.Clean(a.Home)
-	for current := filepath.Clean(path); current != home; current = filepath.Dir(current) {
-		rel, err := filepath.Rel(home, current)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return
-		}
-		entries, err := os.ReadDir(current)
-		if err != nil || len(entries) != 0 {
-			return
-		}
-		if err := os.Remove(current); err != nil {
-			return
-		}
+func (a *Adapter) inspectPath(path string) (pathState, error) {
+	home, err := a.openHome()
+	if err != nil {
+		return pathState{}, err
 	}
+	defer home.root.Close()
+	return home.inspect(path)
 }
 
-func (a *Adapter) inspectPath(path string) (pathState, error) {
-	if !within(a.Home, path) {
-		return pathState{}, fmt.Errorf("managed-files: target %q escapes home", path)
+func (a *Adapter) openHome() (*homeFS, error) {
+	info, err := os.Lstat(a.Home)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, errors.New("managed-files: home is not a real directory")
 	}
-	relative, _ := filepath.Rel(filepath.Clean(a.Home), filepath.Clean(path))
+	root, err := os.OpenRoot(a.Home)
+	if err != nil {
+		return nil, err
+	}
+	anchored, err := root.Stat(".")
+	if err != nil || !os.SameFile(info, anchored) {
+		root.Close()
+		return nil, errors.New("managed-files: home changed while opening")
+	}
+	return &homeFS{root: root, path: filepath.Clean(a.Home), info: info}, nil
+}
+func (h *homeFS) relative(path string) (string, error) {
+	if !within(h.path, path) {
+		return "", fmt.Errorf("managed-files: target %q escapes home", path)
+	}
+	return filepath.Rel(h.path, filepath.Clean(path))
+}
+func (h *homeFS) verifyAnchor() error {
+	current, err := os.Lstat(h.path)
+	if err != nil || current.Mode()&os.ModeSymlink != 0 || !os.SameFile(h.info, current) {
+		return errors.New("managed-files: home root changed before mutation")
+	}
+	return nil
+}
+func (h *homeFS) inspect(path string) (pathState, error) {
+	relative, err := h.relative(path)
+	if err != nil {
+		return pathState{}, err
+	}
 	parts := strings.Split(relative, string(filepath.Separator))
-	current := filepath.Clean(a.Home)
+	current := ""
 	for _, part := range parts[:len(parts)-1] {
 		current = filepath.Join(current, part)
-		info, err := os.Lstat(current)
+		info, err := h.root.Lstat(current)
 		if errors.Is(err, os.ErrNotExist) {
 			break
 		}
@@ -466,7 +603,7 @@ func (a *Adapter) inspectPath(path string) (pathState, error) {
 			return pathState{}, fmt.Errorf("managed-files: target parent %q is not a real directory", current)
 		}
 	}
-	info, err := os.Lstat(path)
+	info, err := h.root.Lstat(relative)
 	if errors.Is(err, os.ErrNotExist) {
 		return pathState{}, nil
 	}
@@ -474,7 +611,7 @@ func (a *Adapter) inspectPath(path string) (pathState, error) {
 		return pathState{}, err
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		target, err := os.Readlink(path)
+		target, err := h.root.Readlink(relative)
 		if err != nil {
 			return pathState{}, err
 		}
@@ -486,11 +623,10 @@ func (a *Adapter) inspectPath(path string) (pathState, error) {
 		}
 		return pathState{kind: "special", exists: true}, nil
 	}
-	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	file, err := h.root.OpenFile(relative, os.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return pathState{}, err
 	}
-	file := os.NewFile(uintptr(fd), path)
 	defer file.Close()
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
@@ -501,6 +637,66 @@ func (a *Adapter) inspectPath(path string) (pathState, error) {
 		return pathState{}, errors.New("managed-files: target changed while hashing")
 	}
 	return pathState{kind: "file", digest: hex.EncodeToString(hash.Sum(nil)), exists: true}, nil
+}
+
+func (h *homeFS) removeExact(path string, expected pathState) error {
+	if err := h.verifyAnchor(); err != nil {
+		return err
+	}
+	current, err := h.inspect(path)
+	if err != nil {
+		return err
+	}
+	if current != expected {
+		return fmt.Errorf("managed-files: path changed immediately before remove at %s", path)
+	}
+	relative, err := h.relative(path)
+	if err != nil {
+		return err
+	}
+	return h.root.Remove(relative)
+}
+func (h *homeFS) removeEmptyParents(path string) {
+	for current := filepath.Clean(path); current != h.path; current = filepath.Dir(current) {
+		relative, err := h.relative(current)
+		if err != nil {
+			return
+		}
+		info, err := h.root.Lstat(relative)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return
+		}
+		directory, err := h.root.OpenRoot(relative)
+		if err != nil {
+			return
+		}
+		anchored, statErr := directory.Stat(".")
+		if statErr != nil || !os.SameFile(info, anchored) {
+			directory.Close()
+			return
+		}
+		opened, err := directory.Open(".")
+		if err != nil {
+			directory.Close()
+			return
+		}
+		_, readErr := opened.Readdirnames(1)
+		_ = opened.Close()
+		_ = directory.Close()
+		if readErr != io.EOF {
+			return
+		}
+		if err := h.verifyAnchor(); err != nil {
+			return
+		}
+		latest, err := h.root.Lstat(relative)
+		if err != nil || latest.Mode()&os.ModeSymlink != 0 || !os.SameFile(info, latest) {
+			return
+		}
+		if err := h.root.Remove(relative); err != nil {
+			return
+		}
+	}
 }
 
 func desiredPaths(targets map[string]chezmoi.Target) map[string]string {
@@ -534,6 +730,15 @@ func sortedTargetPaths(targets map[string]chezmoi.Target) []string {
 	}
 	sort.Strings(paths)
 	return paths
+}
+
+func expectedTargets(targets map[string]chezmoi.Target, paths []string) []chezmoi.ExpectedTarget {
+	expected := make([]chezmoi.ExpectedTarget, len(paths))
+	for index, path := range paths {
+		target := targets[path]
+		expected[index] = chezmoi.ExpectedTarget{Path: path, Kind: target.Kind, Digest: target.Digest}
+	}
+	return expected
 }
 
 func within(base, path string) bool {

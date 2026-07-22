@@ -626,6 +626,31 @@ func TestLoadVerifiedAllowsAnyConfigGateAndUnrelatedProviderMetadata(t *testing.
 	}
 }
 
+func TestLoadVerifiedRequiresNonOverlappingManagedFileScopes(t *testing.T) {
+	managed := func(id, scope string) map[string]any {
+		return map[string]any{"id": id, "type": "managed-files", "profiles": []any{"macos-terminal"}, "dependsOn": []any{}, "versionPolicy": "tracked", "provider": "chezmoi", "package": id, "commands": []any{}, "metadata": map[string]any{model.ManagedFilesScopeMetadataKey: scope}}
+	}
+	t.Run("missing", func(t *testing.T) {
+		input := catalogObject(t)
+		item := managed("dotfiles.one", ".config/one")
+		item["metadata"] = map[string]any{}
+		input["resources"] = []any{item}
+		assertCatalogError(t, input, "requires managedFiles.scope")
+	})
+	for name, scope := range map[string]string{"absolute": "/tmp", "escape": "../other", "unclean": "a/../b"} {
+		t.Run(name, func(t *testing.T) {
+			input := catalogObject(t)
+			input["resources"] = []any{managed("dotfiles.one", scope)}
+			assertCatalogError(t, input, "unsafe managed-file scope")
+		})
+	}
+	t.Run("overlap", func(t *testing.T) {
+		input := catalogObject(t)
+		input["resources"] = []any{managed("dotfiles.one", ".config"), managed("dotfiles.two", ".config/two")}
+		assertCatalogError(t, input, "overlapping managed-file scopes")
+	})
+}
+
 func TestLoadVerifiedBoundsCatalogAndSignature(t *testing.T) {
 	t.Run("exact catalog limit", func(t *testing.T) {
 		contents := readFixture(t)

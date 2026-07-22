@@ -39,6 +39,12 @@ type Target struct {
 	Digest  string
 }
 
+type ExpectedTarget struct {
+	Path   string
+	Kind   string
+	Digest string
+}
+
 type fileIdentity struct {
 	path string
 	info os.FileInfo
@@ -190,13 +196,33 @@ func (c Client) Diff(ctx context.Context, targets []string) ([]byte, error) {
 }
 
 func (c Client) ApplyTargets(ctx context.Context, targets []string) error {
-	return c.ApplyTargetsChecked(ctx, targets, nil)
+	return c.applyTargets(ctx, targets, nil, nil)
 }
 
 // ApplyTargetsChecked invokes check for each destination immediately before
 // the staged object is installed. It lets typed resource adapters bind the
 // mutation to the exact content hash they planned without weakening staging.
-func (c Client) ApplyTargetsChecked(ctx context.Context, targets []string, check func(string) error) error {
+
+func (c Client) ApplyTargetsChecked(ctx context.Context, expected []ExpectedTarget, check func(string) error) error {
+	targets := make([]string, len(expected))
+	byPath := make(map[string]ExpectedTarget, len(expected))
+	for index, target := range expected {
+		decodedDigest, digestErr := hex.DecodeString(target.Digest)
+		if !filepath.IsAbs(target.Path) || target.Path != filepath.Clean(target.Path) || (target.Kind != "file" && target.Kind != "symlink") || digestErr != nil || len(decodedDigest) != sha256.Size {
+			return fmt.Errorf("chezmoi: invalid expected target %#v", target)
+		}
+		path := filepath.Clean(target.Path)
+		if _, duplicate := byPath[path]; duplicate {
+			return fmt.Errorf("chezmoi: duplicate expected target %q", path)
+		}
+		target.Path = path
+		targets[index] = path
+		byPath[path] = target
+	}
+	return c.applyTargets(ctx, targets, byPath, check)
+}
+
+func (c Client) applyTargets(ctx context.Context, targets []string, expected map[string]ExpectedTarget, check func(string) error) error {
 	if len(targets) == 0 {
 		return nil
 	}
@@ -253,11 +279,61 @@ func (c Client) ApplyTargetsChecked(ctx context.Context, targets []string, check
 					return err
 				}
 			}
+			if expected != nil {
+				if err := verifyExpectedTarget(staged[i], expected[absolute[i]]); err != nil {
+					return err
+				}
+			}
 			return verifyIdentities(append(inv.identities, parentIdentities...))
 		}
-		if err := installStaged(c.Destination, rel, staged[i], precondition); err != nil {
+		if err := installStaged(c.Destination, rel, staged[i], check != nil, precondition); err != nil {
 			return fmt.Errorf("chezmoi: install target %q: %w", absolute[i], err)
 		}
+	}
+	return nil
+}
+
+func verifyExpectedTarget(path string, expected ExpectedTarget) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("chezmoi: inspect staged target: %w", err)
+	}
+	var kind string
+	var contents []byte
+	if info.Mode()&os.ModeSymlink != 0 {
+		kind = "symlink"
+		target, err := os.Readlink(path)
+		if err != nil {
+			return err
+		}
+		contents = []byte(target)
+	} else if info.Mode().IsRegular() {
+		kind = "file"
+		fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+		if err != nil {
+			return err
+		}
+		file := os.NewFile(uintptr(fd), path)
+		opened, statErr := file.Stat()
+		if statErr != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
+			file.Close()
+			return errors.New("chezmoi: staged target changed before verification")
+		}
+		contents, err = io.ReadAll(file)
+		closeErr := file.Close()
+		if err = errors.Join(err, closeErr); err != nil {
+			return err
+		}
+		current, statErr := os.Lstat(path)
+		if statErr != nil || !os.SameFile(info, current) || current.Size() != info.Size() || !current.ModTime().Equal(info.ModTime()) {
+			return errors.New("chezmoi: staged target changed during verification")
+		}
+	} else {
+		return errors.New("chezmoi: staged target is not a regular file or symlink")
+	}
+	sum := sha256.Sum256(contents)
+	if kind != expected.Kind || hex.EncodeToString(sum[:]) != expected.Digest {
+		return fmt.Errorf("chezmoi: staged target %q does not match expected kind and digest", expected.Path)
 	}
 	return nil
 }
@@ -475,7 +551,7 @@ func copyRegularFile(source, destination string, mode os.FileMode) error {
 	return errors.Join(copyErr, out.Close())
 }
 
-func installStaged(home, relative, staged string, check func() error) error {
+func installStaged(home, relative, staged string, allowSymlinkReplacement bool, check func() error) error {
 	info, err := os.Lstat(staged)
 	if err != nil {
 		return err
@@ -509,7 +585,7 @@ func installStaged(home, relative, staged string, check func() error) error {
 		}
 	}
 	if leaf, statErr := root.Lstat(relative); statErr == nil {
-		if leaf.Mode()&os.ModeSymlink != 0 || !leaf.Mode().IsRegular() {
+		if !sameReplaceableKind(leaf, info, allowSymlinkReplacement) {
 			return errors.New("existing target is not a regular file")
 		}
 	} else if !errors.Is(statErr, os.ErrNotExist) {
@@ -562,7 +638,7 @@ func installStaged(home, relative, staged string, check func() error) error {
 		return err
 	}
 	if leaf, statErr := root.Lstat(relative); statErr == nil {
-		if leaf.Mode()&os.ModeSymlink != 0 || !leaf.Mode().IsRegular() {
+		if !sameReplaceableKind(leaf, info, allowSymlinkReplacement) {
 			_ = root.Remove(temp)
 			return errors.New("existing target changed to an unsafe type")
 		}
@@ -575,6 +651,13 @@ func installStaged(home, relative, staged string, check func() error) error {
 		return err
 	}
 	return nil
+}
+
+func sameReplaceableKind(existing, staged os.FileInfo, allowSymlink bool) bool {
+	if existing.Mode().IsRegular() {
+		return staged.Mode().IsRegular()
+	}
+	return allowSymlink && existing.Mode()&os.ModeSymlink != 0 && staged.Mode()&os.ModeSymlink != 0
 }
 
 func validateLinkname(home, relative, linkname string) error {

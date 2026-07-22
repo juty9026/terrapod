@@ -274,6 +274,33 @@ func TestAnyConfigGateRequiresExactTrueMetadataValue(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsDuplicateManagedFileOwnershipAndCrossCatalogScopeOverlap(t *testing.T) {
+	managed := func(id model.ResourceID, scope string) model.Resource {
+		return model.Resource{ID: id, Type: model.ResourceManagedFiles, Profiles: []model.Profile{model.ProfileMacOSTerminal}, VersionPolicy: model.VersionTracked, Provider: "chezmoi", Package: string(id), Metadata: map[string]string{model.ManagedFilesScopeMetadataKey: scope}}
+	}
+	t.Run("duplicate receipt path", func(t *testing.T) {
+		one, two := managed("dotfiles.one", ".one"), managed("dotfiles.two", ".two")
+		input := baseInput(nil)
+		input.Historical = map[string]model.Catalog{"old": catalog([]model.Resource{one, two})}
+		path := "/home/me/.config/shared"
+		input.Snapshot.Ownership = map[model.ResourceID]model.Ownership{"dotfiles.one": {ResourceID: "dotfiles.one", CatalogDigest: "old", Provider: "chezmoi", Package: "dotfiles.one", Paths: map[string]string{path: "file:a"}}, "dotfiles.two": {ResourceID: "dotfiles.two", CatalogDigest: "old", Provider: "chezmoi", Package: "dotfiles.two", Paths: map[string]string{path: "file:b"}}}
+		plan, err := planner.New(resource.NewRegistry()).Build(context.Background(), input)
+		if err == nil || !strings.Contains(err.Error(), "duplicate managed-file ownership") {
+			t.Fatalf("Build=%#v,%v", plan, err)
+		}
+	})
+	t.Run("current historical overlap", func(t *testing.T) {
+		current, old := managed("dotfiles.current", ".config"), managed("dotfiles.old", ".config/old")
+		input := baseInput([]model.Resource{current})
+		input.Historical = map[string]model.Catalog{"old": catalog([]model.Resource{old})}
+		input.Snapshot.Ownership = map[model.ResourceID]model.Ownership{old.ID: {ResourceID: old.ID, CatalogDigest: "old", Provider: old.Provider, Package: old.Package, Paths: map[string]string{"/home/me/.config/old/a": "file:digest"}}}
+		plan, err := planner.New(resource.NewRegistry()).Build(context.Background(), input)
+		if err == nil || !strings.Contains(err.Error(), "overlapping managed-file authority") {
+			t.Fatalf("Build=%#v,%v", plan, err)
+		}
+	})
+}
+
 func TestAnyConfigGateMalformedEntryDisablesEvenWhenAnotherGateIsTrue(t *testing.T) {
 	for _, malformed := range map[string]string{
 		"empty suffix": planner.EnabledByAnyConfigMetadataPrefix,

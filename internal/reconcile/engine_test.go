@@ -28,6 +28,7 @@ type fixtureAdapter struct {
 	onSimulate                   func()
 	canceled                     []model.Operation
 	observationPaths             map[string]string
+	boundResources               []model.Resource
 }
 
 func (f *fixtureAdapter) event(value string) {
@@ -58,6 +59,10 @@ func (f *fixtureAdapter) Execute(_ context.Context, operation model.Operation) m
 		f.onExecute()
 	}
 	return f.result(operation, "execute:"+operation.ID)
+}
+func (f *fixtureAdapter) ExecuteResource(ctx context.Context, item model.Resource, operation model.Operation) model.OperationResult {
+	f.boundResources = append(f.boundResources, item)
+	return f.Execute(ctx, operation)
 }
 func (f *fixtureAdapter) Verify(_ context.Context, item model.Resource) (model.Observation, error) {
 	f.event("verify:" + string(item.ID))
@@ -198,7 +203,7 @@ func TestDynamicObservationPathsRoundTripToHistoricalPrune(t *testing.T) {
 }
 
 func TestManagedFileObservationPathsBecomeExactOwnership(t *testing.T) {
-	item := model.Resource{ID: "dotfiles.home", Type: model.ResourceManagedFiles, Provider: "fixture", Package: "home", VersionPolicy: model.VersionTracked}
+	item := model.Resource{ID: "dotfiles.home", Type: model.ResourceManagedFiles, Provider: "fixture", Package: "home", VersionPolicy: model.VersionTracked, Metadata: map[string]string{model.ManagedFilesScopeMetadataKey: "."}}
 	adapter := &fixtureAdapter{fail: map[string]bool{}, observationPaths: map[string]string{"/home/me/.zshrc": "file:digest"}}
 	engine, store := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
 	if _, err := engine.Apply(context.Background(), model.Plan{ID: "install-managed", Operations: []model.Operation{op(item, "install-managed", model.OperationInstall)}}); err != nil {
@@ -210,6 +215,9 @@ func TestManagedFileObservationPathsBecomeExactOwnership(t *testing.T) {
 	}
 	if got := snapshot.Ownership[item.ID].Paths; !reflect.DeepEqual(got, adapter.observationPaths) {
 		t.Fatalf("managed ownership paths = %#v", got)
+	}
+	if len(adapter.boundResources) != 1 || adapter.boundResources[0].Metadata[model.ManagedFilesScopeMetadataKey] != "." {
+		t.Fatalf("bound resources=%#v", adapter.boundResources)
 	}
 	engine.Enabled = nil
 	if _, err := engine.Apply(context.Background(), model.Plan{ID: "prune-managed", Operations: []model.Operation{op(item, "prune-managed", model.OperationPrune)}}); err != nil {

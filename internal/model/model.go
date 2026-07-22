@@ -16,6 +16,8 @@ const (
 	ProfileVPSShell      Profile = "vps-shell"
 )
 
+const ManagedFilesScopeMetadataKey = "managedFiles.scope"
+
 func (p Profile) Supported() bool {
 	return p == ProfileMacOSTerminal || p == ProfileVPSShell
 }

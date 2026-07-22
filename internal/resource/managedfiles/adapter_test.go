@@ -30,12 +30,14 @@ func (f *fakeClient) ApplyTargets(_ context.Context, paths []string) error {
 	}
 	return nil
 }
-func (f *fakeClient) ApplyTargetsChecked(_ context.Context, paths []string, check func(string) error) error {
+func (f *fakeClient) ApplyTargetsChecked(_ context.Context, expected []chezmoi.ExpectedTarget, check func(string) error) error {
 	if f.beforeCheck != nil {
 		f.beforeCheck()
 	}
-	for _, path := range paths {
-		if err := check(path); err != nil {
+	paths := make([]string, len(expected))
+	for index, target := range expected {
+		paths[index] = target.Path
+		if err := check(target.Path); err != nil {
 			return err
 		}
 	}
@@ -57,7 +59,7 @@ func testAdapter(t *testing.T, targets []chezmoi.Target) (*Adapter, *fakeClient,
 	}
 	client := &fakeClient{targets: targets}
 	a := &Adapter{Client: client, State: store, Home: home, Backup: recovery.Backup{Root: filepath.Join(stateDir, "recovery"), Base: home}}
-	item := model.Resource{ID: "dotfiles.home", Type: model.ResourceManagedFiles, Provider: "chezmoi", Package: "home", VersionPolicy: model.VersionTracked}
+	item := model.Resource{ID: "dotfiles.home", Type: model.ResourceManagedFiles, Provider: "chezmoi", Package: "home", VersionPolicy: model.VersionTracked, Metadata: map[string]string{model.ManagedFilesScopeMetadataKey: "."}}
 	return a, client, store, home, item
 }
 
@@ -88,13 +90,52 @@ func TestAbsentCreateAndExactOwnershipObservation(t *testing.T) {
 	}
 	client.apply = func(paths []string) error { return os.WriteFile(paths[0], []byte("desired"), 0o600) }
 	begin(t, store, ops[0])
-	result := a.Execute(context.Background(), ops[0])
+	result := a.ExecuteResource(context.Background(), item, ops[0])
 	if !result.Success {
 		t.Fatal(result.Detail)
 	}
 	verified, err := a.Verify(context.Background(), item)
 	if err != nil || verified.Paths[path] != "file:"+Digest("file", []byte("desired")) {
 		t.Fatalf("Verify = %#v, %v", verified, err)
+	}
+}
+
+func TestSignedScopeFiltersAggregateChezmoiTargets(t *testing.T) {
+	a, client, _, home, item := testAdapter(t, nil)
+	item.Metadata[model.ManagedFilesScopeMetadataKey] = ".config/one"
+	one, two := filepath.Join(home, ".config", "one", "a"), filepath.Join(home, ".config", "two", "b")
+	client.targets = []chezmoi.Target{target(one, "file", "one"), target(two, "file", "two")}
+	observation, err := a.Inspect(context.Background(), item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(observation.Paths) != 1 || observation.Paths[one] == "" || observation.Paths[two] != "" {
+		t.Fatalf("scoped paths=%#v", observation.Paths)
+	}
+}
+
+func TestHistoricalScopePrunesItsReceiptWhileCurrentOtherTargetsExist(t *testing.T) {
+	a, client, store, home, item := testAdapter(t, nil)
+	item.Metadata[model.ManagedFilesScopeMetadataKey] = ".old"
+	old := filepath.Join(home, ".old", "managed")
+	if err := os.MkdirAll(filepath.Dir(old), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(old, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client.targets = []chezmoi.Target{target(filepath.Join(home, ".current", "managed"), "file", "current")}
+	owned := model.Ownership{ResourceID: item.ID, Paths: map[string]string{old: "file:" + Digest("file", []byte("old"))}}
+	if err := store.PutOwnership(owned); err != nil {
+		t.Fatal(err)
+	}
+	obs, err := a.Inspect(context.Background(), item)
+	if err != nil || !obs.Healthy {
+		t.Fatalf("Inspect=%#v,%v", obs, err)
+	}
+	ops, err := a.Plan(context.Background(), item, obs, owned)
+	if err != nil || len(ops) != 1 || ops[0].Kind != model.OperationPrune {
+		t.Fatalf("Plan=%#v,%v", ops, err)
 	}
 }
 
@@ -134,7 +175,7 @@ func TestDifferingPreownershipBacksUpBeforeAdopt(t *testing.T) {
 		return os.WriteFile(paths[0], []byte("desired"), 0o600)
 	}
 	begin(t, store, ops[0])
-	if result := a.Execute(context.Background(), ops[0]); !result.Success {
+	if result := a.ExecuteResource(context.Background(), item, ops[0]); !result.Success {
 		t.Fatal(result.Detail)
 	}
 }
@@ -183,9 +224,47 @@ func TestExecuteRechecksOwnedHashAfterPlanning(t *testing.T) {
 	called := false
 	client.apply = func([]string) error { called = true; return nil }
 	begin(t, store, ops[0])
-	result := a.Execute(context.Background(), ops[0])
+	result := a.ExecuteResource(context.Background(), item, ops[0])
 	if result.Success || called || !strings.Contains(result.Detail, "changed after planning") {
 		t.Fatalf("Execute = %#v, apply=%v", result, called)
+	}
+}
+
+func TestMixedOwnedAndNewDifferingPathBacksUpOnlyNewPath(t *testing.T) {
+	a, client, store, home, item := testAdapter(t, nil)
+	ownedPath, newPath := filepath.Join(home, "owned"), filepath.Join(home, "new")
+	if err := os.WriteFile(ownedPath, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newPath, []byte("local"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	client.targets = []chezmoi.Target{target(ownedPath, "file", "updated"), target(newPath, "file", "desired")}
+	owned := model.Ownership{ResourceID: item.ID, Paths: map[string]string{ownedPath: "file:" + Digest("file", []byte("old"))}}
+	if err := store.PutOwnership(owned); err != nil {
+		t.Fatal(err)
+	}
+	op := operation(item, model.OperationUpgrade)
+	begin(t, store, op)
+	client.apply = func(paths []string) error {
+		snapshot, _ := store.Snapshot()
+		backup, err := os.ReadFile(filepath.Join(a.Backup.Root, snapshot.ActiveJournal.ID, "new"))
+		if err != nil || string(backup) != "local" {
+			t.Fatalf("backup=%q,%v", backup, err)
+		}
+		for _, path := range paths {
+			desired := "updated"
+			if path == newPath {
+				desired = "desired"
+			}
+			if err := os.WriteFile(path, []byte(desired), 0o600); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if result := a.ExecuteResource(context.Background(), item, op); !result.Success {
+		t.Fatal(result.Detail)
 	}
 }
 
@@ -209,7 +288,7 @@ func TestExecuteRechecksHashInsideStagedApplyImmediatelyBeforeMutation(t *testin
 	}
 	called := false
 	client.apply = func([]string) error { called = true; return nil }
-	result := a.Execute(context.Background(), op)
+	result := a.ExecuteResource(context.Background(), item, op)
 	if result.Success || called || !strings.Contains(result.Detail, "changed immediately before mutation") {
 		t.Fatalf("Execute = %#v, apply=%v", result, called)
 	}
@@ -244,7 +323,7 @@ func TestObsoleteUnchangedPrunesAndPreservesModified(t *testing.T) {
 				t.Fatalf("Plan=%#v,%v", ops, err)
 			}
 			begin(t, store, ops[0])
-			if result := a.Execute(context.Background(), ops[0]); !result.Success {
+			if result := a.ExecuteResource(context.Background(), item, ops[0]); !result.Success {
 				t.Fatal(result.Detail)
 			}
 			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
@@ -270,7 +349,7 @@ func TestPruneRemovesOnlyRecordedPathsAndOnlyEmptyParents(t *testing.T) {
 	}
 	op := operation(item, model.OperationPrune)
 	begin(t, store, op)
-	if result := a.Execute(context.Background(), op); !result.Success {
+	if result := a.ExecuteResource(context.Background(), item, op); !result.Success {
 		t.Fatal(result.Detail)
 	}
 	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
@@ -292,7 +371,7 @@ func TestPruneRemovesOnlyRecordedPathsAndOnlyEmptyParents(t *testing.T) {
 	if err := store.PutOwnership(owned); err != nil {
 		t.Fatal(err)
 	}
-	if result := a.Execute(context.Background(), op); !result.Success {
+	if result := a.ExecuteResource(context.Background(), item, op); !result.Success {
 		t.Fatal(result.Detail)
 	}
 	if _, err := os.Stat(dir); err != nil {
@@ -336,6 +415,34 @@ func TestSymlinkReplacementIsConflict(t *testing.T) {
 	}
 }
 
+func TestExactOwnedSymlinkCanUpdateButLocallyEditedCannot(t *testing.T) {
+	a, client, store, home, item := testAdapter(t, nil)
+	path := filepath.Join(home, "link")
+	if err := os.Symlink("old", path); err != nil {
+		t.Fatal(err)
+	}
+	client.targets = []chezmoi.Target{target(path, "symlink", "new")}
+	owned := model.Ownership{ResourceID: item.ID, Paths: map[string]string{path: "symlink:" + Digest("symlink", []byte("old"))}}
+	if err := store.PutOwnership(owned); err != nil {
+		t.Fatal(err)
+	}
+	obs, _ := a.Inspect(context.Background(), item)
+	ops, err := a.Plan(context.Background(), item, obs, owned)
+	if err != nil || len(ops) != 1 {
+		t.Fatalf("Plan=%#v,%v", ops, err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("local", path); err != nil {
+		t.Fatal(err)
+	}
+	obs, _ = a.Inspect(context.Background(), item)
+	if _, err := a.Plan(context.Background(), item, obs, owned); err == nil {
+		t.Fatal("locally edited symlink accepted")
+	}
+}
+
 func TestPruneRejectsSymlinkParentEvenWhenOutsideFileHashMatches(t *testing.T) {
 	a, _, store, home, item := testAdapter(t, nil)
 	outside := t.TempDir()
@@ -354,12 +461,61 @@ func TestPruneRejectsSymlinkParentEvenWhenOutsideFileHashMatches(t *testing.T) {
 	}
 	op := operation(item, model.OperationPrune)
 	begin(t, store, op)
-	result := a.Execute(context.Background(), op)
+	result := a.ExecuteResource(context.Background(), item, op)
 	if result.Success || !strings.Contains(result.Detail, "not a real directory") {
 		t.Fatalf("Execute = %#v", result)
 	}
 	if _, err := os.Stat(outsideFile); err != nil {
 		t.Fatalf("outside file was removed: %v", err)
+	}
+}
+
+func TestPruneRejectsDeterministicHomeAndParentSwaps(t *testing.T) {
+	for _, rootSwap := range []bool{true, false} {
+		t.Run(map[bool]string{true: "home", false: "parent"}[rootSwap], func(t *testing.T) {
+			a, _, store, home, item := testAdapter(t, nil)
+			parent := filepath.Join(home, "parent")
+			if err := os.Mkdir(parent, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(parent, "managed")
+			if err := os.WriteFile(path, []byte("owned"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			outside := t.TempDir()
+			outsideFile := filepath.Join(outside, "managed")
+			if err := os.WriteFile(outsideFile, []byte("owned"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			moved := filepath.Join(t.TempDir(), "moved")
+			owned := model.Ownership{ResourceID: item.ID, Paths: map[string]string{path: "file:" + Digest("file", []byte("owned"))}}
+			if err := store.PutOwnership(owned); err != nil {
+				t.Fatal(err)
+			}
+			op := operation(item, model.OperationPrune)
+			begin(t, store, op)
+			beforeManagedRemove = func() {
+				beforeManagedRemove = nil
+				target := parent
+				if rootSwap {
+					target = home
+				}
+				if err := os.Rename(target, moved); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outside, target); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Cleanup(func() { beforeManagedRemove = nil })
+			result := a.ExecuteResource(context.Background(), item, op)
+			if result.Success {
+				t.Fatalf("swap prune succeeded: %#v", result)
+			}
+			if _, err := os.Stat(outsideFile); err != nil {
+				t.Fatalf("outside file removed: %v", err)
+			}
+		})
 	}
 }
 
@@ -378,7 +534,7 @@ func TestBackupFailureAbortsApply(t *testing.T) {
 	client.apply = func([]string) error { called = true; return nil }
 	op := operation(item, model.OperationAdopt)
 	begin(t, store, op)
-	result := a.Execute(context.Background(), op)
+	result := a.ExecuteResource(context.Background(), item, op)
 	if result.Success || called {
 		t.Fatalf("backup failure result=%#v apply=%v", result, called)
 	}
@@ -404,5 +560,33 @@ func TestResolveConflictBacksUpThenAcceptsDesired(t *testing.T) {
 	got, err := os.ReadFile(path)
 	if err != nil || string(got) != "desired" {
 		t.Fatalf("resolved target = %q, %v", got, err)
+	}
+}
+
+func TestResolveConflictBacksUpAndDeletesModifiedObsoleteOwnedPath(t *testing.T) {
+	a, client, store, home, item := testAdapter(t, nil)
+	obsolete := filepath.Join(home, "obsolete")
+	current := filepath.Join(home, "current")
+	if err := os.WriteFile(obsolete, []byte("local edit"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(current, []byte("local current"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client.targets = []chezmoi.Target{target(current, "file", "desired")}
+	owned := model.Ownership{ResourceID: item.ID, Paths: map[string]string{obsolete: "file:" + Digest("file", []byte("old"))}}
+	if err := store.PutOwnership(owned); err != nil {
+		t.Fatal(err)
+	}
+	client.apply = func(paths []string) error { return os.WriteFile(paths[0], []byte("desired"), 0o600) }
+	if err := a.ResolveConflict(context.Background(), item, "resolve-obsolete"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(obsolete); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("obsolete remains: %v", err)
+	}
+	backup, err := os.ReadFile(filepath.Join(a.Backup.Root, "resolve-obsolete", "obsolete"))
+	if err != nil || string(backup) != "local edit" {
+		t.Fatalf("backup=%q,%v", backup, err)
 	}
 }

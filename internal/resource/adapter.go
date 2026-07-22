@@ -16,6 +16,12 @@ type Adapter interface {
 	Verify(context.Context, model.Resource) (model.Observation, error)
 }
 
+// BoundExecutor receives the exact signed resource selected by reconciliation.
+// It is used by adapters whose mutation authority includes resource metadata.
+type BoundExecutor interface {
+	ExecuteResource(context.Context, model.Resource, model.Operation) model.OperationResult
+}
+
 type registryKey struct {
 	resourceType model.ResourceType
 	provider     string
