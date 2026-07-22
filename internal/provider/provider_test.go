@@ -73,6 +73,20 @@ func TestValidateChangeSetRejectsSortedUniqueUnmanagedRemovals(t *testing.T) {
 	}
 }
 
+func TestValidateChangeSetNeverAllowsEmptyRemovalID(t *testing.T) {
+	changes := ChangeSet{Removes: []string{"", "", "managed"}}
+	target := model.Resource{}
+
+	err := ValidateChangeSet(changes, target, []string{"", "managed"})
+	var unmanaged *ErrUnmanagedRemoval
+	if !errors.As(err, &unmanaged) {
+		t.Fatalf("ValidateChangeSet() error = %v, want *ErrUnmanagedRemoval", err)
+	}
+	if want := []string{""}; !reflect.DeepEqual(unmanaged.IDs, want) {
+		t.Fatalf("IDs = %#v, want %#v", unmanaged.IDs, want)
+	}
+}
+
 func TestOperationCarriesTypedProviderTargetInJSON(t *testing.T) {
 	op := model.Operation{Provider: "homebrew", Package: "ripgrep"}
 	data, err := json.Marshal(op)

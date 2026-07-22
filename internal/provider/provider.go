@@ -33,9 +33,13 @@ func (e *ErrUnmanagedRemoval) Error() string {
 
 func ValidateChangeSet(changes ChangeSet, target model.Resource, planOwnedRemovals []string) error {
 	allowed := make(map[string]struct{}, len(planOwnedRemovals)+1)
-	allowed[target.Package] = struct{}{}
+	if target.Package != "" {
+		allowed[target.Package] = struct{}{}
+	}
 	for _, id := range planOwnedRemovals {
-		allowed[id] = struct{}{}
+		if id != "" {
+			allowed[id] = struct{}{}
+		}
 	}
 
 	unmanaged := make(map[string]struct{})

@@ -13,7 +13,10 @@ import (
 	"strings"
 )
 
-const sudoPath = "/usr/bin/sudo"
+const (
+	sudoPath    = "/usr/bin/sudo"
+	OutputLimit = 4 * 1024 * 1024
+)
 
 type Request struct {
 	Path      string
@@ -27,6 +30,19 @@ type Request struct {
 type Result struct {
 	Stdout []byte
 	Stderr []byte
+}
+
+type ErrOutputLimit struct {
+	Streams []string
+}
+
+func (e *ErrOutputLimit) Error() string {
+	return fmt.Sprintf("execx: output limit exceeded: %s", strings.Join(e.Streams, ", "))
+}
+
+func (e *ErrOutputLimit) Is(target error) bool {
+	_, ok := target.(*ErrOutputLimit)
+	return ok
 }
 
 type Runner struct {
@@ -77,19 +93,21 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 	cmd.Dir = req.Dir
 	cmd.Env = environment(req.Env)
 	cmd.Stdin = req.Stdin
-	var stdout, stderr bytes.Buffer
+	var stdout, stderr captureBuffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
 	result := Result{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}
+	var executionErr error
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return result, fmt.Errorf("execx: execute %q: %w", path, ctxErr)
+		executionErr = fmt.Errorf("execx: execute %q: %w", path, ctxErr)
+	} else if err != nil {
+		executionErr = fmt.Errorf("execx: execute %q: %w", path, err)
 	}
-	if err != nil {
-		return result, fmt.Errorf("execx: execute %q: %w", path, err)
-	}
-	return result, nil
+
+	limitErr := outputLimitError(stdout.exceeded, stderr.exceeded)
+	return result, errors.Join(executionErr, limitErr)
 }
 
 func (r *Runner) validate(req Request) error {
@@ -140,4 +158,42 @@ func environment(values map[string]string) []string {
 
 func containsNUL(value string) bool {
 	return strings.IndexByte(value, 0) >= 0
+}
+
+type captureBuffer struct {
+	buffer   bytes.Buffer
+	exceeded bool
+}
+
+func (b *captureBuffer) Write(p []byte) (int, error) {
+	written := len(p)
+	remaining := OutputLimit - b.buffer.Len()
+	if remaining > len(p) {
+		remaining = len(p)
+	}
+	if remaining > 0 {
+		_, _ = b.buffer.Write(p[:remaining])
+	}
+	if remaining < len(p) {
+		b.exceeded = true
+	}
+	return written, nil
+}
+
+func (b *captureBuffer) Bytes() []byte {
+	return b.buffer.Bytes()
+}
+
+func outputLimitError(stdoutExceeded, stderrExceeded bool) error {
+	streams := make([]string, 0, 2)
+	if stdoutExceeded {
+		streams = append(streams, "stdout")
+	}
+	if stderrExceeded {
+		streams = append(streams, "stderr")
+	}
+	if len(streams) == 0 {
+		return nil
+	}
+	return &ErrOutputLimit{Streams: streams}
 }

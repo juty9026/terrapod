@@ -1,6 +1,7 @@
 package execx
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -78,6 +80,79 @@ func TestRunnerCapturesOutputAndPassesStdin(t *testing.T) {
 	}
 	if got := string(result.Stderr); got != "stderr:input" {
 		t.Fatalf("stderr = %q", got)
+	}
+}
+
+func TestRunnerAcceptsOutputAtLimit(t *testing.T) {
+	for _, stream := range []string{"stdout", "stderr"} {
+		t.Run(stream, func(t *testing.T) {
+			runner := NewRunner(nil, nil, func() int { return 501 })
+
+			result, err := runner.Run(context.Background(), helperRequest("output", stream, strconv.Itoa(OutputLimit)))
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if got := resultStream(result, stream); len(got) != OutputLimit {
+				t.Fatalf("captured %s bytes = %d, want %d", stream, len(got), OutputLimit)
+			}
+		})
+	}
+}
+
+func TestRunnerCapsAndReportsOutputOverLimit(t *testing.T) {
+	for _, stream := range []string{"stdout", "stderr"} {
+		t.Run(stream, func(t *testing.T) {
+			runner := NewRunner(nil, nil, func() int { return 501 })
+
+			result, err := runner.Run(context.Background(), helperRequest("output", stream, strconv.Itoa(OutputLimit+1)))
+			var limitErr *ErrOutputLimit
+			if !errors.As(err, &limitErr) {
+				t.Fatalf("Run() error = %v, want *ErrOutputLimit", err)
+			}
+			if !errors.Is(err, &ErrOutputLimit{}) {
+				t.Fatalf("Run() error = %v, want errors.Is output limit match", err)
+			}
+			if want := []string{stream}; !reflect.DeepEqual(limitErr.Streams, want) {
+				t.Fatalf("streams = %#v, want %#v", limitErr.Streams, want)
+			}
+			if got := resultStream(result, stream); len(got) != OutputLimit {
+				t.Fatalf("captured %s bytes = %d, want %d", stream, len(got), OutputLimit)
+			}
+		})
+	}
+}
+
+func TestRunnerReportsExceededStreamsInDeterministicOrder(t *testing.T) {
+	runner := NewRunner(nil, nil, func() int { return 501 })
+
+	result, err := runner.Run(context.Background(), helperRequest("output", "both", strconv.Itoa(OutputLimit+1)))
+	var limitErr *ErrOutputLimit
+	if !errors.As(err, &limitErr) {
+		t.Fatalf("Run() error = %v, want *ErrOutputLimit", err)
+	}
+	if want := []string{"stdout", "stderr"}; !reflect.DeepEqual(limitErr.Streams, want) {
+		t.Fatalf("streams = %#v, want %#v", limitErr.Streams, want)
+	}
+	if len(result.Stdout) != OutputLimit || len(result.Stderr) != OutputLimit {
+		t.Fatalf("captured lengths = (%d, %d), want (%d, %d)", len(result.Stdout), len(result.Stderr), OutputLimit, OutputLimit)
+	}
+}
+
+func TestRunnerPreservesContextErrorWithOutputLimit(t *testing.T) {
+	runner := NewRunner(nil, nil, func() int { return 501 })
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	result, err := runner.Run(ctx, helperRequest("output-sleep", "stdout", strconv.Itoa(OutputLimit+1)))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Run() error = %v, want context deadline exceeded", err)
+	}
+	var limitErr *ErrOutputLimit
+	if !errors.As(err, &limitErr) {
+		t.Fatalf("Run() error = %v, want joined *ErrOutputLimit", err)
+	}
+	if got := len(result.Stdout); got != OutputLimit {
+		t.Fatalf("captured stdout bytes = %d, want %d", got, OutputLimit)
 	}
 }
 
@@ -241,6 +316,36 @@ func TestExecxHelper(t *testing.T) {
 		_, _ = fmt.Fprint(os.Stdout, cwd)
 	case "sleep":
 		time.Sleep(10 * time.Second)
+	case "output", "output-sleep":
+		if len(args) != 3 {
+			os.Exit(2)
+		}
+		count, err := strconv.Atoi(args[2])
+		if err != nil {
+			os.Exit(2)
+		}
+		var output io.Writer
+		switch args[1] {
+		case "stdout":
+			output = os.Stdout
+		case "stderr":
+			output = os.Stderr
+		case "both":
+			chunk := bytes.Repeat([]byte("x"), count)
+			if _, err := os.Stdout.Write(chunk); err != nil {
+				os.Exit(2)
+			}
+			output = os.Stderr
+		default:
+			os.Exit(2)
+		}
+		chunk := bytes.Repeat([]byte("x"), count)
+		if _, err := output.Write(chunk); err != nil {
+			os.Exit(2)
+		}
+		if args[0] == "output-sleep" {
+			time.Sleep(10 * time.Second)
+		}
 	case "marker":
 		if len(args) != 2 {
 			os.Exit(2)
@@ -252,4 +357,11 @@ func TestExecxHelper(t *testing.T) {
 		os.Exit(2)
 	}
 	os.Exit(0)
+}
+
+func resultStream(result Result, stream string) []byte {
+	if stream == "stdout" {
+		return result.Stdout
+	}
+	return result.Stderr
 }
