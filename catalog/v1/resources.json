@@ -376,6 +376,150 @@
       "package": "stablyai/orca/orca",
       "commands": [],
       "metadata": {"enabledByConfig": "enableMacosAppGroupDevelopmentApps"}
+    },
+    {
+      "id": "bootstrap-apt.build-essential",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "build-essential", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.ca-certificates",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "ca-certificates", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.curl",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "curl", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.file",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "file", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.git",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "git", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.libbz2-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "libbz2-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.libffi-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "libffi-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.liblzma-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "liblzma-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.libncursesw5-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "libncursesw5-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.libreadline-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "libreadline-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.libsqlite3-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "libsqlite3-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.libssl-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "libssl-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.libxml2-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "libxml2-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.libxmlsec1-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "libxmlsec1-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.procps",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "procps", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.tk-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "tk-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.unzip",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "unzip", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.xz-utils",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "xz-utils", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.zlib1g-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "zlib1g-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.zsh",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "zsh", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "runtime.bun",
+      "type": "package", "profiles": ["macos-terminal", "vps-shell"], "dependsOn": ["core.mise"],
+      "versionPolicy": "pinned", "provider": "mise", "package": "bun", "commands": ["bun"],
+      "metadata": {"version": "latest"}
+    },
+    {
+      "id": "runtime.node",
+      "type": "package", "profiles": ["macos-terminal", "vps-shell"], "dependsOn": ["core.mise"],
+      "versionPolicy": "pinned", "provider": "mise", "package": "node", "commands": ["node"],
+      "metadata": {"version": "24"}
+    },
+    {
+      "id": "runtime.python",
+      "type": "package", "profiles": ["macos-terminal", "vps-shell"], "dependsOn": ["core.mise"],
+      "versionPolicy": "pinned", "provider": "mise", "package": "python", "commands": ["python"],
+      "metadata": {"version": "3.13"}
+    },
+    {
+      "id": "runtime.uv",
+      "type": "package", "profiles": ["macos-terminal", "vps-shell"], "dependsOn": ["core.mise"],
+      "versionPolicy": "pinned", "provider": "mise", "package": "uv", "commands": ["uv", "uvx"],
+      "metadata": {"version": "latest"}
     }
   ]
 }

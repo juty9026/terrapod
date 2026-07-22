@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -49,8 +50,8 @@ func TestSeedCatalogHasCurrentConfigSchemaAndHomebrewResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Catalog.Resources) != 32 {
-		t.Fatalf("Resources count = %d, want 32", len(got.Catalog.Resources))
+	if len(got.Catalog.Resources) != 56 {
+		t.Fatalf("Resources count = %d, want 56", len(got.Catalog.Resources))
 	}
 	wantFields := []model.ConfigField{
 		{ID: "profile", Kind: "string", Required: true},
@@ -66,6 +67,126 @@ func TestSeedCatalogHasCurrentConfigSchemaAndHomebrewResources(t *testing.T) {
 	if !reflect.DeepEqual(got.Catalog.Config.Fields, wantFields) {
 		t.Fatalf("Config.Fields = %#v, want %#v", got.Catalog.Config.Fields, wantFields)
 	}
+}
+
+func TestSeedCatalogMatchesBootstrapAPTAndMiseDeclarations(t *testing.T) {
+	catalogContents, err := os.ReadFile(filepath.Join("..", "..", "catalog", "v1", "resources.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seed model.Catalog
+	if err := json.Unmarshal(catalogContents, &seed); err != nil {
+		t.Fatal(err)
+	}
+
+	aptContents, err := os.ReadFile(filepath.Join("..", "..", ".chezmoiscripts", "run_onchange_before_00-bootstrap-ubuntu.sh.tmpl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	miseContents, err := os.ReadFile(filepath.Join("..", "..", "dot_config", "mise", "config.toml.tmpl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantAPT := extractAPTInstallList(t, string(aptContents))
+	wantMise := extractMiseTools(t, string(miseContents))
+	gotAPT := make(map[string]model.Resource)
+	gotMise := make(map[string]model.Resource)
+	for _, resource := range seed.Resources {
+		switch resource.Provider {
+		case "apt":
+			gotAPT[resource.Package] = resource
+		case "mise":
+			gotMise[resource.Package] = resource
+		}
+	}
+	if len(gotAPT) != len(wantAPT) {
+		t.Fatalf("APT catalog packages = %v, template packages = %v", sortedResourceKeys(gotAPT), wantAPT)
+	}
+	for _, pkg := range wantAPT {
+		resource, ok := gotAPT[pkg]
+		if !ok {
+			t.Fatalf("missing APT resource for %q", pkg)
+		}
+		if resource.ID != model.ResourceID("bootstrap-apt."+pkg) || !reflect.DeepEqual(resource.Profiles, []model.Profile{model.ProfileVPSShell}) || resource.VersionPolicy != model.VersionTracked || len(resource.Commands) != 0 || !reflect.DeepEqual(resource.Metadata, map[string]string{"bootstrapOnly": "true"}) {
+			t.Fatalf("APT resource %q is mismapped: %#v", pkg, resource)
+		}
+	}
+	if len(gotMise) != len(wantMise) {
+		t.Fatalf("mise catalog tools = %v, template tools = %v", sortedResourceKeys(gotMise), sortedStringKeys(wantMise))
+	}
+	wantCommands := map[string][]string{"bun": {"bun"}, "node": {"node"}, "python": {"python"}, "uv": {"uv", "uvx"}}
+	for tool, version := range wantMise {
+		resource, ok := gotMise[tool]
+		if !ok {
+			t.Fatalf("missing mise resource for %q", tool)
+		}
+		if resource.ID != model.ResourceID("runtime."+tool) || !reflect.DeepEqual(resource.Profiles, []model.Profile{model.ProfileMacOSTerminal, model.ProfileVPSShell}) || resource.VersionPolicy != model.VersionPinned || resource.Metadata["version"] != version || !reflect.DeepEqual(resource.Commands, wantCommands[tool]) {
+			t.Fatalf("mise resource %q is mismapped: %#v", tool, resource)
+		}
+	}
+}
+
+func extractAPTInstallList(t *testing.T, script string) []string {
+	t.Helper()
+	start := strings.Index(script, "apt-get install -y \\\n")
+	if start < 0 {
+		t.Fatal("APT install declaration not found")
+	}
+	block := script[start+len("apt-get install -y \\\n"):]
+	end := strings.Index(block, "; then")
+	if end < 0 {
+		t.Fatal("APT install declaration terminator not found")
+	}
+	lines := strings.Split(block[:end], "\n")
+	packages := make([]string, 0, len(lines))
+	for _, line := range lines {
+		pkg := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(line), "\\"))
+		if pkg == "" || strings.ContainsAny(pkg, " \t\"'$") {
+			t.Fatalf("invalid APT package declaration %q", line)
+		}
+		packages = append(packages, pkg)
+	}
+	return packages
+}
+
+func extractMiseTools(t *testing.T, config string) map[string]string {
+	t.Helper()
+	start := strings.Index(config, "[tools]\n")
+	if start < 0 {
+		t.Fatal("mise [tools] declaration not found")
+	}
+	block := config[start+len("[tools]\n"):]
+	if end := strings.Index(block, "\n["); end >= 0 {
+		block = block[:end]
+	}
+	tools := make(map[string]string)
+	for _, line := range strings.Split(strings.TrimSpace(block), "\n") {
+		parts := strings.Split(line, " = ")
+		if len(parts) != 2 || len(parts[1]) < 2 || parts[1][0] != '"' || parts[1][len(parts[1])-1] != '"' {
+			t.Fatalf("invalid mise tool declaration %q", line)
+		}
+		tools[parts[0]] = strings.Trim(parts[1], "\"")
+	}
+	return tools
+}
+
+func sortedResourceKeys(resources map[string]model.Resource) []string {
+	keys := make([]string, 0, len(resources))
+	for key := range resources {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func sortedStringKeys(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func TestLoadVerifiedRejectsUntrustedBytes(t *testing.T) {
