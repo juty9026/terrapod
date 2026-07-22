@@ -22,7 +22,14 @@ const maxInputSize = 4 * 1024 * 1024
 const (
 	enabledByConfigMetadataKey       = "enabledByConfig"
 	enabledByAnyConfigMetadataPrefix = "enabledByAnyConfig."
+	legacyMetadataPrefix             = "legacy."
 )
+
+var knownVendorLegacyKinds = map[string]struct{}{
+	"antigravity-native": {},
+	"claude-native":      {},
+	"codex-standalone":   {},
+}
 
 type SignatureSet struct {
 	PublicKeys map[string]ed25519.PublicKey
@@ -182,6 +189,9 @@ func validate(catalog model.Catalog) error {
 		if err := validateConfigGateMetadata(resource, configKinds); err != nil {
 			return err
 		}
+		if err := validateLegacyMetadata(resource); err != nil {
+			return err
+		}
 
 		profiles := append([]model.Profile(nil), resource.Profiles...)
 		sort.Slice(profiles, func(i, j int) bool { return profiles[i] < profiles[j] })
@@ -218,6 +228,59 @@ func validate(catalog model.Catalog) error {
 		return fmt.Errorf("dependency cycle: %s", strings.Join(parts, " -> "))
 	}
 	return nil
+}
+
+func validateLegacyMetadata(resource model.Resource) error {
+	packageKeys := map[string]struct{}{
+		"legacy.apt.package":      {},
+		"legacy.mise.package":     {},
+		"legacy.homebrew.package": {},
+	}
+	for key, value := range resource.Metadata {
+		if !strings.HasPrefix(key, legacyMetadataPrefix) {
+			continue
+		}
+		if _, ok := packageKeys[key]; ok {
+			if !safeLegacyPackageIdentifier(value) {
+				return fmt.Errorf("resource %q has unsafe legacy package identifier %q", resource.ID, value)
+			}
+			continue
+		}
+		if key != "legacy.vendor.receipt" && key != "legacy.vendor.uninstall" {
+			return fmt.Errorf("resource %q has unknown legacy metadata %q", resource.ID, key)
+		}
+	}
+	receipt, hasReceipt := resource.Metadata["legacy.vendor.receipt"]
+	uninstall, hasUninstall := resource.Metadata["legacy.vendor.uninstall"]
+	if hasReceipt != hasUninstall {
+		return fmt.Errorf("resource %q must pair legacy vendor receipt and uninstall kinds", resource.ID)
+	}
+	if hasReceipt {
+		if _, ok := knownVendorLegacyKinds[receipt]; !ok {
+			return fmt.Errorf("resource %q has unknown legacy vendor receipt kind %q", resource.ID, receipt)
+		}
+		if _, ok := knownVendorLegacyKinds[uninstall]; !ok || receipt != uninstall {
+			return fmt.Errorf("resource %q has unsupported legacy vendor uninstall kind %q", resource.ID, uninstall)
+		}
+	}
+	return nil
+}
+
+func safeLegacyPackageIdentifier(identifier string) bool {
+	if identifier == "" || strings.HasPrefix(identifier, "-") || strings.HasPrefix(identifier, "/") {
+		return false
+	}
+	for _, r := range []byte(identifier) {
+		if !asciiLetterOrDigit(r) && !strings.ContainsRune("._+@:/~-", rune(r)) {
+			return false
+		}
+	}
+	for _, segment := range strings.Split(identifier, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 func validateConfigGateMetadata(resource model.Resource, configKinds map[string]string) error {

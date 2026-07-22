@@ -25,7 +25,7 @@
       "provider": "homebrew-formula",
       "package": "bat",
       "commands": ["bat"],
-      "metadata": {}
+      "metadata": {"legacy.homebrew.package": "bat", "legacy.mise.package": "aqua:sharkdp/bat"}
     },
     {
       "id": "core.btop",
@@ -36,7 +36,7 @@
       "provider": "homebrew-formula",
       "package": "btop",
       "commands": ["btop"],
-      "metadata": {}
+      "metadata": {"legacy.homebrew.package": "btop", "legacy.mise.package": "aqua:aristocratos/btop"}
     },
     {
       "id": "core.chezmoi",
@@ -47,7 +47,7 @@
       "provider": "homebrew-formula",
       "package": "chezmoi",
       "commands": ["chezmoi"],
-      "metadata": {}
+      "metadata": {"legacy.homebrew.package": "chezmoi"}
     },
     {
       "id": "core.dust",
@@ -58,7 +58,7 @@
       "provider": "homebrew-formula",
       "package": "dust",
       "commands": ["dust"],
-      "metadata": {}
+      "metadata": {"legacy.homebrew.package": "dust", "legacy.mise.package": "aqua:bootandy/dust"}
     },
     {
       "id": "core.duf",
@@ -69,7 +69,7 @@
       "provider": "homebrew-formula",
       "package": "duf",
       "commands": ["duf"],
-      "metadata": {}
+      "metadata": {"legacy.homebrew.package": "duf", "legacy.mise.package": "aqua:muesli/duf"}
     },
     {
       "id": "core.fastfetch",
@@ -80,7 +80,7 @@
       "provider": "homebrew-formula",
       "package": "fastfetch",
       "commands": ["fastfetch"],
-      "metadata": {}
+      "metadata": {"legacy.homebrew.package": "fastfetch", "legacy.mise.package": "aqua:fastfetch-cli/fastfetch"}
     },
     {
       "id": "core.fd",
@@ -91,7 +91,7 @@
       "provider": "homebrew-formula",
       "package": "fd",
       "commands": ["fd"],
-      "metadata": {}
+      "metadata": {"legacy.homebrew.package": "fd", "legacy.mise.package": "aqua:sharkdp/fd"}
     },
     {
       "id": "core.fzf",
@@ -102,7 +102,7 @@
       "provider": "homebrew-formula",
       "package": "fzf",
       "commands": ["fzf"],
-      "metadata": {}
+      "metadata": {"legacy.homebrew.package": "fzf", "legacy.mise.package": "aqua:junegunn/fzf"}
     },
     {
       "id": "core.gh",
@@ -113,7 +113,7 @@
       "provider": "homebrew-formula",
       "package": "gh",
       "commands": ["gh"],
-      "metadata": {}
+      "metadata": {"legacy.homebrew.package": "gh", "legacy.mise.package": "aqua:cli/cli"}
     },
     {
       "id": "core.git",
@@ -124,7 +124,7 @@
       "provider": "homebrew-formula",
       "package": "git",
       "commands": ["git"],
-      "metadata": {}
+      "metadata": {"legacy.homebrew.package": "git"}
     },
     {
       "id": "core.git-delta",
@@ -135,7 +135,7 @@
       "provider": "homebrew-formula",
       "package": "git-delta",
       "commands": ["delta"],
-      "metadata": {}
+      "metadata": {"legacy.homebrew.package": "git-delta", "legacy.mise.package": "aqua:dandavison/delta"}
     },
     {
       "id": "core.gum",
@@ -146,7 +146,7 @@
       "provider": "homebrew-formula",
       "package": "gum",
       "commands": ["gum"],
-      "metadata": {}
+      "metadata": {"legacy.homebrew.package": "gum"}
     },
     {
       "id": "core.lazygit",
@@ -157,7 +157,7 @@
       "provider": "homebrew-formula",
       "package": "lazygit",
       "commands": ["lazygit"],
-      "metadata": {}
+      "metadata": {"legacy.homebrew.package": "lazygit", "legacy.mise.package": "aqua:jesseduffield/lazygit"}
     },
     {
       "id": "core.lsd",
@@ -168,7 +168,7 @@
       "provider": "homebrew-formula",
       "package": "lsd",
       "commands": ["lsd"],
-      "metadata": {}
+      "metadata": {"legacy.homebrew.package": "lsd", "legacy.mise.package": "aqua:lsd-rs/lsd"}
     },
     {
       "id": "core.mise",
@@ -179,7 +179,7 @@
       "provider": "homebrew-formula",
       "package": "mise",
       "commands": ["mise"],
-      "metadata": {}
+      "metadata": {"legacy.homebrew.package": "mise"}
     },
     {
       "id": "core.neovim",
@@ -190,7 +190,7 @@
       "provider": "homebrew-formula",
       "package": "neovim",
       "commands": ["nvim"],
-      "metadata": {}
+      "metadata": {"legacy.homebrew.package": "neovim", "legacy.mise.package": "aqua:neovim/neovim"}
     },
     {
       "id": "core.ripgrep",
@@ -201,7 +201,7 @@
       "provider": "homebrew-formula",
       "package": "ripgrep",
       "commands": ["rg"],
-      "metadata": {}
+      "metadata": {"legacy.homebrew.package": "ripgrep", "legacy.mise.package": "aqua:BurntSushi/ripgrep"}
     },
     {
       "id": "core.starship",
@@ -212,7 +212,7 @@
       "provider": "homebrew-formula",
       "package": "starship",
       "commands": ["starship"],
-      "metadata": {}
+      "metadata": {"legacy.homebrew.package": "starship", "legacy.mise.package": "aqua:starship/starship"}
     },
     {
       "id": "core.zellij",
@@ -223,7 +223,7 @@
       "provider": "homebrew-formula",
       "package": "zellij",
       "commands": ["zellij"],
-      "metadata": {}
+      "metadata": {"legacy.homebrew.package": "zellij", "legacy.mise.package": "aqua:zellij-org/zellij"}
     },
     {
       "id": "core.zoxide",
@@ -234,7 +234,7 @@
       "provider": "homebrew-formula",
       "package": "zoxide",
       "commands": ["zoxide"],
-      "metadata": {}
+      "metadata": {"legacy.homebrew.package": "zoxide", "legacy.mise.package": "aqua:ajeetdsouza/zoxide"}
     },
     {
       "id": "optional-ai.antigravity-cli",
@@ -247,7 +247,10 @@
       "commands": ["agy"],
       "metadata": {
         "enabledByAnyConfig.enableAiCliTools": "true",
-        "enabledByAnyConfig.enableDevelopmentWorkspace": "true"
+        "enabledByAnyConfig.enableDevelopmentWorkspace": "true",
+        "legacy.homebrew.package": "antigravity-cli",
+        "legacy.vendor.receipt": "antigravity-native",
+        "legacy.vendor.uninstall": "antigravity-native"
       }
     },
     {
@@ -261,7 +264,10 @@
       "commands": ["claude"],
       "metadata": {
         "enabledByAnyConfig.enableAiCliTools": "true",
-        "enabledByAnyConfig.enableDevelopmentWorkspace": "true"
+        "enabledByAnyConfig.enableDevelopmentWorkspace": "true",
+        "legacy.homebrew.package": "claude-code",
+        "legacy.vendor.receipt": "claude-native",
+        "legacy.vendor.uninstall": "claude-native"
       }
     },
     {
@@ -275,7 +281,10 @@
       "commands": ["codex"],
       "metadata": {
         "enabledByAnyConfig.enableAiCliTools": "true",
-        "enabledByAnyConfig.enableDevelopmentWorkspace": "true"
+        "enabledByAnyConfig.enableDevelopmentWorkspace": "true",
+        "legacy.homebrew.package": "codex",
+        "legacy.vendor.receipt": "codex-standalone",
+        "legacy.vendor.uninstall": "codex-standalone"
       }
     },
     {

@@ -70,6 +70,59 @@ func TestSeedCatalogHasCurrentConfigSchemaAndHomebrewResources(t *testing.T) {
 	}
 }
 
+func TestSeedCatalogDeclaresOnlyKnownLegacyPackageSources(t *testing.T) {
+	contents, err := os.ReadFile(filepath.Join("..", "..", "catalog", "v1", "resources.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seed model.Catalog
+	if err := json.Unmarshal(contents, &seed); err != nil {
+		t.Fatal(err)
+	}
+	wantMise := map[model.ResourceID]string{
+		"core.bat": "aqua:sharkdp/bat", "core.btop": "aqua:aristocratos/btop",
+		"core.dust": "aqua:bootandy/dust", "core.duf": "aqua:muesli/duf",
+		"core.fastfetch": "aqua:fastfetch-cli/fastfetch", "core.fd": "aqua:sharkdp/fd",
+		"core.fzf": "aqua:junegunn/fzf", "core.gh": "aqua:cli/cli",
+		"core.git-delta": "aqua:dandavison/delta", "core.lazygit": "aqua:jesseduffield/lazygit",
+		"core.lsd": "aqua:lsd-rs/lsd", "core.neovim": "aqua:neovim/neovim",
+		"core.ripgrep": "aqua:BurntSushi/ripgrep", "core.starship": "aqua:starship/starship",
+		"core.zellij": "aqua:zellij-org/zellij", "core.zoxide": "aqua:ajeetdsouza/zoxide",
+	}
+	wantVendor := map[model.ResourceID]string{
+		"optional-ai.antigravity-cli": "antigravity-native",
+		"optional-ai.claude-code":     "claude-native",
+		"optional-ai.codex":           "codex-standalone",
+	}
+	seenMise := 0
+	seenVendor := 0
+	for _, resource := range seed.Resources {
+		if resource.Provider != "homebrew-formula" && resource.Provider != "homebrew-cask" {
+			continue
+		}
+		if strings.HasPrefix(string(resource.ID), "core.") || strings.HasPrefix(string(resource.ID), "optional-ai.") {
+			if got := resource.Metadata["legacy.homebrew.package"]; got != resource.Package {
+				t.Fatalf("resource %q legacy Homebrew package = %q, want %q", resource.ID, got, resource.Package)
+			}
+		}
+		if want, ok := wantMise[resource.ID]; ok {
+			seenMise++
+			if got := resource.Metadata["legacy.mise.package"]; got != want {
+				t.Fatalf("resource %q legacy mise package = %q, want %q", resource.ID, got, want)
+			}
+		}
+		if want, ok := wantVendor[resource.ID]; ok {
+			seenVendor++
+			if resource.Metadata["legacy.vendor.receipt"] != want || resource.Metadata["legacy.vendor.uninstall"] != want {
+				t.Fatalf("resource %q vendor metadata = %#v, want kind %q", resource.ID, resource.Metadata, want)
+			}
+		}
+	}
+	if seenMise != len(wantMise) || seenVendor != len(wantVendor) {
+		t.Fatalf("legacy declarations seen mise=%d vendor=%d", seenMise, seenVendor)
+	}
+}
+
 func TestSeedCatalogMatchesBootstrapAPTAndMiseDeclarations(t *testing.T) {
 	catalogContents, err := os.ReadFile(filepath.Join("..", "..", "catalog", "v1", "resources.json"))
 	if err != nil {
@@ -393,6 +446,27 @@ func TestLoadVerifiedRejectsInvalidCatalog(t *testing.T) {
 				resourcesOf(input)[0]["commands"] = []any{"rg", "rg"}
 			},
 			want: `duplicate command "rg"`,
+		},
+		{
+			name: "unknown legacy metadata",
+			edit: func(input map[string]any) {
+				resourcesOf(input)[0]["metadata"] = map[string]any{"legacy.shell.command": "rm"}
+			},
+			want: `unknown legacy metadata "legacy.shell.command"`,
+		},
+		{
+			name: "unpaired vendor receipt",
+			edit: func(input map[string]any) {
+				resourcesOf(input)[0]["metadata"] = map[string]any{"legacy.vendor.receipt": "claude-native"}
+			},
+			want: "must pair legacy vendor receipt and uninstall kinds",
+		},
+		{
+			name: "unknown vendor kind",
+			edit: func(input map[string]any) {
+				resourcesOf(input)[0]["metadata"] = map[string]any{"legacy.vendor.receipt": "shell", "legacy.vendor.uninstall": "shell"}
+			},
+			want: `unknown legacy vendor receipt kind "shell"`,
 		},
 		{
 			name: "dependency cycle",
