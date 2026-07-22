@@ -17,6 +17,7 @@ import (
 	"github.com/juty9026/terrapod/internal/model"
 	"github.com/juty9026/terrapod/internal/paths"
 	"github.com/juty9026/terrapod/internal/planner"
+	"github.com/juty9026/terrapod/internal/reconcile"
 	"github.com/juty9026/terrapod/internal/resource"
 	"github.com/juty9026/terrapod/internal/state"
 )
@@ -29,7 +30,7 @@ func TestHelpDescribesShadowCommandSurfaceWithoutDependencies(t *testing.T) {
 	for _, want := range []string{
 		"Personal Development Environment Manager",
 		"plan", "status", "doctor", "diff",
-		"apply (unavailable until activation)",
+		"apply      Reconcile package resources",
 		"update (unavailable until activation)",
 		"resolve (unavailable until activation)",
 		"setup (unavailable until activation)",
@@ -455,7 +456,7 @@ func TestDiffReturnsShadowModeExitCode(t *testing.T) {
 }
 
 func TestMutationCommandsAreNotDispatched(t *testing.T) {
-	for _, command := range []string{"apply", "update", "resolve", "setup", "configure", "chezmoi"} {
+	for _, command := range []string{"update", "resolve", "setup", "configure", "chezmoi"} {
 		t.Run(command, func(t *testing.T) {
 			deps := Dependencies{Geteuid: func() int { return 501 }}
 			code, _, stderr := run(t, []string{command}, deps)
@@ -463,6 +464,53 @@ func TestMutationCommandsAreNotDispatched(t *testing.T) {
 				t.Fatalf("Run(%s) = %d, stderr=%q", command, code, stderr)
 			}
 		})
+	}
+}
+
+func TestApplyBuildsNonUpgradePlanAndRendersDeterministicSummary(t *testing.T) {
+	deps, fixture := fixtureDependencies(t, "ready.json")
+	loadCatalog := deps.LoadCatalog
+	deps.LoadCatalog = func() (catalog.Verified, error) {
+		verified, err := loadCatalog()
+		if err != nil {
+			return catalog.Verified{}, err
+		}
+		verified.Catalog.Resources = append(verified.Catalog.Resources, model.Resource{ID: "optional.hidden", Type: model.ResourcePackage, Provider: "fixture", Package: "hidden", VersionPolicy: model.VersionTracked, Metadata: map[string]string{planner.EnabledByAnyConfigMetadataPrefix + "enableAi": "true"}})
+		return verified, nil
+	}
+	fixture.Operations = map[model.ResourceID][]model.Operation{
+		"core.alpha": {{ID: "upgrade", Kind: model.OperationUpgrade, Provider: "fixture"}, {ID: "install", Kind: model.OperationInstall, Provider: "fixture"}},
+	}
+	called := false
+	deps.Apply = func(_ context.Context, plan model.Plan, resources []model.Resource, digest string) (reconcile.Summary, error) {
+		called = true
+		if digest != "fixture-digest" || len(resources) != 4 {
+			t.Fatalf("apply facts: digest=%q resources=%d", digest, len(resources))
+		}
+		for _, operation := range plan.Operations {
+			if operation.Kind == model.OperationUpgrade {
+				t.Fatal("apply enabled upgrade")
+			}
+		}
+		return reconcile.Summary{Ready: []model.ResourceID{"core.beta", "core.alpha"}, Unavailable: map[model.ResourceID]string{}}, nil
+	}
+	code, stdout, stderr := run(t, []string{"apply"}, deps)
+	if code != 0 || stderr != "" || !called {
+		t.Fatalf("apply=%d called=%v stderr=%q", code, called, stderr)
+	}
+	if stdout != "Ready:\n  core.alpha\n  core.beta\nUnavailable:\n  (none)\n" {
+		t.Fatalf("stdout=%q", stdout)
+	}
+}
+
+func TestApplyReturnsUnavailableWithUsefulSummaryOnResourceFailure(t *testing.T) {
+	deps, _ := fixtureDependencies(t, "ready.json")
+	deps.Apply = func(context.Context, model.Plan, []model.Resource, string) (reconcile.Summary, error) {
+		return reconcile.Summary{Ready: []model.ResourceID{"core.alpha"}, Unavailable: map[model.ResourceID]string{"core.beta": "verify failed"}}, errors.New("journal warning")
+	}
+	code, stdout, stderr := run(t, []string{"apply"}, deps)
+	if code != exitUnavailable || !strings.Contains(stdout, "core.beta: verify failed") || !strings.Contains(stderr, "journal warning") {
+		t.Fatalf("apply=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 }
 

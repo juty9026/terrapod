@@ -21,6 +21,7 @@ import (
 	"github.com/juty9026/terrapod/internal/model"
 	"github.com/juty9026/terrapod/internal/paths"
 	"github.com/juty9026/terrapod/internal/planner"
+	"github.com/juty9026/terrapod/internal/reconcile"
 	"github.com/juty9026/terrapod/internal/state"
 )
 
@@ -41,6 +42,7 @@ type Dependencies struct {
 	LoadConfig  func() (model.Config, error)
 	OpenState   func() (*state.Store, error)
 	Planner     *planner.Planner
+	Apply       func(context.Context, model.Plan, []model.Resource, string) (reconcile.Summary, error)
 }
 
 type reconciliation struct {
@@ -48,6 +50,7 @@ type reconciliation struct {
 	config  model.Config
 	plan    model.Plan
 	lock    string
+	digest  string
 }
 
 func Run(ctx context.Context, args []string, deps Dependencies) int {
@@ -96,7 +99,7 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	if !ok {
 		return exitUsage
 	}
-	if isMutationCommand(command) {
+	if isMutationCommand(command) && command != "apply" {
 		fmt.Fprintf(stderr, "%s is unavailable until activation\n", command)
 		return exitUnavailable
 	}
@@ -117,6 +120,19 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	}
 
 	switch command {
+	case "apply":
+		if deps.Apply == nil {
+			fmt.Fprintln(stderr, "internal error: reconciliation engine is not configured")
+			return exitFailure
+		}
+		summary, applyErr := deps.Apply(ctx, snapshot.plan, enabledResources(snapshot.catalog, snapshot.config), snapshot.digest)
+		renderApplySummary(stdout, summary)
+		if applyErr != nil {
+			fmt.Fprintln(stderr, applyErr)
+		}
+		if applyErr != nil || len(summary.Unavailable) != 0 {
+			return exitUnavailable
+		}
 	case "plan":
 		renderPlan(stdout, snapshot.plan, snapshot.lock)
 	case "status":
@@ -204,7 +220,7 @@ func buildReconciliation(ctx context.Context, deps Dependencies, upgrade bool) (
 	if err != nil {
 		return reconciliation{}, fmt.Errorf("inspect reconciliation lock: %w", err)
 	}
-	return reconciliation{catalog: verified.Catalog, config: cfg, plan: built, lock: lock}, nil
+	return reconciliation{catalog: verified.Catalog, config: cfg, plan: built, lock: lock, digest: verified.Digest}, nil
 }
 
 func configuredProfile(cfg model.Config) (model.Profile, error) {
@@ -234,6 +250,19 @@ func enabledResources(catalog model.Catalog, cfg model.Config) []model.Resource 
 			if !enabled {
 				continue
 			}
+		}
+		hasAnyGate, anyEnabled := false, false
+		for key := range candidate.Metadata {
+			if !strings.HasPrefix(key, planner.EnabledByAnyConfigMetadataPrefix) {
+				continue
+			}
+			hasAnyGate = true
+			field := strings.TrimPrefix(key, planner.EnabledByAnyConfigMetadataPrefix)
+			enabled, _ := cfg.Terrapod[field].(bool)
+			anyEnabled = anyEnabled || enabled
+		}
+		if hasAnyGate && !anyEnabled {
+			continue
 		}
 		resources = append(resources, candidate)
 	}

@@ -7,12 +7,14 @@ import (
 	"strings"
 
 	"github.com/juty9026/terrapod/internal/model"
+	"github.com/juty9026/terrapod/internal/reconcile"
 )
 
 func renderHelp(output io.Writer) {
 	fmt.Fprintln(output, "Terrapod — Personal Development Environment Manager")
 	fmt.Fprintln(output)
-	fmt.Fprintln(output, "Read-only shadow commands:")
+	fmt.Fprintln(output, "Commands:")
+	fmt.Fprintln(output, "  apply      Reconcile package resources")
 	fmt.Fprintln(output, "  plan       Show deterministic reconciliation operations")
 	fmt.Fprintln(output, "  status     Show Ready and Unavailable resources")
 	fmt.Fprintln(output, "  doctor     Check whether enabled resources are available")
@@ -20,8 +22,28 @@ func renderHelp(output io.Writer) {
 	fmt.Fprintln(output, "  version    Show the development version")
 	fmt.Fprintln(output)
 	fmt.Fprintln(output, "Mutation commands:")
-	for _, command := range []string{"apply", "update", "resolve", "setup", "configure", "chezmoi"} {
+	for _, command := range []string{"update", "resolve", "setup", "configure", "chezmoi"} {
 		fmt.Fprintf(output, "  %s (unavailable until activation)\n", command)
+	}
+}
+
+func renderApplySummary(output io.Writer, summary reconcile.Summary) {
+	ready := append([]model.ResourceID(nil), summary.Ready...)
+	sort.Slice(ready, func(i, j int) bool { return ready[i] < ready[j] })
+	fmt.Fprintln(output, "Ready:")
+	if len(ready) == 0 {
+		fmt.Fprintln(output, "  (none)")
+	}
+	for _, id := range ready {
+		fmt.Fprintf(output, "  %s\n", id)
+	}
+	fmt.Fprintln(output, "Unavailable:")
+	ids := sortedUnavailableIDs(summary.Unavailable)
+	if len(ids) == 0 {
+		fmt.Fprintln(output, "  (none)")
+	}
+	for _, id := range ids {
+		fmt.Fprintf(output, "  %s: %s\n", id, summary.Unavailable[id])
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sync"
 	"time"
@@ -121,6 +122,78 @@ func (s *Store) Begin(plan model.Plan) (model.Journal, error) {
 		return model.Journal{}, err
 	}
 	return journal, nil
+}
+
+// BeginOrResume returns the active journal when it contains the exact plan.
+// Otherwise it atomically points the snapshot at a replacement journal and
+// marks the prior journal as superseded.
+func (s *Store) BeginOrResume(plan model.Plan) (model.Journal, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if plan.ID == "" {
+		return model.Journal{}, false, errors.New("plan ID is empty")
+	}
+
+	snapshot, err := s.readSnapshot()
+	if err != nil {
+		return model.Journal{}, false, err
+	}
+	if snapshot.ActiveJournal != nil {
+		active, err := s.readJournal(snapshot.ActiveJournal.ID)
+		if err != nil {
+			return model.Journal{}, false, err
+		}
+		if active.Status != "active" {
+			return model.Journal{}, false, fmt.Errorf("active journal %q has status %q", active.ID, active.Status)
+		}
+		if reflect.DeepEqual(active.Plan, plan) {
+			return active.Journal, true, nil
+		}
+		return s.replaceActive(snapshot, active, plan)
+	}
+	journal, err := s.newJournal(plan)
+	return journal, false, err
+}
+
+func (s *Store) newJournal(plan model.Plan) (model.Journal, error) {
+	id, err := newJournalID()
+	if err != nil {
+		return model.Journal{}, err
+	}
+	journal := model.Journal{ID: id, Plan: plan, Results: make([]model.OperationResult, 0), StartedAt: time.Now().UTC(), Status: "active"}
+	if err := s.writeJournal(persistedJournal{Journal: journal}); err != nil {
+		return model.Journal{}, err
+	}
+	snapshot, err := s.readSnapshot()
+	if err != nil {
+		return model.Journal{}, err
+	}
+	snapshot.ActiveJournal = &journal
+	if err := s.writeSnapshot(snapshot); err != nil {
+		return model.Journal{}, err
+	}
+	return journal, nil
+}
+
+func (s *Store) replaceActive(snapshot model.Snapshot, active persistedJournal, plan model.Plan) (model.Journal, bool, error) {
+	id, err := newJournalID()
+	if err != nil {
+		return model.Journal{}, false, err
+	}
+	replacement := model.Journal{ID: id, Plan: plan, Results: make([]model.OperationResult, 0), StartedAt: time.Now().UTC(), Status: "active"}
+	if err := s.writeJournal(persistedJournal{Journal: replacement}); err != nil {
+		return model.Journal{}, false, err
+	}
+	snapshot.ActiveJournal = &replacement
+	if err := s.writeSnapshot(snapshot); err != nil {
+		return model.Journal{}, false, err
+	}
+	active.Status = "superseded"
+	active.SupersededBy = replacement.ID
+	if err := s.writeJournal(active); err != nil {
+		return model.Journal{}, false, err
+	}
+	return replacement, false, nil
 }
 
 func (s *Store) Record(result model.OperationResult) error {

@@ -37,6 +37,51 @@ func TestOpenCreatesEmptySnapshot(t *testing.T) {
 	}
 }
 
+func TestBeginOrResumeUsesExactActivePlanAndReplacesDifferentPlan(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := model.Plan{ID: "first", Release: "v1", Operations: []model.Operation{{ID: "one", ResourceID: "core.alpha"}}, Unavailable: map[model.ResourceID]string{}}
+	journal, resumed, err := store.BeginOrResume(first)
+	if err != nil || resumed {
+		t.Fatalf("begin=%#v resumed=%v err=%v", journal, resumed, err)
+	}
+	same, didResume, err := store.BeginOrResume(first)
+	if err != nil || !didResume || same.ID != journal.ID {
+		t.Fatalf("resume=%#v resumed=%v err=%v", same, didResume, err)
+	}
+	second := model.Plan{ID: "second", Release: "v2", Unavailable: map[model.ResourceID]string{}}
+	replacement, didResume, err := store.BeginOrResume(second)
+	if err != nil || didResume || replacement.ID == journal.ID {
+		t.Fatalf("replace=%#v resumed=%v err=%v", replacement, didResume, err)
+	}
+	snapshot, err := store.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.ActiveJournal == nil || snapshot.ActiveJournal.ID != replacement.ID || snapshot.ActiveJournal.Plan.ID != "second" {
+		t.Fatalf("snapshot=%#v", snapshot)
+	}
+	prior, err := store.readJournal(journal.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prior.Status != "superseded" || prior.SupersededBy != replacement.ID {
+		t.Fatalf("prior journal=%#v", prior)
+	}
+}
+
+func TestBeginOrResumeRejectsEmptyPlanID(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.BeginOrResume(model.Plan{}); err == nil {
+		t.Fatal("empty plan ID accepted")
+	}
+}
+
 func TestPutAndDeleteOwnershipPersistAtomically(t *testing.T) {
 	dir := t.TempDir()
 	store, err := Open(dir)

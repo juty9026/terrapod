@@ -23,6 +23,12 @@ type Provider interface {
 	Verify(context.Context, model.Resource) (model.Observation, error)
 }
 
+// Privilege acquires the process-wide authorization needed by privileged
+// provider operations. Reconciliation calls it at most once per apply.
+type Privilege interface {
+	Acquire(context.Context) error
+}
+
 type ErrUnmanagedRemoval struct {
 	IDs []string
 }
