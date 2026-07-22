@@ -58,21 +58,27 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 		stderr = io.Discard
 	}
 
-	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+	if len(args) == 0 {
 		renderHelp(stdout)
 		return 0
 	}
-	if args[0] == "version" || args[0] == "--version" {
+	command := args[0]
+	if command == "help" || command == "--help" || command == "-h" {
+		if !rejectExtraArgs(command, args[1:], stderr) {
+			return exitUsage
+		}
+		renderHelp(stdout)
+		return 0
+	}
+	if command == "version" || command == "--version" {
+		if !rejectExtraArgs(command, args[1:], stderr) {
+			return exitUsage
+		}
 		fmt.Fprintln(stdout, "tpod development")
 		return 0
 	}
 
-	command := args[0]
-	if isMutationCommand(command) {
-		fmt.Fprintf(stderr, "%s is unavailable until activation\n", command)
-		return exitUnavailable
-	}
-	if command != "plan" && command != "status" && command != "doctor" && command != "diff" {
+	if !isManagerCommand(command) {
 		fmt.Fprintf(stderr, "unknown command %q; run 'tpod help'\n", command)
 		return exitUsage
 	}
@@ -84,15 +90,19 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 		fmt.Fprintln(stderr, "Terrapod manager commands must run as a non-root user")
 		return exitFailure
 	}
+	upgrade, ok := parseManagerArgs(command, args[1:], stderr)
+	if !ok {
+		return exitUsage
+	}
+	if isMutationCommand(command) {
+		fmt.Fprintf(stderr, "%s is unavailable until activation\n", command)
+		return exitUnavailable
+	}
 	if command == "diff" {
 		fmt.Fprintln(stderr, "shadow mode: managed-file adapter is not active")
 		return exitUnavailable
 	}
 
-	upgrade, ok := parseReadOnlyArgs(command, args[1:], stderr)
-	if !ok {
-		return exitUsage
-	}
 	snapshot, err := buildReconciliation(ctx, deps, upgrade)
 	if err != nil {
 		var missing *config.ErrMissing
@@ -118,7 +128,7 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	return 0
 }
 
-func parseReadOnlyArgs(command string, args []string, stderr io.Writer) (bool, bool) {
+func parseManagerArgs(command string, args []string, stderr io.Writer) (bool, bool) {
 	if len(args) == 0 {
 		return false, true
 	}
@@ -131,6 +141,14 @@ func parseReadOnlyArgs(command string, args []string, stderr io.Writer) (bool, b
 	}
 	fmt.Fprintln(stderr)
 	return false, false
+}
+
+func rejectExtraArgs(command string, args []string, stderr io.Writer) bool {
+	if len(args) == 0 {
+		return true
+	}
+	fmt.Fprintf(stderr, "usage: tpod %s\n", command)
+	return false
 }
 
 func buildReconciliation(ctx context.Context, deps Dependencies, upgrade bool) (reconciliation, error) {
@@ -180,7 +198,7 @@ func buildReconciliation(ctx context.Context, deps Dependencies, upgrade bool) (
 	if err != nil {
 		return reconciliation{}, fmt.Errorf("build plan: %w", err)
 	}
-	lock, err := inspectLiveLock(deps.Paths.StateDir)
+	lock, err := inspectLiveLock(deps.Paths.StateDir, probeProcess)
 	if err != nil {
 		return reconciliation{}, fmt.Errorf("inspect reconciliation lock: %w", err)
 	}
@@ -221,7 +239,7 @@ func enabledResources(catalog model.Catalog, cfg model.Config) []model.Resource 
 	return resources
 }
 
-func inspectLiveLock(stateDir string) (string, error) {
+func inspectLiveLock(stateDir string, probe func(int) error) (string, error) {
 	if stateDir == "" {
 		return "none", nil
 	}
@@ -233,27 +251,67 @@ func inspectLiveLock(stateDir string) (string, error) {
 		return "", err
 	}
 	defer root.Close()
-	info, err := root.Lstat("lock")
+	lockInfo, err := root.Lstat("lock")
 	if errors.Is(err, os.ErrNotExist) {
 		return "none", nil
 	}
 	if err != nil {
 		return "", err
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+	if !lockInfo.IsDir() || lockInfo.Mode()&os.ModeSymlink != 0 {
 		return "", errors.New("unsafe lock path is not a directory")
 	}
-	ownerFile, err := root.OpenFile("lock/owner.json", os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	lockRoot, err := root.OpenRoot("lock")
+	if err != nil {
+		return "", err
+	}
+	defer lockRoot.Close()
+	openedLockInfo, err := lockRoot.Stat(".")
+	if err != nil {
+		return "", err
+	}
+	if err := requireSameFile(lockInfo, openedLockInfo, "lock directory"); err != nil {
+		return "", err
+	}
+	currentLockInfo, err := root.Lstat("lock")
+	if err != nil {
+		return "", err
+	}
+	if !currentLockInfo.IsDir() || currentLockInfo.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("unsafe lock path changed during inspection")
+	}
+	if err := requireSameFile(lockInfo, currentLockInfo, "lock directory"); err != nil {
+		return "", err
+	}
+
+	ownerInfo, err := lockRoot.Lstat("owner.json")
+	if err != nil {
+		return "", err
+	}
+	if !ownerInfo.Mode().IsRegular() || ownerInfo.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("unsafe lock owner is not a regular file")
+	}
+	ownerFile, err := lockRoot.Open("owner.json")
 	if err != nil {
 		return "", err
 	}
 	defer ownerFile.Close()
-	ownerInfo, err := ownerFile.Stat()
+	openedOwnerInfo, err := ownerFile.Stat()
 	if err != nil {
 		return "", err
 	}
-	if !ownerInfo.Mode().IsRegular() {
-		return "", errors.New("unsafe lock owner is not a regular file")
+	if err := requireSameFile(ownerInfo, openedOwnerInfo, "lock owner"); err != nil {
+		return "", err
+	}
+	currentOwnerInfo, err := lockRoot.Lstat("owner.json")
+	if err != nil {
+		return "", err
+	}
+	if !currentOwnerInfo.Mode().IsRegular() || currentOwnerInfo.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("unsafe lock owner changed during inspection")
+	}
+	if err := requireSameFile(ownerInfo, currentOwnerInfo, "lock owner"); err != nil {
+		return "", err
 	}
 	contents, err := io.ReadAll(io.LimitReader(ownerFile, 64*1024+1))
 	if err != nil {
@@ -284,11 +342,10 @@ func inspectLiveLock(stateDir string) (string, error) {
 	if owner.PID <= 0 || owner.StartedAt.IsZero() || nonceErr != nil || len(nonce) != 16 || len(owner.Command) == 0 || len(owner.Command) > 128 || !utf8.ValidString(owner.Command) || strings.IndexFunc(owner.Command, unicode.IsControl) >= 0 {
 		return "", errors.New("unsafe lock owner metadata")
 	}
-	process, err := os.FindProcess(owner.PID)
-	if err != nil {
-		return "", err
+	if probe == nil {
+		return "", errors.New("process probe is not configured")
 	}
-	err = process.Signal(syscall.Signal(0))
+	err = probe(owner.PID)
 	if err == nil || errors.Is(err, os.ErrPermission) || errors.Is(err, syscall.EPERM) {
 		return fmt.Sprintf("active (PID %d, command %s)", owner.PID, owner.Command), nil
 	}
@@ -298,6 +355,21 @@ func inspectLiveLock(stateDir string) (string, error) {
 	return "", err
 }
 
+func requireSameFile(expected, actual os.FileInfo, label string) error {
+	if !os.SameFile(expected, actual) {
+		return fmt.Errorf("unsafe %s identity changed during inspection", label)
+	}
+	return nil
+}
+
+func probeProcess(pid int) error {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return process.Signal(syscall.Signal(0))
+}
+
 func isMutationCommand(command string) bool {
 	switch command {
 	case "apply", "update", "resolve", "setup", "configure", "chezmoi":
@@ -305,4 +377,8 @@ func isMutationCommand(command string) bool {
 	default:
 		return false
 	}
+}
+
+func isManagerCommand(command string) bool {
+	return command == "plan" || command == "status" || command == "doctor" || command == "diff" || isMutationCommand(command)
 }

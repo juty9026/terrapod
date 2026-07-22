@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/juty9026/terrapod/internal/catalog"
@@ -47,11 +48,44 @@ func TestVersionDoesNotRequireManagerDependencies(t *testing.T) {
 	}
 }
 
-func TestManagerCommandsRejectRootBeforeLoadingDependencies(t *testing.T) {
-	deps := Dependencies{Geteuid: func() int { return 0 }}
-	code, _, stderr := run(t, []string{"status"}, deps)
-	if code == 0 || !strings.Contains(stderr, "must run as a non-root user") {
-		t.Fatalf("Run(status as root) = %d, stderr=%q", code, stderr)
+func TestManagerCommandsRejectRootBeforeCommandDispatch(t *testing.T) {
+	for _, command := range []string{"plan", "status", "doctor", "diff", "apply", "update", "resolve", "setup", "configure", "chezmoi"} {
+		t.Run(command, func(t *testing.T) {
+			deps := Dependencies{Geteuid: func() int { return 0 }}
+			code, _, stderr := run(t, []string{command}, deps)
+			if code == 0 || !strings.Contains(stderr, "must run as a non-root user") {
+				t.Fatalf("Run(%s as root) = %d, stderr=%q", command, code, stderr)
+			}
+		})
+	}
+}
+
+func TestCommandsRejectInvalidArgumentsBeforeRendering(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"help", []string{"help", "unexpected"}},
+		{"version", []string{"version", "unexpected"}},
+		{"plan", []string{"plan", "unexpected"}},
+		{"status", []string{"status", "unexpected"}},
+		{"doctor", []string{"doctor", "unexpected"}},
+		{"diff", []string{"diff", "unexpected"}},
+		{"apply", []string{"apply", "unexpected"}},
+		{"update", []string{"update", "unexpected"}},
+		{"resolve", []string{"resolve", "unexpected"}},
+		{"setup", []string{"setup", "unexpected"}},
+		{"configure", []string{"configure", "unexpected"}},
+		{"chezmoi", []string{"chezmoi", "unexpected"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			deps := Dependencies{Geteuid: func() int { return 501 }}
+			code, stdout, stderr := run(t, test.args, deps)
+			if code != 2 || stdout != "" || !strings.HasPrefix(stderr, "usage: tpod") {
+				t.Fatalf("Run(%v) = %d, stdout=%q stderr=%q", test.args, code, stdout, stderr)
+			}
+		})
 	}
 }
 
@@ -114,6 +148,17 @@ func TestPlanRendersStableSectionsAndNeverExecutes(t *testing.T) {
 
 func TestStatusDistinguishesReadyAndUnavailable(t *testing.T) {
 	deps, fixture := fixtureDependencies(t, "drifted.json")
+	store, err := deps.OpenState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := store.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := persisted.Ownership["core.alpha"].Package; got != "alpha" {
+		t.Fatalf("drifted fixture ownership package = %q, want alpha", got)
+	}
 	fixture.Operations = map[model.ResourceID][]model.Operation{
 		"core.beta": {{ID: "install-beta", Kind: model.OperationInstall}},
 	}
@@ -134,8 +179,44 @@ func TestStatusDistinguishesReadyAndUnavailable(t *testing.T) {
 	}
 }
 
+func TestRequireSameFileRejectsDifferentIdentity(t *testing.T) {
+	firstPath := filepath.Join(t.TempDir(), "first")
+	secondPath := filepath.Join(t.TempDir(), "second")
+	if err := os.WriteFile(firstPath, []byte("first"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secondPath, []byte("second"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	first, err := os.Stat(firstPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.Stat(secondPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := requireSameFile(first, first, "owner"); err != nil {
+		t.Fatalf("same identity rejected: %v", err)
+	}
+	if err := requireSameFile(first, second, "owner"); err == nil {
+		t.Fatal("different identities accepted")
+	}
+}
+
 func TestDoctorFailsOnlyWhenEnabledResourceIsUnavailable(t *testing.T) {
 	deps, fixture := fixtureDependencies(t, "ready.json")
+	store, err := deps.OpenState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := store.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted.Ownership) != 0 || len(persisted.AppliedCatalogs) != 1 || persisted.AppliedCatalogs[0] != "fixture-digest" {
+		t.Fatalf("ready fixture snapshot = %#v", persisted)
+	}
 	code, _, stderr := run(t, []string{"doctor"}, deps)
 	if code != 0 || stderr != "" {
 		t.Fatalf("ready doctor = %d, stderr=%q", code, stderr)
@@ -182,6 +263,132 @@ func TestStatusRejectsIncompleteLockOwner(t *testing.T) {
 	code, _, stderr := run(t, []string{"status"}, deps)
 	if code == 0 || !strings.Contains(stderr, "inspect reconciliation lock") {
 		t.Fatalf("Run(status) = %d, stderr=%q", code, stderr)
+	}
+}
+
+func TestInspectLiveLockRejectsUnsafeFilesystemEntries(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, stateDir string)
+	}{
+		{
+			name: "lock directory symlink",
+			setup: func(t *testing.T, stateDir string) {
+				external := t.TempDir()
+				if err := os.Symlink(external, filepath.Join(stateDir, "lock")); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "owner symlink",
+			setup: func(t *testing.T, stateDir string) {
+				makeLockDir(t, stateDir)
+				external := filepath.Join(t.TempDir(), "owner.json")
+				if err := os.WriteFile(external, validOwnerJSON(42), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(external, filepath.Join(stateDir, "lock", "owner.json")); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "owner fifo",
+			setup: func(t *testing.T, stateDir string) {
+				makeLockDir(t, stateDir)
+				if err := syscall.Mkfifo(filepath.Join(stateDir, "lock", "owner.json"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "oversized owner",
+			setup: func(t *testing.T, stateDir string) {
+				makeLockDir(t, stateDir)
+				writeOwnerContents(t, stateDir, bytes.Repeat([]byte("x"), 64*1024+1))
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			stateDir := t.TempDir()
+			test.setup(t, stateDir)
+			called := false
+			_, err := inspectLiveLock(stateDir, func(int) error {
+				called = true
+				return nil
+			})
+			if err == nil {
+				t.Fatal("unsafe lock accepted")
+			}
+			if called {
+				t.Fatal("process probe called for unsafe lock")
+			}
+		})
+	}
+}
+
+func TestInspectLiveLockRejectsInvalidOwnerMetadata(t *testing.T) {
+	tests := []struct {
+		name     string
+		contents []byte
+	}{
+		{"unknown field", []byte(`{"pid":42,"command":"tpod apply","startedAt":"2026-07-22T00:00:00Z","nonce":"0123456789abcdef0123456789abcdef","extra":true}`)},
+		{"invalid nonce", []byte(`{"pid":42,"command":"tpod apply","startedAt":"2026-07-22T00:00:00Z","nonce":"00"}`)},
+		{"zero pid", []byte(`{"pid":0,"command":"tpod apply","startedAt":"2026-07-22T00:00:00Z","nonce":"0123456789abcdef0123456789abcdef"}`)},
+		{"control command", []byte("{\"pid\":42,\"command\":\"tpod\\napply\",\"startedAt\":\"2026-07-22T00:00:00Z\",\"nonce\":\"0123456789abcdef0123456789abcdef\"}")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			stateDir := t.TempDir()
+			makeLockDir(t, stateDir)
+			writeOwnerContents(t, stateDir, test.contents)
+			called := false
+			_, err := inspectLiveLock(stateDir, func(int) error {
+				called = true
+				return nil
+			})
+			if err == nil {
+				t.Fatal("invalid lock owner accepted")
+			}
+			if called {
+				t.Fatal("process probe called for invalid lock owner")
+			}
+		})
+	}
+}
+
+func TestInspectLiveLockClassifiesProcessProbeResults(t *testing.T) {
+	tests := []struct {
+		name       string
+		probeError error
+		want       string
+		wantError  bool
+	}{
+		{"live", nil, "active (PID 42, command tpod apply)", false},
+		{"permission denied is live", syscall.EPERM, "active (PID 42, command tpod apply)", false},
+		{"stale", syscall.ESRCH, "none (stale lock present)", false},
+		{"probe failure", errors.New("probe failed"), "", true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			stateDir := t.TempDir()
+			makeLockDir(t, stateDir)
+			writeOwnerContents(t, stateDir, validOwnerJSON(42))
+			got, err := inspectLiveLock(stateDir, func(pid int) error {
+				if pid != 42 {
+					t.Fatalf("probe PID = %d, want 42", pid)
+				}
+				return test.probeError
+			})
+			if (err != nil) != test.wantError || got != test.want {
+				t.Fatalf("inspectLiveLock() = %q, %v; want %q, error=%v", got, err, test.want, test.wantError)
+			}
+			if strings.Contains(got, "active") && test.probeError == syscall.ESRCH {
+				t.Fatalf("stale PID reported live: %q", got)
+			}
+		})
 	}
 }
 
@@ -265,4 +472,22 @@ func writeLockOwner(t *testing.T, stateDir, suffix string) {
 	if err := os.WriteFile(filepath.Join(stateDir, "lock", "owner.json"), []byte(owner), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func makeLockDir(t *testing.T, stateDir string) {
+	t.Helper()
+	if err := os.Mkdir(filepath.Join(stateDir, "lock"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeOwnerContents(t *testing.T, stateDir string, contents []byte) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(stateDir, "lock", "owner.json"), contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func validOwnerJSON(pid int) []byte {
+	return []byte(fmt.Sprintf(`{"pid":%d,"command":"tpod apply","startedAt":"2026-07-22T00:00:00Z","nonce":"0123456789abcdef0123456789abcdef"}`, pid))
 }
