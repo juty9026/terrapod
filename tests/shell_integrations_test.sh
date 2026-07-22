@@ -74,6 +74,21 @@ pass "rendered shell integrations script is valid sh"
 sh -n "$retry_rendered" || fail "rendered shell integrations retry script should be valid sh"
 pass "rendered shell integrations retry script is valid sh"
 
+catalog="$repo_root/catalog/v1/resources.json"
+jq -e '
+  [
+    .resources[] |
+    select(.id == "shell.oh-my-zsh" or .id == "shell.zinit" or .id == "shell.scm-breeze") |
+    select(.type == "git-checkout" and .provider == "git" and .versionPolicy == "pinned") |
+    select(.commands == []) |
+    select(.metadata["git.remote"] | startswith("https://github.com/")) |
+    select(.metadata["git.ref"] | startswith("refs/")) |
+    select(.metadata["git.commit"] | test("^[0-9a-f]{40}$")) |
+    .id
+  ] | sort == ["shell.oh-my-zsh", "shell.scm-breeze", "shell.zinit"]
+' "$catalog" >/dev/null || fail "catalog should model all shell integrations as pinned Git checkouts"
+pass "catalog models all shell integrations as pinned Git checkouts"
+
 write_stub "$tmp_dir/bin/curl" \
   'printf "%s\n" "curl args:$*" >>"$SHELL_INTEGRATIONS_TEST_LOG"' \
   'output_file=' \

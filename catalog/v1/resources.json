@@ -507,6 +507,42 @@
       "metadata": {"bootstrapOnly": "true"}
     },
     {
+      "id": "shell.oh-my-zsh",
+      "type": "git-checkout", "profiles": ["macos-terminal", "vps-shell"], "dependsOn": ["core.git"],
+      "versionPolicy": "pinned", "provider": "git", "package": "oh-my-zsh", "commands": [],
+      "metadata": {
+        "git.remote": "https://github.com/ohmyzsh/ohmyzsh.git",
+        "git.ref": "refs/heads/master",
+        "git.commit": "e1d1f0dcd53d87096e5bfa48cb1c30d37cb7e5bf",
+        "git.destination": ".oh-my-zsh",
+        "git.verifyFiles": "oh-my-zsh.sh"
+      }
+    },
+    {
+      "id": "shell.zinit",
+      "type": "git-checkout", "profiles": ["macos-terminal", "vps-shell"], "dependsOn": ["core.git"],
+      "versionPolicy": "pinned", "provider": "git", "package": "zinit", "commands": [],
+      "metadata": {
+        "git.remote": "https://github.com/zdharma-continuum/zinit.git",
+        "git.ref": "refs/tags/v3.15.0",
+        "git.commit": "429ab136312dfce68ad7d87a0ecb08c5063e7287",
+        "git.destination": ".local/share/zinit/zinit.git",
+        "git.verifyFiles": "zinit.zsh"
+      }
+    },
+    {
+      "id": "shell.scm-breeze",
+      "type": "git-checkout", "profiles": ["macos-terminal", "vps-shell"], "dependsOn": ["core.git"],
+      "versionPolicy": "pinned", "provider": "git", "package": "scm-breeze", "commands": [],
+      "metadata": {
+        "git.remote": "https://github.com/scmbreeze/scm_breeze.git",
+        "git.ref": "refs/heads/main",
+        "git.commit": "2d17ef533c90efbedee922e055b84869d9abf16a",
+        "git.destination": ".scm_breeze",
+        "git.verifyFiles": "install.sh"
+      }
+    },
+    {
       "id": "runtime.bun",
       "type": "package", "profiles": ["macos-terminal", "vps-shell"], "dependsOn": ["core.mise"],
       "versionPolicy": "pinned", "provider": "mise", "package": "bun", "commands": ["bun"],

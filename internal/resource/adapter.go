@@ -22,6 +22,13 @@ type BoundExecutor interface {
 	ExecuteResource(context.Context, model.Resource, model.Operation) model.OperationResult
 }
 
+// HistoricalPlanner plans removal using a signed historical resource and its
+// ownership receipt. Adapters implement it when desired and historical state
+// cannot be distinguished from the Resource value alone.
+type HistoricalPlanner interface {
+	PlanHistorical(context.Context, model.Resource, model.Observation, model.Ownership) ([]model.Operation, error)
+}
+
 type registryKey struct {
 	resourceType model.ResourceType
 	provider     string

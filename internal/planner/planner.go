@@ -174,7 +174,13 @@ func (p *Planner) Build(ctx context.Context, input Input) (model.Plan, error) {
 		if err := ctx.Err(); err != nil {
 			return model.Plan{}, err
 		}
-		operations, planErr := adapter.Plan(ctx, historicalResource, observation, input.Snapshot.Ownership[id])
+		var operations []model.Operation
+		var planErr error
+		if historical, ok := adapter.(resource.HistoricalPlanner); ok {
+			operations, planErr = historical.PlanHistorical(ctx, historicalResource, observation, input.Snapshot.Ownership[id])
+		} else {
+			operations, planErr = adapter.Plan(ctx, historicalResource, observation, input.Snapshot.Ownership[id])
+		}
 		if planErr != nil {
 			if isContextError(planErr) {
 				return model.Plan{}, planErr

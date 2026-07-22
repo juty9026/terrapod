@@ -104,6 +104,37 @@ func TestBuildPrunesRemovedOwnedResourcesDependentFirst(t *testing.T) {
 	assertOperationIDs(t, plan, "prune-ripgrep", "prune-homebrew")
 }
 
+type historicalFixture struct {
+	*resource.Fixture
+	called bool
+}
+
+func (f *historicalFixture) PlanHistorical(_ context.Context, item model.Resource, _ model.Observation, _ model.Ownership) ([]model.Operation, error) {
+	f.called = true
+	return []model.Operation{{ID: "historical-" + string(item.ID), Kind: model.OperationPrune}}, nil
+}
+
+func TestBuildUsesHistoricalPlannerForRemovedResources(t *testing.T) {
+	fixture := &historicalFixture{Fixture: &resource.Fixture{Observations: map[model.ResourceID]model.Observation{}}}
+	registry := resource.NewRegistry()
+	if err := registry.Register(model.ResourcePackage, "brew", fixture); err != nil {
+		t.Fatal(err)
+	}
+	historical := catalog([]model.Resource{resourceDef("core.ripgrep", nil)})
+	input := baseInput(nil)
+	input.Historical["old"] = historical
+	input.Snapshot.Ownership = ownershipFor("old", historical.Resources...)
+
+	plan, err := planner.New(registry).Build(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fixture.called {
+		t.Fatal("historical planner was not called")
+	}
+	assertOperationIDs(t, plan, "historical-core.ripgrep")
+}
+
 func TestBuildRejectsPruneWithoutMatchingVerifiedHistoricalCatalog(t *testing.T) {
 	tests := map[string]func(*planner.Input){
 		"missing digest": func(input *planner.Input) { delete(input.Historical, "old") },
