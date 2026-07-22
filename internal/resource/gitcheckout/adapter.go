@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -70,9 +71,24 @@ var beforeGitMetadataCommit func() error
 var beforeStagingQuarantine func(string)
 var afterMetadataOldRename func() error
 var afterMetadataNewRename func() error
+var afterPartialBackup func(string)
+var afterRemovalQuarantine func(string, string)
+var afterTreeQuarantineValidated func(string)
 
 type metadataIntent struct {
-	Token, OldDigest, NewDigest string
+	Token       string
+	OldDigest   string
+	NewDigest   string
+	JournalID   string
+	PlanID      string
+	OperationID string
+	ResourceID  model.ResourceID
+	Provider    string
+	Package     string
+	Remote      string
+	Commit      string
+	Destination string
+	Capability  string
 }
 
 type metadataPendingError struct{ err error }
@@ -341,7 +357,7 @@ func (a *Adapter) execute(ctx context.Context, item model.Resource, op model.Ope
 	if len(op.Removes) != 0 {
 		return errors.New("git-checkout: non-prune operation cannot remove packages")
 	}
-	if err := a.recoverMetadataTransaction(d); err != nil {
+	if err := a.recoverMetadataTransaction(ctx, item, op, *snapshot.ActiveJournal, d); err != nil {
 		return err
 	}
 	current, err := a.inspect(ctx, d) // close the plan/apply race
@@ -388,7 +404,7 @@ func (a *Adapter) execute(ctx context.Context, item model.Resource, op model.Ope
 		if !current.exists || !current.git || current.remote != d.remote {
 			return errors.New("git-checkout: checkout changed before update")
 		}
-		return a.update(ctx, d)
+		return a.update(ctx, item, op, *snapshot.ActiveJournal, d)
 	default:
 		return fmt.Errorf("git-checkout: unsupported operation %q", op.Kind)
 	}
@@ -866,7 +882,7 @@ func (a *Adapter) materializeGitSnapshot(d declaration, snapshot *gitSnapshot) (
 	return cap, nil
 }
 
-func (a *Adapter) commitGitSnapshot(d declaration, snapshot *gitSnapshot, cap stagingCapability) error {
+func (a *Adapter) commitGitSnapshot(d declaration, snapshot *gitSnapshot, cap stagingCapability, intent metadataIntent) error {
 	if err := snapshot.verifySource(); err != nil {
 		return err
 	}
@@ -897,7 +913,7 @@ func (a *Adapter) commitGitSnapshot(d declaration, snapshot *gitSnapshot, cap st
 	if err != nil {
 		return err
 	}
-	intent := metadataIntent{Token: cap.token, OldDigest: oldDigest, NewDigest: newDigest}
+	intent.Token, intent.OldDigest, intent.NewDigest = cap.token, oldDigest, newDigest
 	if err := writeMetadataIntent(home.root, intentPath, intent); err != nil {
 		return err
 	}
@@ -910,7 +926,7 @@ func (a *Adapter) commitGitSnapshot(d declaration, snapshot *gitSnapshot, cap st
 	}
 	if digest, err := digestRootTree(home.root, oldPath); err != nil || digest != oldDigest {
 		_ = home.root.Rename(oldPath, gitPath)
-		_ = home.root.Remove(intentPath)
+		_ = retireIntent(home.root, intentPath, cap.token)
 		transactionStarted = false
 		return errors.New("git-checkout: original .git changed during metadata quarantine")
 	}
@@ -928,7 +944,7 @@ func (a *Adapter) commitGitSnapshot(d declaration, snapshot *gitSnapshot, cap st
 	if digest, err := digestRootTree(home.root, gitPath); err != nil || digest != newDigest {
 		_ = home.root.Rename(gitPath, newPath)
 		_ = home.root.Rename(oldPath, gitPath)
-		_ = home.root.Remove(intentPath)
+		_ = retireIntent(home.root, intentPath, cap.token)
 		transactionStarted = false
 		return errors.New("git-checkout: new .git changed during metadata commit")
 	}
@@ -946,7 +962,7 @@ func (a *Adapter) commitGitSnapshot(d declaration, snapshot *gitSnapshot, cap st
 	if err := removeTreeByDigest(home.root, oldPath, oldDigest, cap.token); err != nil {
 		return metadataPendingError{err}
 	}
-	if err := home.root.Remove(intentPath); err != nil {
+	if err := retireIntent(home.root, intentPath, cap.token); err != nil {
 		return metadataPendingError{err}
 	}
 	if err := home.verify(); err != nil {
@@ -1052,7 +1068,7 @@ func readMetadataIntent(root *os.Root, path string) (metadataIntent, error) {
 		return metadataIntent{}, errors.Join(readErr, closeErr, errors.New("git-checkout: invalid metadata transaction intent"))
 	}
 	var intent metadataIntent
-	if err := json.Unmarshal(contents, &intent); err != nil || !regexp.MustCompile(`^[0-9a-f]{16}$`).MatchString(intent.Token) || len(intent.OldDigest) != 64 || len(intent.NewDigest) != 64 {
+	if err := json.Unmarshal(contents, &intent); err != nil || !regexp.MustCompile(`^[0-9a-f]{16}$`).MatchString(intent.Token) || len(intent.OldDigest) != 64 || len(intent.NewDigest) != 64 || len(intent.Capability) != 64 || intent.JournalID == "" || intent.OperationID == "" {
 		return metadataIntent{}, errors.New("git-checkout: invalid metadata transaction intent")
 	}
 	return intent, nil
@@ -1071,10 +1087,21 @@ func removeTreeByDigest(root *os.Root, path, expected, token string) error {
 		_ = root.Rename(quarantine, path)
 		return errors.New("git-checkout: metadata garbage identity changed")
 	}
-	return root.RemoveAll(quarantine)
+	if afterTreeQuarantineValidated != nil {
+		afterTreeQuarantineValidated(quarantine)
+	}
+	return nil
 }
 
-func (a *Adapter) recoverMetadataTransaction(d declaration) error {
+func retireIntent(root *os.Root, path, token string) error {
+	tombstone := path + ".retired-" + token
+	if _, err := root.Lstat(tombstone); !errors.Is(err, os.ErrNotExist) {
+		return errors.New("git-checkout: retired intent path already exists")
+	}
+	return root.Rename(path, tombstone)
+}
+
+func (a *Adapter) recoverMetadataTransaction(ctx context.Context, item model.Resource, op model.Operation, journal model.Journal, d declaration) error {
 	home, err := a.openHome()
 	if err != nil {
 		return err
@@ -1089,6 +1116,16 @@ func (a *Adapter) recoverMetadataTransaction(d declaration) error {
 	}
 	intent, err := readMetadataIntent(home.root, intentPath)
 	if err != nil {
+		return err
+	}
+	if intent.JournalID != journal.ID || intent.PlanID != journal.Plan.ID || intent.OperationID != op.ID || intent.ResourceID != item.ID || intent.Provider != item.Provider || intent.Package != item.Package || intent.Remote != d.remote || intent.Commit != d.commit || intent.Destination != d.destination || !journalAuthorizes(journal, op) {
+		return errors.New("git-checkout: metadata transaction is not authorized by the active signed operation")
+	}
+	capability, err := a.State.TransactionAuthorization(journal.ID, op.ID)
+	if err != nil || subtle.ConstantTimeCompare([]byte(capability), []byte(intent.Capability)) != 1 {
+		return errors.New("git-checkout: metadata transaction capability is not authorized")
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	gitPath := filepath.Join(destination, ".git")
@@ -1121,7 +1158,7 @@ func (a *Adapter) recoverMetadataTransaction(d declaration) error {
 		currentErr, oldErr, newErr = nil, nil, os.ErrNotExist
 	}
 	if currentErr == nil && current == intent.NewDigest && errors.Is(oldErr, os.ErrNotExist) && errors.Is(newErr, os.ErrNotExist) {
-		if err := home.root.Remove(intentPath); err != nil {
+		if err := retireIntent(home.root, intentPath, intent.Token); err != nil {
 			return err
 		}
 		return syncRootDirectory(home.root, destination)
@@ -1132,10 +1169,19 @@ func (a *Adapter) recoverMetadataTransaction(d declaration) error {
 	if err := removeTreeByDigest(home.root, oldPath, intent.OldDigest, intent.Token); err != nil {
 		return err
 	}
-	if err := home.root.Remove(intentPath); err != nil {
+	if err := retireIntent(home.root, intentPath, intent.Token); err != nil {
 		return err
 	}
 	return syncRootDirectory(home.root, destination)
+}
+
+func journalAuthorizes(journal model.Journal, op model.Operation) bool {
+	for _, candidate := range journal.Plan.Operations {
+		if candidate.ID == op.ID && candidate.ResourceID == op.ResourceID && candidate.Kind == op.Kind && candidate.Provider == op.Provider && candidate.Package == op.Package && sameStrings(candidate.Removes, op.Removes) {
+			return true
+		}
+	}
+	return false
 }
 
 func gitEnvironment() map[string]string {
@@ -1283,9 +1329,7 @@ func (a *Adapter) removeStaging(staging stagingCapability) error {
 	if err != nil {
 		return err
 	}
-	if err := home.root.RemoveAll(quarantine); err != nil {
-		return err
-	}
+	_ = quarantine // validated tombstone is retained for non-destructive GC.
 	if err := home.verify(); err != nil {
 		return err
 	}
@@ -1424,7 +1468,7 @@ func syncRootDirectory(root *os.Root, relative string) error {
 	return directory.Sync()
 }
 
-func (a *Adapter) update(ctx context.Context, d declaration) error {
+func (a *Adapter) update(ctx context.Context, item model.Resource, op model.Operation, journal model.Journal, d declaration) error {
 	destination := filepath.Join(a.Home, filepath.FromSlash(d.destination))
 	before, err := a.inspect(ctx, d)
 	if err != nil || !before.git || before.remote != d.remote {
@@ -1518,7 +1562,16 @@ func (a *Adapter) update(ctx context.Context, d declaration) error {
 			return err
 		}
 	}
-	if err := a.commitGitSnapshot(d, snapshot, cap); err != nil {
+	intent := metadataIntent{
+		JournalID: journal.ID, PlanID: journal.Plan.ID, OperationID: op.ID,
+		ResourceID: item.ID, Provider: item.Provider, Package: item.Package,
+		Remote: d.remote, Commit: d.commit, Destination: d.destination,
+	}
+	intent.Capability, err = a.State.EnsureTransactionAuthorization(journal.ID, op.ID)
+	if err != nil {
+		return err
+	}
+	if err := a.commitGitSnapshot(d, snapshot, cap, intent); err != nil {
 		var pending metadataPendingError
 		if errors.As(err, &pending) {
 			committed = true
@@ -1539,13 +1592,48 @@ func (a *Adapter) backupAndRemove(ctx context.Context, journal string, d declara
 		home.close()
 		return err
 	}
-	checkout, err := home.root.OpenRoot(filepath.FromSlash(d.destination))
+	originalInfo, err := home.root.Lstat(filepath.FromSlash(d.destination))
+	if err != nil || !originalInfo.IsDir() {
+		home.close()
+		return errors.New("git-checkout: partial checkout is not a real directory")
+	}
+	token := make([]byte, 8)
+	if _, err := rand.Read(token); err != nil {
+		home.close()
+		return err
+	}
+	quarantineRelative := filepath.FromSlash(d.destination) + ".tpod-partial-" + hex.EncodeToString(token)
+	if err := home.root.Rename(filepath.FromSlash(d.destination), quarantineRelative); err != nil {
+		home.close()
+		return err
+	}
+	quarantinedInfo, err := home.root.Lstat(quarantineRelative)
+	if err != nil || !os.SameFile(originalInfo, quarantinedInfo) {
+		_ = home.root.Rename(quarantineRelative, filepath.FromSlash(d.destination))
+		home.close()
+		return errors.New("git-checkout: partial checkout changed during quarantine")
+	}
+	quarantineDigest, err := digestRootTree(home.root, quarantineRelative)
+	if err != nil {
+		_ = home.root.Rename(quarantineRelative, filepath.FromSlash(d.destination))
+		home.close()
+		return err
+	}
+	checkout, err := home.root.OpenRoot(quarantineRelative)
 	if err != nil {
 		home.close()
 		return err
 	}
+	quarantine := filepath.Join(a.Home, quarantineRelative)
+	committed := false
+	defer func() {
+		if !committed {
+			if _, err := os.Lstat(destination); errors.Is(err, os.ErrNotExist) {
+				_ = os.Rename(quarantine, destination)
+			}
+		}
+	}()
 	var files []string
-	var directories []string
 	err = fs.WalkDir(checkout.FS(), ".", func(relative string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -1557,11 +1645,10 @@ func (a *Adapter) backupAndRemove(ctx context.Context, journal string, d declara
 		if err != nil {
 			return err
 		}
-		path := filepath.Join(destination, relative)
 		if info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
-			directories = append(directories, path)
 			return nil
 		}
+		path := filepath.Join(quarantine, relative)
 		if !info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 {
 			return fmt.Errorf("git-checkout: unsafe partial object %s", path)
 		}
@@ -1577,29 +1664,45 @@ func (a *Adapter) backupAndRemove(ctx context.Context, journal string, d declara
 		return err
 	}
 	receipts := make(map[string]string, len(files))
-	for _, path := range files {
+	for _, source := range files {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := a.Backup.Save(journal, path); err != nil {
+		relative, _ := filepath.Rel(quarantine, source)
+		logical := filepath.Join(destination, relative)
+		if err := a.Backup.SaveAs(journal, source, logical); err != nil {
 			return fmt.Errorf("git-checkout: backup partial checkout: %w", err)
 		}
-		receipt, err := pathReceipt(path)
+		receipt, err := pathReceipt(source)
 		if err != nil {
 			return err
 		}
-		receipts[path] = receipt
+		receipts[source] = receipt
 	}
-	return a.removeRecorded(destination, files, directories, func(path string) error {
+	if afterPartialBackup != nil {
+		afterPartialBackup(quarantine)
+	}
+	for path, expected := range receipts {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		current, err := pathReceipt(path)
-		if err != nil || current != receipts[path] {
-			return errors.New("git-checkout: partial checkout changed immediately before replacement")
+		if err != nil || current != expected {
+			return errors.New("git-checkout: partial checkout changed after backup")
 		}
-		return nil
-	})
+	}
+	verificationRoot, err := a.openHome()
+	if err != nil {
+		return err
+	}
+	latestInfo, statErr := verificationRoot.root.Lstat(quarantineRelative)
+	latestDigest, digestErr := digestRootTree(verificationRoot.root, quarantineRelative)
+	verificationRoot.close()
+	if statErr != nil || digestErr != nil || !os.SameFile(originalInfo, latestInfo) || latestDigest != quarantineDigest {
+		return errors.New("git-checkout: quarantined partial checkout changed after backup")
+	}
+	committed = true
+	return nil
 }
 
 func (a *Adapter) prune(ctx context.Context, d declaration, owned map[string]string) error {
@@ -1627,17 +1730,7 @@ func (a *Adapter) prune(ctx context.Context, d declaration, owned map[string]str
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return a.removeRecorded(destination, files, nil, func(path string) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		expected := owned[path]
-		got, err := a.ownedReceipt(d, path)
-		if err != nil || got != expected {
-			return errors.New("git-checkout: path changed immediately before removal")
-		}
-		return nil
-	})
+	return a.removeRecorded(destination, files, owned)
 }
 
 func (a *Adapter) validateOwned(d declaration, owned map[string]string) error {
@@ -1746,7 +1839,7 @@ func pathReceipt(path string) (string, error) {
 	return prefix + hex.EncodeToString(sum[:]), nil
 }
 
-func (a *Adapter) removeRecorded(root string, files, extraDirs []string, before func(string) error) error {
+func (a *Adapter) removeRecorded(root string, files []string, receipts map[string]string) error {
 	relativeRoot, err := filepath.Rel(a.Home, root)
 	if err != nil || !safeRelative(filepath.ToSlash(relativeRoot)) {
 		return errors.New("git-checkout: removal root escapes home")
@@ -1769,64 +1862,36 @@ func (a *Adapter) removeRecorded(root string, files, extraDirs []string, before 
 	}
 	defer anchored.Close()
 	sort.Slice(files, func(i, j int) bool { return len(files[i]) > len(files[j]) })
-	dirSet := map[string]struct{}{}
-	for _, dir := range extraDirs {
-		relative, err := filepath.Rel(root, dir)
-		if err != nil || (relative != "." && !safeRelative(filepath.ToSlash(relative))) {
-			return errors.New("git-checkout: directory removal path escapes checkout")
-		}
-		if relative != "." {
-			dirSet[relative] = struct{}{}
-		}
-	}
 	for _, path := range files {
 		relative, err := filepath.Rel(root, path)
 		if err != nil || !safeRelative(filepath.ToSlash(relative)) {
 			return errors.New("git-checkout: removal path escapes checkout")
 		}
-		if before != nil {
-			if err := before(path); err != nil {
-				return err
-			}
-		}
-		if err := anchored.Remove(relative); err != nil && !errors.Is(err, os.ErrNotExist) {
+		token := make([]byte, 8)
+		if _, err := rand.Read(token); err != nil {
 			return err
 		}
-		for parent := filepath.Dir(relative); parent != "."; parent = filepath.Dir(parent) {
-			dirSet[parent] = struct{}{}
-		}
-	}
-	dirs := make([]string, 0, len(dirSet))
-	for dir := range dirSet {
-		dirs = append(dirs, dir)
-	}
-	sort.Slice(dirs, func(i, j int) bool { return len(dirs[i]) > len(dirs[j]) })
-	for _, dir := range dirs {
-		if err := anchored.Remove(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
-			if errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST) {
-				continue
-			}
+		tombstone := filepath.Join(filepath.Dir(relative), ".tpod-pruned-"+hex.EncodeToString(token)+"-"+filepath.Base(relative))
+		if err := anchored.Rename(relative, tombstone); err != nil {
 			return err
+		}
+		if afterRemovalQuarantine != nil {
+			afterRemovalQuarantine(root, tombstone)
+		}
+		got, err := rootPathReceipt(anchored, tombstone)
+		if err != nil || got != receipts[path] {
+			return errors.New("git-checkout: quarantined path does not match removal authority")
+		}
+		if _, err := anchored.Lstat(relative); !errors.Is(err, os.ErrNotExist) {
+			return errors.New("git-checkout: removal path reappeared during quarantine")
 		}
 	}
 	if err := syncRootDirectory(anchored, "."); err != nil {
 		return err
 	}
 	currentRoot, err := home.root.Lstat(relativeRoot)
-	if err == nil && os.SameFile(rootInfo, currentRoot) {
-		directory, openErr := anchored.Open(".")
-		if openErr == nil {
-			entries, readErr := directory.ReadDir(1)
-			_ = directory.Close()
-			if readErr == io.EOF && len(entries) == 0 {
-				_ = anchored.Close()
-				if latest, statErr := home.root.Lstat(relativeRoot); statErr == nil && os.SameFile(rootInfo, latest) {
-					if err := home.root.Remove(relativeRoot); err != nil && !errors.Is(err, syscall.ENOTEMPTY) && !errors.Is(err, syscall.EEXIST) {
-						return err
-					}
-				}
-			}
-		}
+	if err != nil || !os.SameFile(rootInfo, currentRoot) {
+		return errors.New("git-checkout: removal root changed during quarantine")
 	}
 	if err := home.verify(); err != nil {
 		return err

@@ -2,6 +2,7 @@ package gitcheckout
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -49,7 +50,8 @@ func resourceAt(destination string) model.Resource {
 func newFixture(t *testing.T, run runnerFunc) (*Adapter, model.Resource, *state.Store, string) {
 	t.Helper()
 	home := t.TempDir()
-	store, err := state.Open(filepath.Join(t.TempDir(), "state"))
+	stateDir := filepath.Join(t.TempDir(), "state")
+	store, err := state.Open(stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -450,6 +452,179 @@ func TestPrivateGitDoesNotMutateSwappedPublishedStaging(t *testing.T) {
 	}
 }
 
+func TestPruneDoesNotDeleteSwappedQuarantine(t *testing.T) {
+	a, item, store, destination := newFixture(t, func(context.Context, execx.Request) (execx.Result, error) {
+		return execx.Result{}, errors.New("Git must not run")
+	})
+	tracked := filepath.Join(destination, "tracked.zsh")
+	if err := os.MkdirAll(destination, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tracked, []byte("owned"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := pathReceipt(tracked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owned := model.Ownership{ResourceID: item.ID, Provider: item.Provider, Package: item.Package, Paths: map[string]string{tracked: receipt}}
+	if err := store.PutOwnership(owned); err != nil {
+		t.Fatal(err)
+	}
+	op := operation(item, model.OperationPrune)
+	if _, err := store.Begin(model.Plan{ID: "prune-swap", Operations: []model.Operation{op}}); err != nil {
+		t.Fatal(err)
+	}
+	var foreign, original string
+	afterRemovalQuarantine = func(root, relative string) {
+		afterRemovalQuarantine = nil
+		foreign = filepath.Join(root, relative)
+		original = foreign + "-original"
+		if err := os.Rename(foreign, original); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(foreign, []byte("foreign"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	defer func() { afterRemovalQuarantine = nil }()
+	result := a.ExecuteResource(context.Background(), item, op)
+	if result.Success || !strings.Contains(result.Detail, "removal authority") {
+		t.Fatalf("result=%#v", result)
+	}
+	if got, err := os.ReadFile(foreign); err != nil || string(got) != "foreign" {
+		t.Fatalf("foreign=%q err=%v", got, err)
+	}
+	if got, err := os.ReadFile(original); err != nil || string(got) != "owned" {
+		t.Fatalf("original=%q err=%v", got, err)
+	}
+}
+
+func TestValidatedTreeTombstoneIsNotDeletedAfterSwap(t *testing.T) {
+	base := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(base, "old"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "old", "metadata"), []byte("owned"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	digest, err := digestRootTree(root, "old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var foreign, original string
+	afterTreeQuarantineValidated = func(relative string) {
+		afterTreeQuarantineValidated = nil
+		foreign = filepath.Join(base, relative)
+		original = foreign + "-original"
+		if err := os.Rename(foreign, original); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(foreign, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(foreign, "metadata"), []byte("foreign"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	defer func() { afterTreeQuarantineValidated = nil }()
+	if err := removeTreeByDigest(root, "old", digest, "token"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(foreign, "metadata")); err != nil || string(got) != "foreign" {
+		t.Fatalf("foreign=%q err=%v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(original, "metadata")); err != nil || string(got) != "owned" {
+		t.Fatalf("original=%q err=%v", got, err)
+	}
+}
+
+func TestForgedAndStaleMetadataIntentCannotRecover(t *testing.T) {
+	for _, name := range []string{"forged", "stale", "matching-fields"} {
+		t.Run(name, func(t *testing.T) {
+			a, item, store, destination := newFixture(t, func(context.Context, execx.Request) (execx.Result, error) { return execx.Result{}, nil })
+			if err := os.MkdirAll(filepath.Join(destination, ".git"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			marker := filepath.Join(destination, ".git", "marker")
+			if err := os.WriteFile(marker, []byte("old"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			op := operation(item, model.OperationUpgrade)
+			journal, err := store.Begin(model.Plan{ID: "authorized-plan", Operations: []model.Operation{op}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			intent := metadataIntent{Token: strings.Repeat("a", 16), OldDigest: strings.Repeat("b", 64), NewDigest: strings.Repeat("c", 64), Capability: strings.Repeat("d", 64), JournalID: "forged", PlanID: journal.Plan.ID, OperationID: op.ID, ResourceID: item.ID, Provider: item.Provider, Package: item.Package, Remote: item.Metadata[MetadataRemote], Commit: item.Metadata[MetadataCommit], Destination: item.Metadata[MetadataDestination]}
+			if name == "stale" {
+				intent.JournalID = journal.ID
+				intent.PlanID = "prior-plan"
+			} else if name == "matching-fields" {
+				intent.JournalID = journal.ID
+			}
+			contents, _ := json.Marshal(intent)
+			if err := os.WriteFile(filepath.Join(destination, ".git.tpod-transaction.json"), contents, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			result := a.ExecuteResource(context.Background(), item, op)
+			if result.Success || !strings.Contains(result.Detail, "authorized") {
+				t.Fatalf("result=%#v", result)
+			}
+			if got, err := os.ReadFile(marker); err != nil || string(got) != "old" {
+				t.Fatalf("current metadata mutated=%q err=%v", got, err)
+			}
+		})
+	}
+}
+
+func TestPartialBackupChangePreventsReplacement(t *testing.T) {
+	a, item, store, destination := newFixture(t, func(_ context.Context, request execx.Request) (execx.Result, error) {
+		args := strings.Join(request.Args, " ")
+		switch {
+		case strings.Contains(args, " init "):
+			return execx.Result{}, os.MkdirAll(filepath.Join(request.Dir, ".git"), 0o700)
+		case strings.Contains(args, "rev-parse FETCH_HEAD"):
+			return execx.Result{Stdout: []byte(testCommit + "\n")}, nil
+		case strings.Contains(args, " checkout "):
+			return execx.Result{}, os.WriteFile(filepath.Join(request.Dir, "zinit.zsh"), []byte("installed"), 0o600)
+		}
+		return execx.Result{}, nil
+	})
+	partial := filepath.Join(destination, "partial.txt")
+	if err := os.MkdirAll(destination, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(partial, []byte("before"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	afterPartialBackup = func(quarantine string) {
+		afterPartialBackup = nil
+		if err := os.WriteFile(filepath.Join(quarantine, "partial.txt"), []byte("changed"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	defer func() { afterPartialBackup = nil }()
+	op := operation(item, model.OperationRestore)
+	if _, err := store.Begin(model.Plan{ID: "partial-change", Operations: []model.Operation{op}}); err != nil {
+		t.Fatal(err)
+	}
+	result := a.ExecuteResource(context.Background(), item, op)
+	if result.Success || !strings.Contains(result.Detail, "changed after backup") {
+		t.Fatalf("result=%#v", result)
+	}
+	if got, err := os.ReadFile(partial); err != nil || string(got) != "changed" {
+		t.Fatalf("partial=%q err=%v", got, err)
+	}
+	if _, err := os.Lstat(filepath.Join(destination, "zinit.zsh")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("replacement committed: %v", err)
+	}
+}
+
 func TestSnapshotDetectsSameInodeContentMutation(t *testing.T) {
 	a, item, _, destination := newFixture(t, gitInspector(t, itemRemote(), testCommit, ""))
 	if err := os.MkdirAll(filepath.Join(destination, ".git"), 0o700); err != nil {
@@ -665,7 +840,8 @@ func TestRealHomebrewGitInstallUpdateAndConfigIsolation(t *testing.T) {
 	fixed["shell.zinit"] = fixedSpec{remote: remote, destination: prior.destination, verify: prior.verify}
 	defer func() { fixed["shell.zinit"] = prior }()
 	home := t.TempDir()
-	store, err := state.Open(filepath.Join(t.TempDir(), "state"))
+	stateDir := filepath.Join(t.TempDir(), "state")
+	store, err := state.Open(stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -748,11 +924,16 @@ func TestRealHomebrewGitInstallUpdateAndConfigIsolation(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(checkout, ".git")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("old-rename crash left current metadata: %v", err)
 	}
-	restarted := &Adapter{Runner: NewRunner(nil, func() int { return 501 }), Git: git, Home: home, State: store, Backup: a.Backup}
+	reopenedStore, err := state.Open(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted := &Adapter{Runner: NewRunner(nil, func() int { return 501 }), Git: git, Home: home, State: reopenedStore, Backup: a.Backup}
 	if result := restarted.ExecuteResource(context.Background(), item, upgrade); !result.Success {
 		t.Fatalf("old-rename restart recovery=%#v", result)
 	}
 	a = restarted
+	store = reopenedStore
 	if err := store.Complete(journal.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -773,11 +954,16 @@ func TestRealHomebrewGitInstallUpdateAndConfigIsolation(t *testing.T) {
 	if got := strings.TrimSpace(runGitTest(t, git, "-C", checkout, "rev-parse", "HEAD")); got != second {
 		t.Fatalf("new metadata was not current after crash: %s", got)
 	}
-	restarted = &Adapter{Runner: NewRunner(nil, func() int { return 501 }), Git: git, Home: home, State: store, Backup: a.Backup}
+	reopenedStore, err = state.Open(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted = &Adapter{Runner: NewRunner(nil, func() int { return 501 }), Git: git, Home: home, State: reopenedStore, Backup: a.Backup}
 	if result := restarted.ExecuteResource(context.Background(), item, upgrade); !result.Success {
 		t.Fatalf("new-rename restart recovery=%#v", result)
 	}
 	a = restarted
+	store = reopenedStore
 	if err := store.Complete(journal.ID); err != nil {
 		t.Fatal(err)
 	}
