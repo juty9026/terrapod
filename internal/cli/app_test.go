@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/juty9026/terrapod/internal/catalog"
 	"github.com/juty9026/terrapod/internal/config"
@@ -326,6 +327,59 @@ func TestInspectLiveLockRejectsUnsafeFilesystemEntries(t *testing.T) {
 				t.Fatal("process probe called for unsafe lock")
 			}
 		})
+	}
+}
+
+func TestRunDoesNotBlockWhenOwnerChangesFromRegularFileToFIFO(t *testing.T) {
+	deps, _ := fixtureDependencies(t, "ready.json")
+	writeLockOwner(t, deps.Paths.StateDir, "")
+	ownerPath := filepath.Join(deps.Paths.StateDir, "lock", "owner.json")
+	originalHook := beforeOpenLockOwner
+	t.Cleanup(func() { beforeOpenLockOwner = originalHook })
+	var hookErr error
+	hookReached := make(chan struct{})
+	beforeOpenLockOwner = func() {
+		defer close(hookReached)
+		if err := os.Remove(ownerPath); err != nil {
+			hookErr = err
+			return
+		}
+		hookErr = syscall.Mkfifo(ownerPath, 0o600)
+	}
+
+	type result struct {
+		code   int
+		stderr string
+	}
+	results := make(chan result, 1)
+	go func() {
+		code, _, stderr := run(t, []string{"status"}, deps)
+		results <- result{code: code, stderr: stderr}
+	}()
+	<-hookReached
+	if hookErr != nil {
+		t.Fatal(hookErr)
+	}
+
+	select {
+	case got := <-results:
+		if got.code == 0 || !strings.Contains(got.stderr, "inspect reconciliation lock") {
+			t.Fatalf("Run(status) = %d, stderr=%q", got.code, got.stderr)
+		}
+	case <-time.After(250 * time.Millisecond):
+		writer, err := os.OpenFile(ownerPath, os.O_WRONLY|syscall.O_NONBLOCK, 0)
+		if err != nil {
+			t.Fatalf("unblock FIFO reader: %v", err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatalf("close FIFO writer: %v", err)
+		}
+		select {
+		case <-results:
+		case <-time.After(time.Second):
+			t.Fatal("blocked Run goroutine could not be recovered")
+		}
+		t.Fatal("Run blocked while opening a swapped FIFO owner")
 	}
 }
 

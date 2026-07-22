@@ -30,6 +30,8 @@ const (
 	exitUnavailable = 69
 )
 
+var beforeOpenLockOwner = func() {}
+
 type Dependencies struct {
 	Stdout      io.Writer
 	Stderr      io.Writer
@@ -291,7 +293,8 @@ func inspectLiveLock(stateDir string, probe func(int) error) (string, error) {
 	if !ownerInfo.Mode().IsRegular() || ownerInfo.Mode()&os.ModeSymlink != 0 {
 		return "", errors.New("unsafe lock owner is not a regular file")
 	}
-	ownerFile, err := lockRoot.Open("owner.json")
+	beforeOpenLockOwner()
+	ownerFile, err := lockRoot.OpenFile("owner.json", os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return "", err
 	}
