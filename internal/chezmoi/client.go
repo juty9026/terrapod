@@ -45,6 +45,8 @@ type ExpectedTarget struct {
 	Digest string
 }
 
+var beforeStagedCopy func(string)
+
 type fileIdentity struct {
 	path string
 	info os.FileInfo
@@ -286,7 +288,12 @@ func (c Client) applyTargets(ctx context.Context, targets []string, expected map
 			}
 			return verifyIdentities(append(inv.identities, parentIdentities...))
 		}
-		if err := installStaged(c.Destination, rel, staged[i], check != nil, precondition); err != nil {
+		var exact *ExpectedTarget
+		if expected != nil {
+			value := expected[absolute[i]]
+			exact = &value
+		}
+		if err := installStaged(c.Destination, rel, staged[i], exact, check != nil, precondition); err != nil {
 			return fmt.Errorf("chezmoi: install target %q: %w", absolute[i], err)
 		}
 	}
@@ -551,7 +558,7 @@ func copyRegularFile(source, destination string, mode os.FileMode) error {
 	return errors.Join(copyErr, out.Close())
 }
 
-func installStaged(home, relative, staged string, allowSymlinkReplacement bool, check func() error) error {
+func installStaged(home, relative, staged string, expected *ExpectedTarget, allowSymlinkReplacement bool, check func() error) error {
 	info, err := os.Lstat(staged)
 	if err != nil {
 		return err
@@ -576,6 +583,9 @@ func installStaged(home, relative, staged string, allowSymlinkReplacement bool, 
 				return err
 			}
 			if err := root.Mkdir(parent, 0o700); err != nil {
+				return err
+			}
+			if err := syncRootDirectory(root, filepath.Dir(parent)); err != nil {
 				return err
 			}
 			parentInfo, statErr = root.Lstat(parent)
@@ -610,7 +620,17 @@ func installStaged(home, relative, staged string, allowSymlinkReplacement bool, 
 		if err := root.Symlink(linkname, temp); err != nil {
 			return err
 		}
+		if expected != nil {
+			sum := sha256.Sum256([]byte(linkname))
+			if expected.Kind != "symlink" || hex.EncodeToString(sum[:]) != expected.Digest {
+				_ = root.Remove(temp)
+				return errors.New("staged symlink changed before commit")
+			}
+		}
 	} else {
+		if beforeStagedCopy != nil {
+			beforeStagedCopy(staged)
+		}
 		fd, err := syscall.Open(staged, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 		if err != nil {
 			return err
@@ -626,11 +646,29 @@ func installStaged(home, relative, staged string, allowSymlinkReplacement bool, 
 			in.Close()
 			return err
 		}
-		_, copyErr := io.Copy(out, in)
+		hash := sha256.New()
+		_, copyErr := io.Copy(io.MultiWriter(out, hash), in)
+		chmodErr := out.Chmod(info.Mode().Perm())
+		tempInfo, statErr := out.Stat()
+		syncErr := out.Sync()
 		closeErr := errors.Join(in.Close(), out.Close())
-		if err := errors.Join(copyErr, closeErr); err != nil {
+		if err := errors.Join(copyErr, chmodErr, statErr, syncErr, closeErr); err != nil {
 			_ = root.Remove(temp)
 			return err
+		}
+		if !tempInfo.Mode().IsRegular() || tempInfo.Mode().Perm() != info.Mode().Perm() || tempInfo.Size() != info.Size() {
+			_ = root.Remove(temp)
+			return errors.New("staged temp identity, mode, or size mismatch")
+		}
+		writtenDigest := hex.EncodeToString(hash.Sum(nil))
+		if expected != nil && writtenDigest != expected.Digest {
+			_ = root.Remove(temp)
+			return errors.New("staged bytes changed before temp commit")
+		}
+		digest, verifiedInfo, err := digestRootRegular(root, temp)
+		if err != nil || !os.SameFile(tempInfo, verifiedInfo) || digest != writtenDigest {
+			_ = root.Remove(temp)
+			return errors.New("staged temp changed before rename")
 		}
 	}
 	if err := check(); err != nil {
@@ -650,7 +688,30 @@ func installStaged(home, relative, staged string, allowSymlinkReplacement bool, 
 		_ = root.Remove(temp)
 		return err
 	}
-	return nil
+	return syncRootDirectory(root, filepath.Dir(relative))
+}
+
+func digestRootRegular(root *os.Root, path string) (string, os.FileInfo, error) {
+	file, err := root.OpenFile(path, os.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return "", nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return "", nil, errors.New("not a regular temp file")
+	}
+	hash := sha256.New()
+	_, err = io.Copy(hash, file)
+	return hex.EncodeToString(hash.Sum(nil)), info, err
+}
+func syncRootDirectory(root *os.Root, path string) error {
+	directory, err := root.Open(path)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
 }
 
 func sameReplaceableKind(existing, staged os.FileInfo, allowSymlink bool) bool {

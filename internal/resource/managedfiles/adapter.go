@@ -35,6 +35,49 @@ type Adapter struct {
 	Backup recovery.Backup
 }
 
+type Conflict struct {
+	Path     string
+	Obsolete bool
+}
+
+func (a *Adapter) Conflicts(ctx context.Context, desired model.Resource, owned model.Ownership) ([]Conflict, error) {
+	if err := a.validate(); err != nil {
+		return nil, err
+	}
+	if err := a.validateOwnershipScope(desired, owned.Paths); err != nil {
+		return nil, err
+	}
+	targets, err := a.targets(ctx, desired)
+	if err != nil {
+		return nil, err
+	}
+	home, err := a.openHome()
+	if err != nil {
+		return nil, err
+	}
+	defer home.root.Close()
+	var conflicts []Conflict
+	for path := range unionPaths(targets, owned.Paths) {
+		current, err := home.inspect(path)
+		if err != nil {
+			return nil, err
+		}
+		target, desiredNow := targets[path]
+		ownedKind, ownedDigest, hasOwned := decodeOwned(owned.Paths[path])
+		if desiredNow {
+			matchesDesired := current.exists && current.kind == target.Kind && current.digest == target.Digest
+			matchesOwned := hasOwned && current.exists && current.kind == ownedKind && current.digest == ownedDigest
+			if current.exists && !matchesDesired && !matchesOwned && (hasOwned || current.kind == "symlink") {
+				conflicts = append(conflicts, Conflict{Path: path})
+			}
+		} else if current.exists && (!hasOwned || current.kind != ownedKind || current.digest != ownedDigest) {
+			conflicts = append(conflicts, Conflict{Path: path, Obsolete: true})
+		}
+	}
+	sort.Slice(conflicts, func(i, j int) bool { return conflicts[i].Path < conflicts[j].Path })
+	return conflicts, nil
+}
+
 type pathState struct {
 	kind   string
 	digest string
@@ -170,7 +213,7 @@ func (a *Adapter) Plan(ctx context.Context, desired model.Resource, _ model.Obse
 		if desiredNow {
 			changed = changed || !matchesDesired || !ok || ownedKind != target.Kind || ownedDigest != target.Digest
 		} else {
-			changed = changed || current.exists
+			changed = true
 		}
 	}
 	if !changed {
@@ -281,6 +324,9 @@ func (a *Adapter) Verify(ctx context.Context, desired model.Resource) (model.Obs
 // ResolveConflict is the explicit managed-file conflict action: it always
 // creates a recovery copy before accepting the desired target.
 func (a *Adapter) ResolveConflict(ctx context.Context, desired model.Resource, journal string) error {
+	if err := a.validate(); err != nil {
+		return err
+	}
 	if desired.Type != model.ResourceManagedFiles || desired.Provider != "chezmoi" || desired.ID == "" {
 		return errors.New("managed-files: resolve requires an exact managed-files/chezmoi resource")
 	}
@@ -377,7 +423,9 @@ func (a *Adapter) ResolveConflict(ctx context.Context, desired model.Resource, j
 		if err := home.removeExact(path, authorized[path]); err != nil {
 			return err
 		}
-		home.removeEmptyParents(filepath.Dir(path))
+		if err := home.removeEmptyParents(filepath.Dir(path)); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -540,7 +588,9 @@ func (a *Adapter) removeOwned(ctx context.Context, home *homeFS, paths map[strin
 		if err := home.removeExact(path, current); err != nil {
 			return fmt.Errorf("managed-files: prune %s: %w", path, err)
 		}
-		home.removeEmptyParents(filepath.Dir(path))
+		if err := home.removeEmptyParents(filepath.Dir(path)); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -654,49 +704,83 @@ func (h *homeFS) removeExact(path string, expected pathState) error {
 	if err != nil {
 		return err
 	}
-	return h.root.Remove(relative)
+	if err := h.root.Remove(relative); err != nil {
+		return err
+	}
+	return h.syncDirectory(filepath.Dir(relative))
 }
-func (h *homeFS) removeEmptyParents(path string) {
+func (h *homeFS) removeEmptyParents(path string) error {
 	for current := filepath.Clean(path); current != h.path; current = filepath.Dir(current) {
 		relative, err := h.relative(current)
 		if err != nil {
-			return
+			return err
 		}
 		info, err := h.root.Lstat(relative)
-		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return nil
 		}
 		directory, err := h.root.OpenRoot(relative)
 		if err != nil {
-			return
+			return err
 		}
 		anchored, statErr := directory.Stat(".")
 		if statErr != nil || !os.SameFile(info, anchored) {
 			directory.Close()
-			return
+			if statErr != nil {
+				return statErr
+			}
+			return errors.New("managed-files: directory changed while pruning parents")
 		}
 		opened, err := directory.Open(".")
 		if err != nil {
 			directory.Close()
-			return
+			return err
 		}
 		_, readErr := opened.Readdirnames(1)
 		_ = opened.Close()
 		_ = directory.Close()
 		if readErr != io.EOF {
-			return
+			if readErr == nil {
+				return nil
+			}
+			return readErr
 		}
 		if err := h.verifyAnchor(); err != nil {
-			return
+			return err
 		}
 		latest, err := h.root.Lstat(relative)
-		if err != nil || latest.Mode()&os.ModeSymlink != 0 || !os.SameFile(info, latest) {
-			return
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if latest.Mode()&os.ModeSymlink != 0 || !os.SameFile(info, latest) {
+			return errors.New("managed-files: directory changed while pruning parents")
 		}
 		if err := h.root.Remove(relative); err != nil {
-			return
+			return err
+		}
+		if err := h.syncDirectory(filepath.Dir(relative)); err != nil {
+			return err
 		}
 	}
+	return nil
+}
+
+func (h *homeFS) syncDirectory(path string) error {
+	directory, err := h.root.Open(path)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
 }
 
 func desiredPaths(targets map[string]chezmoi.Target) map[string]string {

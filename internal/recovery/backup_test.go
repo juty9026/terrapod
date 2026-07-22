@@ -84,6 +84,51 @@ func TestSaveRejectsSymlinkParentAndFIFO(t *testing.T) {
 	}
 }
 
+func TestSaveIsIdempotentOnlyForExactExistingBackup(t *testing.T) {
+	base, root := t.TempDir(), t.TempDir()
+	source := filepath.Join(base, "file")
+	if err := os.WriteFile(source, []byte("same"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	backup := Backup{Root: root, Base: base}
+	if err := backup.Save("journal", source); err != nil {
+		t.Fatal(err)
+	}
+	if err := backup.Save("journal", source); err != nil {
+		t.Fatalf("exact retry=%v", err)
+	}
+	if err := os.WriteFile(source, []byte("different"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := backup.Save("journal", source); err == nil || !strings.Contains(err.Error(), "differs") {
+		t.Fatalf("different retry=%v", err)
+	}
+}
+
+func TestSaveSymlinkRetryRequiresExactTarget(t *testing.T) {
+	base, root := t.TempDir(), t.TempDir()
+	source := filepath.Join(base, "link")
+	if err := os.Symlink("one", source); err != nil {
+		t.Fatal(err)
+	}
+	backup := Backup{Root: root, Base: base}
+	if err := backup.Save("journal", source); err != nil {
+		t.Fatal(err)
+	}
+	if err := backup.Save("journal", source); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(source); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("two", source); err != nil {
+		t.Fatal(err)
+	}
+	if err := backup.Save("journal", source); err == nil {
+		t.Fatal("different symlink retry accepted")
+	}
+}
+
 func TestSavePreservesSymlinkAsSymlink(t *testing.T) {
 	home, root := t.TempDir(), t.TempDir()
 	path := filepath.Join(home, "link")

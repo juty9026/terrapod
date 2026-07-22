@@ -333,6 +333,21 @@ func TestObsoleteUnchangedPrunesAndPreservesModified(t *testing.T) {
 	}
 }
 
+func TestMissingObsoleteReceiptStillSchedulesOwnershipRefresh(t *testing.T) {
+	a, client, _, home, item := testAdapter(t, nil)
+	current, obsolete := filepath.Join(home, "current"), filepath.Join(home, "obsolete")
+	if err := os.WriteFile(current, []byte("desired"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client.targets = []chezmoi.Target{target(current, "file", "desired")}
+	owned := model.Ownership{ResourceID: item.ID, Paths: map[string]string{current: "file:" + Digest("file", []byte("desired")), obsolete: "file:" + Digest("file", []byte("old"))}}
+	obs, _ := a.Inspect(context.Background(), item)
+	ops, err := a.Plan(context.Background(), item, obs, owned)
+	if err != nil || len(ops) != 1 || ops[0].Kind != model.OperationUpgrade {
+		t.Fatalf("Plan=%#v,%v", ops, err)
+	}
+}
+
 func TestPruneRemovesOnlyRecordedPathsAndOnlyEmptyParents(t *testing.T) {
 	a, _, store, home, item := testAdapter(t, nil)
 	dir := filepath.Join(home, ".config", "app")

@@ -469,6 +469,29 @@ func TestApplyTargetsCheckedRejectsRenderedContentDifferentFromExpected(t *testi
 	}
 }
 
+func TestApplyTargetsCheckedRejectsStagedRestoreRaceBeforeTempCopy(t *testing.T) {
+	home, source, config, binary := clientPaths(t)
+	planned := []byte("planned")
+	c := Client{Runner: runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+		return execx.Result{}, os.WriteFile(request.Args[len(request.Args)-1], planned, 0o640)
+	}), Binary: binary, Source: source, Config: config, Destination: home}
+	sum := sha256.Sum256(planned)
+	beforeStagedCopy = func(path string) {
+		beforeStagedCopy = nil
+		if err := os.WriteFile(path, []byte("wrong!!"), 0o640); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { beforeStagedCopy = nil })
+	err := c.ApplyTargetsChecked(context.Background(), []ExpectedTarget{{Path: filepath.Join(home, "target"), Kind: "file", Digest: hex.EncodeToString(sum[:])}}, func(string) error { return nil })
+	if err == nil {
+		t.Fatal("staged restore race installed")
+	}
+	if _, err := os.Lstat(filepath.Join(home, "target")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("wrong target installed: %v", err)
+	}
+}
+
 func TestApplyTargetsCheckedAllowsOnlyAuthorizedSameKindSymlinkReplacement(t *testing.T) {
 	home, source, config, binary := clientPaths(t)
 	path := filepath.Join(home, "link")

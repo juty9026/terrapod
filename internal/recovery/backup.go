@@ -55,9 +55,20 @@ func (b Backup) Save(journal, path string) (retErr error) {
 	if err := ensureRealParents(root, filepath.Dir(destination)); err != nil {
 		return fmt.Errorf("recovery: create destination parents: %w", err)
 	}
+	sourceInfo, err := base.Lstat(relative)
+	if err != nil {
+		return fmt.Errorf("recovery: inspect source: %w", err)
+	}
 	if _, err := root.Lstat(destination); !errors.Is(err, os.ErrNotExist) {
 		if err == nil {
-			return fmt.Errorf("recovery: backup already exists for %q", relative)
+			same, compareErr := sameCapturedObject(base, relative, sourceInfo, root, destination)
+			if compareErr != nil {
+				return compareErr
+			}
+			if same {
+				return nil
+			}
+			return fmt.Errorf("recovery: existing backup for %q differs from current object", relative)
 		}
 		return err
 	}
@@ -71,10 +82,6 @@ func (b Backup) Save(journal, path string) (retErr error) {
 			_ = root.Remove(temporary)
 		}
 	}()
-	sourceInfo, err := base.Lstat(relative)
-	if err != nil {
-		return fmt.Errorf("recovery: inspect source: %w", err)
-	}
 	if sourceInfo.Mode()&os.ModeSymlink != 0 {
 		target, err := base.Readlink(relative)
 		if err != nil || target == "" || strings.IndexByte(target, 0) >= 0 {
@@ -106,8 +113,8 @@ func (b Backup) Save(journal, path string) (retErr error) {
 		}
 		hash := sha256.New()
 		_, copyErr := io.Copy(io.MultiWriter(out, hash), fd)
-		syncErr := out.Sync()
 		chmodErr := out.Chmod(sourceInfo.Mode().Perm())
+		syncErr := out.Sync()
 		closeErr := errors.Join(fd.Close(), out.Close())
 		if err := errors.Join(copyErr, syncErr, chmodErr, closeErr); err != nil {
 			return fmt.Errorf("recovery: copy file: %w", err)
@@ -130,6 +137,50 @@ func (b Backup) Save(journal, path string) (retErr error) {
 		return fmt.Errorf("recovery: commit backup: %w", err)
 	}
 	return syncDirectory(root, filepath.Dir(destination))
+}
+
+func sameCapturedObject(base *os.Root, source string, sourceInfo os.FileInfo, backup *os.Root, destination string) (bool, error) {
+	backupInfo, err := backup.Lstat(destination)
+	if err != nil {
+		return false, err
+	}
+	if sourceInfo.Mode()&os.ModeSymlink != 0 {
+		return sameSymlink(base, source, sourceInfo, backup, destination, backupInfo)
+	}
+	if !sourceInfo.Mode().IsRegular() || !backupInfo.Mode().IsRegular() {
+		return false, nil
+	}
+	sourceDigest, currentSource, err := digestRegular(base, source)
+	if err != nil {
+		return false, err
+	}
+	backupDigest, currentBackup, err := digestRegular(backup, destination)
+	if err != nil {
+		return false, err
+	}
+	return os.SameFile(sourceInfo, currentSource) && os.SameFile(backupInfo, currentBackup) && sourceInfo.Mode().Perm() == backupInfo.Mode().Perm() && equalDigest(sourceDigest, backupDigest), nil
+}
+func sameSymlink(base *os.Root, source string, sourceInfo os.FileInfo, backup *os.Root, destination string, backupInfo os.FileInfo) (bool, error) {
+	if backupInfo.Mode()&os.ModeSymlink == 0 {
+		return false, nil
+	}
+	left, err := base.Readlink(source)
+	if err != nil {
+		return false, err
+	}
+	right, err := backup.Readlink(destination)
+	if err != nil {
+		return false, err
+	}
+	currentSource, err := base.Lstat(source)
+	if err != nil {
+		return false, err
+	}
+	currentBackup, err := backup.Lstat(destination)
+	if err != nil {
+		return false, err
+	}
+	return os.SameFile(sourceInfo, currentSource) && os.SameFile(backupInfo, currentBackup) && left == right, nil
 }
 
 func openAnchoredRoot(path string) (*os.Root, os.FileInfo, error) {
@@ -190,6 +241,9 @@ func ensureRealParents(root *os.Root, path string) error {
 		info, err := root.Lstat(current)
 		if errors.Is(err, os.ErrNotExist) {
 			if err := root.Mkdir(current, 0o700); err != nil {
+				return err
+			}
+			if err := syncDirectory(root, filepath.Dir(current)); err != nil {
 				return err
 			}
 			info, err = root.Lstat(current)
