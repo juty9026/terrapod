@@ -23,6 +23,13 @@ type Provider interface {
 	Verify(context.Context, model.Resource) (model.Observation, error)
 }
 
+// MetadataRefresher refreshes provider inventory without changing installed
+// resources. Update runs only refreshers selected by the enabled catalog.
+type MetadataRefresher interface {
+	Name() string
+	RefreshMetadata(context.Context) error
+}
+
 // Privilege acquires the process-wide authorization needed by privileged
 // provider operations. Reconciliation calls it at most once per apply.
 type Privilege interface {

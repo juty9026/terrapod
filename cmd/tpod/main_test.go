@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -19,6 +21,25 @@ import (
 	"github.com/juty9026/terrapod/internal/resource/managementcore"
 	"github.com/juty9026/terrapod/internal/state"
 )
+
+func TestCompiledReleaseRootsRequireCanonicalCompleteLdflags(t *testing.T) {
+	oldID, oldKey := releaseRootKeyID, releaseRootPublicKey
+	t.Cleanup(func() { releaseRootKeyID, releaseRootPublicKey = oldID, oldKey })
+	releaseRootKeyID, releaseRootPublicKey = "", ""
+	if _, err := compiledReleaseRoots(); err == nil || !strings.Contains(err.Error(), "not embedded") {
+		t.Fatalf("empty roots error=%v", err)
+	}
+	releaseRootKeyID, releaseRootPublicKey = "root", "%%"
+	if _, err := compiledReleaseRoots(); err == nil {
+		t.Fatal("invalid base64 accepted")
+	}
+	key := make([]byte, ed25519.PublicKeySize)
+	releaseRootPublicKey = base64.StdEncoding.EncodeToString(key)
+	roots, err := compiledReleaseRoots()
+	if err != nil || len(roots["root"]) != ed25519.PublicKeySize {
+		t.Fatalf("roots=%v err=%v", roots, err)
+	}
+}
 
 func TestBuiltBinaryDispatchesThroughRealConstrainedChezmoiClient(t *testing.T) {
 	root := t.TempDir()

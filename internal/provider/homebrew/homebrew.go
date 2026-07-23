@@ -148,6 +148,14 @@ func (a *Adapter) Name() string {
 	return "homebrew-cask"
 }
 
+func (a *Adapter) RefreshMetadata(ctx context.Context) error {
+	_, err := a.run(ctx, "update")
+	if err != nil {
+		return fmt.Errorf("homebrew: refresh metadata: %w", err)
+	}
+	return nil
+}
+
 func (a *Adapter) Inspect(ctx context.Context, resource model.Resource) (model.Observation, error) {
 	if err := a.validateResource(resource); err != nil {
 		return model.Observation{}, err

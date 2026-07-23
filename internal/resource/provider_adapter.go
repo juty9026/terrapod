@@ -61,6 +61,13 @@ func (a *ProviderAdapter) Execute(ctx context.Context, operation model.Operation
 func (a *ProviderAdapter) Verify(ctx context.Context, item model.Resource) (model.Observation, error) {
 	return a.provider.Verify(ctx, item)
 }
+func (a *ProviderAdapter) Name() string { return a.provider.Name() }
+func (a *ProviderAdapter) RefreshMetadata(ctx context.Context) error {
+	if refresher, ok := a.provider.(provider.MetadataRefresher); ok {
+		return refresher.RefreshMetadata(ctx)
+	}
+	return nil
+}
 func (a *ProviderAdapter) Simulate(ctx context.Context, item model.Resource, operation model.Operation) (provider.ChangeSet, error) {
 	if item.ID != operation.ResourceID || item.Provider != operation.Provider || item.Package != operation.Package {
 		return provider.ChangeSet{}, errors.New("resource: simulation identity mismatch")

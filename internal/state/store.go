@@ -1,7 +1,9 @@
 package state
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,8 +19,10 @@ import (
 )
 
 const (
-	snapshotFilename = "snapshot.json"
-	journalDirname   = "journals"
+	snapshotFilename    = "snapshot.json"
+	journalDirname      = "journals"
+	updateDirname       = "updates"
+	trustedKeysFilename = "trusted-keys.json"
 )
 
 var journalIDPattern = regexp.MustCompile(`^\d{8}T\d{6}\.\d{9}Z-[0-9a-f]{32}$`)
@@ -32,9 +36,63 @@ type Store struct {
 	mu  sync.Mutex
 }
 
+func (s *Store) TrustedKeys() (map[string]ed25519.PublicKey, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	path := filepath.Join(s.dir, trustedKeysFilename)
+	var encoded map[string]string
+	if err := readJSONFile(path, &encoded); errors.Is(err, os.ErrNotExist) {
+		return map[string]ed25519.PublicKey{}, nil
+	} else if err != nil {
+		return nil, err
+	}
+	result := make(map[string]ed25519.PublicKey, len(encoded))
+	for id, value := range encoded {
+		key, err := base64.StdEncoding.Strict().DecodeString(value)
+		if err != nil || len(key) != ed25519.PublicKeySize || base64.StdEncoding.EncodeToString(key) != value {
+			return nil, fmt.Errorf("invalid persisted trusted key %q", id)
+		}
+		result[id] = ed25519.PublicKey(key)
+	}
+	return result, nil
+}
+
+func (s *Store) PutTrustedKeys(keys, compiled map[string]ed25519.PublicKey) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(compiled) == 0 {
+		return errors.New("compiled trust root is required")
+	}
+	for id, root := range compiled {
+		key, ok := keys[id]
+		if !ok || !reflect.DeepEqual([]byte(key), []byte(root)) {
+			return fmt.Errorf("trusted keys omit compiled root %q", id)
+		}
+	}
+	encoded := make(map[string]string, len(keys))
+	for id, key := range keys {
+		if id == "" || len(key) != ed25519.PublicKeySize {
+			return fmt.Errorf("invalid trusted key %q", id)
+		}
+		encoded[id] = base64.StdEncoding.EncodeToString(key)
+	}
+	return writeJSONAtomic(filepath.Join(s.dir, trustedKeysFilename), encoded)
+}
+
 type persistedJournal struct {
 	model.Journal
 	SupersededBy string `json:"supersededBy,omitempty"`
+}
+
+// UpdateRecord binds a pre-activation journal to the signed release facts that
+// a newly activated binary must independently re-verify.
+type UpdateRecord struct {
+	JournalID     string            `json:"journalId"`
+	PlanID        string            `json:"planId"`
+	Version       string            `json:"version"`
+	CatalogDigest string            `json:"catalogDigest"`
+	TrustedKeys   map[string]string `json:"trustedKeys,omitempty"`
+	Activated     bool              `json:"activated"`
 }
 
 func Open(dir string) (*Store, error) {
@@ -46,6 +104,9 @@ func Open(dir string) (*Store, error) {
 	}
 	if err := ensurePrivateDir(filepath.Join(dir, journalDirname)); err != nil {
 		return nil, fmt.Errorf("create journal directory: %w", err)
+	}
+	if err := ensurePrivateDir(filepath.Join(dir, updateDirname)); err != nil {
+		return nil, fmt.Errorf("create update directory: %w", err)
 	}
 
 	s := &Store{dir: dir}
@@ -72,6 +133,54 @@ func Open(dir string) (*Store, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+func (s *Store) Journal(id string) (model.Journal, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	journal, err := s.readJournal(id)
+	return journal.Journal, err
+}
+
+func (s *Store) PutUpdate(record UpdateRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !journalIDPattern.MatchString(record.JournalID) || record.PlanID == "" || record.Version == "" || record.CatalogDigest == "" {
+		return errors.New("invalid update record")
+	}
+	journal, err := s.readJournal(record.JournalID)
+	if err != nil {
+		return err
+	}
+	if journal.Status != "active" || journal.Plan.ID != record.PlanID {
+		return errors.New("update record does not match active journal")
+	}
+	return writeJSONAtomic(filepath.Join(s.dir, updateDirname, record.JournalID+".json"), record)
+}
+
+func (s *Store) Update(id string) (UpdateRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !journalIDPattern.MatchString(id) {
+		return UpdateRecord{}, fmt.Errorf("unsafe journal ID %q", id)
+	}
+	var record UpdateRecord
+	if err := readJSONFile(filepath.Join(s.dir, updateDirname, id+".json"), &record); err != nil {
+		return UpdateRecord{}, err
+	}
+	if record.JournalID != id || record.PlanID == "" || record.Version == "" || record.CatalogDigest == "" {
+		return UpdateRecord{}, errors.New("invalid persisted update record")
+	}
+	return record, nil
+}
+
+func (s *Store) MarkUpdateActivated(id string) error {
+	record, err := s.Update(id)
+	if err != nil {
+		return err
+	}
+	record.Activated = true
+	return s.PutUpdate(record)
 }
 
 func (s *Store) Snapshot() (model.Snapshot, error) {

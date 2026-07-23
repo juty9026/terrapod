@@ -49,25 +49,29 @@ type HistoricalResource struct {
 	CatalogDigest string
 }
 type ApplyInput struct {
-	Plan                model.Plan
-	CurrentResources    []model.Resource
-	EnabledIDs          []model.ResourceID
-	HistoricalResources map[model.ResourceID]HistoricalResource
-	CatalogDigest       string
-	Profile             model.Profile
+	Plan                 model.Plan
+	CurrentResources     []model.Resource
+	EnabledIDs           []model.ResourceID
+	HistoricalResources  map[model.ResourceID]HistoricalResource
+	CatalogDigest        string
+	Profile              model.Profile
+	ForceUpgrade         bool
+	RequiredOperationIDs map[string]bool
 }
 
 type Engine struct {
-	Registry        resource.Registry
-	State           *state.Store
-	LockDir         string
-	Privilege       provider.Privilege
-	Resources       map[model.ResourceID]model.Resource
-	Enabled         []model.ResourceID
-	ResourceDigests map[model.ResourceID]string
-	CatalogDigest   string
-	EffectiveUID    func() int
-	Profile         model.Profile
+	Registry             resource.Registry
+	State                *state.Store
+	LockDir              string
+	Privilege            provider.Privilege
+	Resources            map[model.ResourceID]model.Resource
+	Enabled              []model.ResourceID
+	ResourceDigests      map[model.ResourceID]string
+	CatalogDigest        string
+	EffectiveUID         func() int
+	Profile              model.Profile
+	ForceUpgrade         bool
+	RequiredOperationIDs map[string]bool
 }
 
 func (e *Engine) ApplyInput(ctx context.Context, input ApplyInput) (Summary, error) {
@@ -75,7 +79,29 @@ func (e *Engine) ApplyInput(ctx context.Context, input ApplyInput) (Summary, err
 	if err != nil {
 		return Summary{}, err
 	}
-	return copyEngine.apply(ctx, input.Plan, nil)
+	return copyEngine.apply(ctx, input.Plan, nil, false)
+}
+
+// PreflightInput validates and simulates an apply, including privilege
+// acquisition, without creating a journal or mutating managed resources.
+func (e *Engine) PreflightInput(ctx context.Context, input ApplyInput) (Summary, error) {
+	copyEngine, err := e.withInput(input)
+	if err != nil {
+		return Summary{}, err
+	}
+	return copyEngine.apply(ctx, input.Plan, nil, true)
+}
+
+// PreflightInputHeld is PreflightInput under a transaction-owned state lock.
+func (e *Engine) PreflightInputHeld(ctx context.Context, input ApplyInput, lock *state.Lock) (Summary, error) {
+	if lock == nil {
+		return Summary{}, errors.New("reconcile: held state lock is required")
+	}
+	copyEngine, err := e.withInput(input)
+	if err != nil {
+		return Summary{}, err
+	}
+	return copyEngine.apply(ctx, input.Plan, lock, true)
 }
 
 // ApplyInputHeld runs the ordinary reconciliation invariants while reusing an
@@ -88,7 +114,7 @@ func (e *Engine) ApplyInputHeld(ctx context.Context, input ApplyInput, lock *sta
 	if err != nil {
 		return Summary{}, err
 	}
-	return copyEngine.apply(ctx, input.Plan, lock)
+	return copyEngine.apply(ctx, input.Plan, lock, false)
 }
 
 func (e *Engine) withInput(input ApplyInput) (*Engine, error) {
@@ -121,14 +147,16 @@ func (e *Engine) withInput(input ApplyInput) (*Engine, error) {
 	}
 	copyEngine.CatalogDigest = input.CatalogDigest
 	copyEngine.Profile = input.Profile
+	copyEngine.ForceUpgrade = input.ForceUpgrade
+	copyEngine.RequiredOperationIDs = input.RequiredOperationIDs
 	return &copyEngine, nil
 }
 
 func (e *Engine) Apply(ctx context.Context, plan model.Plan) (summary Summary, retErr error) {
-	return e.apply(ctx, plan, nil)
+	return e.apply(ctx, plan, nil, false)
 }
 
-func (e *Engine) apply(ctx context.Context, plan model.Plan, held *state.Lock) (summary Summary, retErr error) {
+func (e *Engine) apply(ctx context.Context, plan model.Plan, held *state.Lock, preflightOnly bool) (summary Summary, retErr error) {
 	summary.Unavailable = cloneUnavailable(plan.Unavailable)
 	if plan.ID == "" {
 		return summary, errors.New("reconcile: plan ID is empty")
@@ -189,6 +217,9 @@ func (e *Engine) apply(ctx context.Context, plan model.Plan, held *state.Lock) (
 	remaining := make(map[model.ResourceID]int, len(plan.Operations))
 	authorizedRemovals := make(map[model.ResourceID]map[string]struct{})
 	for _, operation := range plan.Operations {
+		if !e.operationRequired(operation.ID) {
+			continue
+		}
 		if _, duplicate := seenOperations[operation.ID]; duplicate {
 			return summary, fmt.Errorf("reconcile: duplicate operation ID %q", operation.ID)
 		}
@@ -234,6 +265,9 @@ func (e *Engine) apply(ctx context.Context, plan model.Plan, held *state.Lock) (
 		}
 	}
 	for _, operation := range plan.Operations {
+		if !e.operationRequired(operation.ID) {
+			continue
+		}
 		item, adapter := indexed[operation.ResourceID], adapters[operation.ResourceID]
 		for _, removal := range operation.Removes {
 			if removal == item.Package {
@@ -283,6 +317,9 @@ func (e *Engine) apply(ctx context.Context, plan model.Plan, held *state.Lock) (
 	if privileged {
 		needed := false
 		for _, operation := range plan.Operations {
+			if !e.operationRequired(operation.ID) {
+				continue
+			}
 			if !operation.RequiresPrivilege {
 				continue
 			}
@@ -309,6 +346,9 @@ func (e *Engine) apply(ctx context.Context, plan model.Plan, held *state.Lock) (
 	}
 	if err := ctx.Err(); err != nil {
 		return summary, err
+	}
+	if preflightOnly {
+		return summary, nil
 	}
 	journal, _, err := e.State.BeginOrResume(plan)
 	if err != nil {
@@ -352,6 +392,9 @@ func (e *Engine) apply(ctx context.Context, plan model.Plan, held *state.Lock) (
 	}
 	pendingOwnership := make(map[model.ResourceID]struct{})
 	for _, operation := range plan.Operations {
+		if !e.operationRequired(operation.ID) {
+			continue
+		}
 		item, adapter := indexed[operation.ResourceID], adapters[operation.ResourceID]
 		if failed[item.ID] {
 			if err := e.record(ctx, operation, false, "blocked by earlier resource failure"); err != nil {
@@ -450,6 +493,10 @@ func (e *Engine) apply(ctx context.Context, plan model.Plan, held *state.Lock) (
 	}
 	sort.Slice(summary.Ready, func(i, j int) bool { return summary.Ready[i] < summary.Ready[j] })
 	return summary, nil
+}
+
+func (e *Engine) operationRequired(id string) bool {
+	return e.RequiredOperationIDs == nil || e.RequiredOperationIDs[id]
 }
 
 func derivedPrivilege(item model.Resource, operation model.Operation, declarations []legacydecl.Declaration, profile model.Profile) bool {
@@ -578,7 +625,7 @@ func (e *Engine) execute(ctx context.Context, item model.Resource, operation mod
 	if operation.Kind == model.OperationVerify {
 		return verifyDesired(ctx, adapter, item)
 	}
-	if operation.Kind == model.OperationInstall || operation.Kind == model.OperationAdopt || operation.Kind == model.OperationUpgrade || operation.Kind == model.OperationRestore {
+	if operation.Kind == model.OperationInstall || operation.Kind == model.OperationAdopt || operation.Kind == model.OperationRestore || (operation.Kind == model.OperationUpgrade && !e.ForceUpgrade) {
 		observed, err := adapter.Inspect(ctx, item)
 		if err != nil {
 			return model.Observation{}, fmt.Errorf("inspect resource before %s: %w", operation.Kind, err)

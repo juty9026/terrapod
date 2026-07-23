@@ -37,6 +37,10 @@ func TestStagerStagesAndAtomicallyActivatesRelease(t *testing.T) {
 	if err := s.Activate("1.2.3"); err != nil {
 		t.Fatal(err)
 	}
+	loaded, verified, err := s.LoadActive("1.2.3")
+	if err != nil || loaded.Path != got.Path || verified.Manifest.Version != "1.2.3" {
+		t.Fatalf("LoadActive=%#v %#v %v", loaded, verified.Manifest, err)
+	}
 	target, err := os.Readlink(s.ActiveRelease)
 	if err != nil || target != filepath.Join("releases", "1.2.3") {
 		t.Fatalf("target=%q err=%v", target, err)
@@ -50,6 +54,21 @@ func TestStagerStagesAndAtomicallyActivatesRelease(t *testing.T) {
 	after, _ := os.Readlink(s.ActiveRelease)
 	if after != target {
 		t.Fatalf("failed activation changed current to %q", after)
+	}
+}
+
+func TestLoadActiveRejectsDifferentCurrentTarget(t *testing.T) {
+	root := realReleaseTempDir(t)
+	rel := stagedFixture(t, root, Platform{OS: "linux", Arch: "amd64"}, sourceTar(t, map[string]string{"README.md": "hello"}))
+	s := testStager(Stager{ReleaseDir: filepath.Join(root, "data", "releases"), ActiveRelease: filepath.Join(root, "data", "current")})
+	if _, err := s.Stage(context.Background(), rel, Platform{OS: "linux", Arch: "amd64"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("releases", "other"), s.ActiveRelease); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.LoadActive("1.2.3"); err == nil {
+		t.Fatal("different active target accepted")
 	}
 }
 

@@ -24,6 +24,7 @@ import (
 	"github.com/juty9026/terrapod/internal/resolve"
 	"github.com/juty9026/terrapod/internal/resource"
 	"github.com/juty9026/terrapod/internal/state"
+	updatepkg "github.com/juty9026/terrapod/internal/update"
 )
 
 func TestHelpDescribesShadowCommandSurfaceWithoutDependencies(t *testing.T) {
@@ -36,7 +37,7 @@ func TestHelpDescribesShadowCommandSurfaceWithoutDependencies(t *testing.T) {
 		"plan", "status", "doctor", "diff",
 		"apply      Reconcile managed resources",
 		"resolve    Resolve one unavailable resource",
-		"update (unavailable until activation)",
+		"update     Install the latest signed release",
 		"setup (unavailable until activation)",
 		"configure (unavailable until activation)",
 		"chezmoi    Run a constrained read-only chezmoi command",
@@ -145,6 +146,25 @@ func TestMissingConfigPrintsSetupGuidanceWithoutLoadingOtherData(t *testing.T) {
 	}
 	if loadedCatalog {
 		t.Fatal("catalog loaded after missing config")
+	}
+}
+
+func TestUpdateAndHiddenContinuationDispatch(t *testing.T) {
+	deps := Dependencies{Geteuid: func() int { return 501 }, Update: func(context.Context) (updatepkg.Result, error) {
+		return updatepkg.Result{Handoff: true, JournalID: "journal"}, nil
+	}}
+	code, _, stderr := run(t, []string{"update"}, deps)
+	if code != 0 || stderr != "" {
+		t.Fatalf("Run(update)=%d stderr=%q", code, stderr)
+	}
+	var journal string
+	deps.ContinueUpdate = func(_ context.Context, id string) (updatepkg.Result, error) {
+		journal = id
+		return updatepkg.Result{Summary: reconcile.Summary{Unavailable: map[model.ResourceID]string{}}}, nil
+	}
+	code, _, stderr = run(t, []string{"internal-continue-update", "--journal", "journal-id"}, deps)
+	if code != 0 || stderr != "" || journal != "journal-id" {
+		t.Fatalf("Run(continue)=%d journal=%q stderr=%q", code, journal, stderr)
 	}
 }
 
@@ -519,7 +539,7 @@ func TestDiffUsesManagedFileClientAndPreservesOutput(t *testing.T) {
 }
 
 func TestMutationCommandsAreNotDispatched(t *testing.T) {
-	for _, command := range []string{"update", "setup", "configure"} {
+	for _, command := range []string{"setup", "configure"} {
 		t.Run(command, func(t *testing.T) {
 			deps := Dependencies{Geteuid: func() int { return 501 }}
 			code, _, stderr := run(t, []string{command}, deps)

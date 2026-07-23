@@ -60,6 +60,10 @@ func (a *ProviderTransferAdapter) Execute(ctx context.Context, op model.Operatio
 func (a *ProviderTransferAdapter) Verify(ctx context.Context, item model.Resource) (model.Observation, error) {
 	return a.desired.Verify(ctx, item)
 }
+func (a *ProviderTransferAdapter) Name() string { return a.desired.Name() }
+func (a *ProviderTransferAdapter) RefreshMetadata(ctx context.Context) error {
+	return a.desired.RefreshMetadata(ctx)
+}
 func (a *ProviderTransferAdapter) Simulate(ctx context.Context, item model.Resource, op model.Operation) (provider.ChangeSet, error) {
 	a.simulateMu.Lock()
 	defer a.simulateMu.Unlock()

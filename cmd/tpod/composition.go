@@ -2,26 +2,33 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"time"
 
+	"github.com/juty9026/terrapod/internal/catalog"
 	"github.com/juty9026/terrapod/internal/chezmoi"
 	"github.com/juty9026/terrapod/internal/cli"
+	"github.com/juty9026/terrapod/internal/config"
 	"github.com/juty9026/terrapod/internal/execx"
 	"github.com/juty9026/terrapod/internal/model"
 	"github.com/juty9026/terrapod/internal/paths"
 	"github.com/juty9026/terrapod/internal/planner"
+	"github.com/juty9026/terrapod/internal/provider"
 	"github.com/juty9026/terrapod/internal/provider/apt"
 	"github.com/juty9026/terrapod/internal/provider/homebrew"
 	"github.com/juty9026/terrapod/internal/provider/legacy"
 	"github.com/juty9026/terrapod/internal/provider/mise"
 	"github.com/juty9026/terrapod/internal/reconcile"
 	"github.com/juty9026/terrapod/internal/recovery"
+	"github.com/juty9026/terrapod/internal/release"
 	"github.com/juty9026/terrapod/internal/resource"
 	archivepkg "github.com/juty9026/terrapod/internal/resource/archive"
 	"github.com/juty9026/terrapod/internal/resource/gitcheckout"
@@ -30,6 +37,7 @@ import (
 	"github.com/juty9026/terrapod/internal/resource/managedfiles"
 	"github.com/juty9026/terrapod/internal/resource/managementcore"
 	"github.com/juty9026/terrapod/internal/state"
+	updatepkg "github.com/juty9026/terrapod/internal/update"
 )
 
 type productionPaths struct{ brew, git, mise string }
@@ -191,4 +199,160 @@ func productionAppRunning(name string) bool {
 		return true
 	}
 	return exec.Command("/usr/bin/pgrep", "-x", name).Run() == nil
+}
+
+type sudoPrivilege struct{}
+
+func (sudoPrivilege) Acquire(ctx context.Context) error {
+	command := exec.CommandContext(ctx, "/usr/bin/sudo", "-v")
+	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := command.Run(); err != nil {
+		return fmt.Errorf("sudo privilege preflight: %w", err)
+	}
+	return nil
+}
+
+func configureSignedUpdate(deps *cli.Dependencies, layout paths.Layout, chezmoiClient chezmoi.Client, compiled map[string]ed25519.PublicKey) {
+	build := func(output bool) (updatepkg.Dependencies, error) {
+		store, err := state.Open(layout.StateDir)
+		if err != nil {
+			return updatepkg.Dependencies{}, err
+		}
+		persisted, err := store.TrustedKeys()
+		if err != nil {
+			return updatepkg.Dependencies{}, err
+		}
+		verifier := release.Verifier{CompiledKeys: compiled, PersistedKeys: persisted}
+		stager := release.Stager{ReleaseDir: layout.ReleaseDir, ActiveRelease: layout.ActiveRelease, Verifier: verifier, ExpectedPlatform: release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}}
+		configuredPlanner, err := productionPlanner(layout, store, chezmoiClient)
+		if err != nil {
+			return updatepkg.Dependencies{}, err
+		}
+		registry := configuredPlanner.Registry()
+		refreshers := make([]provider.MetadataRefresher, 0, 4)
+		for _, name := range []string{"homebrew-formula", "homebrew-cask", "apt", "mise"} {
+			adapter, ok := registry.Lookup(model.ResourcePackage, name)
+			if !ok {
+				continue
+			}
+			if refresher, ok := adapter.(provider.MetadataRefresher); ok {
+				refreshers = append(refreshers, refresher)
+			}
+		}
+		load := func(_ context.Context, staged release.Staged) (updatepkg.Inputs, error) {
+			_, verified, err := stager.Load(staged.Version)
+			if err != nil {
+				return updatepkg.Inputs{}, err
+			}
+			asset, err := verified.Manifest.CatalogAsset()
+			if err != nil {
+				return updatepkg.Inputs{}, err
+			}
+			bound, err := catalog.LoadReleaseBound(filepath.Join(staged.Path, "catalog", "resources.json"), asset.SHA256)
+			if err != nil {
+				return updatepkg.Inputs{}, err
+			}
+			cfg, err := config.Load(layout.ConfigFile)
+			if err != nil {
+				return updatepkg.Inputs{}, err
+			}
+			normalized, _, err := config.Normalize(cfg, bound.Catalog.Config)
+			if err != nil {
+				return updatepkg.Inputs{}, err
+			}
+			profileValue, ok := normalized.Terrapod["profile"].(string)
+			profile := model.Profile(profileValue)
+			if !ok || !profile.Supported() {
+				return updatepkg.Inputs{}, fmt.Errorf("unsupported configured profile %q", profileValue)
+			}
+			historical, err := productionHistoricalCatalogs(store, stager, layout.ReleaseDir)
+			if err != nil {
+				return updatepkg.Inputs{}, err
+			}
+			return updatepkg.Inputs{Catalog: bound, Config: normalized, Historical: historical, Profile: profile}, nil
+		}
+		result := updatepkg.Dependencies{
+			Releases: release.Client{HTTP: &http.Client{Timeout: 30 * time.Second}, CacheDir: layout.ReleaseCacheDir, Verifier: verifier}, Stager: stager, Platform: release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}, Refreshers: refreshers,
+			Planner: configuredPlanner, Engine: &reconcile.Engine{Registry: registry, State: store, LockDir: layout.StateDir, Privilege: sudoPrivilege{}, EffectiveUID: os.Geteuid}, State: store, LockDir: layout.StateDir,
+			LoadStaged: load, CurrentVersion: stager.CurrentVersion,
+			VerifyActive: func(ctx context.Context, version string) (release.Staged, release.VerifiedRelease, updatepkg.Inputs, error) {
+				staged, verified, err := stager.LoadActive(version)
+				if err != nil {
+					return release.Staged{}, release.VerifiedRelease{}, updatepkg.Inputs{}, err
+				}
+				inputs, err := load(ctx, staged)
+				return staged, verified, inputs, err
+			},
+			SelfCheck: func(ctx context.Context, binary string) error {
+				command := exec.CommandContext(ctx, binary, "internal-self-check")
+				command.Env = []string{"HOME=" + layout.HomeDir}
+				return command.Run()
+			},
+			PrintPlan: func(plan model.Plan) error {
+				if output {
+					cli.RenderUpdatePlan(deps.Stdout, plan)
+				}
+				return nil
+			}, WriteConfig: func(cfg model.Config) error { return config.WriteAtomic(layout.ConfigFile, cfg) },
+			TrustAfter: verifier.TrustAfter, PersistTrusted: func(keys map[string]ed25519.PublicKey) error { return store.PutTrustedKeys(keys, compiled) },
+			Exec: func(path string, args, environment []string) error {
+				return syscall.Exec(path, append([]string{path}, args...), environment)
+			}, Environment: os.Environ(), HandoffToken: func() string { return os.Getenv("TPOD_UPDATE_LOCK_NONCE") },
+		}
+		return result, nil
+	}
+	deps.Update = func(ctx context.Context) (updatepkg.Result, error) {
+		configured, err := build(true)
+		if err != nil {
+			return updatepkg.Result{}, err
+		}
+		return updatepkg.Run(ctx, configured)
+	}
+	deps.ContinueUpdate = func(ctx context.Context, journal string) (updatepkg.Result, error) {
+		configured, err := build(false)
+		if err != nil {
+			return updatepkg.Result{}, err
+		}
+		return updatepkg.Continue(ctx, journal, configured)
+	}
+}
+
+func productionHistoricalCatalogs(store *state.Store, stager release.Stager, releaseDir string) (map[string]model.Catalog, error) {
+	snapshot, err := store.Snapshot()
+	if err != nil {
+		return nil, err
+	}
+	wanted := make(map[string]struct{}, len(snapshot.Ownership))
+	for _, owned := range snapshot.Ownership {
+		wanted[owned.CatalogDigest] = struct{}{}
+	}
+	result := make(map[string]model.Catalog)
+	entries, err := os.ReadDir(releaseDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return result, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		staged, verified, err := stager.Load(entry.Name())
+		if err != nil {
+			continue
+		}
+		asset, err := verified.Manifest.CatalogAsset()
+		if err != nil {
+			continue
+		}
+		bound, err := catalog.LoadReleaseBound(filepath.Join(staged.Path, "catalog", "resources.json"), asset.SHA256)
+		if err != nil {
+			continue
+		}
+		if _, ok := wanted[bound.Digest]; ok {
+			result[bound.Digest] = bound.Catalog
+		}
+	}
+	return result, nil
 }

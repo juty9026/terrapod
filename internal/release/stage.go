@@ -244,6 +244,75 @@ func (s Stager) Activate(version string) error {
 	return syncDirectory(parent)
 }
 
+// LoadActive re-verifies the signed manifest and every staged artifact before
+// an update continuation trusts the active release.
+func (s Stager) LoadActive(version string) (Staged, VerifiedRelease, error) {
+	if !stableSemVerPattern.MatchString(version) {
+		return Staged{}, VerifiedRelease{}, fmt.Errorf("invalid release version %q", version)
+	}
+	target, err := os.Readlink(s.ActiveRelease)
+	if err != nil {
+		return Staged{}, VerifiedRelease{}, err
+	}
+	if filepath.IsAbs(target) {
+		return Staged{}, VerifiedRelease{}, errors.New("active release link must be relative")
+	}
+	activePath := filepath.Clean(filepath.Join(filepath.Dir(s.ActiveRelease), target))
+	expected := filepath.Join(s.ReleaseDir, version)
+	if activePath != expected {
+		return Staged{}, VerifiedRelease{}, errors.New("active release differs from expected version")
+	}
+	return s.Load(version)
+}
+
+func (s Stager) Load(version string) (Staged, VerifiedRelease, error) {
+	if !stableSemVerPattern.MatchString(version) {
+		return Staged{}, VerifiedRelease{}, fmt.Errorf("invalid release version %q", version)
+	}
+	expected := filepath.Join(s.ReleaseDir, version)
+	manifestData, err := readImmutableFile(filepath.Join(expected, "release.json"), MaxManifestSize)
+	if err != nil {
+		return Staged{}, VerifiedRelease{}, err
+	}
+	signatureData, err := readImmutableFile(filepath.Join(expected, "release.json.sig"), MaxManifestSize)
+	if err != nil {
+		return Staged{}, VerifiedRelease{}, err
+	}
+	record, err := s.validateInstalledRelease(expected, version, manifestData, signatureData)
+	if err != nil {
+		return Staged{}, VerifiedRelease{}, err
+	}
+	manifest, err := s.Verifier.VerifyManifest(manifestData, signatureData)
+	if err != nil {
+		return Staged{}, VerifiedRelease{}, err
+	}
+	files := map[string]string{record.Binary.Name: filepath.Join(expected, "bin", "tpod"), record.Catalog.Name: filepath.Join(expected, "catalog", "resources.json"), record.Source.Name: filepath.Join(expected, ".artifacts", "source.tar.gz")}
+	verified := VerifiedRelease{Manifest: manifest, Files: files, manifestData: manifestData, signatureData: signatureData}
+	if err := verified.sealManifest(); err != nil {
+		return Staged{}, VerifiedRelease{}, err
+	}
+	return Staged{Version: version, Path: expected}, verified, nil
+}
+
+func (s Stager) CurrentVersion() (string, error) {
+	target, err := os.Readlink(s.ActiveRelease)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if filepath.IsAbs(target) {
+		return "", errors.New("active release link must be relative")
+	}
+	clean := filepath.Clean(filepath.Join(filepath.Dir(s.ActiveRelease), target))
+	relative, err := filepath.Rel(s.ReleaseDir, clean)
+	if err != nil || strings.Contains(relative, string(filepath.Separator)) || !stableSemVerPattern.MatchString(relative) {
+		return "", errors.New("active release link has unsafe target")
+	}
+	return relative, nil
+}
+
 func extractSource(source, destination string) ([]stagedFile, error) {
 	manifest, err := (archivepkg.Adapter{}).ExtractFile(source, "tar.gz", destination)
 	if err != nil {

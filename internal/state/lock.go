@@ -40,6 +40,51 @@ func Acquire(dir, command string) (*Lock, error) {
 	return acquireStateLock(dir, command, nil)
 }
 
+// ResumeHandoff adopts a lock across syscall.Exec. The PID is unchanged and
+// the unguessable nonce is passed only in the controlled child environment.
+func ResumeHandoff(dir, nonce string) (*Lock, error) {
+	absoluteDir, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, err
+	}
+	dir = filepath.Clean(absoluteDir)
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	keep := false
+	defer func() {
+		if !keep {
+			_ = root.Close()
+		}
+	}()
+	if err := requireRootDirectory(root, "lock"); err != nil {
+		return nil, err
+	}
+	owner, err := readLockOwner(root, "lock/owner.json")
+	if err != nil {
+		return nil, err
+	}
+	if owner.PID != os.Getpid() || owner.Nonce != nonce {
+		return nil, errors.New("state: update lock handoff identity differs")
+	}
+	lock := &Lock{root: root, dir: dir, owner: owner}
+	if err := bindLockDirectory(lock, dir); err != nil {
+		return nil, err
+	}
+	keep = true
+	return lock, nil
+}
+
+func (l *Lock) HandoffToken(dir string) (string, error) {
+	if err := l.ValidateHeld(dir); err != nil {
+		return "", err
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.owner.Nonce, nil
+}
+
 func acquireStateLock(dir, command string, staleObserved func()) (*Lock, error) {
 	absoluteDir, err := filepath.Abs(dir)
 	if err != nil {

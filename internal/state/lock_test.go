@@ -28,6 +28,30 @@ func TestAcquireRejectsLiveLock(t *testing.T) {
 	assertMode(t, filepath.Join(dir, "lock", "owner.json"), 0o600)
 }
 
+func TestResumeHandoffRequiresSamePIDAndNonce(t *testing.T) {
+	dir := t.TempDir()
+	lock, err := Acquire(dir, "tpod update")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := lock.HandoffToken(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResumeHandoff(dir, "wrong"); err == nil {
+		t.Fatal("wrong token resumed lock")
+	}
+	resumed, err := ResumeHandoff(dir, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := resumed.Release(); err != nil {
+		t.Fatal(err)
+	}
+	_ = lock.root.Close()
+	lock.done = true
+}
+
 func TestLockValidateHeldRejectsNilForeignReleasedAndReplacedOwner(t *testing.T) {
 	dir := t.TempDir()
 	var nilLock *Lock

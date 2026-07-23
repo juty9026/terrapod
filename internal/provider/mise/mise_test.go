@@ -20,6 +20,23 @@ func (f runnerFunc) Run(ctx context.Context, request execx.Request) (execx.Resul
 	return f(ctx, request)
 }
 
+func TestRefreshMetadataClearsMiseCache(t *testing.T) {
+	called := false
+	adapter, err := New("/opt/homebrew/bin/mise", t.TempDir(), runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+		called = true
+		if request.Path != "/opt/homebrew/bin/mise" || !reflect.DeepEqual(request.Args, []string{"cache", "clear"}) {
+			t.Fatalf("request=%#v", request)
+		}
+		return execx.Result{}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.RefreshMetadata(context.Background()); err != nil || !called {
+		t.Fatalf("RefreshMetadata called=%v err=%v", called, err)
+	}
+}
+
 func TestConstructorRequiresCleanTrustedDataRootAndRunner(t *testing.T) {
 	var nilRunner *pointerRunner
 	var nilFS *pointerFS

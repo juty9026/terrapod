@@ -113,6 +113,28 @@ func LoadVerified(path string, signatures SignatureSet) (Verified, error) {
 	}, nil
 }
 
+// LoadReleaseBound loads a catalog whose exact SHA-256 is already bound by a
+// verified signed release manifest.
+func LoadReleaseBound(path, expectedDigest string) (Verified, error) {
+	contents, err := readBounded(path)
+	if err != nil {
+		return Verified{}, fmt.Errorf("read release-bound catalog: %w", err)
+	}
+	digest := sha256.Sum256(contents)
+	actual := hex.EncodeToString(digest[:])
+	if actual != expectedDigest {
+		return Verified{}, errors.New("release-bound catalog digest mismatch")
+	}
+	var parsed model.Catalog
+	if err := decodeStrict(contents, &parsed); err != nil {
+		return Verified{}, fmt.Errorf("decode release-bound catalog: %w", err)
+	}
+	if err := validate(parsed); err != nil {
+		return Verified{}, fmt.Errorf("validate release-bound catalog: %w", err)
+	}
+	return Verified{Catalog: parsed, Digest: actual, KeyID: "signed-release"}, nil
+}
+
 func readBounded(path string) ([]byte, error) {
 	file, err := os.Open(path)
 	if err != nil {

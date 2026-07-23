@@ -22,6 +22,23 @@ func (f runnerFunc) Run(ctx context.Context, request execx.Request) (execx.Resul
 	return f(ctx, request)
 }
 
+func TestRefreshMetadataRunsTypedBrewUpdate(t *testing.T) {
+	called := false
+	adapter, err := New(Formula, "/opt/homebrew/bin/brew", t.TempDir(), runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+		called = true
+		if request.Path != "/opt/homebrew/bin/brew" || !reflect.DeepEqual(request.Args, []string{"update"}) {
+			t.Fatalf("request=%#v", request)
+		}
+		return execx.Result{}, nil
+	}), AppPolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.RefreshMetadata(context.Background()); err != nil || !called {
+		t.Fatalf("RefreshMetadata called=%v err=%v", called, err)
+	}
+}
+
 func TestConstructorsUseExactNamesAndStandardBrewPaths(t *testing.T) {
 	for _, brewPath := range []string{"/opt/homebrew/bin/brew", "/usr/local/bin/brew", "/home/linuxbrew/.linuxbrew/bin/brew"} {
 		t.Run(brewPath, func(t *testing.T) {

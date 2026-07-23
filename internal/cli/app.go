@@ -26,6 +26,7 @@ import (
 	"github.com/juty9026/terrapod/internal/resolve"
 	"github.com/juty9026/terrapod/internal/resource"
 	"github.com/juty9026/terrapod/internal/state"
+	updatepkg "github.com/juty9026/terrapod/internal/update"
 )
 
 const (
@@ -52,6 +53,8 @@ type Dependencies struct {
 	Diff            func(context.Context) ([]byte, error)
 	Resolve         func(context.Context, model.ResourceID, io.Reader, io.Writer) (resolve.Result, error)
 	Chezmoi         func(context.Context, string, []string) (execx.Result, error)
+	Update          func(context.Context) (updatepkg.Result, error)
+	ContinueUpdate  func(context.Context, string) (updatepkg.Result, error)
 }
 
 // AdapterSet is the composition boundary for every typed provider introduced
@@ -137,6 +140,33 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 		fmt.Fprintln(stdout, "tpod development")
 		return 0
 	}
+	if command == "internal-self-check" {
+		if !rejectExtraArgs(command, args[1:], stderr) {
+			return exitUsage
+		}
+		return 0
+	}
+	if command == "internal-continue-update" {
+		if deps.Geteuid == nil || deps.Geteuid() == 0 {
+			fmt.Fprintln(stderr, "Terrapod manager commands must run as a non-root user")
+			return exitFailure
+		}
+		if len(args) != 3 || args[1] != "--journal" || args[2] == "" {
+			fmt.Fprintln(stderr, "usage: tpod internal-continue-update --journal <id>")
+			return exitUsage
+		}
+		if deps.ContinueUpdate == nil {
+			fmt.Fprintln(stderr, "internal error: update continuation is not configured")
+			return exitFailure
+		}
+		result, err := deps.ContinueUpdate(ctx, args[2])
+		renderApplySummary(stdout, result.Summary)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return exitUnavailable
+		}
+		return 0
+	}
 
 	if !isManagerCommand(command) {
 		fmt.Fprintf(stderr, "unknown command %q; run 'tpod help'\n", command)
@@ -157,7 +187,7 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	if !ok {
 		return exitUsage
 	}
-	if isMutationCommand(command) && command != "apply" && command != "resolve" {
+	if isMutationCommand(command) && command != "apply" && command != "resolve" && command != "update" {
 		fmt.Fprintf(stderr, "%s is unavailable until activation\n", command)
 		return exitUnavailable
 	}
@@ -193,6 +223,21 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 		}
 		renderResolveResult(stdout, result)
 		if len(result.Summary.Unavailable) != 0 {
+			return exitUnavailable
+		}
+		return 0
+	}
+	if command == "update" {
+		if deps.Update == nil {
+			fmt.Fprintln(stderr, "internal error: signed update is not configured")
+			return exitFailure
+		}
+		result, updateErr := deps.Update(ctx)
+		if !result.Handoff {
+			renderApplySummary(stdout, result.Summary)
+		}
+		if updateErr != nil {
+			fmt.Fprintln(stderr, updateErr)
 			return exitUnavailable
 		}
 		return 0

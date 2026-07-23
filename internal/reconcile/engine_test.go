@@ -311,6 +311,46 @@ func TestApplyInputComposesCurrentAndHistoricalFacts(t *testing.T) {
 	}
 }
 
+func TestPreflightInputSimulatesPrivilegeWithoutJournalOrExecution(t *testing.T) {
+	item := pkg("tools.example", "fixture")
+	adapter := &fixtureAdapter{fail: map[string]bool{}, simulation: provider.ChangeSet{Installs: []string{item.Package}}}
+	engine, store := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
+	engine.Privilege = &privilegeFixture{}
+	operation := op(item, "install", model.OperationInstall)
+	operation.RequiresPrivilege = true
+	input := ApplyInput{Plan: model.Plan{ID: "preflight", Operations: []model.Operation{operation}}, CurrentResources: []model.Resource{item}, EnabledIDs: []model.ResourceID{item.ID}, HistoricalResources: map[model.ResourceID]HistoricalResource{}, CatalogDigest: "signed", Profile: model.ProfileVPSShell}
+
+	if _, err := engine.PreflightInput(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(adapter.events, ","), "execute:") {
+		t.Fatalf("events = %v", adapter.events)
+	}
+	snapshot, err := store.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.ActiveJournal != nil {
+		t.Fatalf("preflight created journal %#v", snapshot.ActiveJournal)
+	}
+}
+
+func TestApplyInputExecutesOnlyReplannedOperationIDs(t *testing.T) {
+	first := pkg("core.alpha", "first")
+	second := pkg("core.beta", "second")
+	a := &fixtureAdapter{fail: map[string]bool{}}
+	b := &fixtureAdapter{fail: map[string]bool{}, present: true}
+	engine, _ := testEngine(t, map[string]*fixtureAdapter{"first": a, "second": b}, first, second)
+	plan := model.Plan{ID: "filtered", Operations: []model.Operation{op(first, "install-first", model.OperationInstall), op(second, "upgrade-second", model.OperationUpgrade)}}
+	input := ApplyInput{Plan: plan, CurrentResources: []model.Resource{first, second}, EnabledIDs: []model.ResourceID{first.ID, second.ID}, HistoricalResources: map[model.ResourceID]HistoricalResource{}, CatalogDigest: "signed", Profile: model.ProfileVPSShell, ForceUpgrade: true, RequiredOperationIDs: map[string]bool{"install-first": true}}
+	if _, err := engine.ApplyInput(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(b.events, ","), "execute:upgrade-second") {
+		t.Fatalf("filtered operation executed: %v", b.events)
+	}
+}
+
 func TestApplyInputHeldReusesExactLiveLockAndPreservesOwnership(t *testing.T) {
 	item := pkg("core.alpha", "fixture")
 	adapter := &fixtureAdapter{fail: map[string]bool{}}

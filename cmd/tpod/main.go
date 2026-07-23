@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -18,7 +20,11 @@ import (
 	"github.com/juty9026/terrapod/internal/paths"
 	"github.com/juty9026/terrapod/internal/planner"
 	"github.com/juty9026/terrapod/internal/state"
+	updatepkg "github.com/juty9026/terrapod/internal/update"
 )
+
+var releaseRootKeyID string
+var releaseRootPublicKey string
 
 // chezmoiPathOverride is set only in the built-binary integration test. Normal
 // releases always select the fixed Homebrew-owned executable for the target.
@@ -60,9 +66,29 @@ func main() {
 		deps.PlannerForState = func(store *state.Store) (*planner.Planner, error) {
 			return productionPlanner(layout, store, client)
 		}
+		if roots, err := compiledReleaseRoots(); err != nil {
+			deps.Update = func(context.Context) (updatepkg.Result, error) { return updatepkg.Result{}, err }
+			deps.ContinueUpdate = func(context.Context, string) (updatepkg.Result, error) { return updatepkg.Result{}, err }
+		} else {
+			configureSignedUpdate(&deps, layout, client, roots)
+		}
 	}
 	code := cli.Run(ctx, os.Args[1:], deps)
 	os.Exit(code)
+}
+
+func compiledReleaseRoots() (map[string]ed25519.PublicKey, error) {
+	if releaseRootKeyID == "" && releaseRootPublicKey == "" {
+		return nil, errors.New("signed update is unavailable: release trust root was not embedded in this build")
+	}
+	if releaseRootKeyID == "" || releaseRootPublicKey == "" {
+		return nil, errors.New("signed update is unavailable: incomplete embedded release trust root")
+	}
+	decoded, err := base64.StdEncoding.Strict().DecodeString(releaseRootPublicKey)
+	if err != nil || len(decoded) != ed25519.PublicKeySize || base64.StdEncoding.EncodeToString(decoded) != releaseRootPublicKey {
+		return nil, errors.New("signed update is unavailable: invalid embedded release public key")
+	}
+	return map[string]ed25519.PublicKey{releaseRootKeyID: ed25519.PublicKey(decoded)}, nil
 }
 
 func productionChezmoiPath() string {

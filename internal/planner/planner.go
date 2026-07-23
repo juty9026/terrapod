@@ -50,6 +50,8 @@ func New(registry resource.Registry) *Planner {
 	return &Planner{registry: registry}
 }
 
+func (p *Planner) Registry() resource.Registry { return p.registry }
+
 func (p *Planner) Build(ctx context.Context, input Input) (model.Plan, error) {
 	if err := ctx.Err(); err != nil {
 		return model.Plan{}, err
@@ -566,3 +568,5 @@ func planID(plan model.Plan) (string, error) {
 	digest := sha256.Sum256(contents)
 	return "sha256:" + hex.EncodeToString(digest[:]), nil
 }
+
+func Digest(plan model.Plan) (string, error) { return planID(plan) }

@@ -1,6 +1,7 @@
 package state
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"os"
@@ -400,6 +401,51 @@ func assertNoTemporaryFiles(t *testing.T, dir string) {
 		if strings.HasPrefix(entry.Name(), ".tmp-") {
 			t.Fatalf("temporary file remained after atomic update: %s", entry.Name())
 		}
+	}
+}
+
+func TestUpdateRecordIsBoundToActiveJournal(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal, err := store.Begin(model.Plan{ID: "plan", Release: "1.2.3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := UpdateRecord{JournalID: journal.ID, PlanID: "plan", Version: "1.2.3", CatalogDigest: strings.Repeat("a", 64)}
+	if err := store.PutUpdate(record); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkUpdateActivated(journal.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Update(journal.ID)
+	if err != nil || !got.Activated || got.PlanID != "plan" {
+		t.Fatalf("Update = %#v, %v", got, err)
+	}
+	record.PlanID = "other"
+	if err := store.PutUpdate(record); err == nil {
+		t.Fatal("mismatched update record accepted")
+	}
+}
+
+func TestPutTrustedKeysRetainsCompiledRoot(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := ed25519.PublicKey(make([]byte, ed25519.PublicKeySize))
+	compiled := map[string]ed25519.PublicKey{"root": root}
+	if err := store.PutTrustedKeys(map[string]ed25519.PublicKey{"next": root}, compiled); err == nil {
+		t.Fatal("compiled root removal accepted")
+	}
+	if err := store.PutTrustedKeys(map[string]ed25519.PublicKey{"root": root, "next": root}, compiled); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.TrustedKeys()
+	if err != nil || len(got) != 2 {
+		t.Fatalf("TrustedKeys=%v, %v", got, err)
 	}
 }
 

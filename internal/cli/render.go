@@ -16,6 +16,7 @@ func renderHelp(output io.Writer) {
 	fmt.Fprintln(output)
 	fmt.Fprintln(output, "Commands:")
 	fmt.Fprintln(output, "  apply      Reconcile managed resources")
+	fmt.Fprintln(output, "  update     Install the latest signed release and reconcile upgrades")
 	fmt.Fprintln(output, "  resolve    Resolve one unavailable resource")
 	fmt.Fprintln(output, "  plan       Show deterministic reconciliation operations")
 	fmt.Fprintln(output, "  status     Show Ready and Unavailable resources")
@@ -25,7 +26,7 @@ func renderHelp(output io.Writer) {
 	fmt.Fprintln(output, "  version    Show the development version")
 	fmt.Fprintln(output)
 	fmt.Fprintln(output, "Mutation commands:")
-	for _, command := range []string{"update", "setup", "configure"} {
+	for _, command := range []string{"setup", "configure"} {
 		fmt.Fprintf(output, "  %s (unavailable until activation)\n", command)
 	}
 }
@@ -94,6 +95,8 @@ func renderPlan(output io.Writer, plan model.Plan, lock string) {
 		fmt.Fprintf(output, "  %s: %s\n", id, plan.Unavailable[id])
 	}
 }
+
+func RenderUpdatePlan(output io.Writer, plan model.Plan) { renderPlan(output, plan, "held by update") }
 
 func renderStatus(output io.Writer, snapshot reconciliation) {
 	fmt.Fprintf(output, "Release: %s\n", snapshot.plan.Release)
