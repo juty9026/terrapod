@@ -17,6 +17,7 @@ import (
 	"github.com/juty9026/terrapod/internal/catalog"
 	"github.com/juty9026/terrapod/internal/config"
 	"github.com/juty9026/terrapod/internal/execx"
+	migratepkg "github.com/juty9026/terrapod/internal/migrate"
 	"github.com/juty9026/terrapod/internal/model"
 	"github.com/juty9026/terrapod/internal/paths"
 	"github.com/juty9026/terrapod/internal/planner"
@@ -57,7 +58,7 @@ func TestVersionDoesNotRequireManagerDependencies(t *testing.T) {
 }
 
 func TestManagerCommandsRejectRootBeforeCommandDispatch(t *testing.T) {
-	for _, command := range []string{"plan", "status", "doctor", "diff", "apply", "update", "resolve", "setup", "configure", "chezmoi"} {
+	for _, command := range []string{"plan", "status", "doctor", "diff", "apply", "update", "resolve", "setup", "configure", "chezmoi", "migrate-current"} {
 		t.Run(command, func(t *testing.T) {
 			deps := Dependencies{Geteuid: func() int { return 0 }}
 			code, _, stderr := run(t, []string{command}, deps)
@@ -65,6 +66,46 @@ func TestManagerCommandsRejectRootBeforeCommandDispatch(t *testing.T) {
 				t.Fatalf("Run(%s as root) = %d, stderr=%q", command, code, stderr)
 			}
 		})
+	}
+}
+
+func TestHiddenMigrateCurrentPrintsPreflightPlanAndSummary(t *testing.T) {
+	printed := false
+	deps := Dependencies{
+		Geteuid: func() int { return 501 },
+		MigrateCurrent: func(_ context.Context, printPlan func(model.Plan) error) (migratepkg.CurrentResult, error) {
+			plan := model.Plan{ID: "migration-plan", Release: "1.2.3", Unavailable: map[model.ResourceID]string{}}
+			if err := printPlan(plan); err != nil {
+				return migratepkg.CurrentResult{}, err
+			}
+			printed = true
+			return migratepkg.CurrentResult{Summary: reconcile.Summary{Ready: []model.ResourceID{"core.git"}, Unavailable: map[model.ResourceID]string{}}}, nil
+		},
+	}
+	code, stdout, stderr := run(t, []string{"migrate-current"}, deps)
+	if code != 0 || !printed || stderr != "" || !strings.Contains(stdout, "Release: 1.2.3") || !strings.Contains(stdout, "core.git") {
+		t.Fatalf("code=%d printed=%v stdout=%q stderr=%q", code, printed, stdout, stderr)
+	}
+
+	deps.MigrateCurrent = func(context.Context, func(model.Plan) error) (migratepkg.CurrentResult, error) {
+		return migratepkg.CurrentResult{AlreadyComplete: true}, nil
+	}
+	code, stdout, stderr = run(t, []string{"migrate-current"}, deps)
+	if code != 0 || stdout != "Terrapod legacy migration is already complete.\n" || stderr != "" {
+		t.Fatalf("second run code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
+func TestHiddenMigrateCurrentUnavailableReturnsForwardRecovery(t *testing.T) {
+	deps := Dependencies{
+		Geteuid: func() int { return 501 },
+		MigrateCurrent: func(context.Context, func(model.Plan) error) (migratepkg.CurrentResult, error) {
+			return migratepkg.CurrentResult{Summary: reconcile.Summary{Unavailable: map[model.ResourceID]string{"core.git": "conflict"}}}, errors.New("migration interrupted")
+		},
+	}
+	code, _, stderr := run(t, []string{"migrate-current"}, deps)
+	if code != exitUnavailable || !strings.Contains(stderr, "migration interrupted") || !strings.Contains(stderr, "tpod apply") || !strings.Contains(stderr, "install.sh --migrate") {
+		t.Fatalf("code=%d stderr=%q", code, stderr)
 	}
 }
 

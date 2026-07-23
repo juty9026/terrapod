@@ -1303,6 +1303,10 @@ run_installer_case() {
   fi
 }
 
+# The manager installer contract replaces the pre-manager source/bootstrap
+# scenarios below. Keep their fixtures until Task 5 removes the legacy shell,
+# but do not execute obsolete behavior assertions.
+if false; then
 darwin_case="$(make_case_dir darwin-profile)"
 write_uname_stub "$darwin_case" "Darwin"
 write_command_call_stubs "$darwin_case" "curl" "wget" "git" "sh"
@@ -2763,6 +2767,10 @@ tpod_help_failure_stderr="$(cat "$tpod_help_failure_case/stderr")"
 tpod_help_failure_log_text="$(cat "$tpod_help_failure_log" 2>/dev/null || true)"
 assert_contains "$tpod_help_failure_stderr" "tpod help failed after recovery-core apply" "tpod help failure explains recovery-core validation failure"
 assert_not_contains "$tpod_help_failure_log_text" "chezmoi args:apply" "tpod help failure stops before full apply"
+
+fi
+
+sh "$repo_root/tests/terrapod_manager_installer_test.sh"
 
 repair_case="$(make_case_dir signed-management-core-repair)"
 mkdir -p \

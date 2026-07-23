@@ -147,7 +147,7 @@ func TestRepairLatestReleaseRejectsDowngradeBeforeMutation(t *testing.T) {
 	err = repairLatestRelease(context.Background(), layout, expectedDigest, verifier, func(context.Context) (release.VerifiedRelease, error) {
 		called = true
 		return verified, nil
-	})
+	}, false)
 	if err == nil || !strings.Contains(err.Error(), "downgrade") || !called {
 		t.Fatalf("called=%v err=%v", called, err)
 	}

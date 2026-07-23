@@ -288,6 +288,82 @@ func TestApplyConfigConversionRestoresBothConfigsAfterPostRenameFailure(t *testi
 	}
 }
 
+func TestApplyConfigConversionExistingPrunesMatchingLegacyConfig(t *testing.T) {
+	root := t.TempDir()
+	legacyPath := filepath.Join(root, "chezmoi.toml")
+	original := mustRead(t, "testdata/chezmoi-current.toml")
+	if err := os.WriteFile(legacyPath, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	conversion, err := ConvertLegacyConfig(original, legacySchema())
+	if err != nil {
+		t.Fatal(err)
+	}
+	terrapodPath := filepath.Join(root, "config.json")
+	if err := config.WriteAtomic(terrapodPath, conversion.Terrapod); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyConfigConversionExisting(legacyPath, terrapodPath, conversion, filepath.Join(root, "backup")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(legacyPath)
+	if err != nil || !bytes.Equal(got, conversion.RewrittenChezmoi) {
+		t.Fatalf("legacy config=%q err=%v", got, err)
+	}
+	if backup, err := os.ReadFile(filepath.Join(root, "backup", "chezmoi.toml")); err != nil || !bytes.Equal(backup, original) {
+		t.Fatalf("backup does not preserve original: %v", err)
+	}
+	if err := ApplyConfigConversionExisting(legacyPath, terrapodPath, conversion, filepath.Join(root, "backup")); err != nil {
+		t.Fatalf("already-pruned retry failed: %v", err)
+	}
+}
+
+func TestApplyConfigConversionExistingRejectsMismatchBeforeLegacyMutation(t *testing.T) {
+	root := t.TempDir()
+	legacyPath := filepath.Join(root, "chezmoi.toml")
+	original := mustRead(t, "testdata/chezmoi-current.toml")
+	if err := os.WriteFile(legacyPath, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	conversion, err := ConvertLegacyConfig(original, legacySchema())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mismatched := model.Config{Version: conversion.Terrapod.Version, Terrapod: make(map[string]any, len(conversion.Terrapod.Terrapod))}
+	for key, value := range conversion.Terrapod.Terrapod {
+		mismatched.Terrapod[key] = value
+	}
+	mismatched.Terrapod["enableEditorStack"] = !mismatched.Terrapod["enableEditorStack"].(bool)
+	terrapodPath := filepath.Join(root, "config.json")
+	if err := config.WriteAtomic(terrapodPath, mismatched); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyConfigConversionExisting(legacyPath, terrapodPath, conversion, filepath.Join(root, "backup")); err == nil {
+		t.Fatal("mismatched independent config was accepted")
+	}
+	if got, err := os.ReadFile(legacyPath); err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("legacy config changed before mismatch rejection: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "backup")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("backup created before mismatch rejection: %v", err)
+	}
+}
+
+func TestConvertLegacyConfigForExistingAcceptsAlreadyPrunedRetry(t *testing.T) {
+	original := mustRead(t, "testdata/chezmoi-current.toml")
+	first, err := ConvertLegacyConfig(original, legacySchema())
+	if err != nil {
+		t.Fatal(err)
+	}
+	retry, err := ConvertLegacyConfigForExisting(first.RewrittenChezmoi, legacySchema(), first.Terrapod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(retry.Terrapod, first.Terrapod) || !bytes.Equal(retry.RewrittenChezmoi, first.RewrittenChezmoi) || len(retry.Removed) != 0 {
+		t.Fatalf("retry conversion=%#v", retry)
+	}
+}
+
 func legacySchema() model.ConfigSchema {
 	fields := []model.ConfigField{{ID: "profile", Kind: "string", Required: true}}
 	for _, id := range []string{

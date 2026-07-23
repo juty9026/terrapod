@@ -51,6 +51,18 @@ func (a *ProviderTransferAdapter) Inspect(ctx context.Context, item model.Resour
 func (a *ProviderTransferAdapter) Plan(ctx context.Context, item model.Resource, o model.Observation, owned model.Ownership) ([]model.Operation, error) {
 	return a.desired.Plan(ctx, item, o, owned)
 }
+func (a *ProviderTransferAdapter) LegacyPackages(ctx context.Context, item model.Resource, observed model.Observation) ([]string, error) {
+	inventory, err := a.legacy.Detect(ctx, a.profile, item, observed)
+	if err != nil {
+		return nil, err
+	}
+	legacy := inventory.Legacy()
+	packages := make([]string, len(legacy))
+	for index, receipt := range legacy {
+		packages[index] = receipt.Package
+	}
+	return packages, nil
+}
 func (a *ProviderTransferAdapter) Execute(ctx context.Context, op model.Operation) model.OperationResult {
 	if op.Kind == model.OperationTransfer {
 		return failedPhase(op, "transfer requires engine-controlled phases")

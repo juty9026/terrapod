@@ -42,6 +42,14 @@ var deprecatedManagedKeys = map[string]bool{
 var afterLegacyRename func() error
 
 func ConvertLegacyConfig(input []byte, schema model.ConfigSchema) (ConfigConversion, error) {
+	return convertLegacyConfig(input, schema, nil)
+}
+
+func ConvertLegacyConfigForExisting(input []byte, schema model.ConfigSchema, existing model.Config) (ConfigConversion, error) {
+	return convertLegacyConfig(input, schema, &existing)
+}
+
+func convertLegacyConfig(input []byte, schema model.ConfigSchema, existing *model.Config) (ConfigConversion, error) {
 	if bytes.IndexByte(input, 0) >= 0 {
 		return ConfigConversion{}, errors.New("legacy config contains NUL")
 	}
@@ -115,6 +123,16 @@ func ConvertLegacyConfig(input []byte, schema model.ConfigSchema) (ConfigConvers
 		rewritten = append(rewritten, raw...)
 	}
 
+	if existing != nil {
+		merged := make(map[string]any, len(existing.Terrapod))
+		for key, value := range existing.Terrapod {
+			merged[key] = value
+		}
+		for key, value := range values {
+			merged[key] = value
+		}
+		values = merged
+	}
 	profileValue, ok := values["profile"].(string)
 	profile := model.Profile(profileValue)
 	if !ok || !profile.Supported() {
@@ -123,6 +141,9 @@ func ConvertLegacyConfig(input []byte, schema model.ConfigSchema) (ConfigConvers
 	normalized, _, err := config.Normalize(model.Config{Version: schema.Version, Terrapod: values}, schema)
 	if err != nil {
 		return ConfigConversion{}, fmt.Errorf("normalize converted config: %w", err)
+	}
+	if existing != nil && !reflect.DeepEqual(normalized, *existing) {
+		return ConfigConversion{}, errors.New("independent Terrapod config differs from converted legacy config")
 	}
 	return ConfigConversion{Terrapod: normalized, RewrittenChezmoi: rewritten, Removed: removed}, nil
 }
@@ -178,6 +199,54 @@ func ApplyConfigConversion(chezmoiPath, terrapodPath string, value ConfigConvers
 		return fmt.Errorf("rewrite legacy chezmoi config: %w", err)
 	}
 	keepNewConfig = true
+	return nil
+}
+
+func ApplyConfigConversionExisting(chezmoiPath, terrapodPath string, value ConfigConversion, backupDir string) error {
+	legacyInfo, err := os.Lstat(chezmoiPath)
+	if err != nil {
+		return fmt.Errorf("inspect legacy chezmoi config: %w", err)
+	}
+	if legacyInfo.Mode()&os.ModeSymlink != 0 {
+		return errors.New("legacy chezmoi config is a symlink")
+	}
+	if !legacyInfo.Mode().IsRegular() {
+		return errors.New("legacy chezmoi config is not a regular file")
+	}
+	configInfo, err := os.Lstat(terrapodPath)
+	if err != nil {
+		return fmt.Errorf("inspect independent Terrapod config: %w", err)
+	}
+	if configInfo.Mode()&os.ModeSymlink != 0 || !configInfo.Mode().IsRegular() {
+		return errors.New("independent Terrapod config is unsafe")
+	}
+	loaded, err := config.Load(terrapodPath)
+	if err != nil {
+		return fmt.Errorf("load independent Terrapod config: %w", err)
+	}
+	if !reflect.DeepEqual(loaded, value.Terrapod) {
+		return errors.New("independent Terrapod config differs from converted legacy config")
+	}
+
+	original, err := os.ReadFile(chezmoiPath)
+	if err != nil {
+		return fmt.Errorf("read legacy chezmoi config: %w", err)
+	}
+	if bytes.Equal(original, value.RewrittenChezmoi) {
+		return nil
+	}
+	if err := writeBackup(filepath.Join(backupDir, filepath.Base(chezmoiPath)), original, legacyInfo.Mode().Perm()); err != nil {
+		return fmt.Errorf("back up legacy chezmoi config: %w", err)
+	}
+	replaced, err := writeAtomicBytes(chezmoiPath, value.RewrittenChezmoi, legacyInfo.Mode().Perm(), afterLegacyRename)
+	if err != nil {
+		if replaced {
+			if _, restoreErr := writeAtomicBytes(chezmoiPath, original, legacyInfo.Mode().Perm(), nil); restoreErr != nil {
+				return fmt.Errorf("rewrite legacy chezmoi config: %v; restore original legacy config: %w", err, restoreErr)
+			}
+		}
+		return fmt.Errorf("rewrite legacy chezmoi config: %w", err)
+	}
 	return nil
 }
 

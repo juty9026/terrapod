@@ -19,6 +19,7 @@ import (
 	"github.com/juty9026/terrapod/internal/catalog"
 	"github.com/juty9026/terrapod/internal/config"
 	"github.com/juty9026/terrapod/internal/execx"
+	migratepkg "github.com/juty9026/terrapod/internal/migrate"
 	"github.com/juty9026/terrapod/internal/model"
 	"github.com/juty9026/terrapod/internal/paths"
 	"github.com/juty9026/terrapod/internal/planner"
@@ -58,6 +59,7 @@ type Dependencies struct {
 	ContinueUpdate  func(context.Context, string) (updatepkg.Result, error)
 	Setup           func(context.Context) (model.Config, error)
 	Configure       func(context.Context, setuppkg.Preset) (model.Config, error)
+	MigrateCurrent  func(context.Context, func(model.Plan) error) (migratepkg.CurrentResult, error)
 }
 
 // AdapterSet is the composition boundary for every typed provider introduced
@@ -160,6 +162,39 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 		renderApplySummary(stdout, result.Summary)
 		if err != nil {
 			fmt.Fprintln(stderr, err)
+			return exitUnavailable
+		}
+		return 0
+	}
+	if command == "migrate-current" {
+		if deps.Geteuid == nil || deps.Geteuid() == 0 {
+			fmt.Fprintln(stderr, "Terrapod manager commands must run as a non-root user")
+			return exitFailure
+		}
+		if len(args) != 1 {
+			fmt.Fprintln(stderr, "usage: tpod migrate-current")
+			return exitUsage
+		}
+		if deps.MigrateCurrent == nil {
+			fmt.Fprintln(stderr, "internal error: legacy migration is not configured")
+			return exitFailure
+		}
+		result, err := deps.MigrateCurrent(ctx, func(plan model.Plan) error {
+			renderPlan(stdout, plan, "held by migration transaction")
+			return nil
+		})
+		if result.AlreadyComplete {
+			fmt.Fprintln(stdout, "Terrapod legacy migration is already complete.")
+			return 0
+		}
+		renderApplySummary(stdout, result.Summary)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			fmt.Fprintln(stderr, "Resolve unavailable resources and run 'tpod apply' as needed, then rerun 'install.sh --migrate' to complete legacy cleanup.")
+			return exitUnavailable
+		}
+		if len(result.Summary.Unavailable) != 0 {
+			fmt.Fprintln(stderr, "Resolve unavailable resources and run 'tpod apply' as needed, then rerun 'install.sh --migrate' to complete legacy cleanup.")
 			return exitUnavailable
 		}
 		return 0

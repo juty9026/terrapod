@@ -165,6 +165,11 @@ repair_cleanup() {
 }
 
 repair_management_core() {
+  repair_mode="${1:-activate}"
+  case "$repair_mode" in
+    activate|--stage-only) ;;
+    *) fatal "invalid Management Core repair mode: $repair_mode" ;;
+  esac
   repair_require_non_root
 
   release_base="$OFFICIAL_RELEASE_BASE_URL"
@@ -268,17 +273,32 @@ repair_management_core() {
   chmod 755 "$binary_download" || fatal "failed to make verified repair binary executable"
   manifest_digest="$("$openssl_bin" dgst -sha256 -r "$manifest_file" | awk '{print $1}')" ||
     fatal "failed to hash verified release manifest"
-  HOME="$HOME" \
-    XDG_DATA_HOME="$data_home" \
-    XDG_CACHE_HOME="$cache_home" \
-    "$binary_download" internal-repair-stage \
-      --manifest-digest "$manifest_digest" \
-      --release-version "$release_version" ||
-    fatal "verified Management Core could not stage and activate the signed release"
+  if [ "$repair_mode" = --stage-only ]; then
+    HOME="$HOME" \
+      XDG_DATA_HOME="$data_home" \
+      XDG_CACHE_HOME="$cache_home" \
+      "$binary_download" internal-repair-stage \
+        --manifest-digest "$manifest_digest" \
+        --release-version "$release_version" \
+        --stage-only ||
+      fatal "verified Management Core could not stage the signed release"
+  else
+    HOME="$HOME" \
+      XDG_DATA_HOME="$data_home" \
+      XDG_CACHE_HOME="$cache_home" \
+      "$binary_download" internal-repair-stage \
+        --manifest-digest "$manifest_digest" \
+        --release-version "$release_version" ||
+      fatal "verified Management Core could not stage and activate the signed release"
+  fi
 
   repair_cleanup
   trap - 0 1 2 15
-  printf '%s\n' "terrapod installer: repaired Management Core"
+  if [ "$repair_mode" = --stage-only ]; then
+    printf '%s\n' "terrapod installer: staged signed Management Core"
+  else
+    printf '%s\n' "terrapod installer: repaired Management Core"
+  fi
 }
 
 user_local_bin_dir() {
@@ -1560,22 +1580,8 @@ print_first_run_warning_completion() {
   printf '%s\n' "  $local_bin_dir/tpod doctor"
 }
 
-main() {
-  case "$#" in
-    0)
-      ;;
-    1)
-      if [ "$1" = --repair ]; then
-        repair_management_core
-        return
-      fi
-      fatal "unsupported argument: $1"
-      ;;
-    *)
-      fatal "usage: install.sh [--repair]"
-      ;;
-  esac
-
+install_manager() {
+  mode="$1"
   profile="$(detect_profile)"
   if [ "${TERRAPOD_PRINT_EXPECTED_HOMEBREW_PATH:-}" = 1 ]; then
     expected_homebrew_path "$profile" "$(machine_arch)"
@@ -1583,26 +1589,11 @@ main() {
   fi
   label="$(profile_label "$profile")"
   local_bin_dir="$(user_local_bin_dir)"
-  source_dir="$(default_source_dir)"
 
-  printf '%s\n' "Terrapod first-run installer"
+  printf '%s\n' "Terrapod manager installer"
   printf '%s\n' "Profile: $label"
-  printf '%s\n' "Source repository: $DEFAULT_SOURCE_REPO"
 
   ensure_user_local_bin "$local_bin_dir"
-  source_already_present=false
-  if source_dir_exists "$source_dir"; then
-    if ! source_is_resumable_terrapod_checkout "$source_dir"; then
-      reject_unresumable_source_dir "$source_dir"
-    fi
-    source_already_present=true
-  fi
-
-  if [ "$source_already_present" = "true" ] && installed_command_surface_is_valid "$local_bin_dir" "$profile"; then
-    print_already_installed_guidance "$local_bin_dir"
-    return 0
-  fi
-
   require_non_root_linux_user "$profile"
   ensure_source_repo_prerequisites "$profile"
   warn_low_linuxbrew_disk_space "$profile"
@@ -1612,27 +1603,53 @@ main() {
   fi
   eval "$brew_shellenv" || fatal "failed to evaluate Homebrew shellenv"
   prepare_brew_bootstrap_tools "$brew_bin"
-  chezmoi_bin="${brew_bin%/brew}/chezmoi"
-  if [ "$source_already_present" = "false" ]; then
-    initialize_source_repository "$chezmoi_bin"
-  fi
-  ensure_first_run_setup "$profile" "$source_dir" "$chezmoi_bin"
-  apply_recovery_core_command_surface "$profile" "$source_dir" "$local_bin_dir"
-  apply_recovery_core_shell_startup_files "$profile" "$chezmoi_bin"
-  initial_apply_status=0
-  run_initial_apply "$chezmoi_bin" "$source_dir" || initial_apply_status="$?"
-  show_first_run_help "$profile" "$local_bin_dir"
-  print_first_run_tpod_availability "$local_bin_dir"
 
-  case "$initial_apply_status" in
-    0)
-      print_first_run_clean_completion
+  case "$mode" in
+    install)
+      repair_management_core
+      tpod_bin="$local_bin_dir/tpod"
+      [ -x "$tpod_bin" ] || fatal "signed Terrapod manager launcher is unavailable: $tpod_bin"
+      "$tpod_bin" setup || fatal "Terrapod Setup did not complete"
+      "$tpod_bin" apply ||
+        fatal "Terrapod initial reconciliation did not complete; the launcher remains available at $tpod_bin"
+      printf '%s\n' "Terrapod manager installation complete."
       ;;
-    2)
-      print_first_run_warning_completion "$local_bin_dir"
+    migrate)
+      repair_management_core --stage-only
+      tpod_bin="$releases/$release_version/bin/tpod"
+      [ -x "$tpod_bin" ] || fatal "staged signed Terrapod manager is unavailable: $tpod_bin"
+      TPOD_MIGRATION_STAGED_VERSION="$release_version" \
+        TPOD_MIGRATION_MANIFEST_DIGEST="$manifest_digest" \
+        "$tpod_bin" migrate-current ||
+        fatal "Terrapod migration requires attention; the manager is active at $tpod_bin"
+      printf '%s\n' "Terrapod manager migration complete."
       ;;
     *)
-      fatal "unexpected initial apply status: $initial_apply_status"
+      fatal "internal installer mode is invalid: $mode"
+      ;;
+  esac
+}
+
+main() {
+  case "$#" in
+    0)
+      install_manager install
+      ;;
+    1)
+      case "$1" in
+        --repair)
+          repair_management_core
+          ;;
+        --migrate)
+          install_manager migrate
+          ;;
+        *)
+          fatal "unsupported argument: $1"
+          ;;
+      esac
+      ;;
+    *)
+      fatal "usage: install.sh [--repair|--migrate]"
       ;;
   esac
 }

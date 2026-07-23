@@ -132,6 +132,7 @@ func main() {
 				return productionActiveCatalog(layout, roots)
 			}
 			configureSignedUpdate(&deps, layout, client, roots)
+			configureCurrentMigration(&deps, layout, roots, client)
 		}
 	}
 	if len(os.Args) > 1 && os.Args[1] == "internal-release-root-check" {
@@ -160,8 +161,9 @@ func repairManagementCore(layout paths.Layout, homeErr error, args []string) err
 	if os.Geteuid() == 0 {
 		return errors.New("repair staging must run as a non-root user")
 	}
-	if len(args) != 4 || args[0] != "--manifest-digest" || args[2] != "--release-version" {
-		return errors.New("usage: tpod internal-repair-stage --manifest-digest <sha256> --release-version <version>")
+	stageOnly := len(args) == 5 && args[4] == "--stage-only"
+	if (len(args) != 4 && !stageOnly) || args[0] != "--manifest-digest" || args[2] != "--release-version" {
+		return errors.New("usage: tpod internal-repair-stage --manifest-digest <sha256> --release-version <version> [--stage-only]")
 	}
 	endpoint, err := repairReleaseEndpoint(args[3])
 	if err != nil {
@@ -178,7 +180,7 @@ func repairManagementCore(layout paths.Layout, homeErr error, args []string) err
 		CacheDir: layout.ReleaseCacheDir,
 		Verifier: verifier,
 	}
-	return repairLatestRelease(context.Background(), layout, args[1], verifier, client.LatestStable)
+	return repairLatestRelease(context.Background(), layout, args[1], verifier, client.LatestStable, stageOnly)
 }
 
 func repairReleaseEndpoint(version string) (string, error) {
@@ -192,7 +194,7 @@ func repairReleaseEndpoint(version string) (string, error) {
 	return strings.TrimSuffix(releaseLatestEndpoint, latestSuffix) + "/tags/v" + version, nil
 }
 
-func repairLatestRelease(ctx context.Context, layout paths.Layout, expectedDigest string, verifier release.Verifier, latest func(context.Context) (release.VerifiedRelease, error)) error {
+func repairLatestRelease(ctx context.Context, layout paths.Layout, expectedDigest string, verifier release.Verifier, latest func(context.Context) (release.VerifiedRelease, error), stageOnly bool) error {
 	verified, err := latest(ctx)
 	if err != nil {
 		return err
@@ -224,6 +226,10 @@ func repairLatestRelease(ctx context.Context, layout paths.Layout, expectedDiges
 		}
 	}
 	launchers := [2]string{filepath.Join(layout.HomeDir, ".local", "bin", "tpod"), filepath.Join(layout.HomeDir, ".local", "bin", "terrapod")}
+	if stageOnly {
+		_, err = stager.Stage(ctx, verified, release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH})
+		return err
+	}
 	_, err = stager.RepairAndActivate(ctx, verified, release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}, launchers)
 	return err
 }
