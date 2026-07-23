@@ -39,6 +39,7 @@ import (
 	"github.com/juty9026/terrapod/internal/resource"
 	"github.com/juty9026/terrapod/internal/resource/managementcore"
 	"github.com/juty9026/terrapod/internal/state"
+	"github.com/juty9026/terrapod/internal/testutil"
 )
 
 func TestProductionActiveCatalogRequiresPublishedReleaseVersion(t *testing.T) {
@@ -410,7 +411,7 @@ func TestBuiltBinaryDispatchesThroughRealConstrainedChezmoiClient(t *testing.T) 
 }
 
 func TestProductionPlannerComposesRealStateBoundAdapters(t *testing.T) {
-	home := t.TempDir()
+	home := testutil.WorkspaceTempDir(t)
 	layout := paths.Resolve(home, map[string]string{})
 	store, err := state.Open(layout.StateDir)
 	if err != nil {
