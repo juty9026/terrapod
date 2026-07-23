@@ -6,6 +6,7 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"bufio"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -169,6 +170,13 @@ func (a Adapter) FetchAndExtract(ctx context.Context, asset Asset, destination s
 	if err != nil {
 		return Manifest{}, err
 	}
+	return a.ExtractFile(archivePath, asset.Format, destination)
+}
+
+// ExtractFile safely extracts a local archive and atomically installs the
+// result at destination. It applies the same limits and path validation as
+// FetchAndExtract without performing network access.
+func (a Adapter) ExtractFile(archivePath, format, destination string) (Manifest, error) {
 	parent := filepath.Dir(destination)
 	if err := ensureAbsoluteDirectoryChain(parent, 0o700); err != nil {
 		return Manifest{}, err
@@ -183,7 +191,7 @@ func (a Adapter) FetchAndExtract(ctx context.Context, asset Asset, destination s
 			_ = os.RemoveAll(staging)
 		}
 	}()
-	manifest, err := a.extract(archivePath, asset.Format, staging)
+	manifest, err := a.extract(archivePath, format, staging)
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -253,6 +261,8 @@ func (a Adapter) extract(source, format, staging string) (Manifest, error) {
 		return a.extractZip(source, staging)
 	case "tar":
 		return a.extractTar(source, staging)
+	case "tar.gz":
+		return a.extractTarGzip(source, staging)
 	default:
 		return Manifest{}, fmt.Errorf("archive: unsupported format %q", format)
 	}
@@ -302,7 +312,38 @@ func (a Adapter) extractTar(source, staging string) (Manifest, error) {
 		return Manifest{}, err
 	}
 	defer file.Close()
-	reader := tar.NewReader(bufio.NewReader(file))
+	return a.extractTarReader(file, staging)
+}
+
+func (a Adapter) extractTarGzip(source, staging string) (Manifest, error) {
+	file, err := os.Open(source)
+	if err != nil {
+		return Manifest{}, err
+	}
+	defer file.Close()
+	buffered := bufio.NewReader(file)
+	compressed, err := gzip.NewReader(buffered)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("archive: open gzip: %w", err)
+	}
+	compressed.Multistream(false)
+	manifest, extractErr := a.extractTarReader(compressed, staging)
+	_, drainErr := io.Copy(io.Discard, compressed)
+	closeErr := compressed.Close()
+	if extractErr != nil || drainErr != nil || closeErr != nil {
+		return Manifest{}, errors.Join(extractErr, drainErr, closeErr)
+	}
+	if _, err := buffered.Peek(1); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return Manifest{}, errors.New("archive: trailing gzip data")
+		}
+		return Manifest{}, fmt.Errorf("archive: inspect gzip trailer: %w", err)
+	}
+	return manifest, nil
+}
+
+func (a Adapter) extractTarReader(input io.Reader, staging string) (Manifest, error) {
+	reader := tar.NewReader(bufio.NewReader(input))
 	entries := make([]entry, 0)
 	seen := make(map[string]bool)
 	limits := a.limits()

@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"fmt"
@@ -39,6 +40,19 @@ func zipBytes(t *testing.T, entries map[string]string, symlink string) []byte {
 		_, _ = io.WriteString(part, "../../outside")
 	}
 	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return output.Bytes()
+}
+
+func gzipBytes(t *testing.T, body []byte) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	writer := gzip.NewWriter(&output)
+	if _, err := writer.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
 	return output.Bytes()
@@ -174,6 +188,50 @@ func TestExtractAtomicallyReplacesDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(destination, "old")); !os.IsNotExist(err) {
 		t.Fatalf("old remains: %v", err)
+	}
+}
+
+func TestExtractFileTarGzipUsesSafeAtomicExtraction(t *testing.T) {
+	parent := realTempDir(t)
+	source := filepath.Join(parent, "source.tar.gz")
+	if err := os.WriteFile(source, gzipBytes(t, tarBytes(t, map[string]string{"src/main.go": "package main"}, nil)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(parent, "out")
+	manifest, err := (Adapter{}).ExtractFile(source, "tar.gz", destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Files) != 1 || manifest.Files[0].Path != "src/main.go" {
+		t.Fatalf("manifest=%+v", manifest)
+	}
+	if body, err := os.ReadFile(filepath.Join(destination, "src", "main.go")); err != nil || string(body) != "package main" {
+		t.Fatalf("body=%q err=%v", body, err)
+	}
+}
+
+func TestExtractFileRejectsCorruptAndTrailingGzipWithoutDestinationMutation(t *testing.T) {
+	valid := gzipBytes(t, tarBytes(t, map[string]string{"ok": "ok"}, nil))
+	corrupt := append([]byte(nil), valid...)
+	corrupt[len(corrupt)-1] ^= 0xff
+	for _, tc := range []struct {
+		name string
+		body []byte
+	}{{"corrupt", corrupt}, {"trailing", append(append([]byte(nil), valid...), []byte("trailing")...)}} {
+		t.Run(tc.name, func(t *testing.T) {
+			parent := realTempDir(t)
+			source := filepath.Join(parent, "source.tar.gz")
+			if err := os.WriteFile(source, tc.body, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			destination := filepath.Join(parent, "out")
+			if _, err := (Adapter{}).ExtractFile(source, "tar.gz", destination); err == nil {
+				t.Fatal("invalid gzip accepted")
+			}
+			if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+				t.Fatalf("destination mutated: %v", err)
+			}
+		})
 	}
 }
 

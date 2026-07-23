@@ -3,13 +3,14 @@ package paths
 import "path/filepath"
 
 type Layout struct {
-	HomeDir       string
-	ConfigFile    string
-	StateDir      string
-	DataDir       string
-	CacheDir      string
-	ReleaseDir    string
-	ActiveRelease string
+	HomeDir         string
+	ConfigFile      string
+	StateDir        string
+	DataDir         string
+	CacheDir        string
+	ReleaseCacheDir string
+	ReleaseDir      string
+	ActiveRelease   string
 }
 
 func Resolve(home string, env map[string]string) Layout {
@@ -19,14 +20,16 @@ func Resolve(home string, env map[string]string) Layout {
 	cacheHome := envOrDefault(env, "XDG_CACHE_HOME", filepath.Join(home, ".cache"))
 	dataDir := filepath.Join(dataHome, "terrapod")
 
+	cacheDir := filepath.Join(cacheHome, "terrapod")
 	return Layout{
-		HomeDir:       home,
-		ConfigFile:    filepath.Join(configHome, "terrapod", "config.json"),
-		StateDir:      filepath.Join(stateHome, "terrapod"),
-		DataDir:       dataDir,
-		CacheDir:      filepath.Join(cacheHome, "terrapod"),
-		ReleaseDir:    filepath.Join(dataDir, "releases"),
-		ActiveRelease: filepath.Join(dataDir, "current"),
+		HomeDir:         home,
+		ConfigFile:      filepath.Join(configHome, "terrapod", "config.json"),
+		StateDir:        filepath.Join(stateHome, "terrapod"),
+		DataDir:         dataDir,
+		CacheDir:        cacheDir,
+		ReleaseCacheDir: filepath.Join(cacheDir, "releases"),
+		ReleaseDir:      filepath.Join(dataDir, "releases"),
+		ActiveRelease:   filepath.Join(dataDir, "current"),
 	}
 }
 
