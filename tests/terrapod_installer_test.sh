@@ -137,7 +137,7 @@ assert_contains "$readme_text" "\`tpod help\` so the short day-to-day command is
 assert_contains "$readme_text" "Use \`tpod\` as the day-to-day management command after bootstrap." "README documents tpod as the day-to-day management command"
 assert_contains "$readme_text" "\`terrapod\` remains the full command and brand name." "README keeps Terrapod as the full command and brand"
 assert_contains "$readme_text" "terrapod chezmoi -- status" "README documents raw chezmoi access through Terrapod"
-assert_contains "$readme_text" "Direct chezmoi use remains an advanced escape hatch." "README keeps direct chezmoi as an advanced escape hatch"
+assert_contains "$readme_text" "Direct access is a read-only chezmoi escape hatch." "README constrains direct chezmoi to read-only access"
 assert_not_contains "$readme_text" "--non-interactive" "README keeps non-interactive installer options out of scope"
 assert_not_contains "$readme_text" "repository rename" "README keeps repository renaming out of scope"
 assert_not_contains "$readme_text" "log-output" "README keeps broader log-output design out of scope"

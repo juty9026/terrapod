@@ -151,10 +151,10 @@ assert_not_contains "$korean_readme" 'Charm APT' \
   "README.ko.md removes the Charm APT trust boundary"
 assert_not_contains "$korean_readme" '공식 mise APT repository' \
   "README.ko.md removes mise APT ownership"
-assert_contains "$korean_readme" 'HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade' \
-  "README.ko.md documents restore-only apply semantics"
-assert_contains "$korean_readme" '기존 mise, APT, vendor-installed payload는 자동으로 제거하지 않습니다.' \
-  "README.ko.md documents non-destructive migration"
+assert_contains "$korean_readme" '`~/.config/terrapod/config.json`' \
+  "README.ko.md documents the independent Terrapod config"
+assert_contains "$korean_readme" 'declared-root ownership' \
+  "README.ko.md documents the ownership boundary"
 assert_contains "$korean_readme" '`development-apps`: Zed와 Orca ADE(`stablyai/orca/orca`).' \
   "README.ko.md documents Zed and Orca ADE in the development-apps inventory"
 assert_contains "$korean_readme" '| `enableMacosAppGroupDevelopmentApps` | `false` | development-apps macOS App Group인 Zed와 Orca ADE(`stablyai/orca/orca`)를 설치합니다. |' \
@@ -173,14 +173,40 @@ assert_contains "$korean_readme" 'Ghostty, Zed buffer와 terminal, Orca terminal
   "README.ko.md directly documents the app-key-only settings scope"
 assert_contains "$korean_readme" '기존 window가 cached font를 계속 사용하면 Ghostty, Zed 또는 Orca를 다시 시작해야 할 수 있습니다.' \
   "README.ko.md directly documents cached-font restart guidance"
-assert_contains "$korean_readme" 'Terrapod은 기존에 설치된 JetBrains Mono Nerd Font 또는 D2Coding을 제거하지 않습니다.' \
-  "README.ko.md documents non-destructive legacy font migration"
 assert_contains "$korean_readme" 'Jetendard 설정 적용이 보류되면 Orca를 종료한 뒤 `tpod apply`를 다시 실행합니다.' \
   "README.ko.md documents Orca font-setting recovery"
-assert_contains "$korean_readme" 'brew upgrade --cask claude-code codex antigravity-cli' \
-  "README.ko.md documents targeted AI CLI upgrades"
 assert_contains "$korean_readme" '`enableMacosAppGroupAiApps`는 deprecated key이며 alias로 해석하지 않습니다.' \
   "README.ko.md documents explicit development-apps key migration"
+assert_contains "$korean_readme" '`tpod plan`' \
+  "README.ko.md documents plan"
+assert_contains "$korean_readme" '`tpod apply`' \
+  "README.ko.md documents apply"
+assert_contains "$korean_readme" '`tpod update`' \
+  "README.ko.md documents update"
+assert_contains "$korean_readme" '`tpod resolve <resource-id>`' \
+  "README.ko.md documents conflict resolution"
+assert_contains "$korean_readme" 'Terrapod-owned resource를 자동으로 prune' \
+  "README.ko.md documents automatic owned-resource pruning"
+assert_contains "$korean_readme" '`brew uninstall --zap`을 사용하지 않습니다' \
+  "README.ko.md documents the Homebrew uninstall boundary"
+assert_contains "$korean_readme" '`ready`' \
+  "README.ko.md documents ready state"
+assert_contains "$korean_readme" '`unavailable`' \
+  "README.ko.md documents unavailable state"
+assert_contains "$korean_readme" 'read-only chezmoi escape hatch' \
+  "README.ko.md documents constrained direct chezmoi access"
+assert_contains "$korean_readme" '`install.sh --migrate`' \
+  "README.ko.md documents the maintainer migration"
+assert_contains "$korean_readme" 'authoring checkout은 active signed release와 분리' \
+  "README.ko.md documents authoring and active release separation"
+assert_contains "$korean_readme" '`install.sh --repair`' \
+  "README.ko.md documents repair"
+assert_contains "$korean_readme" '`macos-terminal`과 `vps-shell`' \
+  "README.ko.md documents supported profiles"
+assert_not_contains "$korean_readme" 'package-manager upgrade를 범위 밖에 둡니다' \
+  "README.ko.md removes the bootstrap-only package boundary"
+assert_not_contains "$korean_readme" 'optional stack을 끄면 chezmoi 관리 대상에서는 제외되지만, machine에 이미 존재하는 file은 제거하지 않습니다.' \
+  "README.ko.md removes non-destructive optional stack opt-out"
 
 extract_headings "$readme" >"$tmp_dir/readme.headings"
 extract_headings "$korean_readme" >"$tmp_dir/readme-ko.headings"
