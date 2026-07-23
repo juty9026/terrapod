@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"debug/elf"
 	"encoding/binary"
@@ -18,7 +19,7 @@ import (
 func TestStagerStagesAndAtomicallyActivatesRelease(t *testing.T) {
 	root := realReleaseTempDir(t)
 	release := stagedFixture(t, root, Platform{OS: "linux", Arch: "amd64"}, sourceTar(t, map[string]string{"README.md": "hello"}))
-	s := Stager{ReleaseDir: filepath.Join(root, "data", "releases"), ActiveRelease: filepath.Join(root, "data", "current")}
+	s := testStager(Stager{ReleaseDir: filepath.Join(root, "data", "releases"), ActiveRelease: filepath.Join(root, "data", "current")})
 	got, err := s.Stage(context.Background(), release, Platform{OS: "linux", Arch: "amd64"})
 	if err != nil {
 		t.Fatal(err)
@@ -63,6 +64,7 @@ func TestStagerRejectsUnsafeArchiveAndWrongBinary(t *testing.T) {
 		{name: "duplicate", archive: sourceTarSequence(t, []tarEntry{{name: "same", body: "one"}, {name: "same", body: "two"}}), binary: linuxBinary(elf.EM_X86_64), want: "duplicate"},
 		{name: "bomb", archive: sourceTarOversizedHeader(t), binary: linuxBinary(elf.EM_X86_64), want: "limit"},
 		{name: "wrong format", archive: sourceTar(t, map[string]string{"ok": "ok"}), binary: []byte("script"), want: "format"},
+		{name: "malformed ELF", archive: sourceTar(t, map[string]string{"ok": "ok"}), binary: malformedELF(), want: "format"},
 		{name: "wrong arch", archive: sourceTar(t, map[string]string{"ok": "ok"}), binary: linuxBinary(elf.EM_AARCH64), want: "architecture"},
 	}
 	for _, tc := range tests {
@@ -72,7 +74,7 @@ func TestStagerRejectsUnsafeArchiveAndWrongBinary(t *testing.T) {
 			binaryAsset, _ := rel.Manifest.BinaryAsset("linux", "amd64")
 			os.WriteFile(rel.Files[binaryAsset.Name], tc.binary, 0o600)
 			bindFixtureFile(t, &rel, binaryAsset.Name)
-			s := Stager{ReleaseDir: filepath.Join(root, "releases"), ActiveRelease: filepath.Join(root, "current")}
+			s := testStager(Stager{ReleaseDir: filepath.Join(root, "releases"), ActiveRelease: filepath.Join(root, "current")})
 			if _, err := s.Stage(context.Background(), rel, Platform{OS: "linux", Arch: "amd64"}); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err=%v want=%q", err, tc.want)
 			}
@@ -87,7 +89,7 @@ func TestStagerAcceptsMachOAndRejectsExecutableOSMismatch(t *testing.T) {
 	root := realReleaseTempDir(t)
 	archive := sourceTar(t, map[string]string{"ok": "ok"})
 	darwin := stagedFixture(t, root, Platform{OS: "darwin", Arch: "arm64"}, archive)
-	s := Stager{ReleaseDir: filepath.Join(root, "releases"), ActiveRelease: filepath.Join(root, "current")}
+	s := testStager(Stager{ReleaseDir: filepath.Join(root, "releases"), ActiveRelease: filepath.Join(root, "current")})
 	if _, err := s.Stage(context.Background(), darwin, Platform{OS: "darwin", Arch: "arm64"}); err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +100,7 @@ func TestStagerAcceptsMachOAndRejectsExecutableOSMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	bindFixtureFile(t, &linux, asset.Name)
-	_, err := (Stager{ReleaseDir: filepath.Join(otherRoot, "releases"), ActiveRelease: filepath.Join(otherRoot, "current")}).Stage(context.Background(), linux, Platform{OS: "linux", Arch: "amd64"})
+	_, err := testStager(Stager{ReleaseDir: filepath.Join(otherRoot, "releases"), ActiveRelease: filepath.Join(otherRoot, "current")}).Stage(context.Background(), linux, Platform{OS: "linux", Arch: "amd64"})
 	if err == nil || !strings.Contains(err.Error(), "operating system") {
 		t.Fatalf("err=%v", err)
 	}
@@ -111,7 +113,7 @@ func TestStagerRejectsDigestDriftAndPreservesCurrent(t *testing.T) {
 	if err := os.WriteFile(rel.Files[catalog.Name], []byte("changed"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s := Stager{ReleaseDir: filepath.Join(root, "data", "releases"), ActiveRelease: filepath.Join(root, "data", "current")}
+	s := testStager(Stager{ReleaseDir: filepath.Join(root, "data", "releases"), ActiveRelease: filepath.Join(root, "data", "current")})
 	if err := os.MkdirAll(filepath.Join(s.ReleaseDir, "1.0.0"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +133,7 @@ func TestStagerRejectsManifestMutationAfterVerification(t *testing.T) {
 	root := realReleaseTempDir(t)
 	rel := stagedFixture(t, root, Platform{OS: "linux", Arch: "amd64"}, sourceTar(t, map[string]string{"ok": "ok"}))
 	rel.Manifest.Version = "9.9.9"
-	s := Stager{ReleaseDir: filepath.Join(root, "releases"), ActiveRelease: filepath.Join(root, "current")}
+	s := testStager(Stager{ReleaseDir: filepath.Join(root, "releases"), ActiveRelease: filepath.Join(root, "current")})
 	if _, err := s.Stage(context.Background(), rel, Platform{OS: "linux", Arch: "amd64"}); err == nil || !strings.Contains(err.Error(), "modified") {
 		t.Fatalf("err=%v", err)
 	}
@@ -148,10 +150,10 @@ func TestStagerRejectsAncestorSymlinkAndMismatchedExistingRelease(t *testing.T) 
 	if err := os.Symlink(real, link); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := (Stager{ReleaseDir: filepath.Join(link, "releases"), ActiveRelease: filepath.Join(link, "current")}).Stage(context.Background(), rel, Platform{OS: "linux", Arch: "amd64"}); err == nil || !strings.Contains(err.Error(), "symlink") {
+	if _, err := testStager(Stager{ReleaseDir: filepath.Join(link, "releases"), ActiveRelease: filepath.Join(link, "current")}).Stage(context.Background(), rel, Platform{OS: "linux", Arch: "amd64"}); err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("err=%v", err)
 	}
-	s := Stager{ReleaseDir: filepath.Join(root, "releases"), ActiveRelease: filepath.Join(root, "current")}
+	s := testStager(Stager{ReleaseDir: filepath.Join(root, "releases"), ActiveRelease: filepath.Join(root, "current")})
 	if _, err := s.Stage(context.Background(), rel, Platform{OS: "linux", Arch: "amd64"}); err != nil {
 		t.Fatal(err)
 	}
@@ -163,6 +165,87 @@ func TestStagerRejectsAncestorSymlinkAndMismatchedExistingRelease(t *testing.T) 
 	}
 }
 
+func TestStagerRejectsEveryInstalledReleaseTamperWithoutChangingCurrent(t *testing.T) {
+	tests := []struct {
+		name   string
+		tamper func(*testing.T, string)
+	}{
+		{"binary", func(t *testing.T, root string) { flipInstalledByte(t, filepath.Join(root, "bin", "tpod"), 0o755) }},
+		{"source archive", func(t *testing.T, root string) {
+			flipInstalledByte(t, filepath.Join(root, ".artifacts", "source.tar.gz"), 0o444)
+		}},
+		{"catalog", func(t *testing.T, root string) {
+			flipInstalledByte(t, filepath.Join(root, "catalog", "resources.json"), 0o444)
+		}},
+		{"stage record", func(t *testing.T, root string) { flipInstalledByte(t, filepath.Join(root, ".stage.json"), 0o444) }},
+		{"signed manifest", func(t *testing.T, root string) { flipInstalledByte(t, filepath.Join(root, "release.json"), 0o444) }},
+		{"signature", func(t *testing.T, root string) { flipInstalledByte(t, filepath.Join(root, "release.json.sig"), 0o444) }},
+		{"extracted source", func(t *testing.T, root string) { flipInstalledByte(t, filepath.Join(root, "source", "ok"), 0o444) }},
+		{"extra file", func(t *testing.T, root string) {
+			if err := os.Chmod(root, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "extra"), []byte("extra"), 0o444); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(root, 0o555); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"mode", func(t *testing.T, root string) {
+			if err := os.Chmod(filepath.Join(root, "catalog", "resources.json"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			base := realReleaseTempDir(t)
+			release := stagedFixture(t, base, Platform{OS: "linux", Arch: "amd64"}, sourceTar(t, map[string]string{"ok": "ok"}))
+			s := testStager(Stager{ReleaseDir: filepath.Join(base, "data", "releases"), ActiveRelease: filepath.Join(base, "data", "current")})
+			staged, err := s.Stage(context.Background(), release, Platform{OS: "linux", Arch: "amd64"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Join("releases", "1.0.0"), s.ActiveRelease); err != nil {
+				t.Fatal(err)
+			}
+			tc.tamper(t, staged.Path)
+			if err := s.Activate("1.2.3"); err == nil {
+				t.Fatal("tampered release activated")
+			}
+			target, err := os.Readlink(s.ActiveRelease)
+			if err != nil || target != filepath.Join("releases", "1.0.0") {
+				t.Fatalf("current=%q err=%v", target, err)
+			}
+			if _, err := s.Stage(context.Background(), release, Platform{OS: "linux", Arch: "amd64"}); err == nil {
+				t.Fatal("tampered same-version release accepted")
+			}
+		})
+	}
+}
+
+func flipInstalledByte(t *testing.T, name string, mode os.FileMode) {
+	t.Helper()
+	data, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) == 0 {
+		t.Fatal("empty fixture")
+	}
+	data[len(data)/2] ^= 0xff
+	if err := os.Chmod(name, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(name, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(name, mode); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func stagedFixture(t *testing.T, root string, platform Platform, archive []byte) VerifiedRelease {
 	t.Helper()
 	dir := filepath.Join(root, "downloads")
@@ -170,7 +253,6 @@ func stagedFixture(t *testing.T, root string, platform Platform, archive []byte)
 		t.Fatal(err)
 	}
 	m := validManifest(t)
-	m.verified = true
 	files := map[string]string{}
 	for i := range m.Assets {
 		var body []byte
@@ -208,9 +290,7 @@ func stagedFixture(t *testing.T, root string, platform Platform, archive []byte)
 		files[m.Assets[i].Name] = path
 	}
 	release := VerifiedRelease{Manifest: m, Files: files}
-	if err := release.sealManifest(); err != nil {
-		t.Fatal(err)
-	}
+	resignFixture(t, &release)
 	return release
 }
 func bindFixtureFile(t *testing.T, r *VerifiedRelease, name string) {
@@ -224,28 +304,74 @@ func bindFixtureFile(t *testing.T, r *VerifiedRelease, name string) {
 			sum := sha256.Sum256(b)
 			r.Manifest.Assets[i].Size = int64(len(b))
 			r.Manifest.Assets[i].SHA256 = hex.EncodeToString(sum[:])
-			if err := r.sealManifest(); err != nil {
-				t.Fatal(err)
-			}
+			resignFixture(t, r)
 			return
 		}
 	}
 }
+func testStager(stager Stager) Stager {
+	private := ed25519.NewKeyFromSeed(testSeed)
+	stager.Verifier = testVerifier(private.Public().(ed25519.PublicKey))
+	return stager
+}
+func resignFixture(t *testing.T, release *VerifiedRelease) {
+	t.Helper()
+	release.Manifest.verified = false
+	private := ed25519.NewKeyFromSeed(testSeed)
+	data := encodeManifest(t, release.Manifest)
+	signature := signManifest(t, "root", private, data)
+	verified, err := testVerifier(private.Public().(ed25519.PublicKey)).VerifyManifest(data, signature)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release.Manifest = verified
+	release.manifestData = data
+	release.signatureData = signature
+	if err := release.sealManifest(); err != nil {
+		t.Fatal(err)
+	}
+}
 func linuxBinary(machine elf.Machine) []byte {
-	b := make([]byte, 64)
+	b := make([]byte, 120)
 	copy(b, []byte{0x7f, 'E', 'L', 'F'})
 	b[4] = 2
 	b[5] = 1
 	b[6] = 1
 	binary.LittleEndian.PutUint16(b[16:], 2)
 	binary.LittleEndian.PutUint16(b[18:], uint16(machine))
+	binary.LittleEndian.PutUint32(b[20:], 1)
+	binary.LittleEndian.PutUint64(b[32:], 64)
+	binary.LittleEndian.PutUint16(b[52:], 64)
+	binary.LittleEndian.PutUint16(b[54:], 56)
+	binary.LittleEndian.PutUint16(b[56:], 1)
+	binary.LittleEndian.PutUint16(b[58:], 64)
+	binary.LittleEndian.PutUint32(b[64:], uint32(elf.PT_LOAD))
+	binary.LittleEndian.PutUint32(b[68:], uint32(elf.PF_R|elf.PF_X))
+	binary.LittleEndian.PutUint64(b[96:], uint64(len(b)))
+	binary.LittleEndian.PutUint64(b[104:], uint64(len(b)))
+	binary.LittleEndian.PutUint64(b[112:], 0x1000)
 	return b
 }
+func malformedELF() []byte {
+	body := linuxBinary(elf.EM_X86_64)
+	body = body[:64]
+	binary.LittleEndian.PutUint64(body[40:], 64)
+	binary.LittleEndian.PutUint16(body[58:], 64)
+	binary.LittleEndian.PutUint16(body[60:], 1)
+	return body
+}
 func machoBinary(cpu uint32) []byte {
-	body := make([]byte, 64)
+	body := make([]byte, 104)
 	binary.LittleEndian.PutUint32(body[0:4], 0xfeedfacf)
 	binary.LittleEndian.PutUint32(body[4:8], cpu)
 	binary.LittleEndian.PutUint32(body[12:16], 2)
+	binary.LittleEndian.PutUint32(body[16:20], 1)
+	binary.LittleEndian.PutUint32(body[20:24], 72)
+	binary.LittleEndian.PutUint32(body[32:36], 0x19)
+	binary.LittleEndian.PutUint32(body[36:40], 72)
+	copy(body[40:56], []byte("__TEXT"))
+	binary.LittleEndian.PutUint64(body[64:72], uint64(len(body)))
+	binary.LittleEndian.PutUint64(body[80:88], uint64(len(body)))
 	return body
 }
 

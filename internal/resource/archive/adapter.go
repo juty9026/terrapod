@@ -343,7 +343,8 @@ func (a Adapter) extractTarGzip(source, staging string) (Manifest, error) {
 }
 
 func (a Adapter) extractTarReader(input io.Reader, staging string) (Manifest, error) {
-	reader := tar.NewReader(bufio.NewReader(input))
+	buffered := bufio.NewReader(input)
+	reader := tar.NewReader(buffered)
 	entries := make([]entry, 0)
 	seen := make(map[string]bool)
 	limits := a.limits()
@@ -402,7 +403,36 @@ func (a Adapter) extractTarReader(input io.Reader, staging string) (Manifest, er
 		pathCopy := spooled
 		entries = append(entries, entry{name: name, size: written, open: func() (io.ReadCloser, error) { return os.Open(pathCopy) }})
 	}
+	if err := validateTarPadding(buffered); err != nil {
+		return Manifest{}, err
+	}
 	return a.writeEntries(staging, entries)
+}
+
+func validateTarPadding(reader io.Reader) error {
+	const maxPadding = int64(1 << 20)
+	var total int64
+	buffer := make([]byte, 32<<10)
+	for {
+		count, err := reader.Read(buffer)
+		if count > 0 {
+			total += int64(count)
+			if total > maxPadding {
+				return errors.New("archive: tar padding exceeds limit")
+			}
+			for _, value := range buffer[:count] {
+				if value != 0 {
+					return errors.New("archive: non-zero data after tar end marker")
+				}
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("archive: read tar padding: %w", err)
+		}
+	}
 }
 
 func validateName(name string) (string, error) {

@@ -235,6 +235,33 @@ func TestExtractFileRejectsCorruptAndTrailingGzipWithoutDestinationMutation(t *t
 	}
 }
 
+func TestExtractFileTarGzipAcceptsZeroPaddingAndRejectsSameMemberData(t *testing.T) {
+	tarData := tarBytes(t, map[string]string{"ok": "ok"}, nil)
+	valid := gzipBytes(t, append(append([]byte(nil), tarData...), make([]byte, 512)...))
+	invalid := gzipBytes(t, append(append([]byte(nil), tarData...), []byte("not-padding")...))
+	second := gzipBytes(t, tarData)
+	for _, tc := range []struct {
+		name string
+		body []byte
+		ok   bool
+	}{{"zero padding", valid, true}, {"nonzero same member", invalid, false}, {"second gzip member", append(append([]byte(nil), gzipBytes(t, tarData)...), second...), false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			parent := realTempDir(t)
+			source := filepath.Join(parent, "source.tar.gz")
+			if err := os.WriteFile(source, tc.body, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := (Adapter{}).ExtractFile(source, "tar.gz", filepath.Join(parent, "out"))
+			if tc.ok && err != nil {
+				t.Fatal(err)
+			}
+			if !tc.ok && err == nil {
+				t.Fatal("invalid trailing archive data accepted")
+			}
+		})
+	}
+}
+
 func TestTarRejectsEntryCountBeforeSpooling(t *testing.T) {
 	var output bytes.Buffer
 	w := tar.NewWriter(&output)

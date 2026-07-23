@@ -26,11 +26,13 @@ type Client struct {
 }
 
 type VerifiedRelease struct {
-	Manifest Manifest
-	Files    map[string]string
-	assets   map[string]githubAsset
-	client   *Client
-	seal     [sha256.Size]byte
+	Manifest      Manifest
+	Files         map[string]string
+	assets        map[string]githubAsset
+	client        *Client
+	seal          [sha256.Size]byte
+	manifestData  []byte
+	signatureData []byte
 }
 
 type githubRelease struct {
@@ -118,7 +120,7 @@ func (c Client) LatestStable(ctx context.Context) (VerifiedRelease, error) {
 		}
 	}
 	bound := c.withHTTP(client)
-	release := VerifiedRelease{Manifest: manifest, assets: assets, client: &bound}
+	release := VerifiedRelease{Manifest: manifest, assets: assets, client: &bound, manifestData: append([]byte(nil), manifestData...), signatureData: append([]byte(nil), signature...)}
 	if err := release.sealManifest(); err != nil {
 		return VerifiedRelease{}, err
 	}
@@ -156,7 +158,11 @@ func (r *VerifiedRelease) sealManifest() error {
 	if err != nil {
 		return err
 	}
-	r.seal = sha256.Sum256(data)
+	hash := sha256.New()
+	_, _ = hash.Write(data)
+	_, _ = hash.Write(r.manifestData)
+	_, _ = hash.Write(r.signatureData)
+	copy(r.seal[:], hash.Sum(nil))
 	return nil
 }
 
@@ -168,7 +174,13 @@ func (r VerifiedRelease) verifySeal() error {
 	if err != nil {
 		return err
 	}
-	if sha256.Sum256(data) != r.seal {
+	hash := sha256.New()
+	_, _ = hash.Write(data)
+	_, _ = hash.Write(r.manifestData)
+	_, _ = hash.Write(r.signatureData)
+	var seal [sha256.Size]byte
+	copy(seal[:], hash.Sum(nil))
+	if seal != r.seal {
 		return errors.New("verified release manifest was modified")
 	}
 	return nil

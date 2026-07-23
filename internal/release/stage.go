@@ -1,9 +1,11 @@
 package release
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
+	"debug/elf"
+	"debug/macho"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -18,7 +20,10 @@ import (
 
 type Platform struct{ OS, Arch string }
 type Staged struct{ Version, Path string }
-type Stager struct{ ReleaseDir, ActiveRelease string }
+type Stager struct {
+	ReleaseDir, ActiveRelease string
+	Verifier                  Verifier
+}
 
 type stagedRecord struct {
 	Version     string       `json:"version"`
@@ -36,7 +41,8 @@ type stagedFile struct {
 }
 
 func (s Stager) Stage(ctx context.Context, release VerifiedRelease, platform Platform) (Staged, error) {
-	if err := release.verifySeal(); err != nil {
+	manifest, err := s.verifyRelease(release)
+	if err != nil {
 		return Staged{}, err
 	}
 	if !supportedPlatform(platform.OS, platform.Arch) {
@@ -51,27 +57,31 @@ func (s Stager) Stage(ctx context.Context, release VerifiedRelease, platform Pla
 	if filepath.Dir(s.ActiveRelease) != filepath.Dir(s.ReleaseDir) {
 		return Staged{}, errors.New("active release and releases must share a parent directory")
 	}
-	binaryAsset, err := release.Manifest.BinaryAsset(platform.OS, platform.Arch)
+	binaryAsset, err := manifest.BinaryAsset(platform.OS, platform.Arch)
 	if err != nil {
 		return Staged{}, err
 	}
-	sourceAsset, err := release.Manifest.SourceAsset()
+	sourceAsset, err := manifest.SourceAsset()
 	if err != nil {
 		return Staged{}, err
 	}
-	catalogAsset, err := release.Manifest.CatalogAsset()
+	catalogAsset, err := manifest.CatalogAsset()
 	if err != nil {
 		return Staged{}, err
 	}
-	destination := filepath.Join(s.ReleaseDir, release.Manifest.Version)
+	destination := filepath.Join(s.ReleaseDir, manifest.Version)
 	if info, statErr := os.Lstat(destination); statErr == nil {
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return Staged{}, errors.New("existing release is not a real directory")
 		}
-		if err := validateExistingRelease(destination, stagedRecord{Version: release.Manifest.Version, OS: platform.OS, Arch: platform.Arch, Binary: binaryAsset, Source: sourceAsset, Catalog: catalogAsset}); err != nil {
+		record, err := s.validateInstalledRelease(destination, manifest.Version, release.manifestData, release.signatureData)
+		if err != nil {
 			return Staged{}, fmt.Errorf("existing release differs: %w", err)
 		}
-		return Staged{Version: release.Manifest.Version, Path: destination}, nil
+		if record.OS != platform.OS || record.Arch != platform.Arch {
+			return Staged{}, errors.New("existing release platform differs")
+		}
+		return Staged{Version: manifest.Version, Path: destination}, nil
 	} else if !errors.Is(statErr, os.ErrNotExist) {
 		return Staged{}, statErr
 	}
@@ -108,6 +118,12 @@ func (s Stager) Stage(ctx context.Context, release VerifiedRelease, platform Pla
 			return Staged{}, err
 		}
 	}
+	if err := writeReadOnlyFile(filepath.Join(staging, "release.json"), release.manifestData); err != nil {
+		return Staged{}, err
+	}
+	if err := writeReadOnlyFile(filepath.Join(staging, "release.json.sig"), release.signatureData); err != nil {
+		return Staged{}, err
+	}
 	if err := copyVerifiedFile(binaryPath, filepath.Join(staging, "bin", "tpod"), binaryAsset, 0o755); err != nil {
 		return Staged{}, err
 	}
@@ -121,8 +137,8 @@ func (s Stager) Stage(ctx context.Context, release VerifiedRelease, platform Pla
 	if err != nil {
 		return Staged{}, err
 	}
-	record := stagedRecord{Version: release.Manifest.Version, OS: platform.OS, Arch: platform.Arch, Binary: binaryAsset, Source: sourceAsset, Catalog: catalogAsset, SourceFiles: files}
-	if err := writeRecord(filepath.Join(staging, ".release.json"), record); err != nil {
+	record := stagedRecord{Version: manifest.Version, OS: platform.OS, Arch: platform.Arch, Binary: binaryAsset, Source: sourceAsset, Catalog: catalogAsset, SourceFiles: files}
+	if err := writeRecord(filepath.Join(staging, ".stage.json"), record); err != nil {
 		return Staged{}, err
 	}
 	if err := makeTreeImmutable(staging); err != nil {
@@ -143,7 +159,7 @@ func (s Stager) Stage(ctx context.Context, release VerifiedRelease, platform Pla
 	if err := syncDirectory(s.ReleaseDir); err != nil {
 		return Staged{}, err
 	}
-	return Staged{Version: release.Manifest.Version, Path: destination}, nil
+	return Staged{Version: manifest.Version, Path: destination}, nil
 }
 
 func (s Stager) Activate(version string) error {
@@ -164,17 +180,8 @@ func (s Stager) Activate(version string) error {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return errors.New("release target must be a real directory")
 	}
-	recordPath := filepath.Join(destination, ".release.json")
-	recordInfo, err := os.Lstat(recordPath)
-	if err != nil || !recordInfo.Mode().IsRegular() {
-		return errors.New("release target has no regular release record")
-	}
-	record, err := readRecord(recordPath)
-	if err != nil {
+	if _, err := s.validateInstalledRelease(destination, version, nil, nil); err != nil {
 		return fmt.Errorf("validate release target: %w", err)
-	}
-	if record.Version != version {
-		return errors.New("release target version does not match requested version")
 	}
 	if info, err := os.Lstat(s.ActiveRelease); err == nil && info.Mode()&os.ModeSymlink == 0 {
 		return errors.New("current release path is not a symlink")
@@ -222,54 +229,95 @@ func extractSource(source, destination string) ([]stagedFile, error) {
 	return files, nil
 }
 
+func (s Stager) verifyRelease(release VerifiedRelease) (Manifest, error) {
+	if err := release.verifySeal(); err != nil {
+		return Manifest{}, err
+	}
+	manifest, err := s.Verifier.VerifyManifest(release.manifestData, release.signatureData)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("re-verify release manifest: %w", err)
+	}
+	want, _ := json.Marshal(release.Manifest)
+	got, _ := json.Marshal(manifest)
+	if !bytes.Equal(got, want) {
+		return Manifest{}, errors.New("verified release differs from signed manifest")
+	}
+	return manifest, nil
+}
+
 func validateExecutable(name string, platform Platform) error {
-	file, err := os.Open(name)
+	input, err := os.Open(name)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-	header := make([]byte, 64)
-	if _, err := io.ReadFull(file, header); err != nil {
+	magic := make([]byte, 4)
+	_, readErr := io.ReadFull(input, magic)
+	closeErr := input.Close()
+	if readErr != nil || closeErr != nil {
 		return errors.New("binary has invalid executable format")
 	}
-	if string(header[:4]) == "\x7fELF" {
-		if platform.OS != "linux" || header[4] != 2 || header[5] != 1 || header[6] != 1 || (header[7] != 0 && header[7] != 3) {
-			return errors.New("binary executable format does not match operating system")
+	isELF := bytes.Equal(magic, []byte{0x7f, 'E', 'L', 'F'})
+	isMachO := bytes.Equal(magic, []byte{0xcf, 0xfa, 0xed, 0xfe})
+	if (platform.OS == "linux" && isMachO) || (platform.OS == "darwin" && isELF) {
+		return errors.New("binary executable format does not match operating system")
+	}
+	if platform.OS == "linux" {
+		file, err := elf.Open(name)
+		if err != nil {
+			return fmt.Errorf("binary has invalid ELF executable format: %w", err)
 		}
-		kind := binary.LittleEndian.Uint16(header[16:18])
-		if kind != 2 && kind != 3 {
-			return errors.New("binary has invalid ELF executable type")
+		defer file.Close()
+		if file.Class != elf.ELFCLASS64 || file.Data != elf.ELFDATA2LSB || file.Version != elf.EV_CURRENT || (file.OSABI != elf.ELFOSABI_NONE && file.OSABI != elf.ELFOSABI_LINUX) || (file.Type != elf.ET_EXEC && file.Type != elf.ET_DYN) {
+			return errors.New("binary has invalid ELF executable format")
 		}
-		machine := binary.LittleEndian.Uint16(header[18:20])
-		want := uint16(62)
+		want := elf.EM_X86_64
 		if platform.Arch == "arm64" {
-			want = 183
+			want = elf.EM_AARCH64
 		}
-		if machine != want {
+		if file.Machine != want {
 			return errors.New("binary executable architecture mismatch")
+		}
+		loadable := false
+		for _, program := range file.Progs {
+			if program.Type == elf.PT_LOAD && program.Flags&elf.PF_X != 0 && program.Filesz > 0 {
+				loadable = true
+				break
+			}
+		}
+		if !loadable {
+			return errors.New("binary has no executable ELF load segment")
 		}
 		return nil
 	}
-	magic := binary.LittleEndian.Uint32(header[:4])
-	if magic == 0xfeedfacf {
-		if platform.OS != "darwin" {
-			return errors.New("binary executable format does not match operating system")
+	if platform.OS == "darwin" {
+		file, err := macho.Open(name)
+		if err != nil {
+			return fmt.Errorf("binary has invalid Mach-O executable format: %w", err)
 		}
-		cpu := binary.LittleEndian.Uint32(header[4:8])
-		want := uint32(0x01000007)
+		defer file.Close()
+		if file.Type != macho.TypeExec {
+			return errors.New("binary has invalid Mach-O executable format")
+		}
+		want := macho.CpuAmd64
 		if platform.Arch == "arm64" {
-			want = 0x0100000c
+			want = macho.CpuArm64
 		}
-		if cpu != want {
+		if file.Cpu != want {
 			return errors.New("binary executable architecture mismatch")
 		}
-		kind := binary.LittleEndian.Uint32(header[12:16])
-		if kind != 2 {
-			return errors.New("binary has invalid Mach-O executable type")
+		loadable := false
+		for _, load := range file.Loads {
+			if segment, ok := load.(*macho.Segment); ok && segment.Filesz > 0 {
+				loadable = true
+				break
+			}
+		}
+		if !loadable {
+			return errors.New("binary has no Mach-O load segment")
 		}
 		return nil
 	}
-	return errors.New("binary has invalid executable format")
+	return fmt.Errorf("unsupported executable operating system %q", platform.OS)
 }
 
 func copyVerifiedFile(source, destination string, asset Asset, mode os.FileMode) error {
@@ -315,9 +363,20 @@ func writeRecord(name string, record stagedRecord) error {
 	_, writeErr := file.Write(append(data, '\n'))
 	return errors.Join(writeErr, file.Sync(), file.Close())
 }
+func writeReadOnlyFile(name string, data []byte) error {
+	if len(data) == 0 || len(data) > MaxManifestSize {
+		return errors.New("signed release metadata size is invalid")
+	}
+	file, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o400)
+	if err != nil {
+		return err
+	}
+	_, writeErr := file.Write(data)
+	return errors.Join(writeErr, file.Sync(), file.Close())
+}
 func readRecord(name string) (stagedRecord, error) {
 	var record stagedRecord
-	data, err := os.ReadFile(name)
+	data, err := readImmutableFile(name, MaxManifestSize)
 	if err != nil {
 		return record, err
 	}
@@ -333,14 +392,75 @@ func readRecord(name string) (stagedRecord, error) {
 	return record, nil
 }
 
-func validateExistingRelease(root string, want stagedRecord) error {
-	record, err := readRecord(filepath.Join(root, ".release.json"))
+func readImmutableFile(name string, limit int64) ([]byte, error) {
+	info, err := os.Lstat(name)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if record.Version != want.Version || record.OS != want.OS || record.Arch != want.Arch || record.Binary != want.Binary || record.Source != want.Source || record.Catalog != want.Catalog {
-		return errors.New("release record mismatch")
+	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o444 || info.Size() <= 0 || info.Size() > limit {
+		return nil, fmt.Errorf("%q is not bounded read-only release metadata", name)
 	}
+	data, err := os.ReadFile(name)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) != info.Size() {
+		return nil, errors.New("release metadata changed while reading")
+	}
+	return data, nil
+}
+
+func (s Stager) validateInstalledRelease(root, version string, expectedManifest, expectedSignature []byte) (stagedRecord, error) {
+	manifestData, err := readImmutableFile(filepath.Join(root, "release.json"), MaxManifestSize)
+	if err != nil {
+		return stagedRecord{}, err
+	}
+	signatureData, err := readImmutableFile(filepath.Join(root, "release.json.sig"), MaxManifestSize)
+	if err != nil {
+		return stagedRecord{}, err
+	}
+	if expectedManifest != nil && !bytes.Equal(manifestData, expectedManifest) {
+		return stagedRecord{}, errors.New("stored signed manifest differs")
+	}
+	if expectedSignature != nil && !bytes.Equal(signatureData, expectedSignature) {
+		return stagedRecord{}, errors.New("stored manifest signature differs")
+	}
+	manifest, err := s.Verifier.VerifyManifest(manifestData, signatureData)
+	if err != nil {
+		return stagedRecord{}, err
+	}
+	if manifest.Version != version {
+		return stagedRecord{}, errors.New("signed manifest version differs from release path")
+	}
+	record, err := readRecord(filepath.Join(root, ".stage.json"))
+	if err != nil {
+		return stagedRecord{}, err
+	}
+	binaryAsset, err := manifest.BinaryAsset(record.OS, record.Arch)
+	if err != nil {
+		return stagedRecord{}, err
+	}
+	sourceAsset, err := manifest.SourceAsset()
+	if err != nil {
+		return stagedRecord{}, err
+	}
+	catalogAsset, err := manifest.CatalogAsset()
+	if err != nil {
+		return stagedRecord{}, err
+	}
+	if record.Version != version || record.Binary != binaryAsset || record.Source != sourceAsset || record.Catalog != catalogAsset {
+		return stagedRecord{}, errors.New("release record differs from signed manifest")
+	}
+	if err := validateExistingRelease(root, record, manifestData, signatureData); err != nil {
+		return stagedRecord{}, err
+	}
+	if err := validateExecutable(filepath.Join(root, "bin", "tpod"), Platform{OS: record.OS, Arch: record.Arch}); err != nil {
+		return stagedRecord{}, err
+	}
+	return record, nil
+}
+
+func validateExistingRelease(root string, record stagedRecord, manifestData, signatureData []byte) error {
 	for _, file := range record.SourceFiles {
 		if file.Size < 0 || !digestPattern.MatchString(file.SHA256) {
 			return errors.New("invalid source file record")
@@ -369,7 +489,7 @@ func validateExistingRelease(root string, want stagedRecord) error {
 			expectedDirs[parent] = true
 		}
 	}
-	fixed := map[string]Asset{"bin/tpod": record.Binary, "catalog/resources.json": record.Catalog, ".artifacts/source.tar.gz": record.Source}
+	fixed := map[string]Asset{"bin/tpod": record.Binary, "catalog/resources.json": record.Catalog, ".artifacts/source.tar.gz": record.Source, "release.json": bytesAsset("release.json", manifestData), "release.json.sig": bytesAsset("release.json.sig", signatureData)}
 	seen := map[string]bool{}
 	err = filepath.WalkDir(root, func(name string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -395,7 +515,7 @@ func validateExistingRelease(root string, want stagedRecord) error {
 			return err
 		}
 		slash := filepath.ToSlash(relative)
-		if slash == ".release.json" {
+		if slash == ".stage.json" {
 			info, _ := entry.Info()
 			if info.Mode().Perm() != 0o444 {
 				return errors.New("release record mode mismatch")
@@ -448,10 +568,14 @@ func validateExistingRelease(root string, want stagedRecord) error {
 			return fmt.Errorf("missing source file %q", name)
 		}
 	}
-	if !seen[".release.json"] {
+	if !seen[".stage.json"] {
 		return errors.New("missing release record")
 	}
 	return nil
+}
+func bytesAsset(name string, data []byte) Asset {
+	digest := sha256.Sum256(data)
+	return Asset{Name: name, Size: int64(len(data)), SHA256: hex.EncodeToString(digest[:])}
 }
 func requireImmutableEntry(name string, entry os.DirEntry, directory bool) error {
 	info, err := entry.Info()
