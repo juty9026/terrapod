@@ -140,12 +140,6 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 		fmt.Fprintln(stdout, "tpod development")
 		return 0
 	}
-	if command == "internal-self-check" {
-		if !rejectExtraArgs(command, args[1:], stderr) {
-			return exitUsage
-		}
-		return 0
-	}
 	if command == "internal-continue-update" {
 		if deps.Geteuid == nil || deps.Geteuid() == 0 {
 			fmt.Fprintln(stderr, "Terrapod manager commands must run as a non-root user")

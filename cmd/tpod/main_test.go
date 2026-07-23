@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -38,6 +39,26 @@ func TestCompiledReleaseRootsRequireCanonicalCompleteLdflags(t *testing.T) {
 	roots, err := compiledReleaseRoots()
 	if err != nil || len(roots["root"]) != ed25519.PublicKeySize {
 		t.Fatalf("roots=%v err=%v", roots, err)
+	}
+}
+
+type privilegeRunnerFunc func(context.Context, execx.Request) (execx.Result, error)
+
+func (f privilegeRunnerFunc) Run(ctx context.Context, request execx.Request) (execx.Result, error) {
+	return f(ctx, request)
+}
+
+func TestPrivilegePreflightIsNoninteractiveAndBounded(t *testing.T) {
+	called := false
+	err := noninteractivePrivilegeWithRunner(context.Background(), privilegeRunnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
+		called = true
+		if request.Path != "/usr/bin/sudo" || !reflect.DeepEqual(request.Args, []string{"-n", "true"}) || request.Stdin != nil || request.Privilege {
+			t.Fatalf("request=%#v", request)
+		}
+		return execx.Result{}, nil
+	}))
+	if err != nil || !called {
+		t.Fatalf("called=%v err=%v", called, err)
 	}
 }
 

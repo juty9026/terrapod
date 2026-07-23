@@ -54,13 +54,41 @@ func (f refresherFixture) RefreshMetadata(context.Context) error {
 }
 
 type adapterFixture struct {
-	events  *[]string
-	present bool
+	events     *[]string
+	present    bool
+	inspectErr error
 }
 
 func (f *adapterFixture) Inspect(context.Context, model.Resource) (model.Observation, error) {
 	*f.events = append(*f.events, "inspect")
+	if f.inspectErr != nil {
+		return model.Observation{}, f.inspectErr
+	}
 	return model.Observation{Present: f.present, Healthy: f.present, Provider: "fixture", Package: "tool"}, nil
+}
+
+func TestContinueRejectsNewActualUnavailableAndKeepsJournal(t *testing.T) {
+	deps, _ := fixtureDependencies(t, "1.0.0", "2.0.0")
+	started, err := Run(context.Background(), deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter, _ := deps.Planner.Registry().Lookup(model.ResourcePackage, "fixture")
+	adapter.(*adapterFixture).inspectErr = errors.New("historical drift")
+	if _, err := Continue(context.Background(), started.JournalID, deps); err == nil {
+		t.Fatal("new unavailable state accepted")
+	}
+	if snapshot, _ := deps.State.Snapshot(); snapshot.ActiveJournal == nil || snapshot.ActiveJournal.ID != started.JournalID {
+		t.Fatalf("journal not retained: %#v", snapshot)
+	}
+}
+
+func TestHistoricalPruneDriftCannotBeSilentlyDropped(t *testing.T) {
+	original := model.Plan{ID: "old", Operations: []model.Operation{{ID: "prune-legacy", ResourceID: "legacy.tool", Kind: model.OperationPrune}}, Unavailable: map[model.ResourceID]string{}}
+	actual := model.Plan{ID: "new", Unavailable: map[model.ResourceID]string{"legacy.tool": "historical ownership drift"}}
+	if err := rejectNewUnavailable(original, actual); err == nil {
+		t.Fatal("historical prune drift accepted")
+	}
 }
 func (f *adapterFixture) Plan(_ context.Context, item model.Resource, observed model.Observation, _ model.Ownership) ([]model.Operation, error) {
 	kind := model.OperationInstall
@@ -196,6 +224,23 @@ func TestContinueRejectsCatalogBindingChangeBeforeConfigOrResourceMutation(t *te
 	}
 }
 
+func TestContinueRejectsPersistedTrustRollback(t *testing.T) {
+	deps, _ := fixtureDependencies(t, "1.0.0", "2.0.0")
+	started, err := Run(context.Background(), deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps.LoadTrusted = func() (state.TrustedKeyring, error) {
+		return state.TrustedKeyring{Keys: map[string]ed25519.PublicKey{}, Provenance: map[string]string{}}, nil
+	}
+	if _, err := Continue(context.Background(), started.JournalID, deps); err == nil {
+		t.Fatal("trusted key rollback accepted")
+	}
+	if snapshot, _ := deps.State.Snapshot(); snapshot.ActiveJournal == nil {
+		t.Fatal("trust failure completed journal")
+	}
+}
+
 func fixtureDependencies(t *testing.T, current, latest string) (Dependencies, *[]string) {
 	t.Helper()
 	events := &[]string{}
@@ -225,9 +270,19 @@ func fixtureDependencies(t *testing.T, current, latest string) (Dependencies, *[
 		VerifyActive: func(context.Context, string) (release.Staged, release.VerifiedRelease, Inputs, error) {
 			return staged, release.VerifiedRelease{Manifest: manifest}, inputs, nil
 		},
-		CurrentVersion: func() (string, error) { return current, nil }, SelfCheck: func(context.Context, string) error { *events = append(*events, "self-check"); return nil }, PrintPlan: func(model.Plan) error { *events = append(*events, "print"); return nil }, WriteConfig: func(model.Config) error { return nil },
+		CurrentVersion: func() (string, error) { return current, nil }, SelfCheck: func(context.Context, string, string, string) error {
+			*events = append(*events, "self-check")
+			return nil
+		}, PrintPlan: func(model.Plan) error { *events = append(*events, "print"); return nil }, WriteConfig: func(model.Config) error { return nil },
 		TrustAfter: func(release.Manifest) (map[string]ed25519.PublicKey, error) {
 			return map[string]ed25519.PublicKey{"root": make([]byte, ed25519.PublicKeySize)}, nil
-		}, PersistTrusted: func(map[string]ed25519.PublicKey) error { *events = append(*events, "persist-trust"); return nil }, Exec: func(string, []string, []string) error { *events = append(*events, "exec"); return nil },
+		}, ReleaseDigest: func(release.VerifiedRelease) (string, error) {
+			return "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", nil
+		}, PersistTrusted: func(map[string]ed25519.PublicKey, string, []string) error {
+			*events = append(*events, "persist-trust")
+			return nil
+		}, LoadTrusted: func() (state.TrustedKeyring, error) {
+			return state.TrustedKeyring{Keys: map[string]ed25519.PublicKey{"root": make([]byte, ed25519.PublicKeySize)}, Provenance: map[string]string{}}, nil
+		}, Exec: func(string, []string, []string) error { *events = append(*events, "exec"); return nil },
 	}, events
 }

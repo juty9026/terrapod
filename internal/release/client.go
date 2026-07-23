@@ -186,6 +186,13 @@ func (r VerifiedRelease) verifySeal() error {
 	return nil
 }
 
+func (r VerifiedRelease) Digest() (string, error) {
+	if err := r.verifySeal(); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(r.seal[:]), nil
+}
+
 func (c Client) downloadAsset(ctx context.Context, rawURL string, asset Asset) (string, error) {
 	if asset.Size <= 0 || asset.Size > MaxAssetSize || !digestPattern.MatchString(asset.SHA256) || !assetNamePattern.MatchString(asset.Name) {
 		return "", fmt.Errorf("invalid declared asset %q", asset.Name)

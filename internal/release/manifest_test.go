@@ -1,8 +1,11 @@
 package release
 
 import (
+	"bytes"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"strings"
@@ -115,6 +118,26 @@ func TestVerifierTrustAfterRetainsCompiledAndPersistedKeys(t *testing.T) {
 	}
 	if _, err := verifier.TrustAfter(validManifest(t)); err == nil || !strings.Contains(err.Error(), "not verified") {
 		t.Fatalf("unverified manifest TrustAfter err=%v", err)
+	}
+}
+
+func TestVerifierAllowsOnlySameManifestKeyAdditionReplay(t *testing.T) {
+	root := ed25519.NewKeyFromSeed(testSeed)
+	next := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, ed25519.SeedSize))
+	manifest := validManifest(t)
+	manifest.TrustedKeys = []TrustedKey{{ID: "next", PublicKey: base64.StdEncoding.EncodeToString(next.Public().(ed25519.PublicKey))}}
+	data := encodeManifest(t, manifest)
+	digest := sha256.Sum256(data)
+	verifier := testVerifier(root.Public().(ed25519.PublicKey))
+	verifier.PersistedKeys = map[string]ed25519.PublicKey{"next": next.Public().(ed25519.PublicKey)}
+	verifier.PersistedProvenance = map[string]string{"next": hex.EncodeToString(digest[:])}
+	if _, err := verifier.VerifyManifest(data, signManifest(t, "root", root, data)); err != nil {
+		t.Fatalf("same manifest replay: %v", err)
+	}
+	manifest.Version = "1.2.4"
+	other := encodeManifest(t, manifest)
+	if _, err := verifier.VerifyManifest(other, signManifest(t, "root", root, other)); err == nil {
+		t.Fatal("different manifest reused existing key ID")
 	}
 }
 

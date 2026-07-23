@@ -351,6 +351,35 @@ func TestApplyInputExecutesOnlyReplannedOperationIDs(t *testing.T) {
 	}
 }
 
+func TestApplyFailureKeepsJournalAndRetryExecutesPendingOperations(t *testing.T) {
+	first := pkg("core.alpha", "first")
+	second := pkg("core.beta", "second")
+	a := &fixtureAdapter{fail: map[string]bool{}}
+	b := &fixtureAdapter{fail: map[string]bool{"execute:install-second": true}}
+	engine, store := testEngine(t, map[string]*fixtureAdapter{"first": a, "second": b}, first, second)
+	plan := model.Plan{ID: "retry", Operations: []model.Operation{op(first, "install-first", model.OperationInstall), op(second, "install-second", model.OperationInstall)}}
+	summary, err := engine.Apply(context.Background(), plan)
+	if err == nil || summary.Unavailable[second.ID] == "" {
+		t.Fatalf("Apply summary=%#v err=%v", summary, err)
+	}
+	snapshot := mustSnapshot(t, store)
+	if snapshot.ActiveJournal == nil || snapshot.ActiveJournal.ID == "" {
+		t.Fatalf("journal completed after failure: %#v", snapshot)
+	}
+	firstExecs := strings.Count(strings.Join(a.events, ","), "execute:install-first")
+	delete(b.fail, "execute:install-second")
+	summary, err = engine.Apply(context.Background(), plan)
+	if err != nil || len(summary.Unavailable) != 0 {
+		t.Fatalf("retry summary=%#v err=%v", summary, err)
+	}
+	if strings.Count(strings.Join(a.events, ","), "execute:install-first") != firstExecs {
+		t.Fatalf("successful operation repeated: %v", a.events)
+	}
+	if mustSnapshot(t, store).ActiveJournal != nil {
+		t.Fatal("successful retry left active journal")
+	}
+}
+
 func TestApplyInputHeldReusesExactLiveLockAndPreservesOwnership(t *testing.T) {
 	item := pkg("core.alpha", "fixture")
 	adapter := &fixtureAdapter{fail: map[string]bool{}}
@@ -522,11 +551,11 @@ func TestApplyRevokesTransferSimulationOnEveryExitPath(t *testing.T) {
 					t.Fatalf("err=%v events=%s", err, events)
 				}
 			case "dependency failure":
-				if err != nil || summary.Unavailable[item.ID] == "" || strings.Contains(events, "install-desired") {
+				if err == nil || summary.Unavailable[item.ID] == "" || strings.Contains(events, "install-desired") {
 					t.Fatalf("summary=%#v err=%v events=%s", summary, err, events)
 				}
 			case "desired install failure":
-				if err != nil || summary.Unavailable[item.ID] == "" || !strings.Contains(events, "install-desired") {
+				if err == nil || summary.Unavailable[item.ID] == "" || !strings.Contains(events, "install-desired") {
 					t.Fatalf("summary=%#v err=%v events=%s", summary, err, events)
 				}
 			case "success":
@@ -545,8 +574,8 @@ func TestApplyDoesNotRemoveLegacyWhenDesiredVerificationFails(t *testing.T) {
 	operation := op(item, "transfer", model.OperationTransfer)
 	operation.Removes = []string{"aqua:BurntSushi/ripgrep"}
 	summary, err := engine.Apply(context.Background(), model.Plan{ID: "p", Operations: []model.Operation{operation}})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("failed verification returned nil error")
 	}
 	if !adapter.legacy || strings.Contains(strings.Join(adapter.events, ","), "remove-legacy") {
 		t.Fatal("legacy removal ran after failed desired verification")
@@ -568,8 +597,8 @@ func TestApplyContinuesIndependentAndBlocksDependentResources(t *testing.T) {
 	engine, _ := testEngine(t, map[string]*fixtureAdapter{"first": a, "child": b, "other": c}, first, child, independent)
 	plan := model.Plan{ID: "p", Operations: []model.Operation{op(first, "first", model.OperationInstall), op(child, "child", model.OperationInstall), op(independent, "other", model.OperationInstall)}}
 	summary, err := engine.Apply(context.Background(), plan)
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("partial failure returned nil error")
 	}
 	if len(b.events) != 0 || !c.present {
 		t.Fatalf("child events=%v independent present=%v", b.events, c.present)
@@ -688,8 +717,8 @@ func TestApplyFailsClosedOnInitialInspectError(t *testing.T) {
 				}
 			}
 			summary, err := engine.Apply(context.Background(), model.Plan{ID: "p", Operations: []model.Operation{op(item, "operation", kind)}})
-			if err != nil {
-				t.Fatal(err)
+			if err == nil {
+				t.Fatal("inspect failure returned nil error")
 			}
 			if _, ok := summary.Unavailable[item.ID]; !ok {
 				t.Fatalf("summary=%#v", summary)
@@ -851,8 +880,8 @@ func TestApplyVerifiesNoOpDependencyBeforeDependentMutation(t *testing.T) {
 	childAdapter := &fixtureAdapter{fail: map[string]bool{}}
 	engine, _ := testEngine(t, map[string]*fixtureAdapter{"dep": depAdapter, "child": childAdapter}, dependency, child)
 	summary, err := engine.Apply(context.Background(), model.Plan{ID: "p", Operations: []model.Operation{op(child, "install", model.OperationInstall)}})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("dependency failure returned nil error")
 	}
 	if _, ok := summary.Unavailable[dependency.ID]; !ok {
 		t.Fatalf("summary=%#v", summary)
@@ -929,8 +958,8 @@ func TestApplyDefersOwnershipUntilLastResourceOperation(t *testing.T) {
 	engine, store := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
 	plan := model.Plan{ID: "p", Operations: []model.Operation{op(item, "first", model.OperationInstall), op(item, "second", model.OperationVerify)}}
 	summary, err := engine.Apply(context.Background(), plan)
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("final operation failure returned nil error")
 	}
 	if _, ok := summary.Unavailable[item.ID]; !ok {
 		t.Fatal("second operation failure not reported")
@@ -946,8 +975,8 @@ func TestApplyDoesNotOwnWhenGlobalFinalVerificationFails(t *testing.T) {
 	adapter := &fixtureAdapter{fail: map[string]bool{}, failVerifyAfter: 2}
 	engine, store := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
 	summary, err := engine.Apply(context.Background(), model.Plan{ID: "p", Operations: []model.Operation{op(item, "install", model.OperationInstall)}})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("final verification failure returned nil error")
 	}
 	if _, ok := summary.Unavailable[item.ID]; !ok {
 		t.Fatalf("summary=%#v", summary)
@@ -987,8 +1016,8 @@ func TestFinalVerificationPropagatesOperatedDependencyFailureToNoOpDependent(t *
 	b := &fixtureAdapter{present: true, fail: map[string]bool{}}
 	engine, _ := testEngine(t, map[string]*fixtureAdapter{"first": a, "dependent": b}, first, dependent)
 	summary, err := engine.Apply(context.Background(), model.Plan{ID: "p", Operations: []model.Operation{op(first, "install", model.OperationInstall)}})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("dependency failure returned nil error")
 	}
 	if _, ok := summary.Unavailable[dependent.ID]; !ok {
 		t.Fatalf("dependent marked ready: %#v", summary)

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +28,7 @@ const (
 
 var journalIDPattern = regexp.MustCompile(`^\d{8}T\d{6}\.\d{9}Z-[0-9a-f]{32}$`)
 var afterJournalCompleted func() error
+var afterReplacementJournal, afterReplacementSnapshot, afterReplacementSuperseded func() error
 
 // Store persists state for one caller. Mutating methods are serialized only for
 // concurrent use of this Store; callers must hold a Lock acquired with Acquire
@@ -36,28 +38,102 @@ type Store struct {
 	mu  sync.Mutex
 }
 
+func ValidateReadOnly(dir string) error {
+	if err := requireRealDirectory(dir); err != nil {
+		return fmt.Errorf("validate state directory: %w", err)
+	}
+	store := &Store{dir: dir}
+	snapshot, err := store.readSnapshot()
+	if err != nil {
+		return err
+	}
+	if snapshot.ActiveJournal != nil {
+		if _, err := store.readJournal(snapshot.ActiveJournal.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func requireRealDirectory(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("path is not a real directory")
+	}
+	return nil
+}
+
+type TrustedKeyring struct {
+	Keys       map[string]ed25519.PublicKey
+	Provenance map[string]string
+}
+type persistedTrustedKeyring struct {
+	Keys       map[string]string `json:"keys"`
+	Provenance map[string]string `json:"provenance"`
+}
+
 func (s *Store) TrustedKeys() (map[string]ed25519.PublicKey, error) {
+	ring, err := s.TrustedKeyring()
+	return ring.Keys, err
+}
+func ReadTrustedKeyring(dir string) (TrustedKeyring, error) {
+	if err := requireRealDirectory(dir); err != nil {
+		return TrustedKeyring{}, err
+	}
+	return (&Store{dir: dir}).TrustedKeyring()
+}
+
+func (s *Store) TrustedKeyring() (TrustedKeyring, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	path := filepath.Join(s.dir, trustedKeysFilename)
-	var encoded map[string]string
-	if err := readJSONFile(path, &encoded); errors.Is(err, os.ErrNotExist) {
-		return map[string]ed25519.PublicKey{}, nil
+	var persisted persistedTrustedKeyring
+	if err := readJSONFile(filepath.Join(s.dir, trustedKeysFilename), &persisted); errors.Is(err, os.ErrNotExist) {
+		return TrustedKeyring{Keys: map[string]ed25519.PublicKey{}, Provenance: map[string]string{}}, nil
 	} else if err != nil {
-		return nil, err
+		return TrustedKeyring{}, err
 	}
-	result := make(map[string]ed25519.PublicKey, len(encoded))
-	for id, value := range encoded {
+	if persisted.Keys == nil || persisted.Provenance == nil {
+		return TrustedKeyring{}, errors.New("invalid persisted trusted keyring")
+	}
+	keys := make(map[string]ed25519.PublicKey, len(persisted.Keys))
+	for id, value := range persisted.Keys {
 		key, err := base64.StdEncoding.Strict().DecodeString(value)
 		if err != nil || len(key) != ed25519.PublicKeySize || base64.StdEncoding.EncodeToString(key) != value {
-			return nil, fmt.Errorf("invalid persisted trusted key %q", id)
+			return TrustedKeyring{}, fmt.Errorf("invalid persisted trusted key %q", id)
 		}
-		result[id] = ed25519.PublicKey(key)
+		keys[id] = ed25519.PublicKey(key)
 	}
-	return result, nil
+	for id, digest := range persisted.Provenance {
+		if _, ok := keys[id]; !ok || !digestPattern.MatchString(digest) {
+			return TrustedKeyring{}, fmt.Errorf("invalid trusted key provenance %q", id)
+		}
+	}
+	return TrustedKeyring{Keys: keys, Provenance: persisted.Provenance}, nil
+}
+
+var digestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+var trustedKeyIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+
+func validRecordedKeys(keys map[string]string) bool {
+	if len(keys) == 0 {
+		return false
+	}
+	for id, value := range keys {
+		if !trustedKeyIDPattern.MatchString(id) || !digestPattern.MatchString(value) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Store) PutTrustedKeys(keys, compiled map[string]ed25519.PublicKey) error {
+	return s.PutTrustedKeysForRelease(keys, compiled, "", nil)
+}
+
+func (s *Store) PutTrustedKeysForRelease(keys, compiled map[string]ed25519.PublicKey, manifestDigest string, additions []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(compiled) == 0 {
@@ -76,12 +152,37 @@ func (s *Store) PutTrustedKeys(keys, compiled map[string]ed25519.PublicKey) erro
 		}
 		encoded[id] = base64.StdEncoding.EncodeToString(key)
 	}
-	return writeJSONAtomic(filepath.Join(s.dir, trustedKeysFilename), encoded)
+	path := filepath.Join(s.dir, trustedKeysFilename)
+	provenance := make(map[string]string)
+	var existing persistedTrustedKeyring
+	if err := readJSONFile(path, &existing); err == nil {
+		for id, digest := range existing.Provenance {
+			provenance[id] = digest
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	for _, id := range additions {
+		if _, ok := keys[id]; !ok || !digestPattern.MatchString(manifestDigest) {
+			return fmt.Errorf("invalid trusted key provenance for %q", id)
+		}
+		if prior := provenance[id]; prior != "" && prior != manifestDigest {
+			return fmt.Errorf("trusted key %q has different provenance", id)
+		}
+		provenance[id] = manifestDigest
+	}
+	for id := range provenance {
+		if _, ok := keys[id]; !ok {
+			delete(provenance, id)
+		}
+	}
+	return writeJSONAtomic(path, persistedTrustedKeyring{Keys: encoded, Provenance: provenance})
 }
 
 type persistedJournal struct {
 	model.Journal
 	SupersededBy string `json:"supersededBy,omitempty"`
+	Replaces     string `json:"replaces,omitempty"`
 }
 
 // UpdateRecord binds a pre-activation journal to the signed release facts that
@@ -91,6 +192,7 @@ type UpdateRecord struct {
 	PlanID        string            `json:"planId"`
 	Version       string            `json:"version"`
 	CatalogDigest string            `json:"catalogDigest"`
+	ReleaseDigest string            `json:"releaseDigest"`
 	TrustedKeys   map[string]string `json:"trustedKeys,omitempty"`
 	Activated     bool              `json:"activated"`
 }
@@ -129,6 +231,9 @@ func Open(dir string) (*Store, error) {
 			return nil, fmt.Errorf("secure snapshot: %w", err)
 		}
 	}
+	if err := s.repairJournals(); err != nil {
+		return nil, err
+	}
 	if _, err := s.readSnapshot(); err != nil {
 		return nil, err
 	}
@@ -145,7 +250,7 @@ func (s *Store) Journal(id string) (model.Journal, error) {
 func (s *Store) PutUpdate(record UpdateRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !journalIDPattern.MatchString(record.JournalID) || record.PlanID == "" || record.Version == "" || record.CatalogDigest == "" {
+	if !journalIDPattern.MatchString(record.JournalID) || record.PlanID == "" || record.Version == "" || !digestPattern.MatchString(record.CatalogDigest) || !digestPattern.MatchString(record.ReleaseDigest) || !validRecordedKeys(record.TrustedKeys) {
 		return errors.New("invalid update record")
 	}
 	journal, err := s.readJournal(record.JournalID)
@@ -168,7 +273,7 @@ func (s *Store) Update(id string) (UpdateRecord, error) {
 	if err := readJSONFile(filepath.Join(s.dir, updateDirname, id+".json"), &record); err != nil {
 		return UpdateRecord{}, err
 	}
-	if record.JournalID != id || record.PlanID == "" || record.Version == "" || record.CatalogDigest == "" {
+	if record.JournalID != id || record.PlanID == "" || record.Version == "" || !digestPattern.MatchString(record.CatalogDigest) || !digestPattern.MatchString(record.ReleaseDigest) || !validRecordedKeys(record.TrustedKeys) {
 		return UpdateRecord{}, errors.New("invalid persisted update record")
 	}
 	return record, nil
@@ -299,19 +404,87 @@ func (s *Store) replaceActive(snapshot model.Snapshot, active persistedJournal, 
 		return model.Journal{}, false, err
 	}
 	replacement := model.Journal{ID: id, Plan: plan, Results: make([]model.OperationResult, 0), StartedAt: time.Now().UTC(), Status: "active"}
-	if err := s.writeJournal(persistedJournal{Journal: replacement}); err != nil {
+	if err := s.writeJournal(persistedJournal{Journal: replacement, Replaces: active.ID}); err != nil {
 		return model.Journal{}, false, err
+	}
+	if afterReplacementJournal != nil {
+		if err := afterReplacementJournal(); err != nil {
+			return model.Journal{}, false, err
+		}
 	}
 	snapshot.ActiveJournal = &replacement
 	if err := s.writeSnapshot(snapshot); err != nil {
 		return model.Journal{}, false, err
+	}
+	if afterReplacementSnapshot != nil {
+		if err := afterReplacementSnapshot(); err != nil {
+			return model.Journal{}, false, err
+		}
 	}
 	active.Status = "superseded"
 	active.SupersededBy = replacement.ID
 	if err := s.writeJournal(active); err != nil {
 		return model.Journal{}, false, err
 	}
+	if afterReplacementSuperseded != nil {
+		if err := afterReplacementSuperseded(); err != nil {
+			return model.Journal{}, false, err
+		}
+	}
 	return replacement, false, nil
+}
+
+func (s *Store) repairJournals() error {
+	snapshot, err := s.readSnapshot()
+	if err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(filepath.Join(s.dir, journalDirname))
+	if err != nil {
+		return err
+	}
+	journals := make(map[string]persistedJournal)
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		id := strings.TrimSuffix(entry.Name(), ".json")
+		if !journalIDPattern.MatchString(id) {
+			return fmt.Errorf("unsafe journal file %q", entry.Name())
+		}
+		journal, err := s.readJournal(id)
+		if err != nil {
+			return err
+		}
+		journals[id] = journal
+	}
+	keep := ""
+	if snapshot.ActiveJournal != nil {
+		pointed, ok := journals[snapshot.ActiveJournal.ID]
+		if !ok {
+			return fmt.Errorf("active journal %q is missing", snapshot.ActiveJournal.ID)
+		}
+		if pointed.Status == "active" {
+			keep = pointed.ID
+		} else {
+			snapshot.ActiveJournal = nil
+		}
+	}
+	for id, journal := range journals {
+		if journal.Status != "active" || id == keep {
+			continue
+		}
+		journal.Status = "superseded"
+		journal.SupersededBy = keep
+		if err := s.writeJournal(journal); err != nil {
+			return err
+		}
+	}
+	if keep != "" {
+		active := journals[keep].Journal
+		snapshot.ActiveJournal = &active
+	}
+	return s.writeSnapshot(snapshot)
 }
 
 func (s *Store) Record(result model.OperationResult) error {

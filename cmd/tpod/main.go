@@ -38,6 +38,27 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if len(os.Args) > 1 && os.Args[1] == "internal-self-check" {
+		if len(os.Args) != 6 || os.Args[2] != "--release" || os.Args[4] != "--manifest-digest" {
+			fmt.Fprintln(os.Stderr, "usage: tpod internal-self-check --release <dir> --manifest-digest <sha256>")
+			os.Exit(2)
+		}
+		roots, err := compiledReleaseRoots()
+		if err == nil && homeErr == nil && os.Geteuid() != 0 {
+			err = productionSelfCheck(layout, roots, os.Args[3], os.Args[5])
+		}
+		if err == nil && homeErr != nil {
+			err = homeErr
+		}
+		if err == nil && os.Geteuid() == 0 {
+			err = errors.New("self-check must run as a non-root user")
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	deps := cli.Dependencies{
 		Stdout:  os.Stdout,
 		Stderr:  os.Stderr,
@@ -72,6 +93,21 @@ func main() {
 		} else {
 			configureSignedUpdate(&deps, layout, client, roots)
 		}
+	}
+	if len(os.Args) > 1 && os.Args[1] == "internal-release-root-check" {
+		if len(os.Args) != 2 {
+			fmt.Fprintln(os.Stderr, "usage: tpod internal-release-root-check")
+			os.Exit(2)
+		}
+		_, err := compiledReleaseRoots()
+		if err == nil && (deps.Update == nil || deps.ContinueUpdate == nil) {
+			err = errors.New("signed update dependencies are not configured")
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
 	}
 	code := cli.Run(ctx, os.Args[1:], deps)
 	os.Exit(code)

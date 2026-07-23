@@ -74,6 +74,64 @@ func TestBeginOrResumeUsesExactActivePlanAndReplacesDifferentPlan(t *testing.T) 
 	}
 }
 
+func TestReplacementCrashRepairsToExactlyOneAuthorizedActiveJournal(t *testing.T) {
+	for _, phase := range []string{"new-journal", "snapshot", "old-superseded"} {
+		t.Run(phase, func(t *testing.T) {
+			dir := t.TempDir()
+			store, err := Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			first := model.Plan{ID: "first"}
+			second := model.Plan{ID: "second"}
+			if _, _, err := store.BeginOrResume(first); err != nil {
+				t.Fatal(err)
+			}
+			crash := func() error { return errors.New("crash") }
+			switch phase {
+			case "new-journal":
+				afterReplacementJournal = crash
+			case "snapshot":
+				afterReplacementSnapshot = crash
+			case "old-superseded":
+				afterReplacementSuperseded = crash
+			}
+			t.Cleanup(func() { afterReplacementJournal, afterReplacementSnapshot, afterReplacementSuperseded = nil, nil, nil })
+			_, _, _ = store.BeginOrResume(second)
+			afterReplacementJournal, afterReplacementSnapshot, afterReplacementSuperseded = nil, nil, nil
+			reopened, err := Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := reopened.Snapshot()
+			if err != nil {
+				t.Fatal(err)
+			}
+			activeCount := 0
+			entries, _ := os.ReadDir(filepath.Join(dir, journalDirname))
+			for _, entry := range entries {
+				journal, err := reopened.readJournal(strings.TrimSuffix(entry.Name(), ".json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if journal.Status == "active" {
+					activeCount++
+				}
+			}
+			if activeCount != 1 || snapshot.ActiveJournal == nil {
+				t.Fatalf("activeCount=%d snapshot=%#v", activeCount, snapshot)
+			}
+			want := "first"
+			if phase != "new-journal" {
+				want = "second"
+			}
+			if snapshot.ActiveJournal.Plan.ID != want {
+				t.Fatalf("active plan=%q want=%q", snapshot.ActiveJournal.Plan.ID, want)
+			}
+		})
+	}
+}
+
 func TestBeginOrResumeRejectsEmptyPlanID(t *testing.T) {
 	store, err := Open(t.TempDir())
 	if err != nil {
@@ -413,7 +471,7 @@ func TestUpdateRecordIsBoundToActiveJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record := UpdateRecord{JournalID: journal.ID, PlanID: "plan", Version: "1.2.3", CatalogDigest: strings.Repeat("a", 64)}
+	record := UpdateRecord{JournalID: journal.ID, PlanID: "plan", Version: "1.2.3", CatalogDigest: strings.Repeat("a", 64), ReleaseDigest: strings.Repeat("b", 64), TrustedKeys: map[string]string{"root": strings.Repeat("0", 64)}}
 	if err := store.PutUpdate(record); err != nil {
 		t.Fatal(err)
 	}
@@ -446,6 +504,29 @@ func TestPutTrustedKeysRetainsCompiledRoot(t *testing.T) {
 	got, err := store.TrustedKeys()
 	if err != nil || len(got) != 2 {
 		t.Fatalf("TrustedKeys=%v, %v", got, err)
+	}
+}
+
+func TestTrustedKeyProvenanceIsDurableAndCannotChange(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := ed25519.PublicKey(make([]byte, ed25519.PublicKeySize))
+	next := ed25519.PublicKey(make([]byte, ed25519.PublicKeySize))
+	next[0] = 1
+	keys := map[string]ed25519.PublicKey{"root": root, "next": next}
+	compiled := map[string]ed25519.PublicKey{"root": root}
+	digest := strings.Repeat("a", 64)
+	if err := store.PutTrustedKeysForRelease(keys, compiled, digest, []string{"next"}); err != nil {
+		t.Fatal(err)
+	}
+	ring, err := store.TrustedKeyring()
+	if err != nil || ring.Provenance["next"] != digest {
+		t.Fatalf("ring=%#v err=%v", ring, err)
+	}
+	if err := store.PutTrustedKeysForRelease(keys, compiled, strings.Repeat("b", 64), []string{"next"}); err == nil {
+		t.Fatal("provenance change accepted")
 	}
 }
 

@@ -356,6 +356,12 @@ func (e *Engine) apply(ctx context.Context, plan model.Plan, held *state.Lock, p
 	}
 
 	failed := make(map[model.ResourceID]bool)
+	succeeded := make(map[string]bool, len(journal.Results))
+	for _, result := range journal.Results {
+		if result.Success {
+			succeeded[result.OperationID] = true
+		}
+	}
 	completed := make(map[model.ResourceID]bool)
 	verifiedNoOp := make(map[model.ResourceID]bool)
 	var verifyDependencies func(model.Resource) error
@@ -396,6 +402,20 @@ func (e *Engine) apply(ctx context.Context, plan model.Plan, held *state.Lock, p
 			continue
 		}
 		item, adapter := indexed[operation.ResourceID], adapters[operation.ResourceID]
+		if succeeded[operation.ID] {
+			remaining[item.ID]--
+			if remaining[item.ID] == 0 && operation.Kind != model.OperationPrune {
+				observed, verifyErr := verifyDesired(ctx, adapter, item)
+				if verifyErr != nil {
+					e.setUnavailable(&summary, failed, item.ID, "resume verification: "+verifyErr.Error())
+					continue
+				}
+				pendingOwnership[item.ID] = struct{}{}
+				completed[item.ID] = true
+				_ = observed
+			}
+			continue
+		}
 		if failed[item.ID] {
 			if err := e.record(ctx, operation, false, "blocked by earlier resource failure"); err != nil {
 				return summary, err
@@ -450,22 +470,26 @@ func (e *Engine) apply(ctx context.Context, plan model.Plan, held *state.Lock, p
 		}
 	}
 	finalObservations := make(map[model.ResourceID]model.Observation)
+	finalFailure := false
 	for _, id := range dependencyOrder(e.Enabled, e.Resources) {
 		if !failed[id] {
 			if _, unavailable := summary.Unavailable[id]; !unavailable {
 				item := e.Resources[id]
 				if dependency, blocked := blockedDependency(item, failed, summary.Unavailable); blocked {
 					summary.Unavailable[id] = fmt.Sprintf("final dependency %q is unavailable", dependency)
+					finalFailure = true
 					continue
 				}
 				adapter, ok := e.Registry.Lookup(item.Type, item.Provider)
 				if !ok {
 					summary.Unavailable[id] = "no adapter for final verification"
+					finalFailure = true
 					continue
 				}
 				observed, err := verifyDesired(ctx, adapter, item)
 				if err != nil {
 					summary.Unavailable[id] = "final readiness verification: " + err.Error()
+					finalFailure = true
 					continue
 				}
 				finalObservations[id] = observed
@@ -487,6 +511,10 @@ func (e *Engine) apply(ctx context.Context, plan model.Plan, held *state.Lock, p
 	}
 	if err := ctx.Err(); err != nil {
 		return summary, err
+	}
+	if len(failed) != 0 || finalFailure {
+		sort.Slice(summary.Ready, func(i, j int) bool { return summary.Ready[i] < summary.Ready[j] })
+		return summary, errors.New("reconcile: execution incomplete; active journal retained for retry")
 	}
 	if err := e.State.Complete(journal.ID); err != nil {
 		return summary, fmt.Errorf("reconcile: complete journal: %w", err)

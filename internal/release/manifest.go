@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,20 +46,22 @@ type TrustedKey struct {
 }
 
 type Manifest struct {
-	Version       string       `json:"version"`
-	CatalogSchema int          `json:"catalogSchema"`
-	StateSchema   int          `json:"stateSchema"`
-	TrustedKeys   []TrustedKey `json:"trustedKeys"`
-	Assets        []Asset      `json:"assets"`
-	verified      bool
-	trustBefore   [sha256.Size]byte
-	trustAfter    map[string]ed25519.PublicKey
+	Version        string       `json:"version"`
+	CatalogSchema  int          `json:"catalogSchema"`
+	StateSchema    int          `json:"stateSchema"`
+	TrustedKeys    []TrustedKey `json:"trustedKeys"`
+	Assets         []Asset      `json:"assets"`
+	verified       bool
+	trustBefore    [sha256.Size]byte
+	trustAfter     map[string]ed25519.PublicKey
+	manifestDigest string
 }
 
 type Verifier struct {
 	CompiledKeys                               map[string]ed25519.PublicKey
 	PersistedKeys                              map[string]ed25519.PublicKey
 	MinCatalog, MaxCatalog, MinState, MaxState int
+	PersistedProvenance                        map[string]string
 }
 
 type signatureEnvelope struct {
@@ -119,12 +122,15 @@ func (v Verifier) VerifyManifest(data, signature []byte) (Manifest, error) {
 	if err := decodeStrict(data, &manifest); err != nil {
 		return Manifest{}, fmt.Errorf("decode release manifest: %w", err)
 	}
-	if err := v.validate(manifest, effectiveTrust); err != nil {
+	digest := sha256.Sum256(data)
+	manifestDigest := hex.EncodeToString(digest[:])
+	if err := v.validate(manifest, effectiveTrust, manifestDigest); err != nil {
 		return Manifest{}, fmt.Errorf("validate release manifest: %w", err)
 	}
 	manifest.verified = true
 	manifest.trustBefore = trustDigest(effectiveTrust)
 	manifest.trustAfter = cloneKeys(effectiveTrust)
+	manifest.manifestDigest = manifestDigest
 	for _, addition := range manifest.TrustedKeys {
 		decoded, _ := base64.StdEncoding.Strict().DecodeString(addition.PublicKey)
 		manifest.trustAfter[addition.ID] = ed25519.PublicKey(append([]byte(nil), decoded...))
@@ -144,6 +150,13 @@ func (v Verifier) TrustAfter(manifest Manifest) (map[string]ed25519.PublicKey, e
 		return nil, errors.New("release manifest was verified by a different trust set")
 	}
 	return cloneKeys(manifest.trustAfter), nil
+}
+
+func (m Manifest) Digest() (string, error) {
+	if !m.verified || !digestPattern.MatchString(m.manifestDigest) {
+		return "", errors.New("release manifest was not verified")
+	}
+	return m.manifestDigest, nil
 }
 
 func (m Manifest) BinaryAsset(goos, goarch string) (Asset, error) {
@@ -181,7 +194,7 @@ func (m Manifest) singletonAsset(kind string) (Asset, error) {
 	return found, nil
 }
 
-func (v Verifier) validate(manifest Manifest, effectiveTrust map[string]ed25519.PublicKey) error {
+func (v Verifier) validate(manifest Manifest, effectiveTrust map[string]ed25519.PublicKey, manifestDigest string) error {
 	if !stableSemVerPattern.MatchString(manifest.Version) {
 		return fmt.Errorf("version %q is not stable SemVer", manifest.Version)
 	}
@@ -194,7 +207,7 @@ func (v Verifier) validate(manifest Manifest, effectiveTrust map[string]ed25519.
 	if manifest.TrustedKeys == nil {
 		return errors.New("trustedKeys is required")
 	}
-	if err := validateTrustedKeyAdditions(manifest.TrustedKeys, effectiveTrust); err != nil {
+	if err := validateTrustedKeyAdditions(manifest.TrustedKeys, effectiveTrust, v.CompiledKeys, v.PersistedProvenance, manifestDigest); err != nil {
 		return err
 	}
 
@@ -263,7 +276,7 @@ func (v Verifier) validate(manifest Manifest, effectiveTrust map[string]ed25519.
 	return nil
 }
 
-func validateTrustedKeyAdditions(keys []TrustedKey, effectiveTrust map[string]ed25519.PublicKey) error {
+func validateTrustedKeyAdditions(keys []TrustedKey, effectiveTrust, compiled map[string]ed25519.PublicKey, provenance map[string]string, manifestDigest string) error {
 	seen := make(map[string]struct{}, len(keys))
 	for _, key := range keys {
 		if !keyIDPattern.MatchString(key.ID) {
@@ -273,15 +286,17 @@ func validateTrustedKeyAdditions(keys []TrustedKey, effectiveTrust map[string]ed
 			return fmt.Errorf("duplicate trusted key ID %q", key.ID)
 		}
 		seen[key.ID] = struct{}{}
-		if _, exists := effectiveTrust[key.ID]; exists {
-			return fmt.Errorf("trusted key ID %q is already trusted", key.ID)
-		}
 		decoded, err := base64.StdEncoding.Strict().DecodeString(key.PublicKey)
 		if err != nil || base64.StdEncoding.EncodeToString(decoded) != key.PublicKey {
 			return fmt.Errorf("trusted key %q has invalid public key encoding", key.ID)
 		}
 		if len(decoded) != ed25519.PublicKeySize {
 			return fmt.Errorf("trusted key %q has length %d, want %d", key.ID, len(decoded), ed25519.PublicKeySize)
+		}
+		if existing, exists := effectiveTrust[key.ID]; exists {
+			if _, root := compiled[key.ID]; root || !bytes.Equal(existing, decoded) || provenance[key.ID] != manifestDigest {
+				return fmt.Errorf("trusted key ID %q is already trusted by different provenance", key.ID)
+			}
 		}
 	}
 	return nil

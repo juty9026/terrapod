@@ -61,7 +61,7 @@ func productionPlanner(layout paths.Layout, store *state.Store, client chezmoi.C
 	if err != nil {
 		return nil, err
 	}
-	runner := execx.NewRunner([]string{"LC_ALL"}, nil, os.Geteuid)
+	runner := execx.NewRunner([]string{"LC_ALL"}, noninteractivePrivilege, os.Geteuid)
 	formulaProvider, err := homebrew.New(homebrew.Formula, tools.brew, filepath.Join(layout.StateDir, "recovery", "homebrew"), runner, homebrew.AppPolicy{})
 	if err != nil {
 		return nil, err
@@ -204,10 +204,21 @@ func productionAppRunning(name string) bool {
 type sudoPrivilege struct{}
 
 func (sudoPrivilege) Acquire(ctx context.Context) error {
-	command := exec.CommandContext(ctx, "/usr/bin/sudo", "-v")
-	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if err := command.Run(); err != nil {
-		return fmt.Errorf("sudo privilege preflight: %w", err)
+	return noninteractivePrivilege(ctx)
+}
+
+type privilegeRunner interface {
+	Run(context.Context, execx.Request) (execx.Result, error)
+}
+
+func noninteractivePrivilege(ctx context.Context) error {
+	return noninteractivePrivilegeWithRunner(ctx, execx.NewRunner(nil, nil, os.Geteuid))
+}
+
+func noninteractivePrivilegeWithRunner(ctx context.Context, runner privilegeRunner) error {
+	_, err := runner.Run(ctx, execx.Request{Path: "/usr/bin/sudo", Args: []string{"-n", "true"}})
+	if err != nil {
+		return fmt.Errorf("sudo noninteractive privilege preflight: %w", err)
 	}
 	return nil
 }
@@ -218,11 +229,11 @@ func configureSignedUpdate(deps *cli.Dependencies, layout paths.Layout, chezmoiC
 		if err != nil {
 			return updatepkg.Dependencies{}, err
 		}
-		persisted, err := store.TrustedKeys()
+		keyring, err := store.TrustedKeyring()
 		if err != nil {
 			return updatepkg.Dependencies{}, err
 		}
-		verifier := release.Verifier{CompiledKeys: compiled, PersistedKeys: persisted}
+		verifier := release.Verifier{CompiledKeys: compiled, PersistedKeys: keyring.Keys, PersistedProvenance: keyring.Provenance}
 		stager := release.Stager{ReleaseDir: layout.ReleaseDir, ActiveRelease: layout.ActiveRelease, Verifier: verifier, ExpectedPlatform: release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}}
 		configuredPlanner, err := productionPlanner(layout, store, chezmoiClient)
 		if err != nil {
@@ -283,9 +294,14 @@ func configureSignedUpdate(deps *cli.Dependencies, layout paths.Layout, chezmoiC
 				inputs, err := load(ctx, staged)
 				return staged, verified, inputs, err
 			},
-			SelfCheck: func(ctx context.Context, binary string) error {
-				command := exec.CommandContext(ctx, binary, "internal-self-check")
+			SelfCheck: func(ctx context.Context, binary, releaseDir, digest string) error {
+				command := exec.CommandContext(ctx, binary, "internal-self-check", "--release", releaseDir, "--manifest-digest", digest)
 				command.Env = []string{"HOME=" + layout.HomeDir}
+				for _, name := range []string{"XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"} {
+					if value := os.Getenv(name); value != "" {
+						command.Env = append(command.Env, name+"="+value)
+					}
+				}
 				return command.Run()
 			},
 			PrintPlan: func(plan model.Plan) error {
@@ -294,7 +310,9 @@ func configureSignedUpdate(deps *cli.Dependencies, layout paths.Layout, chezmoiC
 				}
 				return nil
 			}, WriteConfig: func(cfg model.Config) error { return config.WriteAtomic(layout.ConfigFile, cfg) },
-			TrustAfter: verifier.TrustAfter, PersistTrusted: func(keys map[string]ed25519.PublicKey) error { return store.PutTrustedKeys(keys, compiled) },
+			TrustAfter: verifier.TrustAfter, ReleaseDigest: func(value release.VerifiedRelease) (string, error) { return value.Manifest.Digest() }, PersistTrusted: func(keys map[string]ed25519.PublicKey, digest string, additions []string) error {
+				return store.PutTrustedKeysForRelease(keys, compiled, digest, additions)
+			}, LoadTrusted: store.TrustedKeyring,
 			Exec: func(path string, args, environment []string) error {
 				return syscall.Exec(path, append([]string{path}, args...), environment)
 			}, Environment: os.Environ(), HandoffToken: func() string { return os.Getenv("TPOD_UPDATE_LOCK_NONCE") },
@@ -355,4 +373,49 @@ func productionHistoricalCatalogs(store *state.Store, stager release.Stager, rel
 		}
 	}
 	return result, nil
+}
+
+func productionSelfCheck(layout paths.Layout, compiled map[string]ed25519.PublicKey, releaseDir, expectedDigest string) error {
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	executable, err = filepath.EvalSymlinks(executable)
+	if err != nil {
+		return err
+	}
+	derived := filepath.Dir(filepath.Dir(executable))
+	releaseDir, err = filepath.Abs(releaseDir)
+	if err != nil || filepath.Clean(releaseDir) != derived {
+		return errors.New("self-check release directory differs from executable release root")
+	}
+	keyring, err := state.ReadTrustedKeyring(layout.StateDir)
+	if err != nil {
+		return fmt.Errorf("self-check trusted keys: %w", err)
+	}
+	verifier := release.Verifier{CompiledKeys: compiled, PersistedKeys: keyring.Keys, PersistedProvenance: keyring.Provenance}
+	stager := release.Stager{ReleaseDir: filepath.Dir(releaseDir), ActiveRelease: layout.ActiveRelease, Verifier: verifier, ExpectedPlatform: release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}}
+	staged, verified, err := stager.Load(filepath.Base(releaseDir))
+	if err != nil {
+		return fmt.Errorf("self-check release: %w", err)
+	}
+	digest, err := verified.Manifest.Digest()
+	if err != nil || digest != expectedDigest {
+		return errors.New("self-check manifest digest mismatch")
+	}
+	asset, err := verified.Manifest.CatalogAsset()
+	if err != nil {
+		return err
+	}
+	bound, err := catalog.LoadReleaseBound(filepath.Join(staged.Path, "catalog", "resources.json"), asset.SHA256)
+	if err != nil {
+		return fmt.Errorf("self-check catalog: %w", err)
+	}
+	if bound.Catalog.Release != staged.Version {
+		return errors.New("self-check catalog release mismatch")
+	}
+	if err := state.ValidateReadOnly(layout.StateDir); err != nil {
+		return fmt.Errorf("self-check state schema: %w", err)
+	}
+	return nil
 }

@@ -51,11 +51,13 @@ type Dependencies struct {
 	LoadStaged     func(context.Context, release.Staged) (Inputs, error)
 	VerifyActive   func(context.Context, string) (release.Staged, release.VerifiedRelease, Inputs, error)
 	CurrentVersion func() (string, error)
-	SelfCheck      func(context.Context, string) error
+	SelfCheck      func(context.Context, string, string, string) error
 	PrintPlan      func(model.Plan) error
 	WriteConfig    func(model.Config) error
 	TrustAfter     func(release.Manifest) (map[string]ed25519.PublicKey, error)
-	PersistTrusted func(map[string]ed25519.PublicKey) error
+	ReleaseDigest  func(release.VerifiedRelease) (string, error)
+	PersistTrusted func(map[string]ed25519.PublicKey, string, []string) error
+	LoadTrusted    func() (state.TrustedKeyring, error)
 	Exec           func(string, []string, []string) error
 	Environment    []string
 	HandoffToken   func() string
@@ -95,7 +97,11 @@ func Run(ctx context.Context, deps Dependencies) (result Result, retErr error) {
 	if staged.Version != verified.Manifest.Version {
 		return result, errors.New("update: staged version differs from signed release")
 	}
-	if err := deps.SelfCheck(ctx, filepath.Join(staged.Path, "bin", "tpod")); err != nil {
+	releaseDigest, err := deps.ReleaseDigest(verified)
+	if err != nil {
+		return result, fmt.Errorf("update: bind verified manifest digest: %w", err)
+	}
+	if err := deps.SelfCheck(ctx, filepath.Join(staged.Path, "bin", "tpod"), staged.Path, releaseDigest); err != nil {
 		return result, fmt.Errorf("update: staged binary compatibility check: %w", err)
 	}
 	inputs, err := deps.LoadStaged(ctx, staged)
@@ -126,7 +132,7 @@ func Run(ctx context.Context, deps Dependencies) (result Result, retErr error) {
 	if err != nil {
 		return result, fmt.Errorf("update: derive signed trust additions: %w", err)
 	}
-	record := state.UpdateRecord{JournalID: journal.ID, PlanID: plan.ID, Version: staged.Version, CatalogDigest: inputs.Catalog.Digest, TrustedKeys: encodeKeys(keys)}
+	record := state.UpdateRecord{JournalID: journal.ID, PlanID: plan.ID, Version: staged.Version, CatalogDigest: inputs.Catalog.Digest, ReleaseDigest: releaseDigest, TrustedKeys: encodeKeys(keys)}
 	if err := deps.State.PutUpdate(record); err != nil {
 		return result, fmt.Errorf("update: persist update record: %w", err)
 	}
@@ -136,7 +142,7 @@ func Run(ctx context.Context, deps Dependencies) (result Result, retErr error) {
 		if err := deps.State.MarkUpdateActivated(journal.ID); err != nil {
 			return result, fmt.Errorf("update: record same-release activation: %w", err)
 		}
-		if err := deps.PersistTrusted(keys); err != nil {
+		if err := deps.PersistTrusted(keys, releaseDigest, additionIDs(verified.Manifest)); err != nil {
 			return result, fmt.Errorf("update: persist trusted keys for active release: %w", err)
 		}
 		return continueHeld(ctx, deps, lock, journal.ID, staged, verified, inputs)
@@ -147,7 +153,7 @@ func Run(ctx context.Context, deps Dependencies) (result Result, retErr error) {
 	if err := deps.State.MarkUpdateActivated(journal.ID); err != nil {
 		return result, fmt.Errorf("update: record activation: %w", err)
 	}
-	if err := deps.PersistTrusted(keys); err != nil {
+	if err := deps.PersistTrusted(keys, releaseDigest, additionIDs(verified.Manifest)); err != nil {
 		return result, fmt.Errorf("update: persist trusted keys after activation: %w", err)
 	}
 	result.Handoff = true
@@ -181,6 +187,10 @@ func Continue(ctx context.Context, journalID string, deps Dependencies) (result 
 	if err != nil || !record.Activated {
 		return result, fmt.Errorf("update: load activated update record: %w", err)
 	}
+	ring, err := deps.LoadTrusted()
+	if err != nil || !reflect.DeepEqual(encodeKeys(ring.Keys), record.TrustedKeys) {
+		return result, fmt.Errorf("update: persisted trusted keys differ from update record: %w", err)
+	}
 	staged, verified, inputs, err := deps.VerifyActive(ctx, record.Version)
 	if err != nil {
 		return result, fmt.Errorf("update: re-verify active release: %w", err)
@@ -198,7 +208,8 @@ func continueHeld(ctx context.Context, deps Dependencies, lock *state.Lock, jour
 		return Result{}, err
 	}
 	digest, digestErr := planner.Digest(journal.Plan)
-	if digestErr != nil || digest != record.PlanID || journal.Status != "active" || journal.Plan.ID != record.PlanID || record.Version != staged.Version || verified.Manifest.Version != record.Version || inputs.Catalog.Digest != record.CatalogDigest || inputs.Catalog.Catalog.Release != record.Version {
+	releaseDigest, releaseDigestErr := deps.ReleaseDigest(verified)
+	if digestErr != nil || releaseDigestErr != nil || releaseDigest != record.ReleaseDigest || digest != record.PlanID || journal.Status != "active" || journal.Plan.ID != record.PlanID || record.Version != staged.Version || verified.Manifest.Version != record.Version || inputs.Catalog.Digest != record.CatalogDigest || inputs.Catalog.Catalog.Release != record.Version {
 		return Result{}, errors.New("update: active release, catalog, plan, and journal binding differs")
 	}
 	normalized, _, err := config.Normalize(inputs.Config, inputs.Catalog.Catalog.Config)
@@ -211,6 +222,9 @@ func continueHeld(ctx context.Context, deps Dependencies, lock *state.Lock, jour
 		return Result{}, err
 	}
 	if err := requireAuthorizedReplan(journal.Plan, replanned); err != nil {
+		return Result{}, err
+	}
+	if err := rejectNewUnavailable(journal.Plan, replanned); err != nil {
 		return Result{}, err
 	}
 	required := make(map[string]bool, len(replanned.Operations))
@@ -226,6 +240,15 @@ func continueHeld(ctx context.Context, deps Dependencies, lock *state.Lock, jour
 	applyInput.RequiredOperationIDs = required
 	summary, err := deps.Engine.ApplyInputHeld(ctx, applyInput, lock)
 	return Result{Summary: summary, JournalID: journalID}, err
+}
+
+func rejectNewUnavailable(original, actual model.Plan) error {
+	for id, reason := range actual.Unavailable {
+		if previous, existed := original.Unavailable[id]; !existed || previous != reason {
+			return fmt.Errorf("update: actual-state replan made resource %q unavailable: %s", id, reason)
+		}
+	}
+	return nil
 }
 
 func build(ctx context.Context, deps Dependencies, inputs Inputs) (model.Plan, reconcile.ApplyInput, error) {
@@ -336,10 +359,19 @@ func requireAuthorizedReplan(original, actual model.Plan) error {
 }
 
 func validate(deps Dependencies) error {
-	if deps.Releases == nil || deps.Stager == nil || deps.Planner == nil || deps.Engine == nil || deps.State == nil || deps.LockDir == "" || deps.LoadStaged == nil || deps.VerifyActive == nil || deps.CurrentVersion == nil || deps.SelfCheck == nil || deps.PrintPlan == nil || deps.TrustAfter == nil || deps.PersistTrusted == nil || deps.Exec == nil {
+	if deps.Releases == nil || deps.Stager == nil || deps.Planner == nil || deps.Engine == nil || deps.State == nil || deps.LockDir == "" || deps.LoadStaged == nil || deps.VerifyActive == nil || deps.CurrentVersion == nil || deps.SelfCheck == nil || deps.PrintPlan == nil || deps.TrustAfter == nil || deps.ReleaseDigest == nil || deps.PersistTrusted == nil || deps.LoadTrusted == nil || deps.Exec == nil {
 		return errors.New("update: incomplete dependencies")
 	}
 	return nil
+}
+
+func additionIDs(manifest release.Manifest) []string {
+	ids := make([]string, len(manifest.TrustedKeys))
+	for i, key := range manifest.TrustedKeys {
+		ids[i] = key.ID
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func encodeKeys(keys map[string]ed25519.PublicKey) map[string]string {
