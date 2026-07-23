@@ -3,8 +3,6 @@ set -eu
 
 DEFAULT_SOURCE_REPO="https://github.com/juty9026/terrapod.git"
 OFFICIAL_RELEASE_BASE_URL="__TERRAPOD_RELEASE_BASE_URL__"
-EMBEDDED_RELEASE_ROOT_KEY_ID="__TERRAPOD_RELEASE_ROOT_KEY_ID__"
-EMBEDDED_RELEASE_ROOT_PUBLIC_KEY="__TERRAPOD_RELEASE_ROOT_PUBLIC_KEY__"
 
 fatal() {
   printf '%s\n' "terrapod installer: $*" >&2
@@ -34,18 +32,23 @@ repair_platform() {
   esac
 }
 
-repair_openssl() {
-  for candidate in \
-    /opt/homebrew/opt/openssl@3/bin/openssl \
-    /opt/homebrew/bin/openssl \
-    /home/linuxbrew/.linuxbrew/opt/openssl@3/bin/openssl \
-    /usr/bin/openssl; do
-    if [ -x "$candidate" ] && "$candidate" version 2>/dev/null | grep -E '^OpenSSL 3[.]' >/dev/null; then
-      printf '%s\n' "$candidate"
-      return
-    fi
-  done
-  fatal "OpenSSL 3 is required to verify the signed Terrapod release"
+sha256_file() {
+  path="$1"
+  case "$(uname -s 2>/dev/null || printf unknown)" in
+    Darwin)
+      command -v shasum >/dev/null 2>&1 ||
+        fatal "shasum is required to verify Terrapod release assets"
+      shasum -a 256 "$path" | awk '{print $1}'
+      ;;
+    Linux)
+      command -v sha256sum >/dev/null 2>&1 ||
+        fatal "sha256sum is required to verify Terrapod release assets"
+      sha256sum "$path" | awk '{print $1}'
+      ;;
+    *)
+      fatal "unsupported platform for SHA-256 verification"
+      ;;
+  esac
 }
 
 repair_curl() {
@@ -66,7 +69,7 @@ repair_download() {
   "$curl_bin" -fL --proto '=https' --proto-redir '=https' \
     --connect-timeout 15 --max-time 120 --max-filesize "$maximum_size" \
     -o "$destination" "$url" ||
-    fatal "failed to download signed release input: $url"
+    fatal "failed to download release input: $url"
   actual_size="$(wc -c <"$destination" | tr -d ' ')"
   case "$actual_size" in ''|*[!0-9]*) fatal "failed to measure repair download" ;; esac
   [ "$actual_size" -gt 0 ] && [ "$actual_size" -le "$maximum_size" ] ||
@@ -106,7 +109,7 @@ repair_select_asset() {
     matches="$(printf '%s\n' "$matches" | grep -F '"arch":"'"$arch"'"' || true)"
   fi
   [ "$(printf '%s\n' "$matches" | awk 'NF { count++ } END { print count+0 }')" -eq 1 ] ||
-    fatal "signed release manifest has an invalid $kind asset set"
+    fatal "release manifest has an invalid $kind asset set"
   printf '%s\n' "$matches"
 }
 
@@ -116,30 +119,29 @@ repair_validate_asset() {
   size="$(repair_asset_field "$object" size)"
   digest="$(repair_asset_field "$object" sha256)"
 
-  case "$name" in ''|*[!a-z0-9._-]*|.*) fatal "signed release has an unsafe asset name" ;; esac
-  case "$size" in ''|*[!0-9]*) fatal "signed release has an invalid asset size" ;; esac
+  case "$name" in ''|*[!a-z0-9._-]*|.*) fatal "release has an unsafe asset name" ;; esac
+  case "$size" in ''|*[!0-9]*) fatal "release has an invalid asset size" ;; esac
   [ "$size" -gt 0 ] && [ "$size" -le 8589934592 ] ||
-    fatal "signed release asset size is outside the repair limit"
+    fatal "release asset size is outside the repair limit"
   case "$digest" in
-    ''|*[!0-9a-f]*) fatal "signed release has an invalid SHA-256" ;;
+    ''|*[!0-9a-f]*) fatal "release has an invalid SHA-256" ;;
   esac
-  [ "${#digest}" -eq 64 ] || fatal "signed release has an invalid SHA-256"
+  [ "${#digest}" -eq 64 ] || fatal "release has an invalid SHA-256"
   printf '%s|%s|%s\n' "$name" "$size" "$digest"
 }
 
 repair_verify_file() {
-  openssl_bin="$1"
-  path="$2"
-  expected_size="$3"
-  expected_digest="$4"
+  path="$1"
+  expected_size="$2"
+  expected_digest="$3"
 
   actual_size="$(wc -c <"$path" | tr -d ' ')"
   [ "$actual_size" = "$expected_size" ] ||
-    fatal "signed release asset size mismatch: ${path##*/}"
-  actual_digest="$("$openssl_bin" dgst -sha256 -r "$path" | awk '{print $1}')" ||
-    fatal "failed to hash signed release asset"
+    fatal "release asset size mismatch: ${path##*/}"
+  actual_digest="$(sha256_file "$path")" ||
+    fatal "failed to hash release asset"
   [ "$actual_digest" = "$expected_digest" ] ||
-    fatal "signed release asset checksum mismatch: ${path##*/}"
+    fatal "release asset checksum mismatch: ${path##*/}"
 }
 
 repair_validate_version() {
@@ -173,19 +175,11 @@ repair_management_core() {
   repair_require_non_root
 
   release_base="$OFFICIAL_RELEASE_BASE_URL"
-  root_key_id="$EMBEDDED_RELEASE_ROOT_KEY_ID"
-  root_public_key="$EMBEDDED_RELEASE_ROOT_PUBLIC_KEY"
 
   case "$release_base" in
     __*__|'') fatal "release endpoint is not embedded" ;;
     https://*) ;;
     *) fatal "release endpoint must use HTTPS" ;;
-  esac
-  case "$root_key_id" in
-    ''|__*__|*[!a-z0-9._-]*|.*) fatal "release root key ID is not embedded or canonical" ;;
-  esac
-  case "$root_public_key" in
-    ''|__*__|*[!A-Za-z0-9+/=]*) fatal "release root public key is not embedded or canonical" ;;
   esac
 
   platform="$(repair_platform)"
@@ -196,7 +190,6 @@ repair_management_core() {
     *) fatal "unsupported repair platform: $platform" ;;
   esac
 
-  openssl_bin="$(repair_openssl)"
   curl_bin="$(repair_curl)"
   data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
   terrapod_data="$data_home/terrapod"
@@ -215,47 +208,13 @@ repair_management_core() {
   trap 'exit 1' 1 2 15
   chmod 700 "$work" || fatal "failed to protect repair staging directory"
   manifest_file="$work/release.json"
-  signature_file="$work/release.json.sig"
   repair_download "$curl_bin" "$release_base/release.json" "$manifest_file" 1048576
-  repair_download "$curl_bin" "$release_base/release.json.sig" "$signature_file" 1048576
-
-  compact_signature="$work/signature.compact"
-  tr -d '[:space:]' <"$signature_file" >"$compact_signature"
-  signature_key_id="$(repair_json_field "$compact_signature" keyId)"
-  signature_algorithm="$(repair_json_field "$compact_signature" algorithm)"
-  signature_value="$(repair_json_field "$compact_signature" signature)"
-  [ "$signature_key_id" = "$root_key_id" ] || fatal "release signature uses an untrusted key ID"
-  [ "$signature_algorithm" = ed25519 ] || fatal "release signature algorithm is not Ed25519"
-  case "$signature_value" in ''|*[!A-Za-z0-9+/=]*) fatal "release signature is not canonical base64" ;; esac
-  [ "$(cat "$compact_signature")" = "{\"keyId\":\"$signature_key_id\",\"algorithm\":\"ed25519\",\"signature\":\"$signature_value\"}" ] ||
-    fatal "release signature envelope is not canonical"
-
-  public_raw="$work/public.raw"
-  public_der="$work/public.der"
-  signature_raw="$work/signature.raw"
-  printf '%s' "$root_public_key" | "$openssl_bin" base64 -d -A >"$public_raw" 2>/dev/null ||
-    fatal "failed to decode embedded release public key"
-  [ "$(wc -c <"$public_raw" | tr -d ' ')" -eq 32 ] ||
-    fatal "embedded release public key has invalid length"
-  [ "$("$openssl_bin" base64 -A -in "$public_raw")" = "$root_public_key" ] ||
-    fatal "embedded release public key is not canonical base64"
-  printf '\060\052\060\005\006\003\053\145\160\003\041\000' >"$public_der"
-  cat "$public_raw" >>"$public_der"
-  printf '%s' "$signature_value" | "$openssl_bin" base64 -d -A >"$signature_raw" 2>/dev/null ||
-    fatal "failed to decode release signature"
-  [ "$(wc -c <"$signature_raw" | tr -d ' ')" -eq 64 ] ||
-    fatal "release signature has invalid length"
-  [ "$("$openssl_bin" base64 -A -in "$signature_raw")" = "$signature_value" ] ||
-    fatal "release signature is not canonical base64"
-  "$openssl_bin" pkeyutl -verify -rawin -pubin -inkey "$public_der" \
-    -in "$manifest_file" -sigfile "$signature_raw" >/dev/null 2>&1 ||
-    fatal "release manifest signature verification failed"
 
   compact_manifest="$work/manifest.compact"
   tr -d '[:space:]' <"$manifest_file" >"$compact_manifest"
   release_version="$(repair_json_field "$compact_manifest" version)"
   repair_validate_version "$release_version" ||
-    fatal "signed release manifest version is not stable SemVer"
+    fatal "release manifest version is not stable SemVer"
   tr '{}' '\n\n' <"$compact_manifest" >"$work/manifest.objects"
   binary_object="$(repair_select_asset "$work/manifest.objects" binary "$os_name" "$arch")"
   binary_fields="$(repair_validate_asset "$binary_object")"
@@ -265,13 +224,13 @@ repair_management_core() {
   binary_name="$1"; binary_size="$2"; binary_digest="$3"
   IFS="$old_ifs"
   [ "$binary_name" = "tpod-$os_name-$arch" ] ||
-    fatal "signed release binary name does not match the platform"
+    fatal "release binary name does not match the platform"
 
   binary_download="$work/$binary_name"
   repair_download "$curl_bin" "$release_base/$binary_name" "$binary_download" "$binary_size"
-  repair_verify_file "$openssl_bin" "$binary_download" "$binary_size" "$binary_digest"
+  repair_verify_file "$binary_download" "$binary_size" "$binary_digest"
   chmod 755 "$binary_download" || fatal "failed to make verified repair binary executable"
-  manifest_digest="$("$openssl_bin" dgst -sha256 -r "$manifest_file" | awk '{print $1}')" ||
+  manifest_digest="$(sha256_file "$manifest_file")" ||
     fatal "failed to hash verified release manifest"
   if [ "$repair_mode" = --stage-only ]; then
     HOME="$HOME" \
@@ -281,7 +240,7 @@ repair_management_core() {
         --manifest-digest "$manifest_digest" \
         --release-version "$release_version" \
         --stage-only ||
-      fatal "verified Management Core could not stage the signed release"
+      fatal "verified Management Core could not stage the release"
   else
     HOME="$HOME" \
       XDG_DATA_HOME="$data_home" \
@@ -289,13 +248,13 @@ repair_management_core() {
       "$binary_download" internal-repair-stage \
         --manifest-digest "$manifest_digest" \
         --release-version "$release_version" ||
-      fatal "verified Management Core could not stage and activate the signed release"
+      fatal "verified Management Core could not stage and activate the release"
   fi
 
   repair_cleanup
   trap - 0 1 2 15
   if [ "$repair_mode" = --stage-only ]; then
-    printf '%s\n' "terrapod installer: staged signed Management Core"
+    printf '%s\n' "terrapod installer: staged Management Core"
   else
     printf '%s\n' "terrapod installer: repaired Management Core"
   fi
@@ -1608,7 +1567,7 @@ install_manager() {
     install)
       repair_management_core
       tpod_bin="$local_bin_dir/tpod"
-      [ -x "$tpod_bin" ] || fatal "signed Terrapod manager launcher is unavailable: $tpod_bin"
+      [ -x "$tpod_bin" ] || fatal "Terrapod manager launcher is unavailable: $tpod_bin"
       "$tpod_bin" setup || fatal "Terrapod Setup did not complete"
       "$tpod_bin" apply ||
         fatal "Terrapod initial reconciliation did not complete; the launcher remains available at $tpod_bin"
@@ -1617,7 +1576,7 @@ install_manager() {
     migrate)
       repair_management_core --stage-only
       tpod_bin="$releases/$release_version/bin/tpod"
-      [ -x "$tpod_bin" ] || fatal "staged signed Terrapod manager is unavailable: $tpod_bin"
+      [ -x "$tpod_bin" ] || fatal "staged Terrapod manager is unavailable: $tpod_bin"
       TPOD_MIGRATION_STAGED_VERSION="$release_version" \
         TPOD_MIGRATION_MANIFEST_DIGEST="$manifest_digest" \
         "$tpod_bin" migrate-current ||
