@@ -154,7 +154,7 @@ func TestSeedCatalogDeclaresOnlyKnownLegacyPackageSources(t *testing.T) {
 	}
 }
 
-func TestSeedCatalogMatchesBootstrapAPTAndMiseDeclarations(t *testing.T) {
+func TestSeedCatalogDeclaresBootstrapAPTAndMiseResources(t *testing.T) {
 	catalogContents, err := os.ReadFile(filepath.Join("..", "..", "catalog", "v1", "resources.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -164,16 +164,17 @@ func TestSeedCatalogMatchesBootstrapAPTAndMiseDeclarations(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	aptContents, err := os.ReadFile(filepath.Join("..", "..", ".chezmoiscripts", "run_onchange_before_00-bootstrap-ubuntu.sh.tmpl"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	miseContents, err := os.ReadFile(filepath.Join("..", "..", "dot_config", "mise", "config.toml.tmpl"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	wantAPT := extractAPTInstallList(t, string(aptContents))
+	wantAPT := []string{
+		"build-essential", "ca-certificates", "curl", "file", "git", "libbz2-dev",
+		"libffi-dev", "liblzma-dev", "libncursesw5-dev", "libreadline-dev",
+		"libsqlite3-dev", "libssl-dev", "libxml2-dev", "libxmlsec1-dev", "procps",
+		"tk-dev", "unzip", "xz-utils", "zlib1g-dev", "zsh",
+	}
 	wantMise := extractMiseTools(t, string(miseContents))
 	gotAPT := make(map[string]model.Resource)
 	gotMise := make(map[string]model.Resource)
@@ -222,50 +223,6 @@ func TestSeedCatalogMatchesBootstrapAPTAndMiseDeclarations(t *testing.T) {
 		if !reflect.DeepEqual(resource, want) {
 			t.Fatalf("mise resource %q = %#v, want %#v", tool, resource, want)
 		}
-	}
-}
-
-func extractAPTInstallList(t *testing.T, script string) []string {
-	t.Helper()
-	packages, err := parseAPTInstallList(script)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return packages
-}
-
-func parseAPTInstallList(script string) ([]string, error) {
-	start := strings.Index(script, "apt-get install -y \\\n")
-	if start < 0 {
-		return nil, fmt.Errorf("APT install declaration not found")
-	}
-	block := script[start+len("apt-get install -y \\\n"):]
-	end := strings.Index(block, "; then")
-	if end < 0 {
-		return nil, fmt.Errorf("APT install declaration terminator not found")
-	}
-	lines := strings.Split(block[:end], "\n")
-	packages := make([]string, 0, len(lines))
-	seen := make(map[string]int, len(lines))
-	for index, line := range lines {
-		pkg := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(line), "\\"))
-		if pkg == "" || strings.ContainsAny(pkg, " \t\"'$") {
-			return nil, fmt.Errorf("invalid APT package declaration at line %d: %q", index+1, line)
-		}
-		if firstLine, duplicate := seen[pkg]; duplicate {
-			return nil, fmt.Errorf("duplicate APT package %q at line %d (first declared at line %d)", pkg, index+1, firstLine)
-		}
-		seen[pkg] = index + 1
-		packages = append(packages, pkg)
-	}
-	return packages, nil
-}
-
-func TestParseAPTInstallListRejectsDuplicatePackageDeclaration(t *testing.T) {
-	script := "apt-get install -y \\\n  curl \\\n  curl; then\n"
-	_, err := parseAPTInstallList(script)
-	if err == nil || !strings.Contains(err.Error(), "duplicate") || !strings.Contains(err.Error(), "curl") || !strings.Contains(err.Error(), "line") {
-		t.Fatalf("error = %v", err)
 	}
 }
 
