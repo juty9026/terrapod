@@ -243,8 +243,22 @@ assert_contains 'separate from `enableDevelopmentWorkspace`' \
   "README documents macOS Desktop App Stack separation from enableDevelopmentWorkspace"
 assert_contains 'casks can affect shared applications' \
   "README documents why macOS Desktop App Stack remains separate"
-assert_contains '`tpod update` fetches the latest stable signed Terrapod release' \
-  "README documents the signed stable Terrapod update"
+assert_contains 'Terrapod validates Stable Release metadata from the canonical GitHub repository' \
+  "README documents the canonical Stable Release metadata authority"
+assert_contains "over HTTPS and checks every asset's size and SHA-256 digest before activation." \
+  "README documents Stable Release asset validation"
+assert_contains 'Run `tpod update` once, follow the printed instruction, then run it once more.' \
+  "README documents the first legacy update invocation"
+assert_contains 'The second invocation performs the one-shot manager transition automatically.' \
+  "README documents the second legacy update invocation"
+for removed in \
+  'Ed25519' \
+  'release.json.sig' \
+  'RELEASE_SIGNING_PRIVATE_KEY' \
+  'latest stable signed Terrapod release'
+do
+  assert_not_contains "$removed" "README excludes removed release signing language: $removed"
+done
 assert_contains "It does not upgrade or remove packages outside Terrapod's ownership state." \
   "README limits update reconciliation to Terrapod-owned packages"
 assert_contains 'Terrapod does not run broad Homebrew, APT, or mise upgrades.' \
@@ -269,8 +283,8 @@ assert_contains 'read-only chezmoi escape hatch' \
   "README documents constrained direct chezmoi access"
 assert_contains '`install.sh --migrate`' \
   "README documents the maintainer migration"
-assert_contains 'authoring checkout is separate from the active signed release' \
-  "README documents authoring and active release separation"
+assert_contains 'authoring checkout is separate from the active Stable Release' \
+  "README documents authoring checkout and Stable Release separation"
 assert_contains '`install.sh --repair`' \
   "README documents repair"
 assert_contains '`macos-terminal` and `vps-shell`' \

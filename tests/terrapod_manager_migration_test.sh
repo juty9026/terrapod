@@ -24,6 +24,8 @@ run_scenario() {
 
 grep -F 'migrate-current' "$repo_root/install.sh" >/dev/null ||
   fail "installer must expose explicit --migrate dispatch"
+grep -F 'internal recovery primitive' "$repo_root/install.sh" >/dev/null ||
+  fail "installer must document --migrate as an internal recovery primitive"
 grep -F 'command == "migrate-current"' "$repo_root/internal/cli/app.go" >/dev/null ||
   fail "manager must expose the hidden migration command"
 grep -F 'migration-current.json' "$repo_root/cmd/tpod/migration.go" >/dev/null ||
@@ -31,7 +33,7 @@ grep -F 'migration-current.json' "$repo_root/cmd/tpod/migration.go" >/dev/null |
 grep -F 'ApplyConfigConversion' "$repo_root/cmd/tpod/migration.go" >/dev/null ||
   fail "production migration must commit the lossless config conversion"
 grep -F 'PlanLegacyOwnership' "$repo_root/cmd/tpod/migration.go" >/dev/null ||
-  fail "production migration must import signed legacy ownership"
+  fail "production migration must import release-bound legacy ownership"
 grep -F 'RemoveLegacySource' "$repo_root/cmd/tpod/migration.go" >/dev/null ||
   fail "production migration must use revalidated legacy source removal"
 

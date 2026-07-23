@@ -21,25 +21,30 @@ sh -c "$(curl -fsLS https://github.com/juty9026/terrapod/releases/latest/downloa
 
 The first-run installer installs standard-prefix Homebrew, then installs
 `chezmoi` and `gum` through Homebrew before Terrapod Setup. It installs the
-latest stable signed release, launches Setup from that release, and runs the
-initial declared-state apply only after setup succeeds. The authoring checkout is separate from the active signed release, so editing a checkout cannot change
-the active manager until a signed release is installed. After the initial apply completes, the installer prints
-`tpod help` so the short day-to-day command is immediately visible.
+latest Stable Release, launches Setup from that release, and runs the initial
+declared-state apply only after setup succeeds.
+The authoring checkout is separate from the active Stable Release, so editing a checkout cannot change the active manager until a Stable Release is installed.
+After the initial apply completes, the installer prints `tpod help` so the short day-to-day command is immediately visible.
 Maintainers may clone the authoring checkout from
 `https://github.com/juty9026/terrapod.git`; that checkout is never the active
 runtime source.
 
-Existing maintainer machines from the pre-manager implementation use the
-one-shot `install.sh --migrate` path. It converts legacy chezmoi data into
+Existing maintainer machines from the pre-manager implementation use a guided
+legacy update. Run `tpod update` once, follow the printed instruction, then run it once more.
+The second invocation performs the one-shot manager transition automatically.
+It converts legacy chezmoi data into
 `~/.config/terrapod/config.json`, imports eligible existing resources into
 Terrapod ownership, reconciles them, and removes the legacy source only after
-verification. New installations and routine updates never run this migration.
+verification. The transition uses `install.sh --migrate` as an internal
+recovery primitive; new installations and routine manager updates don't run
+that migration.
 
 Terrapod Setup is the first-run review step. It asks you to choose a Preset,
 shows the concrete Terrapod-managed machine-local settings that Preset would
 write, lets you customize those settings, and asks for confirmation before it
 writes them. If setup is cancelled or fails, the installer stops before the
-initial apply and prints the exact command that resumes the signed installer.
+initial apply and prints the exact command that resumes the Stable Release
+installer.
 
 Terrapod Setup is an interactive first-run prompt. Routine Terrapod command
 output remains operational and scan-friendly after bootstrap.
@@ -51,7 +56,7 @@ before apply with guidance text. There is no plain text fallback.
 
 You do not need to install `chezmoi` manually before running this installer.
 
-After bootstrap, use `tpod` for routine management and signed updates.
+After bootstrap, use `tpod` for routine management and Stable Release updates.
 
 ```sh
 tpod plan
@@ -133,9 +138,10 @@ automatically prunes Terrapod-owned resources that are no longer desired.
 Package removal is provider-specific and never uses `brew uninstall --zap`, so
 Homebrew cask support files remain outside Terrapod's ownership boundary.
 
-`tpod update` fetches the latest stable signed Terrapod release, verifies its
-manifest and every release asset, prints the complete plan, and then atomically
-activates the new Management Core before reconciling Terrapod-owned resources.
+Terrapod validates Stable Release metadata from the canonical GitHub repository
+over HTTPS and checks every asset's size and SHA-256 digest before activation.
+`tpod update` then prints the complete plan and atomically activates the new
+Management Core before reconciling Terrapod-owned resources.
 It does not upgrade or remove packages outside Terrapod's ownership state.
 
 Each resource is either `ready` or `unavailable`. An unavailable resource and
@@ -144,19 +150,17 @@ and run `tpod resolve <resource-id>` to choose the desired state explicitly,
 then rerun `tpod plan` or `tpod apply`.
 
 Stable GitHub Releases contain four static `tpod` binaries for macOS and Linux
-on `amd64` and `arm64`, the immutable source archive, the signed resource
-catalog, `release.json`, `release.json.sig`, and a versioned `install.sh`.
-Release manifests are signed with Ed25519; private signing keys are never
-included in source archives or release assets.
+on `amd64` and `arm64`, the immutable source archive, the release-bound Resource
+Catalog, `release.json`, and a versioned `install.sh`: exactly eight assets.
 
 If the stable launcher reports that the active Management Core is missing or
 broken, run the exact versioned `install.sh --repair` command printed by the
-launcher. Repair verifies the same signed release inputs and restores only the
+launcher. Repair verifies the same Stable Release inputs and restores only the
 Management Core; it does not apply resources or rewrite machine configuration.
 
 Direct access is a read-only chezmoi escape hatch. Terrapod fixes the active
-signed source, independent config, destination, and script exclusion; mutating
-chezmoi subcommands are rejected.
+release-bound source, independent config, destination, and script exclusion;
+mutating chezmoi subcommands are rejected.
 
 ```sh
 terrapod chezmoi -- cd
@@ -177,7 +181,7 @@ Ubuntu 24.04 LTS on `x86_64` and `aarch64`.
 Homebrew is the Modern CLI Provider for the Core Shell Stack on both supported profiles.
 mise is the Development Runtime Manager for Bun, Node.js, Python, and uv.
 The first-run installer installs `chezmoi` and `gum` through Homebrew before Terrapod Setup.
-The signed resource catalog declares the 20 mandatory CLI formulae for both profiles.
+The release-bound Resource Catalog declares the 20 mandatory CLI formulae for both profiles.
 
 ### macOS
 
@@ -213,7 +217,7 @@ catalog resources:
 
 When installing Orca, Terrapod trusts only the fully-qualified `stablyai/orca/orca` cask, not the entire `stablyai/orca` tap.
 
-Machine-specific Homebrew packages remain outside Terrapod unless the signed
+Machine-specific Homebrew packages remain outside Terrapod unless the active
 catalog declares them.
 
 ### Ubuntu 24.04 VPS
@@ -259,12 +263,12 @@ chsh -s "$(command -v zsh)"
 ```
 
 Terrapod handles normal management after bootstrap. If the Management Core is
-unavailable, use the exact signed `install.sh --repair` command printed by the
+unavailable, use the exact `install.sh --repair` command printed by the
 launcher.
 
 ### Intentional Upgrades
 
-`tpod apply` reconciles the active signed catalog. It installs missing declared
+`tpod apply` reconciles the active Resource Catalog. It installs missing declared
 packages, upgrades only Terrapod-owned packages, and automatically prunes
 Terrapod-owned resources removed from desired state. Terrapod does not run broad
 Homebrew, APT, or mise upgrades and never changes packages that are outside its
@@ -303,7 +307,7 @@ values.
 
 Run `tpod setup` or `terrapod configure <Preset>` first so Terrapod writes a
 complete managed setup config. Routine commands validate it against the schema
-in the active signed catalog and add defaults for new optional fields. Unknown
+in the active Resource Catalog and add defaults for new optional fields. Unknown
 legacy fields are pruned during the versioned config migration.
 
 Optional stack profiles and macOS App Group settings are disabled by default.

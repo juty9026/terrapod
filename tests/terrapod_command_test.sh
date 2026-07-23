@@ -6,8 +6,6 @@ fail() { printf '%s\n' "not ok - $*" >&2; exit 1; }
 
 [ ! -e "$repo_root/dot_local/bin/executable_terrapod" ] ||
   fail "legacy chezmoi-owned terrapod launcher remains"
-[ ! -e "$repo_root/dot_local/bin/symlink_tpod" ] ||
-  fail "legacy chezmoi-owned tpod symlink remains"
 
 if find "$repo_root/.chezmoiscripts" -type f -print 2>/dev/null | grep . >/dev/null; then
   fail "chezmoi mutation scripts remain"

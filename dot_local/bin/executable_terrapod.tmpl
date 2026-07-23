@@ -1,0 +1,64 @@
+{{- warnf "Terrapod manager transition is ready.\nRun `tpod update` once more to complete it automatically." -}}
+#!/bin/sh
+set -eu
+
+installer_url="https://github.com/juty9026/terrapod/releases/download/v1.0.0/install.sh"
+
+fatal() {
+  printf '%s\n' "terrapod transition: $*" >&2
+  exit 1
+}
+
+[ "${TPOD_LEGACY_TRANSITION_ACTIVE:-}" != "1" ] ||
+  fatal "migration did not replace the legacy transition bridge"
+[ -x /usr/bin/id ] || fatal "trusted /usr/bin/id is unavailable"
+[ "$(/usr/bin/id -u)" -ne 0 ] || fatal "refusing to run as root"
+
+work="$(mktemp -d "${TMPDIR:-/tmp}/terrapod-transition.XXXXXX")" ||
+  fatal "failed to create a temporary directory"
+trap 'rm -rf "$work"' EXIT HUP INT TERM
+umask 077
+launcher_dir="$HOME/.local/bin"
+bridge="$launcher_dir/terrapod"
+launcher="$launcher_dir/tpod"
+[ -x "$bridge" ] || fatal "legacy transition bridge is unavailable"
+[ -L "$launcher" ] || fatal "legacy tpod symlink is unavailable"
+cp -p "$bridge" "$work/terrapod" ||
+  fatal "failed to preserve the legacy transition bridge"
+cp -P "$launcher" "$work/tpod" ||
+  fatal "failed to preserve the legacy tpod symlink"
+
+restore_legacy_pair() {
+  restore_work="$(mktemp -d "$launcher_dir/.terrapod-transition.XXXXXX")" ||
+    return 1
+  if ! cp -p "$work/terrapod" "$restore_work/terrapod" ||
+      ! cp -P "$work/tpod" "$restore_work/tpod"; then
+    rm -rf "$restore_work"
+    return 1
+  fi
+  if ! mv -f "$restore_work/terrapod" "$bridge" ||
+      ! mv -f "$restore_work/tpod" "$launcher"; then
+    rm -rf "$restore_work"
+    return 1
+  fi
+  rmdir "$restore_work"
+}
+
+installer="$work/install.sh"
+curl_bin="$(command -v curl 2>/dev/null || true)"
+[ -n "$curl_bin" ] || fatal "curl is required"
+"$curl_bin" -fsSL --proto '=https' --proto-redir '=https' "$installer_url" -o "$installer" ||
+  fatal "v1.0.0 is not available; retry this command after the release is published"
+chmod 0700 "$installer" || fatal "failed to protect the downloaded installer"
+
+if TPOD_LEGACY_TRANSITION_ACTIVE=1 sh "$installer" --migrate; then
+  :
+else
+  migration_status="$?"
+  restore_legacy_pair ||
+    fatal "manager migration failed with status $migration_status and legacy bridge restoration failed"
+  fatal "manager migration did not complete; retry the same tpod command"
+fi
+
+[ -x "$launcher" ] || fatal "migration did not install the tpod launcher"
+TPOD_LEGACY_TRANSITION_ACTIVE=1 exec "$launcher" "$@"

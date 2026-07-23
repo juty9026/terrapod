@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"os"
@@ -62,7 +61,7 @@ func (g productionGit) Run(ctx context.Context, dir string, args ...string) ([]b
 	return output, nil
 }
 
-func configureCurrentMigration(deps *cli.Dependencies, layout paths.Layout, roots map[string]ed25519.PublicKey, client chezmoi.Client) {
+func configureCurrentMigration(deps *cli.Dependencies, layout paths.Layout, client chezmoi.Client) {
 	var prepared *currentMigrationPrepared
 	legacySource := legacySourcePath(layout)
 	legacyConfig := filepath.Join(filepath.Dir(filepath.Dir(layout.ConfigFile)), "chezmoi", "chezmoi.toml")
@@ -78,7 +77,7 @@ func configureCurrentMigration(deps *cli.Dependencies, layout paths.Layout, root
 				if stagedVersion == "" || manifestDigest == "" {
 					return migrate.CurrentPrepared{}, errors.New("migration must start through install.sh --migrate")
 				}
-				staged, verified, current, stager, err := loadStagedMigrationRelease(layout, roots, stagedVersion, manifestDigest)
+				staged, verified, current, stager, err := loadStagedMigrationRelease(layout, stagedVersion, manifestDigest)
 				if err != nil {
 					return migrate.CurrentPrepared{}, err
 				}
@@ -117,12 +116,12 @@ func configureCurrentMigration(deps *cli.Dependencies, layout paths.Layout, root
 				if _, err := prepared.stager.RepairAndActivate(ctx, prepared.verified, release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}, launchers); err != nil {
 					return err
 				}
-				active, err := productionActiveCatalog(layout, roots)
+				active, err := productionActiveCatalog(layout)
 				if err != nil {
 					return err
 				}
 				if active.Digest != prepared.current.Digest {
-					return errors.New("active signed catalog changed after migration preflight")
+					return errors.New("active release catalog changed after migration preflight")
 				}
 				return nil
 			},
@@ -142,7 +141,7 @@ func configureCurrentMigration(deps *cli.Dependencies, layout paths.Layout, root
 				return prepared.engine.ApplyInputHeld(ctx, prepared.applyInput, lock)
 			},
 			Resume: func(ctx context.Context, input reconcile.ApplyInput, binding migrate.CurrentBinding, lock *state.Lock) (reconcile.Summary, error) {
-				return resumeCurrentMigration(ctx, layout, roots, client, input, binding, lock)
+				return resumeCurrentMigration(ctx, layout, client, input, binding, lock)
 			},
 			FinalizeSource: func(ctx context.Context, input reconcile.ApplyInput, binding migrate.CurrentBinding, lock *state.Lock) error {
 				if _, err := os.Lstat(legacySource); errors.Is(err, os.ErrNotExist) {
@@ -160,12 +159,12 @@ func configureCurrentMigration(deps *cli.Dependencies, layout paths.Layout, root
 					}
 				}
 				return migrate.RemoveLegacySource(ctx, proof, git, func(context.Context) error {
-					activeBinding, err := currentMigrationBinding(layout, roots)
+					activeBinding, err := currentMigrationBinding(layout)
 					if err != nil {
 						return err
 					}
 					if activeBinding != binding {
-						return errors.New("active signed release changed before source removal")
+						return errors.New("active release changed before source removal")
 					}
 					_, engine, err := currentMigrationEngine(layout, client)
 					if err != nil {
@@ -189,7 +188,7 @@ func prepareCurrentMigration(ctx context.Context, layout paths.Layout, client ch
 	baselinePath := filepath.Join(staged.Path, "source", "catalog", "v1", "legacy-current.json")
 	baseline, warningCategories, err := migrate.LoadLegacyBaseline(baselinePath)
 	if err != nil {
-		return nil, fmt.Errorf("load signed legacy baseline: %w", err)
+		return nil, fmt.Errorf("load release legacy baseline: %w", err)
 	}
 	contents, err := os.ReadFile(legacyConfig)
 	if err != nil {
@@ -273,10 +272,9 @@ func prepareCurrentMigration(ctx context.Context, layout paths.Layout, client ch
 	}, nil
 }
 
-func loadStagedMigrationRelease(layout paths.Layout, roots map[string]ed25519.PublicKey, version, expectedManifestDigest string) (release.Staged, release.VerifiedRelease, catalog.Verified, release.Stager, error) {
-	verifier := release.Verifier{CompiledKeys: roots}
+func loadStagedMigrationRelease(layout paths.Layout, version, expectedManifestDigest string) (release.Staged, release.VerifiedRelease, catalog.Verified, release.Stager, error) {
 	stager := release.Stager{
-		ReleaseDir: layout.ReleaseDir, ActiveRelease: layout.ActiveRelease, Verifier: verifier,
+		ReleaseDir: layout.ReleaseDir, ActiveRelease: layout.ActiveRelease,
 		ExpectedPlatform: release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH},
 	}
 	staged, verified, err := stager.Load(version)
@@ -367,13 +365,13 @@ func currentMigrationEngine(layout paths.Layout, client chezmoi.Client) (*state.
 	}, nil
 }
 
-func resumeCurrentMigration(ctx context.Context, layout paths.Layout, roots map[string]ed25519.PublicKey, client chezmoi.Client, input reconcile.ApplyInput, binding migrate.CurrentBinding, lock *state.Lock) (reconcile.Summary, error) {
-	activeBinding, err := currentMigrationBinding(layout, roots)
+func resumeCurrentMigration(ctx context.Context, layout paths.Layout, client chezmoi.Client, input reconcile.ApplyInput, binding migrate.CurrentBinding, lock *state.Lock) (reconcile.Summary, error) {
+	activeBinding, err := currentMigrationBinding(layout)
 	if err != nil {
 		return reconcile.Summary{}, err
 	}
 	if activeBinding != binding {
-		return reconcile.Summary{}, errors.New("active signed release differs from persisted migration binding")
+		return reconcile.Summary{}, errors.New("active release differs from persisted migration binding")
 	}
 	_, engine, err := currentMigrationEngine(layout, client)
 	if err != nil {
@@ -382,14 +380,14 @@ func resumeCurrentMigration(ctx context.Context, layout paths.Layout, roots map[
 	return engine.ApplyInputHeld(ctx, input, lock)
 }
 
-func currentMigrationBinding(layout paths.Layout, roots map[string]ed25519.PublicKey) (migrate.CurrentBinding, error) {
-	current, err := productionActiveCatalog(layout, roots)
+func currentMigrationBinding(layout paths.Layout) (migrate.CurrentBinding, error) {
+	current, err := productionActiveCatalog(layout)
 	if err != nil {
 		return migrate.CurrentBinding{}, err
 	}
 	stager := release.Stager{
 		ReleaseDir: layout.ReleaseDir, ActiveRelease: layout.ActiveRelease,
-		Verifier: release.Verifier{CompiledKeys: roots}, ExpectedPlatform: release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH},
+		ExpectedPlatform: release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH},
 	}
 	version, err := stager.CurrentVersion()
 	if err != nil {

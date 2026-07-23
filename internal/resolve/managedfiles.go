@@ -82,7 +82,7 @@ func (r *ManagedFiles) Resolve(ctx context.Context, id model.ResourceID, input i
 	}
 	adapter, ok := r.Engine.Registry.Lookup(item.Type, item.Provider)
 	if !ok {
-		return result, fmt.Errorf("resolve: no signed adapter for resource %q", id)
+		return result, fmt.Errorf("resolve: no declared adapter for resource %q", id)
 	}
 	capability, ok := adapter.(managedFilesCapability)
 	if !ok {
@@ -189,7 +189,7 @@ func selectManagedResource(id model.ResourceID, input reconcile.ApplyInput) (mod
 	}
 	if enabled {
 		if current.ID == "" {
-			return model.Resource{}, false, errors.New("resolve: enabled resource is absent from signed input")
+			return model.Resource{}, false, errors.New("resolve: enabled resource is absent from release-bound input")
 		}
 		if current.Type != model.ResourceManagedFiles {
 			return model.Resource{}, false, &ErrNotManaged{ID: id}
@@ -201,7 +201,7 @@ func selectManagedResource(id model.ResourceID, input reconcile.ApplyInput) (mod
 		return model.Resource{}, false, &ErrNotManaged{ID: id}
 	}
 	if historical.Resource.ID != id {
-		return model.Resource{}, false, errors.New("resolve: historical resource index does not match signed input")
+		return model.Resource{}, false, errors.New("resolve: historical resource index does not match release-bound input")
 	}
 	if historical.Resource.Type != model.ResourceManagedFiles {
 		return model.Resource{}, false, &ErrNotManaged{ID: id}
@@ -353,7 +353,7 @@ func renderManagedFilesPrompt(output io.Writer, id model.ResourceID, conflicts [
 			return err
 		}
 	}
-	_, err := fmt.Fprintf(output, "Back up the listed paths and accept Terrapod's signed desired state for %s? [y/N]", id)
+	_, err := fmt.Fprintf(output, "Back up the listed paths and accept Terrapod's declared desired state for %s? [y/N]", id)
 	return err
 }
 

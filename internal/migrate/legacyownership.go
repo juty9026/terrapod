@@ -2,9 +2,7 @@ package migrate
 
 import (
 	"context"
-	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -21,9 +19,7 @@ import (
 
 const (
 	LegacyBaselineRelease = "legacy-current"
-	LegacyBaselineKeyID   = "legacy-current-2026"
 
-	legacyBaselinePublicKey         = "14iK8SGULGWVo50SWPWG5drZ86xbT0VApxhtCT7bz4E="
 	legacyWarningMarkersMetadataKey = "migration.installWarningMarkers"
 )
 
@@ -50,17 +46,11 @@ type LegacyOwnershipResult struct {
 }
 
 func LoadLegacyBaseline(path string) (catalog.Verified, []string, error) {
-	publicKey, err := base64.StdEncoding.Strict().DecodeString(legacyBaselinePublicKey)
-	if err != nil {
-		return catalog.Verified{}, nil, fmt.Errorf("decode compiled legacy baseline key: %w", err)
-	}
-	verified, err := catalog.LoadVerified(path, catalog.SignatureSet{
-		PublicKeys: map[string]ed25519.PublicKey{LegacyBaselineKeyID: publicKey},
-	})
+	verified, err := catalog.Load(path)
 	if err != nil {
 		return catalog.Verified{}, nil, err
 	}
-	if verified.Catalog.Release != LegacyBaselineRelease || verified.KeyID != LegacyBaselineKeyID {
+	if verified.Catalog.Release != LegacyBaselineRelease {
 		return catalog.Verified{}, nil, errors.New("legacy baseline identity mismatch")
 	}
 	var declaration string
@@ -81,7 +71,7 @@ func PlanLegacyOwnership(ctx context.Context, input LegacyOwnershipInput) (Legac
 	if err := ctx.Err(); err != nil {
 		return LegacyOwnershipResult{}, err
 	}
-	if input.Baseline.Catalog.Release != LegacyBaselineRelease || input.Baseline.Digest == "" || input.Baseline.KeyID != LegacyBaselineKeyID {
+	if input.Baseline.Catalog.Release != LegacyBaselineRelease || input.Baseline.Digest == "" {
 		return LegacyOwnershipResult{}, errors.New("verified legacy baseline is required")
 	}
 	baseline := indexLegacyResources(input.Baseline.Catalog.Resources)
@@ -138,7 +128,7 @@ func PlanLegacyOwnership(ctx context.Context, input LegacyOwnershipInput) (Legac
 		if input.Desired[id] {
 			desired, exists := current[id]
 			if !exists {
-				result.Plan.Unavailable[id] = "desired resource is absent from current signed catalog"
+				result.Plan.Unavailable[id] = "desired resource is absent from current Resource Catalog"
 				continue
 			}
 			observed, inspectErr := adapter.Inspect(ctx, desired)
@@ -214,7 +204,7 @@ func markLegacyTransfer(item model.Resource, operations []model.Operation, packa
 			return nil, errors.New("legacy packages must be non-empty and unique")
 		}
 		if _, ok := authorized[packageID]; !ok {
-			return nil, fmt.Errorf("legacy package %q is outside the signed baseline declaration", packageID)
+			return nil, fmt.Errorf("legacy package %q is outside the release-bound baseline declaration", packageID)
 		}
 	}
 	if len(operations) != 1 {

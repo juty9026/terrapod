@@ -22,6 +22,37 @@ run_go() {
   fi
 }
 
+extract_published_assets() {
+  awk '
+    /gh release create/ { publish = 1; next }
+    publish && /^[[:space:]]+/ {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      continued = line ~ /\\$/
+      sub(/[[:space:]]*\\$/, "", line)
+      if (line !~ /^--/) {
+        print line
+      }
+      if (!continued) {
+        exit
+      }
+      next
+    }
+    publish { exit }
+  '
+}
+
+extractor_fixture='          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            artifacts/release.json \
+            extra-release-note.txt'
+extractor_expected='artifacts/release.json
+extra-release-note.txt'
+extractor_actual="$(printf '%s\n' "$extractor_fixture" | extract_published_assets)"
+[ "$extractor_actual" = "$extractor_expected" ] ||
+  fail "release asset extractor includes every positional asset"
+pass "release asset extractor includes every positional asset"
+
 [ -x "$repo_root/scripts/package-source.sh" ] || fail "source packager is executable"
 [ -f "$repo_root/.github/workflows/release.yml" ] || fail "release workflow exists"
 
@@ -104,17 +135,10 @@ grep -F '"release": "1.2.3"' "$assets/resources.json" >/dev/null ||
 grep -F '"release": "development"' "$repo_root/catalog/v1/resources.json" >/dev/null ||
   fail "release rendering leaves the development source catalog unchanged"
 
-openssl genpkey -algorithm Ed25519 -out "$tmp_dir/private.pem" >/dev/null 2>&1
-openssl pkey -in "$tmp_dir/private.pem" -pubout -out "$tmp_dir/public.pem" >/dev/null 2>&1
-openssl pkeyutl -sign -rawin -inkey "$tmp_dir/private.pem" \
-  -in "$assets/release.json" -out "$tmp_dir/release.sig.raw"
-openssl pkeyutl -verify -rawin -pubin -inkey "$tmp_dir/public.pem" \
-  -in "$assets/release.json" -sigfile "$tmp_dir/release.sig.raw" >/dev/null 2>&1 ||
-  fail "manifest signature verifies"
 if grep -R -F "PRIVATE KEY" "$assets" >/dev/null 2>&1; then
   fail "private key material appears in release artifacts"
 fi
-pass "manifest binds all assets and signature verifies"
+pass "manifest binds all release assets"
 
 workflow="$(cat "$repo_root/.github/workflows/release.yml")"
 printf '%s' "$workflow" | grep -F 'release_base="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download"' >/dev/null ||
@@ -125,12 +149,50 @@ for required in \
   'scripts/package-source.sh' \
   '--catalog-source catalog/v1/resources.json' \
   '--catalog-output artifacts/resources.json' \
-  'RELEASE_SIGNING_PRIVATE_KEY' \
+  'internal-release-contract-check' \
   'gh release create' \
   'install.sh'; do
   printf '%s' "$workflow" | grep -F -- "$required" >/dev/null ||
     fail "release workflow contains $required"
 done
+for removed in \
+  'RELEASE_ROOT_KEY_ID' \
+  'RELEASE_ROOT_PUBLIC_KEY' \
+  'RELEASE_SIGNING_PRIVATE_KEY'; do
+  printf '%s' "$workflow" | grep -F -- "$removed" >/dev/null &&
+    fail "release workflow contains removed configuration $removed"
+done
+printf '%s' "$workflow" | grep -F 'release.json.sig' >/dev/null &&
+  fail "release workflow publishes a signature envelope"
+expected_assets='artifacts/tpod-darwin-amd64
+artifacts/tpod-darwin-arm64
+artifacts/tpod-linux-amd64
+artifacts/tpod-linux-arm64
+artifacts/terrapod-source.tar.gz
+artifacts/resources.json
+artifacts/release.json
+artifacts/install.sh'
+published_assets="$(printf '%s\n' "$workflow" | extract_published_assets)"
+[ "$published_assets" = "$expected_assets" ] ||
+  fail "release workflow must publish exactly the expected eight assets"
 printf '%s' "$workflow" | grep -F 'pull-requests: write' >/dev/null &&
   fail "release workflow requests unrelated permissions"
 pass "release workflow has the required bounded publication steps"
+
+for removed in \
+  'RELEASE_ROOT_KEY_ID' \
+  'RELEASE_ROOT_PUBLIC_KEY' \
+  'RELEASE_SIGNING_PRIVATE_KEY' \
+  'release\.json\.sig' \
+  'crypto/ed25519'
+do
+  if grep -R -n -E "$removed" \
+    "$repo_root/cmd" \
+    "$repo_root/internal" \
+    "$repo_root/scripts" \
+    "$repo_root/install.sh" \
+    "$repo_root/.github/workflows/release.yml" >/dev/null; then
+    fail "production implementation contains removed signing term $removed"
+  fi
+done
+pass "production implementation has no removed signing dependencies"

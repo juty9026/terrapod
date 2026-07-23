@@ -118,7 +118,7 @@ func RunCurrent(ctx context.Context, deps CurrentDependencies, printPlan func(mo
 		return result, fmt.Errorf("migration: commit config conversion: %w", err)
 	}
 	if err := deps.Activate(ctx, prepared); err != nil {
-		return result, fmt.Errorf("migration: activate signed manager: %w", err)
+		return result, fmt.Errorf("migration: activate stable manager: %w", err)
 	}
 	result.Activated = true
 	if err := deps.Import(ctx, prepared); err != nil {

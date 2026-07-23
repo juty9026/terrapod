@@ -2,9 +2,7 @@ package catalog
 
 import (
 	"bytes"
-	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -26,20 +24,9 @@ const (
 	enabledByAnyConfigMetadataPrefix = "enabledByAnyConfig."
 )
 
-type SignatureSet struct {
-	PublicKeys map[string]ed25519.PublicKey
-}
-
 type Verified struct {
 	Catalog model.Catalog
 	Digest  string
-	KeyID   string
-}
-
-type signatureEnvelope struct {
-	KeyID     string `json:"keyId"`
-	Algorithm string `json:"algorithm"`
-	Signature string `json:"signature"`
 }
 
 var providersByType = map[model.ResourceType]map[string]struct{}{
@@ -59,44 +46,13 @@ var providersByType = map[model.ResourceType]map[string]struct{}{
 	),
 }
 
-func LoadVerified(path string, signatures SignatureSet) (Verified, error) {
+// Load validates a catalog contained in an already release-bound source
+// archive and returns its content digest.
+func Load(path string) (Verified, error) {
 	catalogBytes, err := readBounded(path)
 	if err != nil {
 		return Verified{}, fmt.Errorf("read resource catalog: %w", err)
 	}
-	signatureBytes, err := readBounded(path + ".sig")
-	if err != nil {
-		return Verified{}, fmt.Errorf("read resource catalog signature: %w", err)
-	}
-
-	var envelope signatureEnvelope
-	if err := decodeStrict(signatureBytes, &envelope); err != nil {
-		return Verified{}, fmt.Errorf("decode signature envelope: %w", err)
-	}
-	if envelope.Algorithm != "ed25519" {
-		return Verified{}, fmt.Errorf("unsupported signature algorithm %q", envelope.Algorithm)
-	}
-	publicKey, ok := signatures.PublicKeys[envelope.KeyID]
-	if !ok {
-		return Verified{}, fmt.Errorf("unknown signature key ID %q", envelope.KeyID)
-	}
-	if len(publicKey) != ed25519.PublicKeySize {
-		return Verified{}, fmt.Errorf("signature key %q has length %d, want %d", envelope.KeyID, len(publicKey), ed25519.PublicKeySize)
-	}
-	signature, err := base64.StdEncoding.Strict().DecodeString(envelope.Signature)
-	if err != nil {
-		return Verified{}, fmt.Errorf("decode signature: %w", err)
-	}
-	if base64.StdEncoding.EncodeToString(signature) != envelope.Signature {
-		return Verified{}, errors.New("non-canonical signature encoding")
-	}
-	if len(signature) != ed25519.SignatureSize {
-		return Verified{}, fmt.Errorf("signature length is %d, want %d", len(signature), ed25519.SignatureSize)
-	}
-	if !ed25519.Verify(publicKey, catalogBytes, signature) {
-		return Verified{}, errors.New("resource catalog signature verification failed")
-	}
-
 	var parsed model.Catalog
 	if err := decodeStrict(catalogBytes, &parsed); err != nil {
 		return Verified{}, fmt.Errorf("decode resource catalog: %w", err)
@@ -106,33 +62,20 @@ func LoadVerified(path string, signatures SignatureSet) (Verified, error) {
 	}
 
 	digest := sha256.Sum256(catalogBytes)
-	return Verified{
-		Catalog: parsed,
-		Digest:  hex.EncodeToString(digest[:]),
-		KeyID:   envelope.KeyID,
-	}, nil
+	return Verified{Catalog: parsed, Digest: hex.EncodeToString(digest[:])}, nil
 }
 
 // LoadReleaseBound loads a catalog whose exact SHA-256 is already bound by a
-// verified signed release manifest.
+// validated Stable Release manifest.
 func LoadReleaseBound(path, expectedDigest string) (Verified, error) {
-	contents, err := readBounded(path)
+	verified, err := Load(path)
 	if err != nil {
 		return Verified{}, fmt.Errorf("read release-bound catalog: %w", err)
 	}
-	digest := sha256.Sum256(contents)
-	actual := hex.EncodeToString(digest[:])
-	if actual != expectedDigest {
+	if verified.Digest != expectedDigest {
 		return Verified{}, errors.New("release-bound catalog digest mismatch")
 	}
-	var parsed model.Catalog
-	if err := decodeStrict(contents, &parsed); err != nil {
-		return Verified{}, fmt.Errorf("decode release-bound catalog: %w", err)
-	}
-	if err := validate(parsed); err != nil {
-		return Verified{}, fmt.Errorf("validate release-bound catalog: %w", err)
-	}
-	return Verified{Catalog: parsed, Digest: actual, KeyID: "signed-release"}, nil
+	return verified, nil
 }
 
 func readBounded(path string) ([]byte, error) {

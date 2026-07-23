@@ -283,7 +283,7 @@ func (a *Adapter) Plan(ctx context.Context, desired model.Resource, _ model.Obse
 }
 
 func (a *Adapter) Execute(ctx context.Context, operation model.Operation) model.OperationResult {
-	return model.OperationResult{OperationID: operation.ID, ResourceID: operation.ResourceID, Detail: "managed-files: signed resource scope is required", FinishedAt: time.Now().UTC()}
+	return model.OperationResult{OperationID: operation.ID, ResourceID: operation.ResourceID, Detail: "managed-files: declared resource scope is required", FinishedAt: time.Now().UTC()}
 }
 
 func (a *Adapter) ExecuteResource(ctx context.Context, desired model.Resource, operation model.Operation) model.OperationResult {
@@ -576,7 +576,7 @@ func (a *Adapter) targets(ctx context.Context, desired model.Resource) (map[stri
 func managedScope(item model.Resource) (string, error) {
 	scope, ok := item.Metadata[model.ManagedFilesScopeMetadataKey]
 	if !ok || scope == "" || filepath.IsAbs(scope) || filepath.ToSlash(filepath.Clean(scope)) != scope || scope == ".." || strings.HasPrefix(scope, "../") || strings.Contains(scope, "\\") {
-		return "", fmt.Errorf("managed-files: resource %q has no safe signed target scope", item.ID)
+		return "", fmt.Errorf("managed-files: resource %q has no safe declared target scope", item.ID)
 	}
 	return scope, nil
 }
@@ -593,7 +593,7 @@ func (a *Adapter) validateOwnershipScope(item model.Resource, paths map[string]s
 	for path := range paths {
 		rel, err := filepath.Rel(filepath.Clean(a.Home), filepath.Clean(path))
 		if err != nil || !scopeContains(scope, filepath.ToSlash(rel)) {
-			return fmt.Errorf("managed-files: ownership path %q is outside signed scope %q", path, scope)
+			return fmt.Errorf("managed-files: ownership path %q is outside declared scope %q", path, scope)
 		}
 	}
 	return nil

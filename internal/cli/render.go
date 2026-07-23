@@ -16,7 +16,7 @@ func renderHelp(output io.Writer) {
 	fmt.Fprintln(output)
 	fmt.Fprintln(output, "Commands:")
 	fmt.Fprintln(output, "  apply      Reconcile managed resources")
-	fmt.Fprintln(output, "  update     Install the latest signed release and reconcile upgrades")
+	fmt.Fprintln(output, "  update     Install the latest Stable Release and reconcile upgrades")
 	fmt.Fprintln(output, "  resolve    Resolve one unavailable resource")
 	fmt.Fprintln(output, "  plan       Show deterministic reconciliation operations")
 	fmt.Fprintln(output, "  status     Show Ready and Unavailable resources")

@@ -6,8 +6,8 @@ Development Environment Manager.
 ## Language
 
 **Terrapod**:
-The Personal Development Environment Manager that reconciles a signed declared
-environment.
+The Personal Development Environment Manager that reconciles a declared
+environment from Stable Releases.
 _Avoid_: bootstrap script, dotfiles wrapper, package manager
 
 **tpod**:
@@ -15,22 +15,22 @@ The preferred day-to-day command spelling for Terrapod.
 _Avoid_: separate tool, product name
 
 **Management Core**:
-The signed `tpod` binary and release metadata that plan and reconcile resources.
+The stable `tpod` binary and release metadata that plan and reconcile resources.
 _Avoid_: shell wrapper, source checkout
 
-**Signed Release**:
-An immutable Terrapod source archive and typed resource catalog bound by a
-signed release manifest.
+**Stable Release**:
+A versioned Terrapod source archive and typed resource catalog bound by a
+stable release manifest published by the canonical GitHub repository.
 _Avoid_: branch head, mutable checkout
 
 **Authoring Checkout**:
-A maintainer's editable repository checkout, separate from the active signed
+A maintainer's editable repository checkout, separate from the active stable
 release.
 _Avoid_: active runtime source, user installation
 
 **Resource Catalog**:
-The signed declaration of config schema, resources, dependencies, providers,
-version policies, and declared roots.
+The release-bound declaration of config schema, resources, dependencies,
+providers, version policies, and declared roots.
 _Avoid_: Brewfile, installer script list
 
 **Stable Resource ID**:
@@ -53,7 +53,7 @@ and prune.
 _Avoid_: generic shell hook, chezmoi script
 
 **Ready**:
-A resource whose actual state satisfies its signed declaration.
+A resource whose actual state satisfies its release-bound declaration.
 _Avoid_: command exists
 
 **Unavailable**:
@@ -135,7 +135,7 @@ _Avoid_: separate product definition, self-labeled translation
 
 ## Relationships
 
-- A **Signed Release** is the only runtime authority for desired state.
+- A **Stable Release** is the only runtime authority for desired state.
 - An **Authoring Checkout** never becomes active merely because its files
   change.
 - The **Resource Catalog** assigns every resource a **Stable Resource ID**,
@@ -149,7 +149,7 @@ _Avoid_: separate product definition, self-labeled translation
   **Unavailable**. There is no intermediate managed state.
 - `tpod plan` inspects actual state and prints the deterministic operation plan.
 - `tpod apply` executes and verifies the active release plan.
-- `tpod update` verifies a newer **Signed Release**, prints its plan, activates
+- `tpod update` validates a newer **Stable Release**, prints its plan, activates
   it atomically, and reconciles it.
 - `tpod resolve <resource-id>` is the explicit conflict workflow for managed
   files.
@@ -174,10 +174,10 @@ _Avoid_: separate product definition, self-labeled translation
   Workspace stacks; workstation additionally enables every macOS App Group.
 - Workstation is available only for the **macOS Terminal Profile**.
 - chezmoi is a script-free managed-files engine. Terrapod fixes its active
-  signed source, destination, independent data file, and script exclusion.
+  release source, destination, independent data file, and script exclusion.
 - `tpod chezmoi -- <read-only-command>` is a constrained inspection escape
   hatch; mutating chezmoi commands are rejected.
-- `install.sh --repair` restores only the signed **Management Core**.
+- `install.sh --repair` restores only the stable **Management Core**.
 - `install.sh --migrate` is a maintainer-only, one-shot bridge from the legacy
   shell/chezmoi installation. It converts config, imports eligible ownership,
   reconciles current state, and removes legacy source only after verification.

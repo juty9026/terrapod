@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/ed25519"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -24,11 +22,8 @@ import (
 	"github.com/juty9026/terrapod/internal/release"
 	setuppkg "github.com/juty9026/terrapod/internal/setup"
 	"github.com/juty9026/terrapod/internal/state"
-	updatepkg "github.com/juty9026/terrapod/internal/update"
 )
 
-var releaseRootKeyID string
-var releaseRootPublicKey string
 var releaseLatestEndpoint = release.DefaultLatestReleaseEndpoint
 
 // chezmoiPathOverride is set only in the built-binary integration test. Normal
@@ -48,9 +43,9 @@ func main() {
 			fmt.Fprintln(os.Stderr, "usage: tpod internal-self-check --release <dir> --manifest-digest <sha256>")
 			os.Exit(2)
 		}
-		roots, err := compiledReleaseRoots()
-		if err == nil && homeErr == nil && os.Geteuid() != 0 {
-			err = productionSelfCheck(layout, roots, os.Args[3], os.Args[5])
+		var err error
+		if homeErr == nil && os.Geteuid() != 0 {
+			err = productionSelfCheck(layout, os.Args[3], os.Args[5])
 		}
 		if err == nil && homeErr != nil {
 			err = homeErr
@@ -84,7 +79,7 @@ func main() {
 			return config.Load(layout.ConfigFile)
 		},
 		LoadCatalog: func() (catalog.Verified, error) {
-			return catalog.Verified{}, errors.New("signed catalog is not configured in shadow build")
+			return catalog.Verified{}, errors.New("release-bound catalog is not configured in shadow build")
 		},
 	}
 	if homeErr == nil {
@@ -124,28 +119,19 @@ func main() {
 		deps.PlannerForState = func(store *state.Store) (*planner.Planner, error) {
 			return productionPlanner(layout, store, client)
 		}
-		if roots, err := compiledReleaseRoots(); err != nil {
-			deps.Update = func(context.Context) (updatepkg.Result, error) { return updatepkg.Result{}, err }
-			deps.ContinueUpdate = func(context.Context, string) (updatepkg.Result, error) { return updatepkg.Result{}, err }
-		} else {
-			deps.LoadCatalog = func() (catalog.Verified, error) {
-				return productionActiveCatalog(layout, roots)
-			}
-			configureSignedUpdate(&deps, layout, client, roots)
-			configureCurrentMigration(&deps, layout, roots, client)
+		deps.LoadCatalog = func() (catalog.Verified, error) {
+			return productionActiveCatalog(layout)
 		}
+		configureStableUpdate(&deps, layout, client)
+		configureCurrentMigration(&deps, layout, client)
 	}
-	if len(os.Args) > 1 && os.Args[1] == "internal-release-root-check" {
+	if len(os.Args) > 1 && os.Args[1] == "internal-release-contract-check" {
 		if len(os.Args) != 2 {
-			fmt.Fprintln(os.Stderr, "usage: tpod internal-release-root-check")
+			fmt.Fprintln(os.Stderr, "usage: tpod internal-release-contract-check")
 			os.Exit(2)
 		}
-		_, err := compiledReleaseRoots()
-		if err == nil && (deps.Update == nil || deps.ContinueUpdate == nil) {
-			err = errors.New("signed update dependencies are not configured")
-		}
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
+		if deps.Update == nil || deps.ContinueUpdate == nil || deps.LoadCatalog == nil || deps.MigrateCurrent == nil || releaseLatestEndpoint != release.DefaultLatestReleaseEndpoint || chezmoiPathOverride != "" {
+			fmt.Fprintln(os.Stderr, "stable release dependencies are not configured")
 			os.Exit(1)
 		}
 		return
@@ -169,18 +155,12 @@ func repairManagementCore(layout paths.Layout, homeErr error, args []string) err
 	if err != nil {
 		return err
 	}
-	roots, err := compiledReleaseRoots()
-	if err != nil {
-		return err
-	}
-	verifier := release.Verifier{CompiledKeys: roots}
 	client := release.Client{
 		HTTP:     repairHTTPClient(),
 		Endpoint: endpoint,
 		CacheDir: layout.ReleaseCacheDir,
-		Verifier: verifier,
 	}
-	return repairLatestRelease(context.Background(), layout, args[1], verifier, client.LatestStable, stageOnly)
+	return repairLatestRelease(context.Background(), layout, args[1], client.LatestStable, stageOnly)
 }
 
 func repairReleaseEndpoint(version string) (string, error) {
@@ -194,7 +174,7 @@ func repairReleaseEndpoint(version string) (string, error) {
 	return strings.TrimSuffix(releaseLatestEndpoint, latestSuffix) + "/tags/v" + version, nil
 }
 
-func repairLatestRelease(ctx context.Context, layout paths.Layout, expectedDigest string, verifier release.Verifier, latest func(context.Context) (release.VerifiedRelease, error), stageOnly bool) error {
+func repairLatestRelease(ctx context.Context, layout paths.Layout, expectedDigest string, latest func(context.Context) (release.VerifiedRelease, error), stageOnly bool) error {
 	verified, err := latest(ctx)
 	if err != nil {
 		return err
@@ -209,7 +189,6 @@ func repairLatestRelease(ctx context.Context, layout paths.Layout, expectedDiges
 	stager := release.Stager{
 		ReleaseDir:       layout.ReleaseDir,
 		ActiveRelease:    layout.ActiveRelease,
-		Verifier:         verifier,
 		ExpectedPlatform: release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH},
 	}
 	current, err := stager.CurrentVersion()
@@ -232,20 +211,6 @@ func repairLatestRelease(ctx context.Context, layout paths.Layout, expectedDiges
 	}
 	_, err = stager.RepairAndActivate(ctx, verified, release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}, launchers)
 	return err
-}
-
-func compiledReleaseRoots() (map[string]ed25519.PublicKey, error) {
-	if releaseRootKeyID == "" && releaseRootPublicKey == "" {
-		return nil, errors.New("signed update is unavailable: release trust root was not embedded in this build")
-	}
-	if releaseRootKeyID == "" || releaseRootPublicKey == "" {
-		return nil, errors.New("signed update is unavailable: incomplete embedded release trust root")
-	}
-	decoded, err := base64.StdEncoding.Strict().DecodeString(releaseRootPublicKey)
-	if err != nil || len(decoded) != ed25519.PublicKeySize || base64.StdEncoding.EncodeToString(decoded) != releaseRootPublicKey {
-		return nil, errors.New("signed update is unavailable: invalid embedded release public key")
-	}
-	return map[string]ed25519.PublicKey{releaseRootKeyID: ed25519.PublicKey(decoded)}, nil
 }
 
 func productionChezmoiPath() string {

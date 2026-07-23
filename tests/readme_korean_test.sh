@@ -211,8 +211,25 @@ assert_contains "$korean_readme" 'read-only chezmoi escape hatch' \
   "README.ko.md documents constrained direct chezmoi access"
 assert_contains "$korean_readme" '`install.sh --migrate`' \
   "README.ko.md documents the maintainer migration"
-assert_contains "$korean_readme" 'authoring checkout은 active signed release와 분리' \
-  "README.ko.md documents authoring and active release separation"
+assert_contains "$korean_readme" 'Terrapod은 canonical GitHub repository가 HTTPS로 제공하는 Stable Release metadata를 검증하고,' \
+  "README.ko.md documents the canonical Stable Release metadata authority"
+assert_contains "$korean_readme" 'activation 전에 모든 asset의 size와 SHA-256 digest를 확인합니다.' \
+  "README.ko.md documents Stable Release asset validation"
+assert_contains "$korean_readme" '먼저 `tpod update`를 한 번 실행하고 출력된 안내를 따른 뒤, 다시 한 번 실행합니다.' \
+  "README.ko.md documents the first legacy update invocation"
+assert_contains "$korean_readme" '두 번째 호출이 one-shot manager transition을 자동으로 수행합니다.' \
+  "README.ko.md documents the second legacy update invocation"
+for removed in \
+  'Ed25519' \
+  'release.json.sig' \
+  'RELEASE_SIGNING_PRIVATE_KEY' \
+  'latest stable signed Terrapod release'
+do
+  assert_not_contains "$korean_readme" "$removed" \
+    "README.ko.md excludes removed release signing language: $removed"
+done
+assert_contains "$korean_readme" 'authoring checkout은 active Stable Release와 분리' \
+  "README.ko.md documents authoring checkout and Stable Release separation"
 assert_contains "$korean_readme" '`install.sh --repair`' \
   "README.ko.md documents repair"
 assert_contains "$korean_readme" '`macos-terminal`과 `vps-shell`' \

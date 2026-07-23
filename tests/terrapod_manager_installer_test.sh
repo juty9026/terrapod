@@ -16,6 +16,13 @@ before() {
 }
 
 [ -x "$installer" ] && sh -n "$installer" || fail "install.sh must be executable POSIX shell"
+installer_text="$(cat "$installer")"
+contains "$installer_text" "__TERRAPOD_RELEASE_BASE_URL__" \
+  "installer keeps the release base placeholder"
+absent "$installer_text" "__TERRAPOD_RELEASE_ROOT_KEY_ID__" \
+  "installer has no release root key ID placeholder"
+absent "$installer_text" "__TERRAPOD_RELEASE_ROOT_PUBLIC_KEY__" \
+  "installer has no release root public key placeholder"
 
 make_case() {
   case_dir="$tmp/$1"
@@ -53,8 +60,8 @@ make_case() {
     printf '%s\n' '   release_version=1.2.3; manifest_digest=test-manifest-digest; data_home="${XDG_DATA_HOME:-$HOME/.local/share}"; releases="$data_home/terrapod/releases";'
     printf '%s\n' '   mkdir -p "$releases/$release_version/bin";'
     printf '%s\n' '   cp "$HOME/.local/bin/tpod" "$releases/$release_version/bin/tpod";'
-    printf '%s\n' '   printf "%s\n" "stage-only:signed-manager" >>"$TERRAPOD_TEST_LOG";'
-    printf '%s\n' ' else printf "%s\n" "activate:signed-manager" >>"$TERRAPOD_TEST_LOG"; fi'
+    printf '%s\n' '   printf "%s\n" "stage-only:manager" >>"$TERRAPOD_TEST_LOG";'
+    printf '%s\n' ' else printf "%s\n" "activate:manager" >>"$TERRAPOD_TEST_LOG"; fi'
     printf '%s\n' '}'
     printf '%s\n' 'main "$@"'
   } >>"$rendered"
@@ -67,10 +74,10 @@ HOME="$fresh/home" TERRAPOD_TEST_LOG="$fresh/events" TERRAPOD_TEST_BREW="$fresh/
   "$fresh/install.sh" >"$fresh/stdout" 2>"$fresh/stderr" || fail "fresh manager install must succeed"
 events="$(cat "$fresh/events")"
 contains "$events" "bootstrap:chezmoi gum" "fresh install bootstraps setup tools"
-contains "$events" "activate:signed-manager" "fresh install activates signed manager"
+contains "$events" "activate:manager" "fresh install activates manager"
 contains "$events" "tpod:setup" "fresh install runs setup"
 contains "$events" "tpod:apply" "fresh install runs apply"
-before "$events" "activate:signed-manager" "tpod:setup" "fresh activation must precede setup"
+before "$events" "activate:manager" "tpod:setup" "fresh activation must precede setup"
 before "$events" "tpod:setup" "tpod:apply" "setup must precede apply"
 
 failed="$(make_case failure)"
@@ -86,9 +93,9 @@ HOME="$migration/home" XDG_DATA_HOME="$migration/data" TERRAPOD_TEST_LOG="$migra
   TERRAPOD_TEST_BREW="$migration/bin/brew" "$migration/install.sh" --migrate >"$migration/stdout" 2>"$migration/stderr" ||
   fail "migration dispatch must succeed"
 events="$(cat "$migration/events")"
-contains "$events" "stage-only:signed-manager" "migration must only stage before hidden preflight"
+contains "$events" "stage-only:manager" "migration must only stage before hidden preflight"
 contains "$events" "tpod:migrate-current" "migration must invoke staged hidden command"
-absent "$events" "activate:signed-manager" "shell must not activate migration release before hidden preflight"
+absent "$events" "activate:manager" "shell must not activate migration release before hidden preflight"
 absent "$events" "tpod:setup" "migration must not run setup"
 
 preflight_failure="$(make_case migration-preflight-failure)"

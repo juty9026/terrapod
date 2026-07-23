@@ -132,7 +132,7 @@ func (e *Engine) VerifyInputPostconditions(ctx context.Context, input ApplyInput
 	for _, id := range dependencyOrder(copyEngine.Enabled, copyEngine.Resources) {
 		item, ok := copyEngine.Resources[id]
 		if !ok {
-			summary.Unavailable[id] = "enabled resource is not signed"
+			summary.Unavailable[id] = "enabled resource is not declared"
 			continue
 		}
 		adapter, ok := copyEngine.Registry.Lookup(item.Type, item.Provider)
@@ -259,7 +259,7 @@ func (e *Engine) apply(ctx context.Context, plan model.Plan, held *state.Lock, p
 		enabledSet[id] = struct{}{}
 		item, ok := e.Resources[id]
 		if !ok || item.ID != id {
-			return summary, fmt.Errorf("reconcile: enabled resource %q is not signed", id)
+			return summary, fmt.Errorf("reconcile: enabled resource %q is not declared", id)
 		}
 	}
 	lock := held
@@ -643,14 +643,14 @@ func (e *Engine) authorize(operation model.Operation) (model.Resource, resource.
 	}
 	item, ok := e.Resources[operation.ResourceID]
 	if !ok {
-		return model.Resource{}, nil, fmt.Errorf("reconcile: resource %q is not signed", operation.ResourceID)
+		return model.Resource{}, nil, fmt.Errorf("reconcile: resource %q is not declared", operation.ResourceID)
 	}
 	if item.ID != operation.ResourceID {
-		return model.Resource{}, nil, fmt.Errorf("reconcile: signed resource index mismatch for %q", operation.ResourceID)
+		return model.Resource{}, nil, fmt.Errorf("reconcile: declared resource index mismatch for %q", operation.ResourceID)
 	}
 	if item.Type == model.ResourceManagedFiles {
-		if _, ok := signedManagedScope(item); !ok {
-			return model.Resource{}, nil, fmt.Errorf("reconcile: managed-file resource %q lacks safe signed scope", item.ID)
+		if _, ok := declaredManagedScope(item); !ok {
+			return model.Resource{}, nil, fmt.Errorf("reconcile: managed-file resource %q lacks safe declared scope", item.ID)
 		}
 	}
 	switch operation.Kind {
@@ -659,7 +659,7 @@ func (e *Engine) authorize(operation model.Operation) (model.Resource, resource.
 		return model.Resource{}, nil, fmt.Errorf("reconcile: operation %q has unsupported kind %q", operation.ID, operation.Kind)
 	}
 	if operation.Provider != item.Provider || operation.Package != item.Package {
-		return model.Resource{}, nil, fmt.Errorf("reconcile: operation %q identity does not match signed resource", operation.ID)
+		return model.Resource{}, nil, fmt.Errorf("reconcile: operation %q identity does not match declared resource", operation.ID)
 	}
 	adapter, ok := e.Registry.Lookup(item.Type, item.Provider)
 	if !ok {
@@ -869,11 +869,11 @@ func validateRemoves(item model.Resource, operation model.Operation, declaration
 
 func validateHistoricalOwnership(item model.Resource, digest string, owned model.Ownership) error {
 	if digest == "" || owned.ResourceID != item.ID || owned.Provider != item.Provider || owned.Package != item.Package || owned.CatalogDigest != digest {
-		return fmt.Errorf("reconcile: historical ownership for %q does not match signed authority", item.ID)
+		return fmt.Errorf("reconcile: historical ownership for %q does not match release-bound authority", item.ID)
 	}
 	if item.Type == model.ResourceManagedFiles {
-		if _, ok := signedManagedScope(item); !ok {
-			return fmt.Errorf("reconcile: historical managed-file ownership for %q lacks signed scope", item.ID)
+		if _, ok := declaredManagedScope(item); !ok {
+			return fmt.Errorf("reconcile: historical managed-file ownership for %q lacks declared scope", item.ID)
 		}
 		for path, receipt := range owned.Paths {
 			if !filepath.IsAbs(path) || receipt == "" {
@@ -884,7 +884,7 @@ func validateHistoricalOwnership(item model.Resource, digest string, owned model
 	}
 	if item.Type == model.ResourceGitCheckout {
 		if !validGitCheckoutOwnership(item, owned.Paths) {
-			return fmt.Errorf("reconcile: historical git-checkout ownership for %q is malformed or outside signed destination", item.ID)
+			return fmt.Errorf("reconcile: historical git-checkout ownership for %q is malformed or outside declared destination", item.ID)
 		}
 		return nil
 	}
@@ -903,12 +903,12 @@ func validateHistoricalOwnership(item model.Resource, digest string, owned model
 		}
 	}
 	if !reflect.DeepEqual(expected, owned.Paths) {
-		return fmt.Errorf("reconcile: historical ownership paths for %q do not match signed authority", item.ID)
+		return fmt.Errorf("reconcile: historical ownership paths for %q do not match release-bound authority", item.ID)
 	}
 	return nil
 }
 
-func signedManagedScope(item model.Resource) (string, bool) {
+func declaredManagedScope(item model.Resource) (string, bool) {
 	scope, ok := item.Metadata[model.ManagedFilesScopeMetadataKey]
 	return scope, ok && scope != "" && scope == pathpkg.Clean(scope) && !strings.HasPrefix(scope, "/") && scope != ".." && !strings.HasPrefix(scope, "../") && !strings.Contains(scope, "\\")
 }
@@ -980,7 +980,7 @@ func verifyDesired(ctx context.Context, adapter resource.Adapter, item model.Res
 		return model.Observation{}, err
 	}
 	if !desiredVerified(item, observed) {
-		return model.Observation{}, errors.New("verification did not establish signed desired identity")
+		return model.Observation{}, errors.New("verification did not establish declared desired identity")
 	}
 	return observed, nil
 }
@@ -1009,7 +1009,7 @@ func (e *Engine) own(item model.Resource, observed model.Observation) error {
 			paths[path] = digest
 		}
 		if item.Type == model.ResourceGitCheckout && !validGitCheckoutOwnership(item, paths) {
-			return fmt.Errorf("reconcile: verified git-checkout paths for %q are malformed or outside signed destination", item.ID)
+			return fmt.Errorf("reconcile: verified git-checkout paths for %q are malformed or outside declared destination", item.ID)
 		}
 	} else {
 		for key, value := range item.Metadata {

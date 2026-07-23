@@ -213,25 +213,26 @@ assert_no_stub_calls() {
 }
 
 sha256_file() {
-  openssl dgst -sha256 -r "$1" | awk '{print $1}'
+  case "$(uname -s)" in
+    Darwin) shasum -a 256 "$1" | awk '{print $1}' ;;
+    Linux) sha256sum "$1" | awk '{print $1}' ;;
+    *) fail "repair test host supports SHA-256" ;;
+  esac
 }
 
 file_size() {
   wc -c <"$1" | tr -d ' '
 }
 
-prepare_signed_repair_fixture() {
+prepare_repair_fixture() {
   case_dir="$1"
   fixture_dir="$case_dir/release-fixture"
   mkdir -p "$fixture_dir/source-input/scripts"
 
-  signing_dir="$tmp_dir/repair-signing"
-  if [ ! -f "$signing_dir/stub-tpod" ]; then
-    mkdir -p "$signing_dir"
-    openssl genpkey -algorithm ed25519 -out "$signing_dir/private.pem" >/dev/null 2>&1
-    openssl pkey -in "$signing_dir/private.pem" -pubout -outform DER \
-      | tail -c 32 | openssl base64 -A >"$signing_dir/public.b64"
-    write_stub "$signing_dir/stub-tpod" \
+  shared_dir="$tmp_dir/repair-fixture"
+  if [ ! -f "$shared_dir/stub-tpod" ]; then
+    mkdir -p "$shared_dir"
+    write_stub "$shared_dir/stub-tpod" \
       '#!/bin/sh' \
       'set -eu' \
       '[ "${1:-}" = internal-repair-stage ] || exit 64' \
@@ -256,17 +257,17 @@ prepare_signed_repair_fixture() {
       'rm -f "$data_home/terrapod/current"' \
       'ln -s releases/1.2.3 "$data_home/terrapod/current"'
     case "$(uname -s):$(uname -m)" in
-      Darwin:x86_64) printf '%s\n' darwin/amd64 >"$signing_dir/platform" ;;
-      Darwin:arm64|Darwin:aarch64) printf '%s\n' darwin/arm64 >"$signing_dir/platform" ;;
-      Linux:x86_64) printf '%s\n' linux/amd64 >"$signing_dir/platform" ;;
-      Linux:arm64|Linux:aarch64) printf '%s\n' linux/arm64 >"$signing_dir/platform" ;;
+      Darwin:x86_64) printf '%s\n' darwin/amd64 >"$shared_dir/platform" ;;
+      Darwin:arm64|Darwin:aarch64) printf '%s\n' darwin/arm64 >"$shared_dir/platform" ;;
+      Linux:x86_64) printf '%s\n' linux/amd64 >"$shared_dir/platform" ;;
+      Linux:arm64|Linux:aarch64) printf '%s\n' linux/arm64 >"$shared_dir/platform" ;;
       *) fail "repair test host platform is supported" ;;
     esac
   fi
-  cp "$signing_dir/stub-tpod" "$fixture_dir/tpod-linux-amd64"
-  cp "$signing_dir/stub-tpod" "$fixture_dir/tpod-linux-arm64"
-  cp "$signing_dir/stub-tpod" "$fixture_dir/tpod-darwin-amd64"
-  cp "$signing_dir/stub-tpod" "$fixture_dir/tpod-darwin-arm64"
+  cp "$shared_dir/stub-tpod" "$fixture_dir/tpod-linux-amd64"
+  cp "$shared_dir/stub-tpod" "$fixture_dir/tpod-linux-arm64"
+  cp "$shared_dir/stub-tpod" "$fixture_dir/tpod-darwin-amd64"
+  cp "$shared_dir/stub-tpod" "$fixture_dir/tpod-darwin-arm64"
   chmod +x "$fixture_dir"/tpod-*
   printf '%s\n' "source fixture" >"$fixture_dir/source-input/README.md"
   cp "$repo_root/scripts/tpod-launcher.sh" "$fixture_dir/source-input/scripts/tpod-launcher.sh"
@@ -287,16 +288,10 @@ prepare_signed_repair_fixture() {
   catalog_digest="$(sha256_file "$fixture_dir/resources.json")"
 
   cat >"$fixture_dir/release.json" <<EOF
-{"version":"1.2.3","catalogSchema":1,"stateSchema":1,"trustedKeys":[],"assets":[{"kind":"binary","os":"darwin","arch":"amd64","name":"tpod-darwin-amd64","size":$darwin_amd64_size,"sha256":"$darwin_amd64_digest"},{"kind":"binary","os":"darwin","arch":"arm64","name":"tpod-darwin-arm64","size":$darwin_arm64_size,"sha256":"$darwin_arm64_digest"},{"kind":"binary","os":"linux","arch":"amd64","name":"tpod-linux-amd64","size":$linux_amd64_size,"sha256":"$linux_amd64_digest"},{"kind":"binary","os":"linux","arch":"arm64","name":"tpod-linux-arm64","size":$linux_arm64_size,"sha256":"$linux_arm64_digest"},{"kind":"source","name":"terrapod-source.tar.gz","size":$source_size,"sha256":"$source_digest"},{"kind":"catalog","name":"resources.json","size":$catalog_size,"sha256":"$catalog_digest"}]}
+{"version":"1.2.3","catalogSchema":1,"stateSchema":1,"assets":[{"kind":"binary","os":"darwin","arch":"amd64","name":"tpod-darwin-amd64","size":$darwin_amd64_size,"sha256":"$darwin_amd64_digest"},{"kind":"binary","os":"darwin","arch":"arm64","name":"tpod-darwin-arm64","size":$darwin_arm64_size,"sha256":"$darwin_arm64_digest"},{"kind":"binary","os":"linux","arch":"amd64","name":"tpod-linux-amd64","size":$linux_amd64_size,"sha256":"$linux_amd64_digest"},{"kind":"binary","os":"linux","arch":"arm64","name":"tpod-linux-arm64","size":$linux_arm64_size,"sha256":"$linux_arm64_digest"},{"kind":"source","name":"terrapod-source.tar.gz","size":$source_size,"sha256":"$source_digest"},{"kind":"catalog","name":"resources.json","size":$catalog_size,"sha256":"$catalog_digest"}]}
 EOF
 
-  cp "$signing_dir/public.b64" "$fixture_dir/public.b64"
-  cp "$signing_dir/platform" "$fixture_dir/platform"
-  openssl pkeyutl -sign -rawin -inkey "$signing_dir/private.pem" \
-    -in "$fixture_dir/release.json" -out "$fixture_dir/signature.bin"
-  signature="$(openssl base64 -A -in "$fixture_dir/signature.bin")"
-  printf '%s\n' '{"keyId":"test-root","algorithm":"ed25519","signature":"'"$signature"'"}' \
-    >"$fixture_dir/release.json.sig"
+  cp "$shared_dir/platform" "$fixture_dir/platform"
 
   write_stub "$case_dir/bin/curl" \
     '#!/bin/sh' \
@@ -317,11 +312,8 @@ EOF
 render_repair_installer() {
   case_dir="$1"
   rendered="$case_dir/install-repair.sh"
-  public_key="$(cat "$case_dir/release-fixture/public.b64")"
   sed \
     -e 's|__TERRAPOD_RELEASE_BASE_URL__|https://releases.example.test|g' \
-    -e 's|__TERRAPOD_RELEASE_ROOT_KEY_ID__|test-root|g' \
-    -e "s|__TERRAPOD_RELEASE_ROOT_PUBLIC_KEY__|$public_key|g" \
     -e "s|/usr/bin/curl|$case_dir/bin/curl|g" \
     "$install_script" >"$rendered"
   chmod +x "$rendered"
@@ -2773,7 +2765,7 @@ fi
 
 sh "$repo_root/tests/terrapod_manager_installer_test.sh"
 
-repair_case="$(make_case_dir signed-management-core-repair)"
+repair_case="$(make_case_dir unsigned-management-core-repair)"
 mkdir -p \
   "$repair_case/xdg-state/terrapod/journals" \
   "$repair_case/xdg-config/terrapod" \
@@ -2785,7 +2777,9 @@ printf '%s\n' keep-resource >"$repair_case/xdg-data/terrapod/resources/owned"
 printf '%s\n' '#!/bin/sh' 'exit 0' >"$repair_case/xdg-data/terrapod/releases/0.9.0/bin/tpod"
 chmod +x "$repair_case/xdg-data/terrapod/releases/0.9.0/bin/tpod"
 ln -s releases/0.9.0 "$repair_case/xdg-data/terrapod/current"
-prepare_signed_repair_fixture "$repair_case"
+prepare_repair_fixture "$repair_case"
+assert_not_contains "$(cat "$repair_case/release-fixture/release.json")" '"trustedKeys"' \
+  "repair fixture uses the unsigned manifest contract"
 repair_log="$repair_case/repair-calls"
 : >"$repair_log"
 TERRAPOD_STUB_CALL_LOG="$repair_log"
@@ -2795,10 +2789,10 @@ unset TERRAPOD_STUB_CALL_LOG
 if [ "$installer_status" -ne 0 ]; then
   sed 's/^/repair stderr: /' "$repair_case/repair-stderr" >&2
 fi
-assert_status "$installer_status" 0 "signed Management Core repair succeeds"
+assert_status "$installer_status" 0 "Management Core repair succeeds"
 [ "$(readlink "$repair_case/xdg-data/terrapod/current")" = "releases/1.2.3" ] ||
-  fail "repair atomically activates the signed release"
-pass "repair atomically activates the signed release"
+  fail "repair atomically activates the release"
+pass "repair atomically activates the release"
 [ -x "$repair_case/xdg-data/terrapod/releases/1.2.3/bin/tpod" ] ||
   fail "repair restores the active binary executable mode"
 [ -x "$repair_case/home/.local/bin/tpod" ] &&
@@ -2816,31 +2810,6 @@ assert_contains "$repair_log_text" "release-version 1.2.3" "repair binds Go stag
 assert_not_contains "$repair_log_text" "setup" "repair never runs setup"
 assert_not_contains "$repair_log_text" "apply" "repair never runs apply"
 
-signature_failure_case="$(make_case_dir repair-signature-failure)"
-mkdir -p "$signature_failure_case/xdg-data/terrapod/releases/0.9.0/bin"
-mkdir -p "$signature_failure_case/home/.local/bin"
-printf '%s\n' '#!/bin/sh' 'exit 0' >"$signature_failure_case/xdg-data/terrapod/releases/0.9.0/bin/tpod"
-printf '%s\n' keep-launcher >"$signature_failure_case/home/.local/bin/tpod"
-printf '%s\n' keep-launcher >"$signature_failure_case/home/.local/bin/terrapod"
-chmod +x "$signature_failure_case/xdg-data/terrapod/releases/0.9.0/bin/tpod"
-ln -s releases/0.9.0 "$signature_failure_case/xdg-data/terrapod/current"
-prepare_signed_repair_fixture "$signature_failure_case"
-printf '%s\n' '{"keyId":"test-root","algorithm":"ed25519","signature":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="}' \
-  >"$signature_failure_case/release-fixture/release.json.sig"
-signature_failure_log="$signature_failure_case/repair-calls"
-: >"$signature_failure_log"
-TERRAPOD_STUB_CALL_LOG="$signature_failure_log"
-export TERRAPOD_STUB_CALL_LOG
-run_repair_case "$signature_failure_case"
-unset TERRAPOD_STUB_CALL_LOG
-assert_failure "$installer_status" "repair rejects an invalid release signature"
-[ "$(readlink "$signature_failure_case/xdg-data/terrapod/current")" = "releases/0.9.0" ] ||
-  fail "signature failure preserves the old current release"
-[ "$(cat "$signature_failure_case/home/.local/bin/tpod")" = keep-launcher ] &&
-  [ "$(cat "$signature_failure_case/home/.local/bin/terrapod")" = keep-launcher ] ||
-  fail "signature failure preserves stable launchers"
-pass "signature failure preserves the old current release"
-
 checksum_failure_case="$(make_case_dir repair-checksum-failure)"
 mkdir -p "$checksum_failure_case/xdg-data/terrapod/releases/0.9.0/bin"
 mkdir -p "$checksum_failure_case/home/.local/bin"
@@ -2849,7 +2818,7 @@ printf '%s\n' keep-launcher >"$checksum_failure_case/home/.local/bin/tpod"
 printf '%s\n' keep-launcher >"$checksum_failure_case/home/.local/bin/terrapod"
 chmod +x "$checksum_failure_case/xdg-data/terrapod/releases/0.9.0/bin/tpod"
 ln -s releases/0.9.0 "$checksum_failure_case/xdg-data/terrapod/current"
-prepare_signed_repair_fixture "$checksum_failure_case"
+prepare_repair_fixture "$checksum_failure_case"
 checksum_platform="$(cat "$checksum_failure_case/release-fixture/platform")"
 printf '%s\n' corrupt >>"$checksum_failure_case/release-fixture/tpod-${checksum_platform%/*}-${checksum_platform#*/}"
 checksum_failure_log="$checksum_failure_case/repair-calls"
@@ -2874,7 +2843,7 @@ printf '%s\n' keep-launcher >"$platform_failure_case/home/.local/bin/tpod"
 printf '%s\n' keep-launcher >"$platform_failure_case/home/.local/bin/terrapod"
 chmod +x "$platform_failure_case/xdg-data/terrapod/releases/0.9.0/bin/tpod"
 ln -s releases/0.9.0 "$platform_failure_case/xdg-data/terrapod/current"
-prepare_signed_repair_fixture "$platform_failure_case"
+prepare_repair_fixture "$platform_failure_case"
 platform_failure_log="$platform_failure_case/repair-calls"
 : >"$platform_failure_log"
 TERRAPOD_STUB_CALL_LOG="$platform_failure_log"
@@ -2890,7 +2859,7 @@ assert_failure "$installer_status" "repair rejects a wrong-platform binary"
 pass "platform failure preserves the old current release and launchers"
 
 repair_fake_path_root_case="$(make_case_dir repair-fake-path-root)"
-prepare_signed_repair_fixture "$repair_fake_path_root_case"
+prepare_repair_fixture "$repair_fake_path_root_case"
 write_stub "$repair_fake_path_root_case/bin/id" '#!/bin/sh' 'printf "%s\n" 0'
 repair_fake_path_root_log="$repair_fake_path_root_case/repair-calls"
 : >"$repair_fake_path_root_log"
@@ -2902,7 +2871,7 @@ assert_status "$installer_status" 0 "PATH id cannot spoof the trusted effective 
 assert_contains "$(cat "$repair_fake_path_root_log")" "curl url:https://releases.example.test/release.json" "repair ignores PATH id and continues as the real non-root user"
 
 repair_root_case="$(make_case_dir repair-root-rejection)"
-prepare_signed_repair_fixture "$repair_root_case"
+prepare_repair_fixture "$repair_root_case"
 write_stub "$repair_root_case/bin/trusted-id" '#!/bin/sh' 'printf "%s\n" 0'
 repair_root_rendered="$(render_repair_installer "$repair_root_case")"
 sed "s|/usr/bin/id|$repair_root_case/bin/trusted-id|g" \
@@ -2937,9 +2906,12 @@ assert_contains "$(cat "$unresolved_repair_case/repair-stderr")" "release endpoi
 pass "unresolved production template fails before creating repair paths"
 
 installer_source="$(cat "$install_script")"
+assert_contains "$installer_source" "__TERRAPOD_RELEASE_BASE_URL__" "installer keeps the release base placeholder"
+assert_not_contains "$installer_source" "__TERRAPOD_RELEASE_ROOT_KEY_ID__" "installer has no release root key ID placeholder"
+assert_not_contains "$installer_source" "__TERRAPOD_RELEASE_ROOT_PUBLIC_KEY__" "installer has no release root public key placeholder"
+assert_not_contains "$installer_source" "release.json.sig" "installer downloads no release signature envelope"
+assert_not_contains "$installer_source" "openssl" "installer requires no OpenSSL"
 assert_not_contains "$installer_source" 'TERRAPOD_REPAIR_TEST_MODE' "production installer has no repair test-mode override"
 assert_not_contains "$installer_source" 'TERRAPOD_REPAIR_PLATFORM' "production installer has no repair platform override"
 assert_not_contains "$installer_source" 'TERRAPOD_OPENSSL' "production installer has no repair OpenSSL override"
 assert_not_contains "$installer_source" '${TERRAPOD_RELEASE_BASE_URL' "production installer has no runtime release endpoint override"
-assert_not_contains "$installer_source" '${TERRAPOD_RELEASE_ROOT_KEY_ID' "production installer has no runtime release root ID override"
-assert_not_contains "$installer_source" '${TERRAPOD_RELEASE_ROOT_PUBLIC_KEY' "production installer has no runtime release root key override"

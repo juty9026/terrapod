@@ -39,7 +39,7 @@ func TestHelpDescribesShadowCommandSurfaceWithoutDependencies(t *testing.T) {
 		"plan", "status", "doctor", "diff",
 		"apply      Reconcile managed resources",
 		"resolve    Resolve one unavailable resource",
-		"update     Install the latest signed release",
+		"update     Install the latest Stable Release",
 		"setup      Configure Terrapod interactively",
 		"configure  Write a Preset non-interactively",
 		"chezmoi    Run a constrained read-only chezmoi command",

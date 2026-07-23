@@ -1,5 +1,9 @@
 # Manage declared development environment resources
 
+> **Supersession note:** ADR 0012 supersedes this decision's
+> application-level release and catalog signing requirements. The historical
+> Decision text below remains unchanged.
+
 Terrapod is a Personal Development Environment Manager, not only a bootstrap
 layer or a chezmoi wrapper. It converges a signed, declared environment across
 the `macos-terminal` and `vps-shell` profiles.

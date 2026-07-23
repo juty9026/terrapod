@@ -15,14 +15,12 @@ import (
 	"time"
 
 	"github.com/juty9026/terrapod/internal/model"
-	"github.com/juty9026/terrapod/internal/release"
 )
 
 const (
-	snapshotFilename    = "snapshot.json"
-	journalDirname      = "journals"
-	updateDirname       = "updates"
-	trustedKeysFilename = "trusted-keys.json"
+	snapshotFilename = "snapshot.json"
+	journalDirname   = "journals"
+	updateDirname    = "updates"
 )
 
 var journalIDPattern = regexp.MustCompile(`^\d{8}T\d{6}\.\d{9}Z-[0-9a-f]{32}$`)
@@ -66,65 +64,7 @@ func requireRealDirectory(path string) error {
 	return nil
 }
 
-type persistedTrustProofs struct {
-	Proofs []release.TrustProof `json:"proofs"`
-}
-
-func ReadTrustProofs(dir string) ([]release.TrustProof, error) {
-	if err := requireRealDirectory(dir); err != nil {
-		return nil, err
-	}
-	return (&Store{dir: dir}).TrustProofs()
-}
-
-func (s *Store) TrustProofs() ([]release.TrustProof, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var persisted persistedTrustProofs
-	if err := readJSONFile(filepath.Join(s.dir, trustedKeysFilename), &persisted); errors.Is(err, os.ErrNotExist) {
-		return []release.TrustProof{}, nil
-	} else if err != nil {
-		return nil, err
-	}
-	if persisted.Proofs == nil {
-		return nil, errors.New("invalid persisted trust proofs")
-	}
-	for index, proof := range persisted.Proofs {
-		if len(proof.Manifest) == 0 || len(proof.Manifest) > release.MaxManifestSize || len(proof.Signature) == 0 || len(proof.Signature) > release.MaxManifestSize {
-			return nil, fmt.Errorf("invalid persisted trust proof %d", index)
-		}
-	}
-	return persisted.Proofs, nil
-}
-
 var digestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
-var trustedKeyIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
-
-func validRecordedKeys(keys map[string]string) bool {
-	if keys == nil {
-		return false
-	}
-	for id, value := range keys {
-		if !trustedKeyIDPattern.MatchString(id) || !digestPattern.MatchString(value) {
-			return false
-		}
-	}
-	return true
-}
-
-func (s *Store) PutTrustProofs(proofs []release.TrustProof) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if proofs == nil {
-		proofs = []release.TrustProof{}
-	}
-	for index, proof := range proofs {
-		if len(proof.Manifest) == 0 || len(proof.Manifest) > release.MaxManifestSize || len(proof.Signature) == 0 || len(proof.Signature) > release.MaxManifestSize {
-			return fmt.Errorf("invalid trust proof %d", index)
-		}
-	}
-	return writeJSONAtomic(filepath.Join(s.dir, trustedKeysFilename), persistedTrustProofs{Proofs: proofs})
-}
 
 type persistedJournal struct {
 	model.Journal
@@ -132,18 +72,15 @@ type persistedJournal struct {
 	Replaces     string `json:"replaces,omitempty"`
 }
 
-// UpdateRecord binds a pre-activation journal to the signed release facts that
+// UpdateRecord binds a pre-activation journal to the stable release facts that
 // a newly activated binary must independently re-verify.
 type UpdateRecord struct {
-	JournalID        string            `json:"journalId"`
-	PlanID           string            `json:"planId"`
-	Version          string            `json:"version"`
-	CatalogDigest    string            `json:"catalogDigest"`
-	ReleaseDigest    string            `json:"releaseDigest"`
-	TrustedKeys      map[string]string `json:"trustedKeys"`
-	TrustProvenance  map[string]string `json:"trustProvenance"`
-	TrustProofDigest string            `json:"trustProofDigest"`
-	Activated        bool              `json:"activated"`
+	JournalID     string `json:"journalId"`
+	PlanID        string `json:"planId"`
+	Version       string `json:"version"`
+	CatalogDigest string `json:"catalogDigest"`
+	ReleaseDigest string `json:"releaseDigest"`
+	Activated     bool   `json:"activated"`
 }
 
 func Open(dir string) (*Store, error) {
@@ -222,15 +159,7 @@ func (s *Store) Update(id string) (UpdateRecord, error) {
 }
 
 func validUpdateRecord(record UpdateRecord) bool {
-	if !journalIDPattern.MatchString(record.JournalID) || record.PlanID == "" || record.Version == "" || !digestPattern.MatchString(record.CatalogDigest) || !digestPattern.MatchString(record.ReleaseDigest) || !digestPattern.MatchString(record.TrustProofDigest) || !validRecordedKeys(record.TrustedKeys) || record.TrustProvenance == nil || len(record.TrustProvenance) != len(record.TrustedKeys) {
-		return false
-	}
-	for id, digest := range record.TrustProvenance {
-		if _, ok := record.TrustedKeys[id]; !ok || !digestPattern.MatchString(digest) {
-			return false
-		}
-	}
-	return true
+	return journalIDPattern.MatchString(record.JournalID) && record.PlanID != "" && record.Version != "" && digestPattern.MatchString(record.CatalogDigest) && digestPattern.MatchString(record.ReleaseDigest)
 }
 
 func (s *Store) MarkUpdateActivated(id string) error {
