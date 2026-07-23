@@ -31,6 +31,10 @@ type SimulationLifecycle interface {
 	CancelSimulation(model.Operation) error
 }
 
+type LegacyInspector interface {
+	LegacyPackages(context.Context, model.Resource, model.Observation) ([]string, error)
+}
+
 // TransferAdapter exposes the phases whose ordering must be controlled by the
 // engine. Implementations must re-inspect their legacy source in these calls.
 type TransferAdapter interface {
@@ -115,6 +119,76 @@ func (e *Engine) ApplyInputHeld(ctx context.Context, input ApplyInput, lock *sta
 		return Summary{}, err
 	}
 	return copyEngine.apply(ctx, input.Plan, lock, false)
+}
+
+// VerifyInputPostconditions checks the desired post-migration state without
+// replaying or simulating the mutation plan.
+func (e *Engine) VerifyInputPostconditions(ctx context.Context, input ApplyInput) (Summary, error) {
+	copyEngine, err := e.withInput(input)
+	if err != nil {
+		return Summary{}, err
+	}
+	summary := Summary{Unavailable: make(map[model.ResourceID]string)}
+	for _, id := range dependencyOrder(copyEngine.Enabled, copyEngine.Resources) {
+		item, ok := copyEngine.Resources[id]
+		if !ok {
+			summary.Unavailable[id] = "enabled resource is not signed"
+			continue
+		}
+		adapter, ok := copyEngine.Registry.Lookup(item.Type, item.Provider)
+		if !ok {
+			summary.Unavailable[id] = "no adapter for readiness verification"
+			continue
+		}
+		observed, verifyErr := verifyDesired(ctx, adapter, item)
+		if verifyErr != nil {
+			summary.Unavailable[id] = verifyErr.Error()
+			continue
+		}
+		if inspector, ok := adapter.(LegacyInspector); ok {
+			packages, inspectErr := inspector.LegacyPackages(ctx, item, observed)
+			if inspectErr != nil {
+				summary.Unavailable[id] = "legacy source verification: " + inspectErr.Error()
+				continue
+			}
+			if len(packages) != 0 {
+				summary.Unavailable[id] = "legacy packages remain present"
+				continue
+			}
+		}
+		summary.Ready = append(summary.Ready, id)
+	}
+	for id, historical := range input.HistoricalResources {
+		adapter, ok := copyEngine.Registry.Lookup(historical.Resource.Type, historical.Resource.Provider)
+		if !ok {
+			summary.Unavailable[id] = "no adapter for historical verification"
+			continue
+		}
+		observed, inspectErr := adapter.Inspect(ctx, historical.Resource)
+		if inspectErr != nil {
+			summary.Unavailable[id] = "historical verification: " + inspectErr.Error()
+			continue
+		}
+		if observed.Present {
+			summary.Unavailable[id] = "historical resource remains present"
+			continue
+		}
+		if inspector, ok := adapter.(LegacyInspector); ok {
+			packages, inspectErr := inspector.LegacyPackages(ctx, historical.Resource, observed)
+			if inspectErr != nil {
+				summary.Unavailable[id] = "historical legacy verification: " + inspectErr.Error()
+				continue
+			}
+			if len(packages) != 0 {
+				summary.Unavailable[id] = "historical legacy packages remain present"
+			}
+		}
+	}
+	if len(summary.Unavailable) != 0 {
+		return summary, errors.New("reconcile: migration postconditions are not ready")
+	}
+	sort.Slice(summary.Ready, func(i, j int) bool { return summary.Ready[i] < summary.Ready[j] })
+	return summary, nil
 }
 
 func (e *Engine) withInput(input ApplyInput) (*Engine, error) {
@@ -203,6 +277,14 @@ func (e *Engine) apply(ctx context.Context, plan model.Plan, held *state.Lock, p
 	if err != nil {
 		return summary, fmt.Errorf("reconcile: read locked snapshot: %w", err)
 	}
+	succeeded := make(map[string]bool)
+	if persisted.ActiveJournal != nil && persisted.ActiveJournal.Status == "active" && reflect.DeepEqual(persisted.ActiveJournal.Plan, plan) {
+		for _, result := range persisted.ActiveJournal.Results {
+			if result.Success {
+				succeeded[result.OperationID] = true
+			}
+		}
+	}
 
 	indexed := make(map[model.ResourceID]model.Resource, len(plan.Operations))
 	adapters := make(map[model.ResourceID]resource.Adapter, len(plan.Operations))
@@ -238,8 +320,10 @@ func (e *Engine) apply(ctx context.Context, plan model.Plan, held *state.Lock, p
 			if operation.Kind != model.OperationPrune {
 				return summary, fmt.Errorf("reconcile: historical resource %q only supports prune", item.ID)
 			}
-			if err := validateHistoricalOwnership(item, e.ResourceDigests[item.ID], persisted.Ownership[item.ID]); err != nil {
-				return summary, err
+			if !succeeded[operation.ID] {
+				if err := validateHistoricalOwnership(item, e.ResourceDigests[item.ID], persisted.Ownership[item.ID]); err != nil {
+					return summary, err
+				}
 			}
 		}
 		allowed := authorizedRemovals[item.ID]
@@ -266,6 +350,9 @@ func (e *Engine) apply(ctx context.Context, plan model.Plan, held *state.Lock, p
 	}
 	for _, operation := range plan.Operations {
 		if !e.operationRequired(operation.ID) {
+			continue
+		}
+		if succeeded[operation.ID] {
 			continue
 		}
 		item, adapter := indexed[operation.ResourceID], adapters[operation.ResourceID]
@@ -320,6 +407,9 @@ func (e *Engine) apply(ctx context.Context, plan model.Plan, held *state.Lock, p
 			if !e.operationRequired(operation.ID) {
 				continue
 			}
+			if succeeded[operation.ID] {
+				continue
+			}
 			if !operation.RequiresPrivilege {
 				continue
 			}
@@ -356,7 +446,6 @@ func (e *Engine) apply(ctx context.Context, plan model.Plan, held *state.Lock, p
 	}
 
 	failed := make(map[model.ResourceID]bool)
-	succeeded := make(map[string]bool, len(journal.Results))
 	for _, result := range journal.Results {
 		if result.Success {
 			succeeded[result.OperationID] = true

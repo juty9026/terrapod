@@ -171,7 +171,7 @@ func configureCurrentMigration(deps *cli.Dependencies, layout paths.Layout, root
 					if err != nil {
 						return err
 					}
-					summary, err := engine.PreflightInputHeld(ctx, input, lock)
+					summary, err := engine.VerifyInputPostconditions(ctx, input)
 					if err != nil {
 						return err
 					}

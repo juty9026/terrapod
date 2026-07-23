@@ -837,6 +837,98 @@ func TestApplyRejectsStaleOrMismatchedHistoricalOwnership(t *testing.T) {
 	}
 }
 
+func TestApplyInputResumeAcceptsCompletedPruneWithoutOwnershipReceipt(t *testing.T) {
+	legacyItem := pkg("legacy.tool", "legacy")
+	currentItem := pkg("core.current", "current")
+	legacyAdapter := &fixtureAdapter{present: true, fail: map[string]bool{}}
+	currentAdapter := &fixtureAdapter{fail: map[string]bool{"execute:install-current": true}}
+	engine, store := testEngine(t, map[string]*fixtureAdapter{"legacy": legacyAdapter, "current": currentAdapter}, legacyItem, currentItem)
+	plan := model.Plan{ID: "migration", Operations: []model.Operation{
+		op(legacyItem, "prune-legacy", model.OperationPrune),
+		op(currentItem, "install-current", model.OperationInstall),
+	}}
+	input := ApplyInput{
+		Plan: plan, CurrentResources: []model.Resource{currentItem}, EnabledIDs: []model.ResourceID{currentItem.ID},
+		HistoricalResources: map[model.ResourceID]HistoricalResource{
+			legacyItem.ID: {Resource: legacyItem, CatalogDigest: "legacy-digest"},
+		},
+		CatalogDigest: "signed", Profile: model.ProfileVPSShell,
+	}
+	if err := store.PutOwnership(model.Ownership{ResourceID: legacyItem.ID, CatalogDigest: "legacy-digest", Provider: legacyItem.Provider, Package: legacyItem.Package, Paths: map[string]string{}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.ApplyInput(context.Background(), input); err == nil {
+		t.Fatal("partial migration succeeded")
+	}
+	if _, owned := mustSnapshot(t, store).Ownership[legacyItem.ID]; owned {
+		t.Fatal("successful prune retained ownership")
+	}
+	pruneExecutions := strings.Count(strings.Join(legacyAdapter.events, ","), "execute:prune-legacy")
+	delete(currentAdapter.fail, "execute:install-current")
+	if _, err := engine.ApplyInput(context.Background(), input); err != nil {
+		t.Fatalf("resume failed: %v", err)
+	}
+	if strings.Count(strings.Join(legacyAdapter.events, ","), "execute:prune-legacy") != pruneExecutions {
+		t.Fatalf("resume repeated prune: %v", legacyAdapter.events)
+	}
+}
+
+func TestApplyInputResumeStillRejectsPendingPruneWithoutOwnership(t *testing.T) {
+	legacyItem := pkg("legacy.tool", "legacy")
+	currentItem := pkg("core.current", "current")
+	engine, store := testEngine(t, map[string]*fixtureAdapter{
+		"legacy":  {present: true, fail: map[string]bool{}},
+		"current": {present: true, fail: map[string]bool{}},
+	}, legacyItem, currentItem)
+	plan := model.Plan{ID: "migration", Operations: []model.Operation{
+		op(currentItem, "install-current", model.OperationInstall),
+		op(legacyItem, "prune-legacy", model.OperationPrune),
+	}}
+	if _, err := store.Begin(plan); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Record(model.OperationResult{OperationID: "install-current", ResourceID: currentItem.ID, Success: true}); err != nil {
+		t.Fatal(err)
+	}
+	input := ApplyInput{
+		Plan: plan, CurrentResources: []model.Resource{currentItem}, EnabledIDs: []model.ResourceID{currentItem.ID},
+		HistoricalResources: map[model.ResourceID]HistoricalResource{
+			legacyItem.ID: {Resource: legacyItem, CatalogDigest: "legacy-digest"},
+		},
+		CatalogDigest: "signed", Profile: model.ProfileVPSShell,
+	}
+	if _, err := engine.ApplyInput(context.Background(), input); err == nil || !strings.Contains(err.Error(), "ownership") {
+		t.Fatalf("pending unauthorized prune err=%v", err)
+	}
+}
+
+func TestVerifyInputPostconditionsChecksDesiredAndHistoricalState(t *testing.T) {
+	currentItem := pkg("core.current", "current")
+	legacyItem := pkg("legacy.tool", "legacy")
+	currentAdapter := &fixtureAdapter{present: true, fail: map[string]bool{}}
+	legacyAdapter := &fixtureAdapter{present: false, fail: map[string]bool{}}
+	engine, _ := testEngine(t, map[string]*fixtureAdapter{"current": currentAdapter, "legacy": legacyAdapter}, currentItem, legacyItem)
+	input := ApplyInput{
+		Plan: model.Plan{ID: "migration"}, CurrentResources: []model.Resource{currentItem}, EnabledIDs: []model.ResourceID{currentItem.ID},
+		HistoricalResources: map[model.ResourceID]HistoricalResource{
+			legacyItem.ID: {Resource: legacyItem, CatalogDigest: "legacy-digest"},
+		},
+		CatalogDigest: "signed", Profile: model.ProfileVPSShell,
+	}
+	if summary, err := engine.VerifyInputPostconditions(context.Background(), input); err != nil || len(summary.Ready) != 1 {
+		t.Fatalf("ready summary=%#v err=%v", summary, err)
+	}
+	currentAdapter.present = false
+	if summary, err := engine.VerifyInputPostconditions(context.Background(), input); err == nil || summary.Unavailable[currentItem.ID] == "" {
+		t.Fatalf("missing desired summary=%#v err=%v", summary, err)
+	}
+	currentAdapter.present = true
+	legacyAdapter.present = true
+	if summary, err := engine.VerifyInputPostconditions(context.Background(), input); err == nil || summary.Unavailable[legacyItem.ID] == "" {
+		t.Fatalf("present historical summary=%#v err=%v", summary, err)
+	}
+}
+
 func TestApplyRejectsMalformedGitCheckoutHistoricalOwnership(t *testing.T) {
 	item := model.Resource{ID: "shell.test", Type: model.ResourceGitCheckout, Provider: "fixture", Package: "test", VersionPolicy: model.VersionPinned, Metadata: map[string]string{"git.destination": ".checkout"}}
 	validReceipt := "file:" + strings.Repeat("a", 64)
