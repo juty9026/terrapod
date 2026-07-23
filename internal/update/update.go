@@ -54,10 +54,10 @@ type Dependencies struct {
 	SelfCheck      func(context.Context, string, string, string) error
 	PrintPlan      func(model.Plan) error
 	WriteConfig    func(model.Config) error
-	TrustAfter     func(release.Manifest) (map[string]ed25519.PublicKey, error)
+	BuildTrusted   func(release.VerifiedRelease) (release.PersistedTrust, error)
 	ReleaseDigest  func(release.VerifiedRelease) (string, error)
-	PersistTrusted func(map[string]ed25519.PublicKey, string, []string) error
-	LoadTrusted    func() (state.TrustedKeyring, error)
+	PersistTrusted func(release.PersistedTrust) error
+	LoadTrusted    func() (release.PersistedTrust, error)
 	Exec           func(string, []string, []string) error
 	Environment    []string
 	HandoffToken   func() string
@@ -128,11 +128,11 @@ func Run(ctx context.Context, deps Dependencies) (result Result, retErr error) {
 	if err != nil {
 		return result, fmt.Errorf("update: persist pre-activation journal: %w", err)
 	}
-	keys, err := deps.TrustAfter(verified.Manifest)
+	trust, err := deps.BuildTrusted(verified)
 	if err != nil {
 		return result, fmt.Errorf("update: derive signed trust additions: %w", err)
 	}
-	record := state.UpdateRecord{JournalID: journal.ID, PlanID: plan.ID, Version: staged.Version, CatalogDigest: inputs.Catalog.Digest, ReleaseDigest: releaseDigest, TrustedKeys: encodeKeys(keys)}
+	record := state.UpdateRecord{JournalID: journal.ID, PlanID: plan.ID, Version: staged.Version, CatalogDigest: inputs.Catalog.Digest, ReleaseDigest: releaseDigest, TrustedKeys: encodeKeys(trust.Keys), TrustProvenance: cloneStrings(trust.Provenance), TrustProofDigest: trust.ProofDigest}
 	if err := deps.State.PutUpdate(record); err != nil {
 		return result, fmt.Errorf("update: persist update record: %w", err)
 	}
@@ -142,7 +142,7 @@ func Run(ctx context.Context, deps Dependencies) (result Result, retErr error) {
 		if err := deps.State.MarkUpdateActivated(journal.ID); err != nil {
 			return result, fmt.Errorf("update: record same-release activation: %w", err)
 		}
-		if err := deps.PersistTrusted(keys, releaseDigest, additionIDs(verified.Manifest)); err != nil {
+		if err := deps.PersistTrusted(trust); err != nil {
 			return result, fmt.Errorf("update: persist trusted keys for active release: %w", err)
 		}
 		return continueHeld(ctx, deps, lock, journal.ID, staged, verified, inputs)
@@ -153,7 +153,7 @@ func Run(ctx context.Context, deps Dependencies) (result Result, retErr error) {
 	if err := deps.State.MarkUpdateActivated(journal.ID); err != nil {
 		return result, fmt.Errorf("update: record activation: %w", err)
 	}
-	if err := deps.PersistTrusted(keys, releaseDigest, additionIDs(verified.Manifest)); err != nil {
+	if err := deps.PersistTrusted(trust); err != nil {
 		return result, fmt.Errorf("update: persist trusted keys after activation: %w", err)
 	}
 	result.Handoff = true
@@ -187,8 +187,8 @@ func Continue(ctx context.Context, journalID string, deps Dependencies) (result 
 	if err != nil || !record.Activated {
 		return result, fmt.Errorf("update: load activated update record: %w", err)
 	}
-	ring, err := deps.LoadTrusted()
-	if err != nil || !reflect.DeepEqual(encodeKeys(ring.Keys), record.TrustedKeys) {
+	trust, err := deps.LoadTrusted()
+	if err != nil || !reflect.DeepEqual(encodeKeys(trust.Keys), record.TrustedKeys) || !reflect.DeepEqual(trust.Provenance, record.TrustProvenance) || trust.ProofDigest != record.TrustProofDigest {
 		return result, fmt.Errorf("update: persisted trusted keys differ from update record: %w", err)
 	}
 	staged, verified, inputs, err := deps.VerifyActive(ctx, record.Version)
@@ -359,25 +359,24 @@ func requireAuthorizedReplan(original, actual model.Plan) error {
 }
 
 func validate(deps Dependencies) error {
-	if deps.Releases == nil || deps.Stager == nil || deps.Planner == nil || deps.Engine == nil || deps.State == nil || deps.LockDir == "" || deps.LoadStaged == nil || deps.VerifyActive == nil || deps.CurrentVersion == nil || deps.SelfCheck == nil || deps.PrintPlan == nil || deps.TrustAfter == nil || deps.ReleaseDigest == nil || deps.PersistTrusted == nil || deps.LoadTrusted == nil || deps.Exec == nil {
+	if deps.Releases == nil || deps.Stager == nil || deps.Planner == nil || deps.Engine == nil || deps.State == nil || deps.LockDir == "" || deps.LoadStaged == nil || deps.VerifyActive == nil || deps.CurrentVersion == nil || deps.SelfCheck == nil || deps.PrintPlan == nil || deps.BuildTrusted == nil || deps.ReleaseDigest == nil || deps.PersistTrusted == nil || deps.LoadTrusted == nil || deps.Exec == nil {
 		return errors.New("update: incomplete dependencies")
 	}
 	return nil
-}
-
-func additionIDs(manifest release.Manifest) []string {
-	ids := make([]string, len(manifest.TrustedKeys))
-	for i, key := range manifest.TrustedKeys {
-		ids[i] = key.ID
-	}
-	sort.Strings(ids)
-	return ids
 }
 
 func encodeKeys(keys map[string]ed25519.PublicKey) map[string]string {
 	result := make(map[string]string, len(keys))
 	for id, key := range keys {
 		result[id] = fmt.Sprintf("%x", []byte(key))
+	}
+	return result
+}
+
+func cloneStrings(values map[string]string) map[string]string {
+	result := make(map[string]string, len(values))
+	for key, value := range values {
+		result[key] = value
 	}
 	return result
 }

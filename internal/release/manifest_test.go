@@ -3,9 +3,7 @@ package release
 import (
 	"bytes"
 	"crypto/ed25519"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"os"
 	"strings"
@@ -91,9 +89,10 @@ func TestVerifierTrustAfterRetainsCompiledAndPersistedKeys(t *testing.T) {
 	root := ed25519.NewKeyFromSeed(testSeed)
 	persisted := ed25519.NewKeyFromSeed([]byte("abcdef0123456789abcdef0123456789"))
 	addition := ed25519.NewKeyFromSeed([]byte("fedcba9876543210fedcba9876543210"))
+	proof := trustProof(t, "root", root, "persisted", persisted.Public().(ed25519.PublicKey), "1.2.2")
 	verifier := Verifier{
-		CompiledKeys:  map[string]ed25519.PublicKey{"root": root.Public().(ed25519.PublicKey)},
-		PersistedKeys: map[string]ed25519.PublicKey{"persisted": persisted.Public().(ed25519.PublicKey)},
+		CompiledKeys:    map[string]ed25519.PublicKey{"root": root.Public().(ed25519.PublicKey)},
+		PersistedProofs: []TrustProof{proof},
 	}
 	manifest := validManifest(t)
 	manifest.TrustedKeys = []TrustedKey{{ID: "next", PublicKey: base64.StdEncoding.EncodeToString(addition.Public().(ed25519.PublicKey))}}
@@ -127,10 +126,7 @@ func TestVerifierAllowsOnlySameManifestKeyAdditionReplay(t *testing.T) {
 	manifest := validManifest(t)
 	manifest.TrustedKeys = []TrustedKey{{ID: "next", PublicKey: base64.StdEncoding.EncodeToString(next.Public().(ed25519.PublicKey))}}
 	data := encodeManifest(t, manifest)
-	digest := sha256.Sum256(data)
-	verifier := testVerifier(root.Public().(ed25519.PublicKey))
-	verifier.PersistedKeys = map[string]ed25519.PublicKey{"next": next.Public().(ed25519.PublicKey)}
-	verifier.PersistedProvenance = map[string]string{"next": hex.EncodeToString(digest[:])}
+	verifier := Verifier{CompiledKeys: map[string]ed25519.PublicKey{"root": root.Public().(ed25519.PublicKey)}, PersistedProofs: []TrustProof{{Manifest: data, Signature: signManifest(t, "root", root, data)}}}
 	if _, err := verifier.VerifyManifest(data, signManifest(t, "root", root, data)); err != nil {
 		t.Fatalf("same manifest replay: %v", err)
 	}
@@ -144,9 +140,10 @@ func TestVerifierAllowsOnlySameManifestKeyAdditionReplay(t *testing.T) {
 func TestVerifierRejectsAdditionForPersistedKeyID(t *testing.T) {
 	root := ed25519.NewKeyFromSeed(testSeed)
 	persisted := ed25519.NewKeyFromSeed([]byte("abcdef0123456789abcdef0123456789"))
+	proof := trustProof(t, "root", root, "persisted", persisted.Public().(ed25519.PublicKey), "1.2.2")
 	verifier := Verifier{
-		CompiledKeys:  map[string]ed25519.PublicKey{"root": root.Public().(ed25519.PublicKey)},
-		PersistedKeys: map[string]ed25519.PublicKey{"persisted": persisted.Public().(ed25519.PublicKey)},
+		CompiledKeys:    map[string]ed25519.PublicKey{"root": root.Public().(ed25519.PublicKey)},
+		PersistedProofs: []TrustProof{proof},
 	}
 	manifest := validManifest(t)
 	manifest.TrustedKeys = []TrustedKey{{ID: "persisted", PublicKey: base64.StdEncoding.EncodeToString(persisted.Public().(ed25519.PublicKey))}}
@@ -161,16 +158,13 @@ func TestVerifierRequiresAndProtectsCompiledTrust(t *testing.T) {
 	other := ed25519.NewKeyFromSeed([]byte("abcdef0123456789abcdef0123456789"))
 	data := validManifestJSON(t)
 
-	withoutRoot := Verifier{PersistedKeys: map[string]ed25519.PublicKey{"persisted": root.Public().(ed25519.PublicKey)}}
+	withoutRoot := Verifier{PersistedProofs: []TrustProof{trustProof(t, "root", root, "persisted", other.Public().(ed25519.PublicKey), "1.2.2")}}
 	if _, err := withoutRoot.VerifyManifest(data, signManifest(t, "persisted", root, data)); err == nil || !strings.Contains(err.Error(), "compiled trust root") {
 		t.Fatalf("missing compiled root err=%v", err)
 	}
-	conflict := Verifier{
-		CompiledKeys:  map[string]ed25519.PublicKey{"root": root.Public().(ed25519.PublicKey)},
-		PersistedKeys: map[string]ed25519.PublicKey{"root": other.Public().(ed25519.PublicKey)},
-	}
-	if _, err := conflict.VerifyManifest(data, signManifest(t, "root", root, data)); err == nil || !strings.Contains(err.Error(), "conflicting trusted key") {
-		t.Fatalf("compiled/persisted conflict err=%v", err)
+	conflict := Verifier{CompiledKeys: map[string]ed25519.PublicKey{"root": root.Public().(ed25519.PublicKey)}, PersistedProofs: []TrustProof{trustProof(t, "root", root, "root", other.Public().(ed25519.PublicKey), "1.2.2")}}
+	if _, err := conflict.VerifyManifest(data, signManifest(t, "root", root, data)); err == nil || !strings.Contains(err.Error(), "already trusted") {
+		t.Fatalf("compiled root addition err=%v", err)
 	}
 }
 

@@ -229,11 +229,14 @@ func configureSignedUpdate(deps *cli.Dependencies, layout paths.Layout, chezmoiC
 		if err != nil {
 			return updatepkg.Dependencies{}, err
 		}
-		keyring, err := store.TrustedKeyring()
+		proofs, err := store.TrustProofs()
 		if err != nil {
 			return updatepkg.Dependencies{}, err
 		}
-		verifier := release.Verifier{CompiledKeys: compiled, PersistedKeys: keyring.Keys, PersistedProvenance: keyring.Provenance}
+		if _, err := release.VerifyProofChain(compiled, proofs); err != nil {
+			return updatepkg.Dependencies{}, err
+		}
+		verifier := release.Verifier{CompiledKeys: compiled, PersistedProofs: proofs}
 		stager := release.Stager{ReleaseDir: layout.ReleaseDir, ActiveRelease: layout.ActiveRelease, Verifier: verifier, ExpectedPlatform: release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}}
 		configuredPlanner, err := productionPlanner(layout, store, chezmoiClient)
 		if err != nil {
@@ -310,9 +313,21 @@ func configureSignedUpdate(deps *cli.Dependencies, layout paths.Layout, chezmoiC
 				}
 				return nil
 			}, WriteConfig: func(cfg model.Config) error { return config.WriteAtomic(layout.ConfigFile, cfg) },
-			TrustAfter: verifier.TrustAfter, ReleaseDigest: func(value release.VerifiedRelease) (string, error) { return value.Manifest.Digest() }, PersistTrusted: func(keys map[string]ed25519.PublicKey, digest string, additions []string) error {
-				return store.PutTrustedKeysForRelease(keys, compiled, digest, additions)
-			}, LoadTrusted: store.TrustedKeyring,
+			BuildTrusted: func(value release.VerifiedRelease) (release.PersistedTrust, error) {
+				current, err := store.TrustProofs()
+				if err != nil {
+					return release.PersistedTrust{}, err
+				}
+				return release.BuildPersistedTrust(compiled, current, value)
+			}, ReleaseDigest: func(value release.VerifiedRelease) (string, error) { return value.Manifest.Digest() }, PersistTrusted: func(trust release.PersistedTrust) error {
+				return store.PutTrustProofs(trust.Proofs)
+			}, LoadTrusted: func() (release.PersistedTrust, error) {
+				current, err := store.TrustProofs()
+				if err != nil {
+					return release.PersistedTrust{}, err
+				}
+				return release.VerifyProofChain(compiled, current)
+			},
 			Exec: func(path string, args, environment []string) error {
 				return syscall.Exec(path, append([]string{path}, args...), environment)
 			}, Environment: os.Environ(), HandoffToken: func() string { return os.Getenv("TPOD_UPDATE_LOCK_NONCE") },
@@ -389,11 +404,14 @@ func productionSelfCheck(layout paths.Layout, compiled map[string]ed25519.Public
 	if err != nil || filepath.Clean(releaseDir) != derived {
 		return errors.New("self-check release directory differs from executable release root")
 	}
-	keyring, err := state.ReadTrustedKeyring(layout.StateDir)
+	proofs, err := state.ReadTrustProofs(layout.StateDir)
 	if err != nil {
-		return fmt.Errorf("self-check trusted keys: %w", err)
+		return fmt.Errorf("self-check trust proofs: %w", err)
 	}
-	verifier := release.Verifier{CompiledKeys: compiled, PersistedKeys: keyring.Keys, PersistedProvenance: keyring.Provenance}
+	if _, err := release.VerifyProofChain(compiled, proofs); err != nil {
+		return fmt.Errorf("self-check trust proof chain: %w", err)
+	}
+	verifier := release.Verifier{CompiledKeys: compiled, PersistedProofs: proofs}
 	stager := release.Stager{ReleaseDir: filepath.Dir(releaseDir), ActiveRelease: layout.ActiveRelease, Verifier: verifier, ExpectedPlatform: release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}}
 	staged, verified, err := stager.Load(filepath.Base(releaseDir))
 	if err != nil {

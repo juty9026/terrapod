@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/juty9026/terrapod/internal/catalog"
@@ -230,14 +231,43 @@ func TestContinueRejectsPersistedTrustRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deps.LoadTrusted = func() (state.TrustedKeyring, error) {
-		return state.TrustedKeyring{Keys: map[string]ed25519.PublicKey{}, Provenance: map[string]string{}}, nil
+	deps.LoadTrusted = func() (release.PersistedTrust, error) {
+		return release.PersistedTrust{Keys: map[string]ed25519.PublicKey{}, Provenance: map[string]string{}, ProofDigest: strings.Repeat("d", 64)}, nil
 	}
 	if _, err := Continue(context.Background(), started.JournalID, deps); err == nil {
 		t.Fatal("trusted key rollback accepted")
 	}
 	if snapshot, _ := deps.State.Snapshot(); snapshot.ActiveJournal == nil {
 		t.Fatal("trust failure completed journal")
+	}
+}
+
+func TestContinueRequiresExactTrustProvenanceAndProofOrder(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*release.PersistedTrust)
+	}{
+		{name: "provenance", mutate: func(trust *release.PersistedTrust) { trust.Provenance["next"] = strings.Repeat("f", 64) }},
+		{name: "proof order digest", mutate: func(trust *release.PersistedTrust) { trust.ProofDigest = strings.Repeat("f", 64) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, _ := fixtureDependencies(t, "1.0.0", "2.0.0")
+			started, err := Run(context.Background(), deps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			deps.LoadTrusted = func() (release.PersistedTrust, error) {
+				trust := release.PersistedTrust{Keys: map[string]ed25519.PublicKey{"next": make([]byte, ed25519.PublicKeySize)}, Provenance: map[string]string{"next": strings.Repeat("e", 64)}, ProofDigest: strings.Repeat("d", 64)}
+				tc.mutate(&trust)
+				return trust, nil
+			}
+			if _, err := Continue(context.Background(), started.JournalID, deps); err == nil {
+				t.Fatal("changed persisted trust accepted")
+			}
+			if snapshot, _ := deps.State.Snapshot(); snapshot.ActiveJournal == nil {
+				t.Fatal("trust failure completed journal")
+			}
+		})
 	}
 }
 
@@ -274,15 +304,15 @@ func fixtureDependencies(t *testing.T, current, latest string) (Dependencies, *[
 			*events = append(*events, "self-check")
 			return nil
 		}, PrintPlan: func(model.Plan) error { *events = append(*events, "print"); return nil }, WriteConfig: func(model.Config) error { return nil },
-		TrustAfter: func(release.Manifest) (map[string]ed25519.PublicKey, error) {
-			return map[string]ed25519.PublicKey{"root": make([]byte, ed25519.PublicKeySize)}, nil
+		BuildTrusted: func(release.VerifiedRelease) (release.PersistedTrust, error) {
+			return release.PersistedTrust{Keys: map[string]ed25519.PublicKey{"next": make([]byte, ed25519.PublicKeySize)}, Provenance: map[string]string{"next": strings.Repeat("e", 64)}, ProofDigest: strings.Repeat("d", 64)}, nil
 		}, ReleaseDigest: func(release.VerifiedRelease) (string, error) {
 			return "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", nil
-		}, PersistTrusted: func(map[string]ed25519.PublicKey, string, []string) error {
+		}, PersistTrusted: func(release.PersistedTrust) error {
 			*events = append(*events, "persist-trust")
 			return nil
-		}, LoadTrusted: func() (state.TrustedKeyring, error) {
-			return state.TrustedKeyring{Keys: map[string]ed25519.PublicKey{"root": make([]byte, ed25519.PublicKeySize)}, Provenance: map[string]string{}}, nil
+		}, LoadTrusted: func() (release.PersistedTrust, error) {
+			return release.PersistedTrust{Keys: map[string]ed25519.PublicKey{"next": make([]byte, ed25519.PublicKeySize)}, Provenance: map[string]string{"next": strings.Repeat("e", 64)}, ProofDigest: strings.Repeat("d", 64)}, nil
 		}, Exec: func(string, []string, []string) error { *events = append(*events, "exec"); return nil },
 	}, events
 }

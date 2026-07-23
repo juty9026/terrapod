@@ -59,9 +59,8 @@ type Manifest struct {
 
 type Verifier struct {
 	CompiledKeys                               map[string]ed25519.PublicKey
-	PersistedKeys                              map[string]ed25519.PublicKey
+	PersistedProofs                            []TrustProof
 	MinCatalog, MaxCatalog, MinState, MaxState int
-	PersistedProvenance                        map[string]string
 }
 
 type signatureEnvelope struct {
@@ -77,7 +76,7 @@ func (v Verifier) VerifyManifest(data, signature []byte) (Manifest, error) {
 	if len(signature) == 0 || len(signature) > MaxManifestSize {
 		return Manifest{}, fmt.Errorf("release signature size is outside 1..%d bytes", MaxManifestSize)
 	}
-	effectiveTrust, err := v.effectiveTrust()
+	effectiveTrust, provenance, err := v.effectiveTrust()
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -124,7 +123,7 @@ func (v Verifier) VerifyManifest(data, signature []byte) (Manifest, error) {
 	}
 	digest := sha256.Sum256(data)
 	manifestDigest := hex.EncodeToString(digest[:])
-	if err := v.validate(manifest, effectiveTrust, manifestDigest); err != nil {
+	if err := v.validate(manifest, effectiveTrust, provenance, manifestDigest); err != nil {
 		return Manifest{}, fmt.Errorf("validate release manifest: %w", err)
 	}
 	manifest.verified = true
@@ -142,7 +141,7 @@ func (v Verifier) TrustAfter(manifest Manifest) (map[string]ed25519.PublicKey, e
 	if !manifest.verified || manifest.trustAfter == nil {
 		return nil, errors.New("release manifest was not verified")
 	}
-	effectiveTrust, err := v.effectiveTrust()
+	effectiveTrust, _, err := v.effectiveTrust()
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +193,7 @@ func (m Manifest) singletonAsset(kind string) (Asset, error) {
 	return found, nil
 }
 
-func (v Verifier) validate(manifest Manifest, effectiveTrust map[string]ed25519.PublicKey, manifestDigest string) error {
+func (v Verifier) validate(manifest Manifest, effectiveTrust map[string]ed25519.PublicKey, provenance map[string]string, manifestDigest string) error {
 	if !stableSemVerPattern.MatchString(manifest.Version) {
 		return fmt.Errorf("version %q is not stable SemVer", manifest.Version)
 	}
@@ -207,7 +206,7 @@ func (v Verifier) validate(manifest Manifest, effectiveTrust map[string]ed25519.
 	if manifest.TrustedKeys == nil {
 		return errors.New("trustedKeys is required")
 	}
-	if err := validateTrustedKeyAdditions(manifest.TrustedKeys, effectiveTrust, v.CompiledKeys, v.PersistedProvenance, manifestDigest); err != nil {
+	if err := validateTrustedKeyAdditions(manifest.TrustedKeys, effectiveTrust, v.CompiledKeys, provenance, manifestDigest); err != nil {
 		return err
 	}
 
@@ -278,6 +277,10 @@ func (v Verifier) validate(manifest Manifest, effectiveTrust map[string]ed25519.
 
 func validateTrustedKeyAdditions(keys []TrustedKey, effectiveTrust, compiled map[string]ed25519.PublicKey, provenance map[string]string, manifestDigest string) error {
 	seen := make(map[string]struct{}, len(keys))
+	materialOwners := make(map[string]string, len(effectiveTrust)+len(keys))
+	for id, key := range effectiveTrust {
+		materialOwners[string(key)] = id
+	}
 	for _, key := range keys {
 		if !keyIDPattern.MatchString(key.ID) {
 			return fmt.Errorf("invalid trusted key ID %q", key.ID)
@@ -293,6 +296,10 @@ func validateTrustedKeyAdditions(keys []TrustedKey, effectiveTrust, compiled map
 		if len(decoded) != ed25519.PublicKeySize {
 			return fmt.Errorf("trusted key %q has length %d, want %d", key.ID, len(decoded), ed25519.PublicKeySize)
 		}
+		if existingID, exists := materialOwners[string(decoded)]; exists && existingID != key.ID {
+			return fmt.Errorf("trusted key %q duplicates key material from %q", key.ID, existingID)
+		}
+		materialOwners[string(decoded)] = key.ID
 		if existing, exists := effectiveTrust[key.ID]; exists {
 			if _, root := compiled[key.ID]; root || !bytes.Equal(existing, decoded) || provenance[key.ID] != manifestDigest {
 				return fmt.Errorf("trusted key ID %q is already trusted by different provenance", key.ID)
@@ -302,27 +309,28 @@ func validateTrustedKeyAdditions(keys []TrustedKey, effectiveTrust, compiled map
 	return nil
 }
 
-func (v Verifier) effectiveTrust() (map[string]ed25519.PublicKey, error) {
+func (v Verifier) effectiveTrust() (map[string]ed25519.PublicKey, map[string]string, error) {
 	if len(v.CompiledKeys) == 0 {
-		return nil, errors.New("release verifier requires at least one compiled trust root")
+		return nil, nil, errors.New("release verifier requires at least one compiled trust root")
 	}
-	trusted := make(map[string]ed25519.PublicKey, len(v.CompiledKeys)+len(v.PersistedKeys))
+	trusted := make(map[string]ed25519.PublicKey, len(v.CompiledKeys))
 	for id, key := range v.CompiledKeys {
 		if err := validateVerifierKey(id, key); err != nil {
-			return nil, fmt.Errorf("compiled trusted key: %w", err)
+			return nil, nil, fmt.Errorf("compiled trusted key: %w", err)
 		}
 		trusted[id] = append(ed25519.PublicKey(nil), key...)
 	}
-	for id, key := range v.PersistedKeys {
-		if err := validateVerifierKey(id, key); err != nil {
-			return nil, fmt.Errorf("persisted trusted key: %w", err)
-		}
-		if current, exists := trusted[id]; exists && !bytes.Equal(current, key) {
-			return nil, fmt.Errorf("conflicting trusted key material for ID %q", id)
-		}
+	if len(v.PersistedProofs) == 0 {
+		return trusted, map[string]string{}, nil
+	}
+	persisted, err := VerifyProofChain(v.CompiledKeys, v.PersistedProofs)
+	if err != nil {
+		return nil, nil, fmt.Errorf("persisted trust proof chain: %w", err)
+	}
+	for id, key := range persisted.Keys {
 		trusted[id] = append(ed25519.PublicKey(nil), key...)
 	}
-	return trusted, nil
+	return trusted, persisted.Provenance, nil
 }
 
 func validateVerifierKey(id string, key ed25519.PublicKey) error {

@@ -1,17 +1,18 @@
 package state
 
 import (
-	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/juty9026/terrapod/internal/model"
+	"github.com/juty9026/terrapod/internal/release"
 )
 
 func TestOpenCreatesEmptySnapshot(t *testing.T) {
@@ -36,6 +37,103 @@ func TestOpenCreatesEmptySnapshot(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "snapshot.json")); err != nil {
 		t.Fatalf("snapshot was not created: %v", err)
+	}
+}
+
+func TestOpenRejectsSnapshotWithNonPrivateMode(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Open(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(dir, snapshotFilename), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(dir); err == nil {
+		t.Fatal("snapshot with mode 0644 was accepted")
+	}
+}
+
+func TestPrivateJSONReadRejectsPathSwapAroundOpen(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		set  func(func(string) error)
+	}{
+		{name: "before open", set: func(hook func(string) error) { afterPrivateLstat = hook }},
+		{name: "after open", set: func(hook func(string) error) { afterPrivateOpen = hook }},
+		{name: "after decode", set: func(hook func(string) error) { afterPrivateDecode = hook }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			store, err := Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, snapshotFilename)
+			backup := path + ".backup"
+			called := false
+			t.Cleanup(func() { afterPrivateLstat, afterPrivateOpen, afterPrivateDecode = nil, nil, nil })
+			tc.set(func(observed string) error {
+				if observed != path || called {
+					return nil
+				}
+				called = true
+				if err := os.Rename(path, backup); err != nil {
+					return err
+				}
+				return os.Symlink(backup, path)
+			})
+			if _, err := store.Snapshot(); err == nil {
+				t.Fatal("path swap was accepted")
+			}
+			if !called {
+				t.Fatal("swap hook was not called")
+			}
+		})
+	}
+}
+
+func TestPersistenceReadersRejectNonPrivateMode(t *testing.T) {
+	for _, name := range []string{"snapshot", "journal", "update", "trust"} {
+		t.Run(name, func(t *testing.T) {
+			store, err := Open(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			journal, err := store.Begin(model.Plan{ID: "plan", Release: "1.2.3"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			record := UpdateRecord{JournalID: journal.ID, PlanID: "plan", Version: "1.2.3", CatalogDigest: strings.Repeat("a", 64), ReleaseDigest: strings.Repeat("b", 64), TrustedKeys: map[string]string{}, TrustProvenance: map[string]string{}, TrustProofDigest: strings.Repeat("d", 64)}
+			if err := store.PutUpdate(record); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.PutTrustProofs([]release.TrustProof{{Manifest: []byte("manifest"), Signature: []byte("signature")}}); err != nil {
+				t.Fatal(err)
+			}
+			path := map[string]string{
+				"snapshot": store.snapshotPath(),
+				"journal":  store.journalPath(journal.ID),
+				"update":   filepath.Join(store.dir, updateDirname, journal.ID+".json"),
+				"trust":    filepath.Join(store.dir, trustedKeysFilename),
+			}[name]
+			if err := os.Chmod(path, 0o640); err != nil {
+				t.Fatal(err)
+			}
+			var readErr error
+			switch name {
+			case "snapshot":
+				_, readErr = store.Snapshot()
+			case "journal":
+				_, readErr = store.Journal(journal.ID)
+			case "update":
+				_, readErr = store.Update(journal.ID)
+			case "trust":
+				_, readErr = store.TrustProofs()
+			}
+			if readErr == nil {
+				t.Fatalf("%s with mode 0640 was accepted", name)
+			}
+		})
 	}
 }
 
@@ -471,7 +569,7 @@ func TestUpdateRecordIsBoundToActiveJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record := UpdateRecord{JournalID: journal.ID, PlanID: "plan", Version: "1.2.3", CatalogDigest: strings.Repeat("a", 64), ReleaseDigest: strings.Repeat("b", 64), TrustedKeys: map[string]string{"root": strings.Repeat("0", 64)}}
+	record := UpdateRecord{JournalID: journal.ID, PlanID: "plan", Version: "1.2.3", CatalogDigest: strings.Repeat("a", 64), ReleaseDigest: strings.Repeat("b", 64), TrustedKeys: map[string]string{"next": strings.Repeat("0", 64)}, TrustProvenance: map[string]string{"next": strings.Repeat("c", 64)}, TrustProofDigest: strings.Repeat("d", 64)}
 	if err := store.PutUpdate(record); err != nil {
 		t.Fatal(err)
 	}
@@ -488,45 +586,37 @@ func TestUpdateRecordIsBoundToActiveJournal(t *testing.T) {
 	}
 }
 
-func TestPutTrustedKeysRetainsCompiledRoot(t *testing.T) {
+func TestPersistedTrustStoresOnlyOrderedProofsPrivately(t *testing.T) {
 	store, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := ed25519.PublicKey(make([]byte, ed25519.PublicKeySize))
-	compiled := map[string]ed25519.PublicKey{"root": root}
-	if err := store.PutTrustedKeys(map[string]ed25519.PublicKey{"next": root}, compiled); err == nil {
-		t.Fatal("compiled root removal accepted")
-	}
-	if err := store.PutTrustedKeys(map[string]ed25519.PublicKey{"root": root, "next": root}, compiled); err != nil {
+	proofs := []release.TrustProof{{Manifest: []byte("manifest-one"), Signature: []byte("signature-one")}, {Manifest: []byte("manifest-two"), Signature: []byte("signature-two")}}
+	if err := store.PutTrustProofs(proofs); err != nil {
 		t.Fatal(err)
 	}
-	got, err := store.TrustedKeys()
-	if err != nil || len(got) != 2 {
-		t.Fatalf("TrustedKeys=%v, %v", got, err)
+	got, err := store.TrustProofs()
+	if err != nil || !reflect.DeepEqual(got, proofs) {
+		t.Fatalf("TrustProofs=%v, %v", got, err)
 	}
-}
-
-func TestTrustedKeyProvenanceIsDurableAndCannotChange(t *testing.T) {
-	store, err := Open(t.TempDir())
+	path := filepath.Join(store.dir, trustedKeysFilename)
+	var raw map[string]json.RawMessage
+	contents, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := ed25519.PublicKey(make([]byte, ed25519.PublicKeySize))
-	next := ed25519.PublicKey(make([]byte, ed25519.PublicKeySize))
-	next[0] = 1
-	keys := map[string]ed25519.PublicKey{"root": root, "next": next}
-	compiled := map[string]ed25519.PublicKey{"root": root}
-	digest := strings.Repeat("a", 64)
-	if err := store.PutTrustedKeysForRelease(keys, compiled, digest, []string{"next"}); err != nil {
+	if err := json.Unmarshal(contents, &raw); err != nil {
 		t.Fatal(err)
 	}
-	ring, err := store.TrustedKeyring()
-	if err != nil || ring.Provenance["next"] != digest {
-		t.Fatalf("ring=%#v err=%v", ring, err)
+	if len(raw) != 1 || raw["proofs"] == nil || raw["keys"] != nil || raw["provenance"] != nil {
+		t.Fatalf("persisted trust schema=%s", contents)
 	}
-	if err := store.PutTrustedKeysForRelease(keys, compiled, strings.Repeat("b", 64), []string{"next"}); err == nil {
-		t.Fatal("provenance change accepted")
+	assertMode(t, path, 0o600)
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.TrustProofs(); err == nil {
+		t.Fatal("world-readable trust proofs accepted")
 	}
 }
 
