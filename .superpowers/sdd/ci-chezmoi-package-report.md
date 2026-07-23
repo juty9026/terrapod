@@ -111,3 +111,54 @@ container 내부에서만 수행했다.
 Known code concern 없음. Local Docker image pull은 Docker Desktop credential
 helper가 응답하지 않아 empty temporary `DOCKER_CONFIG`로 anonymous pull을
 수행했으며, 검증 결과에는 영향이 없다.
+
+## Reviewer follow-up: executable order contract
+
+Reviewer의 Minor finding에 따라 workflow implementation은 변경하지 않고
+`tests/release_artifacts_test.sh`의 prerequisite contract만 강화했다.
+
+### TDD evidence
+
+먼저 exact checksum command를 comment 처리한 contaminated fixture와 checksum
+command를 `apt-get install` 뒤로 이동한 contaminated fixture를 추가했다.
+기존 substring validator에서 focused test가 다음 RED로 종료되는 것을
+확인했다.
+
+```text
+not ok - release prerequisite contract rejects a commented checksum verification
+```
+
+Validator를 exact executable whole-line과 line order 검사로 변경한 뒤 같은
+focused test가 exit 0으로 GREEN이 됐다. 두 negative fixture는 각각 comment
+처리된 checksum과 잘못된 checksum order를 계속 거부한다.
+
+### Contract changes
+
+- Leading whitespace만 제거한 뒤 exact whole-line이 정확히 한 번 존재하는지
+  검사한다. 따라서 comment나 command 뒤 documentation text는 executable
+  command로 인정되지 않는다.
+- 다음 네 command의 line number를 얻어 strict order를 검증한다.
+  - pinned HTTPS-only `curl`
+  - exact `sha256sum -c`
+  - verified local `.deb`와 `zsh`의 `apt-get install`
+  - `chezmoi --version`
+- Required order는 `curl < checksum < apt install < version`이다.
+- Pinned URL assignment, `$RUNNER_TEMP` package path, `apt-get update`도
+  executable exact whole-line으로 검증한다.
+
+### Follow-up verification
+
+다음 검증은 모두 exit 0으로 통과했다.
+
+```sh
+sh tests/release_artifacts_test.sh
+sh -n tests/release_artifacts_test.sh
+git diff --check
+```
+
+Follow-up diff는 `tests/release_artifacts_test.sh`와 이 report에만 한정되며,
+`.github/workflows/release.yml`은 변경하지 않았다.
+
+### Follow-up concerns
+
+Known concern 없음.

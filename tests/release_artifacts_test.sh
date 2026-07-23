@@ -74,16 +74,49 @@ validate_no_runner_tool_reinstall() {
   fi
 }
 
+executable_line_number() {
+  contract="$1"
+  expected_line="$2"
+  matches="$(
+    printf '%s\n' "$contract" |
+      sed 's/^[[:space:]]*//' |
+      grep -n -F -x -- "$expected_line"
+  )" || return 1
+
+  [ "$(printf '%s\n' "$matches" | wc -l | tr -d ' ')" -eq 1 ] || return 1
+  printf '%s\n' "${matches%%:*}"
+}
+
 validate_test_prerequisite_contract() {
   test_job_contract="$1"
 
-  [ "$(printf '%s\n' "$test_job_contract" | grep -c -F 'chezmoi_url="https://github.com/twpayne/chezmoi/releases/download/v2.71.1/chezmoi_2.71.1_linux_amd64.deb"')" -eq 1 ] &&
-    [ "$(printf '%s\n' "$test_job_contract" | grep -c -F 'chezmoi_deb="$RUNNER_TEMP/chezmoi_2.71.1_linux_amd64.deb"')" -eq 1 ] &&
-    [ "$(printf '%s\n' "$test_job_contract" | grep -c -F 'curl --fail --location --proto '\''=https'\'' --proto-redir '\''=https'\'' --output "$chezmoi_deb" "$chezmoi_url"')" -eq 1 ] &&
-    [ "$(printf '%s\n' "$test_job_contract" | grep -c -F 'printf '\''%s  %s\n'\'' '\''49b68f441f60fbf84a79928e35076ccd4d0d7d5c050924c27d03bda25a7024eb'\'' "$chezmoi_deb" | sha256sum -c -')" -eq 1 ] &&
-    [ "$(printf '%s\n' "$test_job_contract" | grep -c -F 'sudo apt-get update')" -eq 1 ] &&
-    [ "$(printf '%s\n' "$test_job_contract" | grep -c -F 'sudo apt-get install -y "$chezmoi_deb" zsh')" -eq 1 ] &&
-    [ "$(printf '%s\n' "$test_job_contract" | grep -c -F 'chezmoi --version')" -eq 1 ] ||
+  executable_line_number "$test_job_contract" \
+    'chezmoi_url="https://github.com/twpayne/chezmoi/releases/download/v2.71.1/chezmoi_2.71.1_linux_amd64.deb"' >/dev/null ||
+    return 1
+  executable_line_number "$test_job_contract" \
+    'chezmoi_deb="$RUNNER_TEMP/chezmoi_2.71.1_linux_amd64.deb"' >/dev/null ||
+    return 1
+  curl_line="$(
+    executable_line_number "$test_job_contract" \
+      'curl --fail --location --proto '\''=https'\'' --proto-redir '\''=https'\'' --output "$chezmoi_deb" "$chezmoi_url"'
+  )" || return 1
+  checksum_line="$(
+    executable_line_number "$test_job_contract" \
+      'printf '\''%s  %s\n'\'' '\''49b68f441f60fbf84a79928e35076ccd4d0d7d5c050924c27d03bda25a7024eb'\'' "$chezmoi_deb" | sha256sum -c -'
+  )" || return 1
+  executable_line_number "$test_job_contract" 'sudo apt-get update' >/dev/null ||
+    return 1
+  apt_install_line="$(
+    executable_line_number "$test_job_contract" \
+      'sudo apt-get install -y "$chezmoi_deb" zsh'
+  )" || return 1
+  version_line="$(
+    executable_line_number "$test_job_contract" 'chezmoi --version'
+  )" || return 1
+
+  [ "$curl_line" -lt "$checksum_line" ] &&
+    [ "$checksum_line" -lt "$apt_install_line" ] &&
+    [ "$apt_install_line" -lt "$version_line" ] ||
     return 1
 
   if printf '%s\n' "$test_job_contract" |
@@ -251,6 +284,24 @@ missing_checksum_fixture="$(
 )"
 if validate_test_prerequisite_contract "$missing_checksum_fixture"; then
   fail "release prerequisite contract rejects a missing checksum verification"
+fi
+commented_checksum_fixture="$(
+  printf '%s\n' "$prerequisite_fixture" |
+    sed '/sha256sum -c/s/^[[:space:]]*/          # /'
+)"
+if validate_test_prerequisite_contract "$commented_checksum_fixture"; then
+  fail "release prerequisite contract rejects a commented checksum verification"
+fi
+misordered_checksum_fixture="$(
+  printf '%s\n' "$prerequisite_fixture" |
+    awk '
+      /sha256sum -c/ { checksum = $0; next }
+      { print }
+      /apt-get install -y/ { print checksum }
+    '
+)"
+if validate_test_prerequisite_contract "$misordered_checksum_fixture"; then
+  fail "release prerequisite contract rejects checksum verification after apt install"
 fi
 validate_test_prerequisite_contract "$prerequisite_fixture" ||
   fail "release prerequisite fixture models the required verified package install"
