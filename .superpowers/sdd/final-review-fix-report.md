@@ -107,8 +107,88 @@ No migration, installer, or `chezmoi apply` was run against `/Users/minu` or a r
 - All eight positive sizes and allowed HTTPS URLs are checked before downloading the manifest.
 - Existing manifest artifact size checks, tag/version checks, limits, redirect allowlist, strict parsing, and checksum validation remain unchanged.
 - The curl contract assertion verifies the pinned URL and both protocol restrictions while preserving output path and test behavior.
-- Diff is limited to the eight requested files; no signing key, signature flow, configurable host, or checksum service was introduced.
+- The initial diff is limited to the eight requested files; no signing key, signature flow, configurable host, or checksum service was introduced.
 
 ## Concerns
 
 No known concerns. The controller will run the full branch suite separately after review, as requested.
+
+## Follow-up: native repair integration fixture
+
+The controller's fresh full Go suite exposed one stale integration fixture after the exact-eight boundary landed.
+
+### RED acknowledgement
+
+Controller command:
+
+```sh
+mise exec go@1.26.0 -- go test ./... -count=1
+```
+
+Controller failure:
+
+```text
+cmd/tpod TestBuiltRepairBinaryUsesStableVersionEndpoint: native repair exit 1
+GitHub release must contain exactly eight assets, got 7
+```
+
+Root cause: `cmd/tpod/main_test.go` still constructed the pre-boundary seven-asset GitHub Release. It omitted `install.sh` metadata and fixture bytes.
+
+### Change
+
+- `cmd/tpod/main_test.go`: added canonical `install.sh` to the metadata list and a positive `#!/bin/sh\n` fixture body. The generated URL remains on the fixture's allowed HTTPS server.
+- Production exact-eight validation was not changed.
+
+### GREEN evidence
+
+```sh
+mise exec go@1.26.0 -- go test ./cmd/tpod -count=1 -run TestBuiltRepairBinaryUsesStableVersionEndpoint -v
+```
+
+Relevant output (exit 0):
+
+```text
+--- PASS: TestBuiltRepairBinaryUsesStableVersionEndpoint (1.79s)
+PASS
+ok github.com/juty9026/terrapod/cmd/tpod 2.358s
+```
+
+The logged TLS handshake error is the test's existing negative probe that verifies a normal macOS build rejects the fixture CA.
+
+```sh
+mise exec go@1.26.0 -- go test ./cmd/tpod ./internal/release -count=1
+```
+
+Output (exit 0):
+
+```text
+ok github.com/juty9026/terrapod/cmd/tpod 4.104s
+ok github.com/juty9026/terrapod/internal/release 3.442s
+```
+
+```sh
+mise exec go@1.26.0 -- go test ./... -count=1
+```
+
+Relevant output (exit 0):
+
+```text
+ok github.com/juty9026/terrapod/cmd/tpod 13.944s
+ok github.com/juty9026/terrapod/internal/release 17.575s
+ok github.com/juty9026/terrapod/internal/reconcile 16.166s
+ok github.com/juty9026/terrapod/internal/resource/gitcheckout 20.549s
+all remaining Go packages passed; packages without tests were reported as such
+```
+
+```sh
+git diff --check
+```
+
+Output: exit 0, no output.
+
+### Follow-up self-review / concerns
+
+- The fixture now mirrors the canonical eight-asset contract with a positive size and allowed HTTPS URL.
+- Installer bytes are metadata-only in this repair path and are not downloaded, preserving the fixture's original semantics.
+- No real-home migration, installer, or `chezmoi apply` was run.
+- No known concerns remain.

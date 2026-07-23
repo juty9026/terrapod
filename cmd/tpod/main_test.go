@@ -134,7 +134,7 @@ func TestBuiltRepairBinaryUsesStableVersionEndpoint(t *testing.T) {
 				Size int    `json:"size"`
 				URL  string `json:"browser_download_url"`
 			}
-			names := []string{"release.json", "tpod-darwin-amd64", "tpod-darwin-arm64", "tpod-linux-amd64", "tpod-linux-arm64", "terrapod-source.tar.gz", "resources.json"}
+			names := []string{"release.json", "tpod-darwin-amd64", "tpod-darwin-arm64", "tpod-linux-amd64", "tpod-linux-arm64", "terrapod-source.tar.gz", "resources.json", "install.sh"}
 			items := make([]metadataAsset, 0, len(names))
 			assetsMu.RLock()
 			for _, name := range names {
@@ -218,6 +218,7 @@ func TestBuiltRepairBinaryUsesStableVersionEndpoint(t *testing.T) {
 	assetsMu.Lock()
 	assets["terrapod-source.tar.gz"] = repairSourceArchive(t)
 	assets["resources.json"] = []byte(`{"version":1,"release":"1.2.3","config":[],"resources":[]}`)
+	assets["install.sh"] = []byte("#!/bin/sh\n")
 	assetsMu.Unlock()
 	manifest := release.Manifest{
 		Version:       "1.2.3",
