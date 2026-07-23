@@ -10,13 +10,21 @@ fail() {
   exit 1
 }
 
+run_go() {
+  if command -v mise >/dev/null 2>&1; then
+    mise exec go@1.26.0 -- go "$@"
+  else
+    command go "$@"
+  fi
+}
+
 run_scenario() {
   package="$1"
   test_name="$2"
   label="$3"
   output="$tmp_dir/$(printf '%s' "$test_name" | tr '[:upper:]' '[:lower:]').out"
 
-  mise exec go@1.26.0 -- go test "$package" -count=1 -run "^${test_name}$" -v >"$output" ||
+  run_go test "$package" -count=1 -run "^${test_name}$" -v >"$output" ||
     fail "$label"
   grep -F -- "--- PASS: $test_name " "$output" >/dev/null ||
     fail "$label did not execute"
@@ -37,13 +45,13 @@ grep -F 'PlanLegacyOwnership' "$repo_root/cmd/tpod/migration.go" >/dev/null ||
 grep -F 'RemoveLegacySource' "$repo_root/cmd/tpod/migration.go" >/dev/null ||
   fail "production migration must use revalidated legacy source removal"
 
-mise exec go@1.26.0 -- go test ./internal/migrate \
+run_go test ./internal/migrate \
   -run 'TestRunCurrent|TestPlanLegacyOwnership|TestValidateLegacySource|TestRemoveLegacySource' >/dev/null ||
   fail "migration transaction, ownership, and source tests must pass"
-mise exec go@1.26.0 -- go test ./internal/cli \
+run_go test ./internal/cli \
   -run 'TestHiddenMigrateCurrent' >/dev/null ||
   fail "hidden migration CLI tests must pass"
-mise exec go@1.26.0 -- go test ./cmd/tpod \
+run_go test ./cmd/tpod \
   -run 'TestMigration' >/dev/null ||
   fail "production migration composition tests must pass"
 

@@ -55,6 +55,17 @@ pass "release asset extractor includes every positional asset"
 
 [ -x "$repo_root/scripts/package-source.sh" ] || fail "source packager is executable"
 [ -f "$repo_root/.github/workflows/release.yml" ] || fail "release workflow exists"
+for go_test_script in manager_shadow_test.sh terrapod_manager_migration_test.sh; do
+  go_test_contract="$(cat "$repo_root/tests/$go_test_script")"
+  printf '%s\n' "$go_test_contract" | grep -F 'run_go() {' >/dev/null ||
+    fail "$go_test_script defines a local run_go helper"
+  printf '%s\n' "$go_test_contract" | grep -F 'if command -v mise >/dev/null 2>&1; then' >/dev/null ||
+    fail "$go_test_script detects mise before using it"
+  [ "$(printf '%s\n' "$go_test_contract" | grep -c -F 'mise exec go@1.26.0 -- go')" -eq 1 ] ||
+    fail "$go_test_script uses mise only through run_go"
+  printf '%s\n' "$go_test_contract" | grep -F 'command go "$@"' >/dev/null ||
+    fail "$go_test_script falls back to command go"
+done
 
 fixture="$tmp_dir/source"
 mkdir -p "$fixture/sub"
@@ -141,6 +152,17 @@ fi
 pass "manifest binds all release assets"
 
 workflow="$(cat "$repo_root/.github/workflows/release.yml")"
+test_job="$(printf '%s\n' "$workflow" | sed -n '/^  test:$/,/^  release:$/p')"
+[ "$(printf '%s\n' "$workflow" | grep -c -F 'go install github.com/twpayne/chezmoi/v2/cmd/chezmoi@')" -eq 1 ] ||
+  fail "release workflow installs chezmoi exactly once"
+printf '%s\n' "$test_job" | grep -F 'go install github.com/twpayne/chezmoi/v2/cmd/chezmoi@v2.71.1' >/dev/null ||
+  fail "release test job installs pinned chezmoi v2.71.1"
+printf '%s\n' "$test_job" | grep -F 'echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"' >/dev/null ||
+  fail "release test job exposes GOPATH bin to later steps"
+printf '%s\n' "$test_job" | grep -F '"$(go env GOPATH)/bin/chezmoi" --version' >/dev/null ||
+  fail "release test job verifies the installed chezmoi binary"
+printf '%s\n' "$test_job" | grep -F 'apt-get install -y zsh' >/dev/null ||
+  fail "release test job installs zsh with Ubuntu package tooling"
 printf '%s' "$workflow" | grep -F 'release_base="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download"' >/dev/null ||
   fail "versioned installer repairs from the latest stable release base"
 for required in \
