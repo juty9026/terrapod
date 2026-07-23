@@ -64,6 +64,7 @@ type FileSystem interface {
 }
 
 type AppPolicy struct {
+	Home             string
 	HomeApplications string
 	Inspector        AppInspector
 	Running          RunningChecker
@@ -78,6 +79,7 @@ type Adapter struct {
 	recoveryDir      string
 	standard         bool
 	runner           Runner
+	home             string
 	homeApplications string
 	inspector        AppInspector
 	running          RunningChecker
@@ -116,6 +118,9 @@ func New(kind Kind, brewPath, recoveryDir string, runner Runner, policy AppPolic
 	if policy.HomeApplications != "" && (!filepath.IsAbs(policy.HomeApplications) || filepath.Clean(policy.HomeApplications) != policy.HomeApplications) {
 		return nil, fmt.Errorf("homebrew: home Applications path must be clean and absolute: %q", policy.HomeApplications)
 	}
+	if policy.Home != "" && (!filepath.IsAbs(policy.Home) || filepath.Clean(policy.Home) != policy.Home) {
+		return nil, fmt.Errorf("homebrew: home path must be clean and absolute: %q", policy.Home)
+	}
 	fs := policy.FS
 	if fs == nil {
 		fs = osFS{}
@@ -132,6 +137,7 @@ func New(kind Kind, brewPath, recoveryDir string, runner Runner, policy AppPolic
 		recoveryDir:      recoveryDir,
 		standard:         standard,
 		runner:           runner,
+		home:             policy.Home,
 		homeApplications: policy.HomeApplications,
 		inspector:        policy.Inspector,
 		running:          policy.Running,
@@ -387,7 +393,11 @@ func (a *Adapter) validateOperation(operation model.Operation) error {
 }
 
 func (a *Adapter) run(ctx context.Context, args ...string) (execx.Result, error) {
-	return a.runner.Run(ctx, execx.Request{Path: a.brewPath, Args: append([]string(nil), args...)})
+	request := execx.Request{Path: a.brewPath, Args: append([]string(nil), args...)}
+	if a.home != "" {
+		request.Env = map[string]string{"HOME": a.home}
+	}
+	return a.runner.Run(ctx, request)
 }
 
 type appDeclaration struct {

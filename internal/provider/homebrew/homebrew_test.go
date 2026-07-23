@@ -84,6 +84,7 @@ func TestConstructorRejectsTypedNilDependencies(t *testing.T) {
 
 func TestFormulaInspectUsesFixedInventoryCommandsAndVerifiesProvidedCommands(t *testing.T) {
 	var calls []execx.Request
+	home := t.TempDir()
 	runner := runnerFunc(func(_ context.Context, request execx.Request) (execx.Result, error) {
 		calls = append(calls, request)
 		switch strings.Join(request.Args, " ") {
@@ -96,7 +97,7 @@ func TestFormulaInspectUsesFixedInventoryCommandsAndVerifiesProvidedCommands(t *
 		}
 	})
 	fs := fakeFS{files: map[string]os.FileInfo{"/opt/homebrew/bin/rg": fakeInfo{name: "rg", mode: 0o755}}}
-	adapter, err := New(Formula, "/opt/homebrew/bin/brew", t.TempDir(), runner, AppPolicy{FS: fs})
+	adapter, err := New(Formula, "/opt/homebrew/bin/brew", t.TempDir(), runner, AppPolicy{Home: home, FS: fs})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,8 +112,8 @@ func TestFormulaInspectUsesFixedInventoryCommandsAndVerifiesProvidedCommands(t *
 		t.Fatalf("observation = %#v", got)
 	}
 	want := []execx.Request{
-		{Path: "/opt/homebrew/bin/brew", Args: []string{"info", "--json=v2", "ripgrep"}},
-		{Path: "/opt/homebrew/bin/brew", Args: []string{"list", "--versions", "ripgrep"}},
+		{Path: "/opt/homebrew/bin/brew", Args: []string{"info", "--json=v2", "ripgrep"}, Env: map[string]string{"HOME": home}},
+		{Path: "/opt/homebrew/bin/brew", Args: []string{"list", "--versions", "ripgrep"}, Env: map[string]string{"HOME": home}},
 	}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %#v, want %#v", calls, want)

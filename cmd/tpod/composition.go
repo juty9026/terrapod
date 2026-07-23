@@ -60,12 +60,12 @@ func productionPlanner(layout paths.Layout, store *state.Store, client chezmoi.C
 	if err != nil {
 		return nil, err
 	}
-	runner := execx.NewRunner([]string{"LC_ALL"}, noninteractivePrivilege, os.Geteuid)
-	formulaProvider, err := homebrew.New(homebrew.Formula, tools.brew, filepath.Join(layout.StateDir, "recovery", "homebrew"), runner, homebrew.AppPolicy{})
+	runner := execx.NewRunner([]string{"HOME", "LC_ALL"}, noninteractivePrivilege, os.Geteuid)
+	formulaProvider, err := homebrew.New(homebrew.Formula, tools.brew, filepath.Join(layout.StateDir, "recovery", "homebrew"), runner, homebrew.AppPolicy{Home: layout.HomeDir})
 	if err != nil {
 		return nil, err
 	}
-	caskProvider, err := homebrew.New(homebrew.Cask, tools.brew, filepath.Join(layout.StateDir, "recovery", "homebrew"), runner, homebrew.AppPolicy{HomeApplications: filepath.Join(layout.HomeDir, "Applications")})
+	caskProvider, err := homebrew.New(homebrew.Cask, tools.brew, filepath.Join(layout.StateDir, "recovery", "homebrew"), runner, homebrew.AppPolicy{Home: layout.HomeDir, HomeApplications: filepath.Join(layout.HomeDir, "Applications")})
 	if err != nil {
 		return nil, err
 	}
