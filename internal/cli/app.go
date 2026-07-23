@@ -25,6 +25,7 @@ import (
 	"github.com/juty9026/terrapod/internal/reconcile"
 	"github.com/juty9026/terrapod/internal/resolve"
 	"github.com/juty9026/terrapod/internal/resource"
+	setuppkg "github.com/juty9026/terrapod/internal/setup"
 	"github.com/juty9026/terrapod/internal/state"
 	updatepkg "github.com/juty9026/terrapod/internal/update"
 )
@@ -55,6 +56,8 @@ type Dependencies struct {
 	Chezmoi         func(context.Context, string, []string) (execx.Result, error)
 	Update          func(context.Context) (updatepkg.Result, error)
 	ContinueUpdate  func(context.Context, string) (updatepkg.Result, error)
+	Setup           func(context.Context) (model.Config, error)
+	Configure       func(context.Context, setuppkg.Preset) (model.Config, error)
 }
 
 // AdapterSet is the composition boundary for every typed provider introduced
@@ -181,9 +184,32 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	if !ok {
 		return exitUsage
 	}
-	if isMutationCommand(command) && command != "apply" && command != "resolve" && command != "update" {
-		fmt.Fprintf(stderr, "%s is unavailable until activation\n", command)
-		return exitUnavailable
+	if command == "setup" {
+		if deps.Setup == nil {
+			fmt.Fprintln(stderr, "internal error: setup is not configured")
+			return exitFailure
+		}
+		if _, err := deps.Setup(ctx); err != nil {
+			fmt.Fprintln(stderr, err)
+			return exitFailure
+		}
+		fmt.Fprintf(stdout, "Configured Terrapod in %s\n", deps.Paths.ConfigFile)
+		fmt.Fprintln(stdout, "Run 'tpod apply' to reconcile these changes.")
+		return 0
+	}
+	if command == "configure" {
+		if deps.Configure == nil {
+			fmt.Fprintln(stderr, "internal error: configure is not configured")
+			return exitFailure
+		}
+		preset := setuppkg.Preset(args[1])
+		if _, err := deps.Configure(ctx, preset); err != nil {
+			fmt.Fprintln(stderr, err)
+			return exitFailure
+		}
+		fmt.Fprintf(stdout, "Configured Terrapod Preset %q in %s\n", preset, deps.Paths.ConfigFile)
+		fmt.Fprintln(stdout, "Run 'tpod apply' to reconcile these changes.")
+		return 0
 	}
 	if command == "diff" {
 		if deps.Diff == nil {
@@ -314,7 +340,19 @@ func parseManagerArgs(command string, args []string, stderr io.Writer) (bool, bo
 		return false, false
 	}
 	if len(args) == 0 {
+		if command == "configure" {
+			fmt.Fprintln(stderr, "usage: tpod configure <minimal|development|workstation>")
+			return false, false
+		}
 		return false, true
+	}
+	if command == "configure" && len(args) == 1 {
+		preset := setuppkg.Preset(args[0])
+		if preset == setuppkg.PresetMinimal || preset == setuppkg.PresetDevelopment || preset == setuppkg.PresetWorkstation {
+			return false, true
+		}
+		fmt.Fprintln(stderr, "usage: tpod configure <minimal|development|workstation>")
+		return false, false
 	}
 	if command == "plan" && len(args) == 1 && args[0] == "--upgrade" {
 		return true, true

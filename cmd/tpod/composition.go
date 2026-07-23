@@ -390,6 +390,45 @@ func productionHistoricalCatalogs(store *state.Store, stager release.Stager, rel
 	return result, nil
 }
 
+func productionActiveCatalog(layout paths.Layout, compiled map[string]ed25519.PublicKey) (catalog.Verified, error) {
+	proofs, err := state.ReadTrustProofs(layout.StateDir)
+	if err != nil {
+		return catalog.Verified{}, err
+	}
+	if _, err := release.VerifyProofChain(compiled, proofs); err != nil {
+		return catalog.Verified{}, err
+	}
+	stager := release.Stager{
+		ReleaseDir:       layout.ReleaseDir,
+		ActiveRelease:    layout.ActiveRelease,
+		Verifier:         release.Verifier{CompiledKeys: compiled, PersistedProofs: proofs},
+		ExpectedPlatform: release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH},
+	}
+	version, err := stager.CurrentVersion()
+	if err != nil {
+		return catalog.Verified{}, err
+	}
+	if version == "" {
+		return catalog.Verified{}, errors.New("active Terrapod release is missing")
+	}
+	staged, verified, err := stager.LoadActive(version)
+	if err != nil {
+		return catalog.Verified{}, err
+	}
+	asset, err := verified.Manifest.CatalogAsset()
+	if err != nil {
+		return catalog.Verified{}, err
+	}
+	bound, err := catalog.LoadReleaseBound(filepath.Join(staged.Path, "catalog", "resources.json"), asset.SHA256)
+	if err != nil {
+		return catalog.Verified{}, err
+	}
+	if bound.Catalog.Release != version {
+		return catalog.Verified{}, errors.New("active catalog release differs from active Terrapod release")
+	}
+	return bound, nil
+}
+
 func productionSelfCheck(layout paths.Layout, compiled map[string]ed25519.PublicKey, releaseDir, expectedDigest string) error {
 	executable, err := os.Executable()
 	if err != nil {

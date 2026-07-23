@@ -23,6 +23,7 @@ import (
 	"github.com/juty9026/terrapod/internal/reconcile"
 	"github.com/juty9026/terrapod/internal/resolve"
 	"github.com/juty9026/terrapod/internal/resource"
+	setuppkg "github.com/juty9026/terrapod/internal/setup"
 	"github.com/juty9026/terrapod/internal/state"
 	updatepkg "github.com/juty9026/terrapod/internal/update"
 )
@@ -38,8 +39,8 @@ func TestHelpDescribesShadowCommandSurfaceWithoutDependencies(t *testing.T) {
 		"apply      Reconcile managed resources",
 		"resolve    Resolve one unavailable resource",
 		"update     Install the latest signed release",
-		"setup (unavailable until activation)",
-		"configure (unavailable until activation)",
+		"setup      Configure Terrapod interactively",
+		"configure  Write a Preset non-interactively",
 		"chezmoi    Run a constrained read-only chezmoi command",
 	} {
 		if !strings.Contains(stdout, want) {
@@ -538,15 +539,39 @@ func TestDiffUsesManagedFileClientAndPreservesOutput(t *testing.T) {
 	}
 }
 
-func TestMutationCommandsAreNotDispatched(t *testing.T) {
-	for _, command := range []string{"setup", "configure"} {
-		t.Run(command, func(t *testing.T) {
-			deps := Dependencies{Geteuid: func() int { return 501 }}
-			code, _, stderr := run(t, []string{command}, deps)
-			if code == 0 || !strings.Contains(stderr, "unavailable until activation") {
-				t.Fatalf("Run(%s) = %d, stderr=%q", command, code, stderr)
-			}
-		})
+func TestSetupAndConfigureDispatchWithoutApplying(t *testing.T) {
+	applied := false
+	setupCalled := false
+	configured := ""
+	deps := Dependencies{
+		Geteuid: func() int { return 501 },
+		Paths:   paths.Layout{ConfigFile: "/home/me/.config/terrapod/config.json"},
+		Setup: func(context.Context) (model.Config, error) {
+			setupCalled = true
+			return model.Config{}, nil
+		},
+		Configure: func(_ context.Context, preset setuppkg.Preset) (model.Config, error) {
+			configured = string(preset)
+			return model.Config{}, nil
+		},
+		Apply: func(context.Context, reconcile.ApplyInput) (reconcile.Summary, error) {
+			applied = true
+			return reconcile.Summary{}, nil
+		},
+	}
+	code, stdout, stderr := run(t, []string{"setup"}, deps)
+	if code != 0 || !setupCalled || applied || stderr != "" || !strings.Contains(stdout, "tpod apply") {
+		t.Fatalf("setup code=%d called=%v applied=%v stdout=%q stderr=%q", code, setupCalled, applied, stdout, stderr)
+	}
+	code, stdout, stderr = run(t, []string{"configure", "development"}, deps)
+	if code != 0 || configured != "development" || applied || stderr != "" || !strings.Contains(stdout, "tpod apply") {
+		t.Fatalf("configure code=%d preset=%q applied=%v stdout=%q stderr=%q", code, configured, applied, stdout, stderr)
+	}
+	for _, args := range [][]string{{"configure"}, {"configure", "other"}, {"configure", "minimal", "extra"}} {
+		code, _, stderr = run(t, args, deps)
+		if code != exitUsage || !strings.Contains(stderr, "usage: tpod configure") {
+			t.Fatalf("Run(%v)=%d stderr=%q", args, code, stderr)
+		}
 	}
 }
 

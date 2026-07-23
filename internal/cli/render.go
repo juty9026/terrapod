@@ -22,13 +22,10 @@ func renderHelp(output io.Writer) {
 	fmt.Fprintln(output, "  status     Show Ready and Unavailable resources")
 	fmt.Fprintln(output, "  doctor     Check whether enabled resources are available")
 	fmt.Fprintln(output, "  diff       Show managed-file changes")
+	fmt.Fprintln(output, "  setup      Configure Terrapod interactively")
+	fmt.Fprintln(output, "  configure  Write a Preset non-interactively")
 	fmt.Fprintln(output, "  chezmoi    Run a constrained read-only chezmoi command")
 	fmt.Fprintln(output, "  version    Show the development version")
-	fmt.Fprintln(output)
-	fmt.Fprintln(output, "Mutation commands:")
-	for _, command := range []string{"setup", "configure"} {
-		fmt.Fprintf(output, "  %s (unavailable until activation)\n", command)
-	}
 }
 
 func renderResolveResult(output io.Writer, result resolve.Result) {

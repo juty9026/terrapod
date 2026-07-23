@@ -22,6 +22,7 @@ import (
 	"github.com/juty9026/terrapod/internal/paths"
 	"github.com/juty9026/terrapod/internal/planner"
 	"github.com/juty9026/terrapod/internal/release"
+	setuppkg "github.com/juty9026/terrapod/internal/setup"
 	"github.com/juty9026/terrapod/internal/state"
 	updatepkg "github.com/juty9026/terrapod/internal/update"
 )
@@ -87,6 +88,30 @@ func main() {
 		},
 	}
 	if homeErr == nil {
+		profile, profileErr := setuppkg.DetectProfile(runtime.GOOS)
+		setupManager := setuppkg.Manager{
+			ConfigPath: layout.ConfigFile,
+			StateDir:   layout.StateDir,
+			Schema: func() (model.ConfigSchema, error) {
+				verified, err := deps.LoadCatalog()
+				if err != nil {
+					return model.ConfigSchema{}, fmt.Errorf("load setup catalog: %w", err)
+				}
+				return verified.Catalog.Config, nil
+			},
+		}
+		deps.Setup = func(ctx context.Context) (model.Config, error) {
+			if profileErr != nil {
+				return model.Config{}, profileErr
+			}
+			return setupManager.Interactive(ctx, profile, setuppkg.CommandGum{Stdin: os.Stdin, Stderr: os.Stderr})
+		}
+		deps.Configure = func(ctx context.Context, preset setuppkg.Preset) (model.Config, error) {
+			if profileErr != nil {
+				return model.Config{}, profileErr
+			}
+			return setupManager.Configure(ctx, preset, profile)
+		}
 		client := chezmoi.Client{
 			Runner:      execx.NewRunner([]string{"HOME"}, nil, os.Geteuid),
 			Binary:      productionChezmoiPath(),
@@ -103,6 +128,9 @@ func main() {
 			deps.Update = func(context.Context) (updatepkg.Result, error) { return updatepkg.Result{}, err }
 			deps.ContinueUpdate = func(context.Context, string) (updatepkg.Result, error) { return updatepkg.Result{}, err }
 		} else {
+			deps.LoadCatalog = func() (catalog.Verified, error) {
+				return productionActiveCatalog(layout, roots)
+			}
 			configureSignedUpdate(&deps, layout, client, roots)
 		}
 	}
