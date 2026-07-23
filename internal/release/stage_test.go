@@ -133,12 +133,25 @@ func TestRepairAndActivateReplacesPartialSameVersionAndRestoresItOnFailure(t *te
 	if err := os.WriteFile(release.Files[binary.Name], original, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	stager.beforeRecoveryCleanup = func(string) error { return errors.New("retain inactive recovery fixture") }
 	staged, err := stager.RepairAndActivate(context.Background(), release, Platform{OS: "linux", Arch: "amd64"}, launchers)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := stager.LoadActive(staged.Version); err != nil {
 		t.Fatal(err)
+	}
+	recovery := filepath.Join(stager.ReleaseDir, ".recovery", "1.2.3")
+	if got, err := os.ReadFile(filepath.Join(recovery, "bin", "tpod")); err != nil || string(got) != "broken" {
+		t.Fatalf("inactive recovery slot body=%q err=%v", got, err)
+	}
+	stager.beforeRecoveryCleanup = nil
+	flipInstalledByte(t, filepath.Join(staged.Path, "bin", "tpod"), 0o444)
+	if _, err := stager.RepairAndActivate(context.Background(), release, Platform{OS: "linux", Arch: "amd64"}, launchers); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(recovery); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("repeated repair did not reuse and clean bounded recovery slot: %v", err)
 	}
 }
 
@@ -188,6 +201,25 @@ func TestRepairAndActivateRollsBackLaunchersAndCurrentOnCommitFailures(t *testin
 		{"activation", func(s *Stager) {
 			s.afterActivateRename = func() error { return errors.New("activation failure") }
 		}},
+		{"first backup cleanup", func(s *Stager) {
+			s.beforeLauncherBackupRemove = func(index int) error {
+				if index == 0 {
+					return errors.New("first backup cleanup failure")
+				}
+				return nil
+			}
+		}},
+		{"second backup cleanup", func(s *Stager) {
+			s.beforeLauncherBackupRemove = func(index int) error {
+				if index == 1 {
+					return errors.New("second backup cleanup failure")
+				}
+				return nil
+			}
+		}},
+		{"backup cleanup fsync", func(s *Stager) {
+			s.launcherCleanupSync = func(string) error { return errors.New("backup cleanup fsync failure") }
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -221,6 +253,18 @@ func TestRepairAndActivateRollsBackLaunchersAndCurrentOnCommitFailures(t *testin
 				got, err := os.ReadFile(target)
 				if err != nil || string(got) != "sentinel:"+filepath.Base(target) {
 					t.Fatalf("launcher %s=%q err=%v", target, got, err)
+				}
+				if info, err := os.Stat(target); err != nil || info.Mode().Perm() != 0o700 {
+					t.Fatalf("launcher %s mode=%v err=%v", target, info, err)
+				}
+			}
+			entries, err := os.ReadDir(launcherDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range entries {
+				if strings.HasPrefix(entry.Name(), ".launcher-backup-") {
+					t.Fatalf("failed repair left executable backup %s", entry.Name())
 				}
 			}
 			if _, err := os.Lstat(filepath.Join(stager.ReleaseDir, "1.2.3")); !errors.Is(err, os.ErrNotExist) {
@@ -280,6 +324,43 @@ func TestRepairAndActivatePreservesUnpreparedLauncherOnBackupFailure(t *testing.
 	}
 	if info, err := os.Lstat(targets[1]); err != nil || !info.IsDir() {
 		t.Fatalf("second launcher info=%v err=%v", info, err)
+	}
+}
+
+func TestRepairAndActivateCleanupRollbackRestoresAbsentAndSymlinkLaunchers(t *testing.T) {
+	root := realReleaseTempDir(t)
+	stager := testStager(Stager{ReleaseDir: filepath.Join(root, "releases"), ActiveRelease: filepath.Join(root, "current")})
+	stager.launcherCleanupSync = func(string) error { return errors.New("cleanup sync failure") }
+	release := stagedFixture(t, root, Platform{OS: "linux", Arch: "amd64"}, sourceTar(t, map[string]string{"scripts/tpod-launcher.sh": "#!/bin/sh\nnew\n"}))
+	if err := os.MkdirAll(filepath.Join(stager.ReleaseDir, "0.9.0"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("releases/0.9.0", stager.ActiveRelease); err != nil {
+		t.Fatal(err)
+	}
+	launcherDir := filepath.Join(root, "bin")
+	if err := os.MkdirAll(launcherDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	targets := [2]string{filepath.Join(launcherDir, "tpod"), filepath.Join(launcherDir, "terrapod")}
+	outside := filepath.Join(root, "outside")
+	if err := os.WriteFile(outside, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, targets[1]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stager.RepairAndActivate(context.Background(), release, Platform{OS: "linux", Arch: "amd64"}, targets); err == nil {
+		t.Fatal("cleanup failure succeeded")
+	}
+	if _, err := os.Lstat(targets[0]); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("absent tpod restored as %v", err)
+	}
+	if target, err := os.Readlink(targets[1]); err != nil || target != outside {
+		t.Fatalf("terrapod target=%q err=%v", target, err)
+	}
+	if target, err := os.Readlink(stager.ActiveRelease); err != nil || target != "releases/0.9.0" {
+		t.Fatalf("current=%q err=%v", target, err)
 	}
 }
 

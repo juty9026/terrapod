@@ -26,6 +26,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -134,6 +135,7 @@ func TestBuiltRepairBinaryUsesEmbeddedReleaseEndpointAndStagesLatest(t *testing.
 		t.Fatal(err)
 	}
 	assets := make(map[string][]byte)
+	var assetsMu sync.RWMutex
 	var manifestData, signatureData []byte
 	var server *httptest.Server
 	var certificatePEM []byte
@@ -146,9 +148,11 @@ func TestBuiltRepairBinaryUsesEmbeddedReleaseEndpointAndStagesLatest(t *testing.
 			}
 			names := []string{"release.json", "release.json.sig", "tpod-darwin-amd64", "tpod-darwin-arm64", "tpod-linux-amd64", "tpod-linux-arm64", "terrapod-source.tar.gz", "resources.json"}
 			items := make([]metadataAsset, 0, len(names))
+			assetsMu.RLock()
 			for _, name := range names {
 				items = append(items, metadataAsset{Name: name, Size: len(assets[name]), URL: server.URL + "/assets/" + name})
 			}
+			assetsMu.RUnlock()
 			_ = json.NewEncoder(w).Encode(struct {
 				TagName    string          `json:"tag_name"`
 				Draft      bool            `json:"draft"`
@@ -158,7 +162,10 @@ func TestBuiltRepairBinaryUsesEmbeddedReleaseEndpointAndStagesLatest(t *testing.
 			return
 		}
 		name := strings.TrimPrefix(request.URL.Path, "/assets/")
+		assetsMu.RLock()
 		data, ok := assets[name]
+		data = append([]byte(nil), data...)
+		assetsMu.RUnlock()
 		if !ok || request.URL.Path == name {
 			http.NotFound(w, request)
 			return
@@ -217,10 +224,14 @@ func TestBuiltRepairBinaryUsesEmbeddedReleaseEndpointAndStagesLatest(t *testing.
 		t.Fatal(err)
 	}
 	for _, name := range []string{"tpod-darwin-amd64", "tpod-darwin-arm64", "tpod-linux-amd64", "tpod-linux-arm64"} {
+		assetsMu.Lock()
 		assets[name] = binaryData
+		assetsMu.Unlock()
 	}
+	assetsMu.Lock()
 	assets["terrapod-source.tar.gz"] = repairSourceArchive(t)
 	assets["resources.json"] = []byte(`{"version":1,"release":"1.2.3","config":[],"resources":[]}`)
+	assetsMu.Unlock()
 	manifest := release.Manifest{
 		Version:       "1.2.3",
 		CatalogSchema: 1,
@@ -250,8 +261,10 @@ func TestBuiltRepairBinaryUsesEmbeddedReleaseEndpointAndStagesLatest(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	assetsMu.Lock()
 	assets["release.json"] = manifestData
 	assets["release.json.sig"] = signatureData
+	assetsMu.Unlock()
 	manifestDigest := sha256.Sum256(manifestData)
 
 	home := filepath.Join(root, "home")

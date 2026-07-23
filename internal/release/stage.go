@@ -22,15 +22,18 @@ import (
 type Platform struct{ OS, Arch string }
 type Staged struct{ Version, Path string }
 type Stager struct {
-	ReleaseDir, ActiveRelease string
-	Verifier                  Verifier
-	ExpectedPlatform          Platform
-	afterSourceCopy           func()
-	beforeCommitValidation    func(string)
-	afterActivateRename       func() error
-	activateSync              func(string) error
-	beforeLauncherInstall     func(int) error
-	launcherSync              func(string) error
+	ReleaseDir, ActiveRelease  string
+	Verifier                   Verifier
+	ExpectedPlatform           Platform
+	afterSourceCopy            func()
+	beforeCommitValidation     func(string)
+	afterActivateRename        func() error
+	activateSync               func(string) error
+	beforeLauncherInstall      func(int) error
+	launcherSync               func(string) error
+	beforeLauncherBackupRemove func(int) error
+	launcherCleanupSync        func(string) error
+	beforeRecoveryCleanup      func(string) error
 }
 
 type stagedRecord struct {
@@ -211,12 +214,18 @@ func (s Stager) RepairAndActivate(ctx context.Context, release VerifiedRelease, 
 			return Staged{}, errors.New("existing release is not a real directory")
 		}
 		if _, err := s.validateInstalledRelease(destination, manifest.Version, release.manifestData, release.signatureData); err != nil {
-			releaseBackup, err = reserveSiblingPath(s.ReleaseDir, ".repair-backup-")
+			releaseBackup, err = s.prepareRecoverySlot(manifest.Version)
 			if err != nil {
+				return Staged{}, err
+			}
+			if err := os.Chmod(destination, 0o700); err != nil {
 				return Staged{}, err
 			}
 			if err := os.Rename(destination, releaseBackup); err != nil {
 				return Staged{}, err
+			}
+			if err := errors.Join(syncDirectory(s.ReleaseDir), syncDirectory(filepath.Dir(releaseBackup))); err != nil {
+				return Staged{}, errors.Join(err, restoreReplacedRelease(destination, releaseBackup))
 			}
 		}
 	}
@@ -234,10 +243,42 @@ func (s Stager) RepairAndActivate(ctx context.Context, release VerifiedRelease, 
 		return Staged{}, errors.Join(err, s.rollbackRepairRelease(destination, releaseBackup, releaseWasAbsent))
 	}
 	if releaseBackup != "" {
-		makeWritableForCleanup(releaseBackup)
-		_ = os.RemoveAll(releaseBackup)
+		var cleanupErr error
+		if s.beforeRecoveryCleanup != nil {
+			cleanupErr = s.beforeRecoveryCleanup(releaseBackup)
+		}
+		if cleanupErr == nil {
+			makeWritableForCleanup(releaseBackup)
+			cleanupErr = os.RemoveAll(releaseBackup)
+		}
+		if cleanupErr == nil {
+			_ = syncDirectory(filepath.Dir(releaseBackup))
+		}
 	}
 	return staged, nil
+}
+
+func (s Stager) prepareRecoverySlot(version string) (string, error) {
+	recovery := filepath.Join(s.ReleaseDir, ".recovery")
+	if err := ensureRealDirectory(recovery, 0o700); err != nil {
+		return "", err
+	}
+	slot := filepath.Join(recovery, version)
+	if info, err := os.Lstat(slot); err == nil {
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return "", errors.New("release recovery slot is not a real directory")
+		}
+		makeWritableForCleanup(slot)
+		if err := os.RemoveAll(slot); err != nil {
+			return "", err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	if err := syncDirectory(recovery); err != nil {
+		return "", err
+	}
+	return slot, nil
 }
 
 func reserveSiblingPath(parent, pattern string) (string, error) {
@@ -275,10 +316,15 @@ func (s Stager) rollbackRepairRelease(destination, backup string, wasAbsent bool
 }
 
 type launcherBackup struct {
+	backup string
+}
+
+type launcherState struct {
 	destination string
-	backup      string
-	existed     bool
-	prepared    bool
+	kind        string
+	data        []byte
+	mode        os.FileMode
+	linkTarget  string
 }
 
 func (s Stager) installLaunchersAndActivate(staged Staged, targets [2]string) error {
@@ -287,6 +333,17 @@ func (s Stager) installLaunchersAndActivate(staged Staged, targets [2]string) er
 		return err
 	}
 	if err := ensureRealDirectory(parent, 0o755); err != nil {
+		return err
+	}
+	states := [2]launcherState{}
+	for index, target := range targets {
+		states[index], err = captureLauncherState(target)
+		if err != nil {
+			return err
+		}
+	}
+	oldCurrentTarget, oldCurrentExists, err := captureActiveReleaseState(s.ActiveRelease)
+	if err != nil {
 		return err
 	}
 	sourceRoot, err := os.OpenRoot(staged.Path)
@@ -320,60 +377,78 @@ func (s Stager) installLaunchersAndActivate(staged Staged, targets [2]string) er
 	defer cleanupLauncherTemporaries(temporaries)
 	backups := [2]launcherBackup{}
 	for index, destination := range targets {
-		backups[index] = launcherBackup{destination: destination}
 		info, err := os.Lstat(destination)
 		if errors.Is(err, os.ErrNotExist) {
-			backups[index].prepared = true
 			continue
 		}
 		if err != nil {
-			_ = rollbackLaunchers(backups)
+			_ = restoreLauncherStates(states, backups)
 			return err
 		}
 		if info.IsDir() {
-			_ = rollbackLaunchers(backups)
+			_ = restoreLauncherStates(states, backups)
 			return fmt.Errorf("launcher destination is a directory: %s", destination)
 		}
 		backup, err := reserveSiblingPath(parent, ".launcher-backup-")
 		if err != nil {
-			_ = rollbackLaunchers(backups)
+			_ = restoreLauncherStates(states, backups)
 			return err
 		}
 		if err := os.Rename(destination, backup); err != nil {
-			_ = rollbackLaunchers(backups)
+			_ = restoreLauncherStates(states, backups)
 			return err
 		}
 		backups[index].backup = backup
-		backups[index].existed = true
-		backups[index].prepared = true
 	}
 	for index, destination := range targets {
 		if s.beforeLauncherInstall != nil {
 			if err := s.beforeLauncherInstall(index); err != nil {
-				return errors.Join(err, rollbackLaunchers(backups))
+				return errors.Join(err, restoreLauncherStates(states, backups))
 			}
 		}
 		if err := os.Rename(temporaries[index], destination); err != nil {
-			return errors.Join(err, rollbackLaunchers(backups))
+			return errors.Join(err, restoreLauncherStates(states, backups))
 		}
 		temporaries[index] = ""
 	}
 	if err := s.syncLauncherDirectory(parent); err != nil {
-		return errors.Join(err, rollbackLaunchers(backups))
+		return errors.Join(err, restoreLauncherStates(states, backups))
 	}
 	for _, destination := range targets {
 		info, err := os.Lstat(destination)
 		if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o755 {
-			return errors.Join(errors.New("stable launcher postcondition failed"), rollbackLaunchers(backups))
+			return errors.Join(errors.New("stable launcher postcondition failed"), restoreLauncherStates(states, backups))
 		}
 	}
 	if err := s.Activate(staged.Version); err != nil {
-		return errors.Join(err, rollbackLaunchers(backups))
+		return errors.Join(err, restoreLauncherStates(states, backups))
 	}
-	for _, backup := range backups {
-		if backup.backup != "" {
-			_ = os.Remove(backup.backup)
+	var cleanupErr error
+	for index, backup := range backups {
+		if backup.backup == "" {
+			continue
 		}
+		if s.beforeLauncherBackupRemove != nil {
+			cleanupErr = s.beforeLauncherBackupRemove(index)
+		}
+		if cleanupErr == nil {
+			cleanupErr = os.Remove(backup.backup)
+		}
+		if cleanupErr != nil {
+			break
+		}
+	}
+	if cleanupErr == nil {
+		if s.launcherCleanupSync != nil {
+			cleanupErr = s.launcherCleanupSync(parent)
+		} else {
+			cleanupErr = syncDirectory(parent)
+		}
+	}
+	if cleanupErr != nil {
+		return errors.Join(cleanupErr,
+			s.restoreActiveReleaseDurable(oldCurrentTarget, oldCurrentExists),
+			restoreLauncherStates(states, backups))
 	}
 	return nil
 }
@@ -415,22 +490,86 @@ func cleanupLauncherTemporaries(paths [2]string) {
 	}
 }
 
-func rollbackLaunchers(backups [2]launcherBackup) error {
+func captureLauncherState(destination string) (launcherState, error) {
+	state := launcherState{destination: destination}
+	info, err := os.Lstat(destination)
+	if errors.Is(err, os.ErrNotExist) {
+		state.kind = "absent"
+		return state, nil
+	}
+	if err != nil {
+		return state, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		state.kind = "symlink"
+		state.linkTarget, err = os.Readlink(destination)
+		return state, err
+	}
+	if !info.Mode().IsRegular() || info.Size() < 0 || info.Size() > MaxManifestSize {
+		return state, errors.New("existing launcher must be absent, a symlink, or a bounded regular file")
+	}
+	file, err := os.Open(destination)
+	if err != nil {
+		return state, err
+	}
+	state.data, err = io.ReadAll(io.LimitReader(file, MaxManifestSize+1))
+	closeErr := file.Close()
+	if err != nil || closeErr != nil || int64(len(state.data)) != info.Size() {
+		return state, errors.Join(err, closeErr, errors.New("existing launcher changed while reading"))
+	}
+	state.kind = "regular"
+	state.mode = info.Mode() & (os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky)
+	return state, nil
+}
+
+func restoreLauncherStates(states [2]launcherState, backups [2]launcherBackup) error {
 	var result error
-	for index := len(backups) - 1; index >= 0; index-- {
-		entry := backups[index]
-		if entry.destination == "" || !entry.prepared {
+	for _, backup := range backups {
+		if backup.backup != "" {
+			if err := os.Remove(backup.backup); err != nil && !errors.Is(err, os.ErrNotExist) {
+				result = errors.Join(result, err)
+			}
+		}
+	}
+	for _, state := range states {
+		if state.destination == "" {
 			continue
 		}
-		if err := os.Remove(entry.destination); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := os.Remove(state.destination); err != nil && !errors.Is(err, os.ErrNotExist) {
 			result = errors.Join(result, err)
 			continue
 		}
-		if entry.existed {
-			result = errors.Join(result, os.Rename(entry.backup, entry.destination))
+		switch state.kind {
+		case "absent":
+		case "regular":
+			temporary, err := writeLauncherTemporary(filepath.Dir(state.destination), state.data)
+			if err == nil {
+				err = os.Chmod(temporary, state.mode)
+			}
+			if err == nil {
+				err = os.Rename(temporary, state.destination)
+			}
+			if temporary != "" {
+				_ = os.Remove(temporary)
+			}
+			result = errors.Join(result, err)
+		case "symlink":
+			temporary, err := reserveSiblingPath(filepath.Dir(state.destination), ".launcher-restore-")
+			if err == nil {
+				err = os.Symlink(state.linkTarget, temporary)
+			}
+			if err == nil {
+				err = os.Rename(temporary, state.destination)
+			}
+			if temporary != "" {
+				_ = os.Remove(temporary)
+			}
+			result = errors.Join(result, err)
+		default:
+			result = errors.Join(result, errors.New("invalid launcher rollback state"))
 		}
 	}
-	if parent := filepath.Dir(backups[0].destination); parent != "." && parent != "" {
+	if parent := filepath.Dir(states[0].destination); parent != "." && parent != "" {
 		result = errors.Join(result, syncDirectory(parent))
 	}
 	return result
@@ -455,7 +594,12 @@ func restoreReplacedRelease(destination, backup string) error {
 	if err := os.Rename(backup, destination); err != nil {
 		return err
 	}
-	return syncDirectory(filepath.Dir(destination))
+	destinationParent := filepath.Dir(destination)
+	backupParent := filepath.Dir(backup)
+	if destinationParent == backupParent {
+		return syncDirectory(destinationParent)
+	}
+	return errors.Join(syncDirectory(destinationParent), syncDirectory(backupParent))
 }
 
 func (s Stager) expectedPlatform() Platform {
@@ -550,6 +694,43 @@ func (s Stager) syncActiveDirectory(path string) error {
 		return s.activateSync(path)
 	}
 	return syncDirectory(path)
+}
+
+func captureActiveReleaseState(path string) (string, bool, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return "", false, errors.New("current release path is not a symlink")
+	}
+	target, err := os.Readlink(path)
+	return target, true, err
+}
+
+func (s Stager) restoreActiveReleaseDurable(oldTarget string, oldExists bool) error {
+	parent := filepath.Dir(s.ActiveRelease)
+	if !oldExists {
+		if err := os.Remove(s.ActiveRelease); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return syncDirectory(parent)
+	}
+	temporary, err := reserveSiblingPath(parent, ".current-cleanup-restore-")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(temporary)
+	if err := os.Symlink(oldTarget, temporary); err != nil {
+		return err
+	}
+	if err := os.Rename(temporary, s.ActiveRelease); err != nil {
+		return err
+	}
+	return syncDirectory(parent)
 }
 
 func (s Stager) restoreActiveRelease(parent, oldTarget string, oldExists bool) error {
