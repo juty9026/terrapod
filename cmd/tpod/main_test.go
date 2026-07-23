@@ -61,6 +61,24 @@ func TestCompiledReleaseRootsRequireCanonicalCompleteLdflags(t *testing.T) {
 	}
 }
 
+func TestRepairReleaseEndpointBindsStableVersionToTag(t *testing.T) {
+	oldEndpoint := releaseLatestEndpoint
+	t.Cleanup(func() { releaseLatestEndpoint = oldEndpoint })
+	releaseLatestEndpoint = "https://api.example.test/releases/latest"
+
+	endpoint, err := repairReleaseEndpoint("1.2.3")
+	if err != nil || endpoint != "https://api.example.test/releases/tags/v1.2.3" {
+		t.Fatalf("endpoint=%q err=%v", endpoint, err)
+	}
+	if _, err := repairReleaseEndpoint("1.2.3-rc.1"); err == nil {
+		t.Fatal("prerelease repair version accepted")
+	}
+	releaseLatestEndpoint = "https://api.example.test/releases/current"
+	if _, err := repairReleaseEndpoint("1.2.3"); err == nil {
+		t.Fatal("non-latest embedded endpoint accepted")
+	}
+}
+
 func TestRepairLatestReleaseRejectsDowngradeBeforeMutation(t *testing.T) {
 	public, private, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -126,7 +144,7 @@ func TestRepairLatestReleaseRejectsDowngradeBeforeMutation(t *testing.T) {
 	}
 }
 
-func TestBuiltRepairBinaryUsesEmbeddedReleaseEndpointAndStagesLatest(t *testing.T) {
+func TestBuiltRepairBinaryUsesSignedVersionEndpoint(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("repair intentionally rejects root")
 	}
@@ -140,7 +158,7 @@ func TestBuiltRepairBinaryUsesEmbeddedReleaseEndpointAndStagesLatest(t *testing.
 	var server *httptest.Server
 	var certificatePEM []byte
 	server, certificatePEM = newRepairTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/latest" {
+		if request.URL.Path == "/tags/v1.2.3" {
 			type metadataAsset struct {
 				Name string `json:"name"`
 				Size int    `json:"size"`
@@ -202,7 +220,7 @@ func TestBuiltRepairBinaryUsesEmbeddedReleaseEndpointAndStagesLatest(t *testing.
 		if err := os.MkdirAll(probeHome, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		probe := exec.Command(normalBinary, "internal-repair-stage", "--manifest-digest", strings.Repeat("0", 64))
+		probe := exec.Command(normalBinary, "internal-repair-stage", "--manifest-digest", strings.Repeat("0", 64), "--release-version", "1.2.3")
 		probe.Env = append(os.Environ(), "HOME="+probeHome, "XDG_DATA_HOME="+filepath.Join(root, "probe-data"), "XDG_CACHE_HOME="+filepath.Join(root, "probe-cache"), "SSL_CERT_FILE="+certificate)
 		output, err := probe.CombinedOutput()
 		if err == nil || !strings.Contains(string(output), "certificate signed by unknown authority") {
@@ -273,7 +291,7 @@ func TestBuiltRepairBinaryUsesEmbeddedReleaseEndpointAndStagesLatest(t *testing.
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(binary, "internal-repair-stage", "--manifest-digest", hex.EncodeToString(manifestDigest[:]))
+	command := exec.Command(binary, "internal-repair-stage", "--manifest-digest", hex.EncodeToString(manifestDigest[:]), "--release-version", "1.2.3")
 	command.Env = append(os.Environ(), "HOME="+home, "XDG_DATA_HOME="+dataHome, "XDG_CACHE_HOME="+cacheHome)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("native repair: %v\n%s", err, output)

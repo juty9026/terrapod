@@ -112,6 +112,8 @@ fi
 pass "manifest binds all assets and signature verifies"
 
 workflow="$(cat "$repo_root/.github/workflows/release.yml")"
+printf '%s' "$workflow" | grep -F 'release_base="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download"' >/dev/null ||
+  fail "versioned installer repairs from the latest stable release base"
 for required in \
   'CGO_ENABLED: "0"' \
   'scripts/build-tpod-release.sh' \

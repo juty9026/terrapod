@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 
 	"github.com/juty9026/terrapod/internal/catalog"
@@ -131,8 +132,12 @@ func repairManagementCore(layout paths.Layout, homeErr error, args []string) err
 	if os.Geteuid() == 0 {
 		return errors.New("repair staging must run as a non-root user")
 	}
-	if len(args) != 2 || args[0] != "--manifest-digest" {
-		return errors.New("usage: tpod internal-repair-stage --manifest-digest <sha256>")
+	if len(args) != 4 || args[0] != "--manifest-digest" || args[2] != "--release-version" {
+		return errors.New("usage: tpod internal-repair-stage --manifest-digest <sha256> --release-version <version>")
+	}
+	endpoint, err := repairReleaseEndpoint(args[3])
+	if err != nil {
+		return err
 	}
 	roots, err := compiledReleaseRoots()
 	if err != nil {
@@ -141,11 +146,22 @@ func repairManagementCore(layout paths.Layout, homeErr error, args []string) err
 	verifier := release.Verifier{CompiledKeys: roots}
 	client := release.Client{
 		HTTP:     repairHTTPClient(),
-		Endpoint: releaseLatestEndpoint,
+		Endpoint: endpoint,
 		CacheDir: layout.ReleaseCacheDir,
 		Verifier: verifier,
 	}
 	return repairLatestRelease(context.Background(), layout, args[1], verifier, client.LatestStable)
+}
+
+func repairReleaseEndpoint(version string) (string, error) {
+	if _, err := release.CompareStableVersions(version, version); err != nil {
+		return "", fmt.Errorf("repair release version: %w", err)
+	}
+	const latestSuffix = "/latest"
+	if !strings.HasSuffix(releaseLatestEndpoint, latestSuffix) {
+		return "", errors.New("embedded release endpoint is not a latest-release endpoint")
+	}
+	return strings.TrimSuffix(releaseLatestEndpoint, latestSuffix) + "/tags/v" + version, nil
 }
 
 func repairLatestRelease(ctx context.Context, layout paths.Layout, expectedDigest string, verifier release.Verifier, latest func(context.Context) (release.VerifiedRelease, error)) error {

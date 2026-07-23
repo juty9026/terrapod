@@ -235,8 +235,10 @@ assert_contains 'separate from `enableDevelopmentWorkspace`' \
   "README documents macOS Desktop App Stack separation from enableDevelopmentWorkspace"
 assert_contains 'casks can affect shared applications' \
   "README documents why macOS Desktop App Stack remains separate"
-assert_contains '`terrapod update` refreshes the Terrapod Source Repository through `chezmoi update --exclude scripts`.' \
-  "README documents Terrapod update as source maintenance"
+assert_contains '`tpod update` fetches the latest stable signed Terrapod release' \
+  "README documents the signed stable Terrapod update"
+assert_contains "It does not upgrade or remove packages outside Terrapod's ownership state." \
+  "README limits update reconciliation to Terrapod-owned packages"
 assert_contains 'Terrapod does not run broad Homebrew, APT, or mise upgrades.' \
   "README states Terrapod does not run broad package or tool upgrades"
 assert_contains 'Use OS package managers directly only when intentionally updating OS-managed packages.' \

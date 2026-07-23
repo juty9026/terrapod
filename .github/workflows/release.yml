@@ -86,7 +86,7 @@ jobs:
             --asset catalog,,,artifacts/resources.json \
             >artifacts/release.json
 
-          release_base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          release_base="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download"
           sed \
             -e "s|__TERRAPOD_RELEASE_BASE_URL__|${release_base}|g" \
             -e "s|__TERRAPOD_RELEASE_ROOT_KEY_ID__|${RELEASE_ROOT_KEY_ID}|g" \

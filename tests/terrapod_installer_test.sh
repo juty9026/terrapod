@@ -236,7 +236,9 @@ prepare_signed_repair_fixture() {
       '[ "${1:-}" = internal-repair-stage ] || exit 64' \
       '[ "${2:-}" = --manifest-digest ] || exit 64' \
       'digest="${3:-}"' \
-      '[ "$#" -eq 3 ] || exit 64' \
+      '[ "${4:-}" = --release-version ] || exit 64' \
+      '[ "${5:-}" = 1.2.3 ] || exit 64' \
+      '[ "$#" -eq 5 ] || exit 64' \
       '[ "${#digest}" -eq 64 ] || exit 64' \
       'case "$digest" in *[!0-9a-f]*) exit 64 ;; esac' \
       'printf "%s\n" "tpod args:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"' \
@@ -2800,6 +2802,8 @@ pass "repair restores binary and launcher executable modes"
   fail "repair preserves config, state, journal, and resources"
 pass "repair preserves config, state, journal, and resources"
 repair_log_text="$(cat "$repair_log")"
+assert_contains "$repair_log_text" "tpod args:internal-repair-stage --manifest-digest" "repair hands the verified manifest digest to Go"
+assert_contains "$repair_log_text" "release-version 1.2.3" "repair binds Go staging to the shell-verified release version"
 assert_not_contains "$repair_log_text" "setup" "repair never runs setup"
 assert_not_contains "$repair_log_text" "apply" "repair never runs apply"
 

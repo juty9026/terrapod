@@ -142,6 +142,20 @@ repair_verify_file() {
     fatal "signed release asset checksum mismatch: ${path##*/}"
 }
 
+repair_validate_version() {
+  value="$1"
+  old_ifs="$IFS"
+  IFS=.
+  set -- $value
+  IFS="$old_ifs"
+  [ "$#" -eq 3 ] || return 1
+  for component in "$@"; do
+    case "$component" in
+      ''|*[!0-9]*|0[0-9]*) return 1 ;;
+    esac
+  done
+}
+
 repair_cleanup() {
   if [ -n "${REPAIR_WORK:-}" ] && [ -d "$REPAIR_WORK" ] && [ ! -L "$REPAIR_WORK" ]; then
     chmod -R u+w "$REPAIR_WORK" 2>/dev/null || true
@@ -234,6 +248,9 @@ repair_management_core() {
 
   compact_manifest="$work/manifest.compact"
   tr -d '[:space:]' <"$manifest_file" >"$compact_manifest"
+  release_version="$(repair_json_field "$compact_manifest" version)"
+  repair_validate_version "$release_version" ||
+    fatal "signed release manifest version is not stable SemVer"
   tr '{}' '\n\n' <"$compact_manifest" >"$work/manifest.objects"
   binary_object="$(repair_select_asset "$work/manifest.objects" binary "$os_name" "$arch")"
   binary_fields="$(repair_validate_asset "$binary_object")"
@@ -255,7 +272,8 @@ repair_management_core() {
     XDG_DATA_HOME="$data_home" \
     XDG_CACHE_HOME="$cache_home" \
     "$binary_download" internal-repair-stage \
-      --manifest-digest "$manifest_digest" ||
+      --manifest-digest "$manifest_digest" \
+      --release-version "$release_version" ||
     fatal "verified Management Core could not stage and activate the signed release"
 
   repair_cleanup
