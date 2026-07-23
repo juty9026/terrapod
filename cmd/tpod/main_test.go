@@ -1,16 +1,33 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
+	"math/big"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/juty9026/terrapod/internal/chezmoi"
 	"github.com/juty9026/terrapod/internal/cli"
@@ -18,6 +35,7 @@ import (
 	"github.com/juty9026/terrapod/internal/model"
 	"github.com/juty9026/terrapod/internal/paths"
 	"github.com/juty9026/terrapod/internal/planner"
+	"github.com/juty9026/terrapod/internal/release"
 	"github.com/juty9026/terrapod/internal/resource"
 	"github.com/juty9026/terrapod/internal/resource/managementcore"
 	"github.com/juty9026/terrapod/internal/state"
@@ -40,6 +58,297 @@ func TestCompiledReleaseRootsRequireCanonicalCompleteLdflags(t *testing.T) {
 	if err != nil || len(roots["root"]) != ed25519.PublicKeySize {
 		t.Fatalf("roots=%v err=%v", roots, err)
 	}
+}
+
+func TestRepairLatestReleaseRejectsDowngradeBeforeMutation(t *testing.T) {
+	public, private, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := strings.Repeat("a", 64)
+	manifest := release.Manifest{
+		Version:       "1.0.0",
+		CatalogSchema: 1,
+		StateSchema:   1,
+		TrustedKeys:   []release.TrustedKey{},
+		Assets: []release.Asset{
+			{Kind: "binary", OS: "darwin", Arch: "amd64", Name: "tpod-darwin-amd64", Size: 1, SHA256: digest},
+			{Kind: "binary", OS: "darwin", Arch: "arm64", Name: "tpod-darwin-arm64", Size: 1, SHA256: digest},
+			{Kind: "binary", OS: "linux", Arch: "amd64", Name: "tpod-linux-amd64", Size: 1, SHA256: digest},
+			{Kind: "binary", OS: "linux", Arch: "arm64", Name: "tpod-linux-arm64", Size: 1, SHA256: digest},
+			{Kind: "source", Name: "terrapod-source.tar.gz", Size: 1, SHA256: digest},
+			{Kind: "catalog", Name: "resources.json", Size: 1, SHA256: digest},
+		},
+	}
+	manifestData, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelopeData, err := json.Marshal(struct {
+		KeyID     string `json:"keyId"`
+		Algorithm string `json:"algorithm"`
+		Signature string `json:"signature"`
+	}{
+		KeyID: "root", Algorithm: "ed25519",
+		Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(private, manifestData)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier := release.Verifier{CompiledKeys: map[string]ed25519.PublicKey{"root": public}}
+	verified, err := release.NewLocalVerifiedRelease(manifestData, envelopeData, nil, verifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedDigest, err := verified.Manifest.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	layout := paths.Resolve(filepath.Join(root, "home"), map[string]string{"XDG_DATA_HOME": filepath.Join(root, "data"), "XDG_CACHE_HOME": filepath.Join(root, "cache")})
+	if err := os.MkdirAll(filepath.Dir(layout.ActiveRelease), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("releases", "2.0.0"), layout.ActiveRelease); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	err = repairLatestRelease(context.Background(), layout, expectedDigest, verifier, func(context.Context) (release.VerifiedRelease, error) {
+		called = true
+		return verified, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "downgrade") || !called {
+		t.Fatalf("called=%v err=%v", called, err)
+	}
+	if _, err := os.Lstat(filepath.Join(layout.ReleaseDir, "1.0.0")); !os.IsNotExist(err) {
+		t.Fatalf("downgrade mutated release tree: %v", err)
+	}
+}
+
+func TestBuiltRepairBinaryUsesEmbeddedReleaseEndpointAndStagesLatest(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("repair intentionally rejects root")
+	}
+	public, private, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assets := make(map[string][]byte)
+	var manifestData, signatureData []byte
+	var server *httptest.Server
+	var certificatePEM []byte
+	server, certificatePEM = newRepairTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/latest" {
+			type metadataAsset struct {
+				Name string `json:"name"`
+				Size int    `json:"size"`
+				URL  string `json:"browser_download_url"`
+			}
+			names := []string{"release.json", "release.json.sig", "tpod-darwin-amd64", "tpod-darwin-arm64", "tpod-linux-amd64", "tpod-linux-arm64", "terrapod-source.tar.gz", "resources.json"}
+			items := make([]metadataAsset, 0, len(names))
+			for _, name := range names {
+				items = append(items, metadataAsset{Name: name, Size: len(assets[name]), URL: server.URL + "/assets/" + name})
+			}
+			_ = json.NewEncoder(w).Encode(struct {
+				TagName    string          `json:"tag_name"`
+				Draft      bool            `json:"draft"`
+				Prerelease bool            `json:"prerelease"`
+				Assets     []metadataAsset `json:"assets"`
+			}{TagName: "v1.2.3", Assets: items})
+			return
+		}
+		name := strings.TrimPrefix(request.URL.Path, "/assets/")
+		data, ok := assets[name]
+		if !ok || request.URL.Path == name {
+			http.NotFound(w, request)
+			return
+		}
+		_, _ = w.Write(data)
+	}))
+	defer server.Close()
+
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+			if err == nil {
+				_ = os.Chmod(path, 0o700)
+			}
+			return nil
+		})
+	})
+	certificate := filepath.Join(root, "release-ca.pem")
+	if err := os.WriteFile(certificate, certificatePEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	publicKey := base64.StdEncoding.EncodeToString(public)
+	embeddedLdflags := "-X main.releaseLatestEndpoint=" + server.URL + "/latest -X main.releaseRootKeyID=test-root -X main.releaseRootPublicKey=" + publicKey
+	if runtime.GOOS == "darwin" {
+		normalBinary := filepath.Join(root, "tpod-normal")
+		build := exec.Command("go", "build", "-ldflags", embeddedLdflags, "-o", normalBinary, ".")
+		if output, err := build.CombinedOutput(); err != nil {
+			t.Fatalf("build normal repair binary: %v\n%s", err, output)
+		}
+		probeHome := filepath.Join(root, "probe-home")
+		if err := os.MkdirAll(probeHome, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		probe := exec.Command(normalBinary, "internal-repair-stage", "--manifest-digest", strings.Repeat("0", 64))
+		probe.Env = append(os.Environ(), "HOME="+probeHome, "XDG_DATA_HOME="+filepath.Join(root, "probe-data"), "XDG_CACHE_HOME="+filepath.Join(root, "probe-cache"), "SSL_CERT_FILE="+certificate)
+		output, err := probe.CombinedOutput()
+		if err == nil || !strings.Contains(string(output), "certificate signed by unknown authority") {
+			t.Fatalf("normal macOS build unexpectedly accepted fixture CA: err=%v output=%s", err, output)
+		}
+		if _, err := os.Lstat(filepath.Join(root, "probe-data", "terrapod")); !os.IsNotExist(err) {
+			t.Fatalf("failed TLS probe mutated release data: %v", err)
+		}
+	}
+
+	binary := filepath.Join(root, "tpod")
+	build := exec.Command("go", "build", "-tags", "tpod_repair_testroot", "-ldflags",
+		embeddedLdflags+" -X main.repairTestCAFile="+certificate, "-o", binary, ".")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build native repair binary: %v\n%s", err, output)
+	}
+	binaryData, err := os.ReadFile(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"tpod-darwin-amd64", "tpod-darwin-arm64", "tpod-linux-amd64", "tpod-linux-arm64"} {
+		assets[name] = binaryData
+	}
+	assets["terrapod-source.tar.gz"] = repairSourceArchive(t)
+	assets["resources.json"] = []byte(`{"version":1,"release":"1.2.3","config":[],"resources":[]}`)
+	manifest := release.Manifest{
+		Version:       "1.2.3",
+		CatalogSchema: 1,
+		StateSchema:   1,
+		TrustedKeys:   []release.TrustedKey{},
+		Assets: []release.Asset{
+			repairAsset("binary", "darwin", "amd64", "tpod-darwin-amd64", assets["tpod-darwin-amd64"]),
+			repairAsset("binary", "darwin", "arm64", "tpod-darwin-arm64", assets["tpod-darwin-arm64"]),
+			repairAsset("binary", "linux", "amd64", "tpod-linux-amd64", assets["tpod-linux-amd64"]),
+			repairAsset("binary", "linux", "arm64", "tpod-linux-arm64", assets["tpod-linux-arm64"]),
+			repairAsset("source", "", "", "terrapod-source.tar.gz", assets["terrapod-source.tar.gz"]),
+			repairAsset("catalog", "", "", "resources.json", assets["resources.json"]),
+		},
+	}
+	manifestData, err = json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signatureData, err = json.Marshal(struct {
+		KeyID     string `json:"keyId"`
+		Algorithm string `json:"algorithm"`
+		Signature string `json:"signature"`
+	}{
+		KeyID: "test-root", Algorithm: "ed25519",
+		Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(private, manifestData)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assets["release.json"] = manifestData
+	assets["release.json.sig"] = signatureData
+	manifestDigest := sha256.Sum256(manifestData)
+
+	home := filepath.Join(root, "home")
+	dataHome := filepath.Join(root, "data")
+	cacheHome := filepath.Join(root, "cache")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(binary, "internal-repair-stage", "--manifest-digest", hex.EncodeToString(manifestDigest[:]))
+	command.Env = append(os.Environ(), "HOME="+home, "XDG_DATA_HOME="+dataHome, "XDG_CACHE_HOME="+cacheHome)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("native repair: %v\n%s", err, output)
+	}
+	current := filepath.Join(dataHome, "terrapod", "current")
+	if target, err := os.Readlink(current); err != nil || target != filepath.Join("releases", "1.2.3") {
+		t.Fatalf("current=%q err=%v", target, err)
+	}
+	for _, name := range []string{"tpod", "terrapod"} {
+		target := filepath.Join(home, ".local", "bin", name)
+		info, err := os.Lstat(target)
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o755 {
+			t.Fatalf("launcher %s info=%v err=%v", name, info, err)
+		}
+	}
+	stagedBinary := filepath.Join(dataHome, "terrapod", "releases", "1.2.3", "bin", "tpod")
+	if info, err := os.Stat(stagedBinary); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("staged binary info=%v err=%v", info, err)
+	}
+}
+
+func newRepairTLSServer(t *testing.T, handler http.Handler) (*httptest.Server, []byte) {
+	t.Helper()
+	caPrivate, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	caTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Terrapod test release CA"},
+		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caPrivate.PublicKey, caPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCertificate, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafPrivate, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "127.0.0.1"},
+		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, caCertificate, &leafPrivate.PublicKey, caPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewUnstartedServer(handler)
+	server.TLS = &tls.Config{Certificates: []tls.Certificate{{
+		Certificate: [][]byte{leafDER, caDER},
+		PrivateKey:  leafPrivate,
+	}}}
+	server.StartTLS()
+	return server, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})
+}
+
+func repairAsset(kind, goos, goarch, name string, data []byte) release.Asset {
+	digest := sha256.Sum256(data)
+	return release.Asset{Kind: kind, OS: goos, Arch: goarch, Name: name, Size: int64(len(data)), SHA256: hex.EncodeToString(digest[:])}
+}
+
+func repairSourceArchive(t *testing.T) []byte {
+	t.Helper()
+	var compressed bytes.Buffer
+	gzipWriter := gzip.NewWriter(&compressed)
+	tarWriter := tar.NewWriter(gzipWriter)
+	launcher := []byte("#!/bin/sh\nexit 0\n")
+	if err := tarWriter.WriteHeader(&tar.Header{Name: "scripts/tpod-launcher.sh", Mode: 0o755, Size: int64(len(launcher)), Typeflag: tar.TypeReg}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tarWriter.Write(launcher); err != nil {
+		t.Fatal(err)
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return compressed.Bytes()
 }
 
 type privilegeRunnerFunc func(context.Context, execx.Request) (execx.Result, error)

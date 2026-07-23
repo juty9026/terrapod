@@ -2,7 +2,7 @@
 set -eu
 
 DEFAULT_SOURCE_REPO="https://github.com/juty9026/terrapod.git"
-OFFICIAL_RELEASE_BASE_URL="https://github.com/juty9026/terrapod/releases/latest/download"
+OFFICIAL_RELEASE_BASE_URL="__TERRAPOD_RELEASE_BASE_URL__"
 EMBEDDED_RELEASE_ROOT_KEY_ID="__TERRAPOD_RELEASE_ROOT_KEY_ID__"
 EMBEDDED_RELEASE_ROOT_PUBLIC_KEY="__TERRAPOD_RELEASE_ROOT_PUBLIC_KEY__"
 
@@ -12,7 +12,8 @@ fatal() {
 }
 
 repair_require_non_root() {
-  uid="$(id -u)" || fatal "failed to determine the effective user"
+  [ -x /usr/bin/id ] || fatal "trusted /usr/bin/id is unavailable"
+  uid="$(/usr/bin/id -u)" || fatal "failed to determine the effective user"
   case "$uid" in
     0)
       fatal "Management Core repair must run as a non-root user"
@@ -24,11 +25,6 @@ repair_require_non_root() {
 }
 
 repair_platform() {
-  if [ "${TERRAPOD_REPAIR_TEST_MODE:-0}" = 1 ] && [ -n "${TERRAPOD_REPAIR_PLATFORM:-}" ]; then
-    printf '%s\n' "$TERRAPOD_REPAIR_PLATFORM"
-    return
-  fi
-
   case "$(uname -s):$(uname -m)" in
     Darwin:x86_64) printf '%s\n' darwin/amd64 ;;
     Darwin:arm64|Darwin:aarch64) printf '%s\n' darwin/arm64 ;;
@@ -39,12 +35,6 @@ repair_platform() {
 }
 
 repair_openssl() {
-  if [ "${TERRAPOD_REPAIR_TEST_MODE:-0}" = 1 ] && [ -n "${TERRAPOD_OPENSSL:-}" ]; then
-    [ -x "$TERRAPOD_OPENSSL" ] || fatal "configured repair OpenSSL is not executable"
-    printf '%s\n' "$TERRAPOD_OPENSSL"
-    return
-  fi
-
   for candidate in \
     /opt/homebrew/opt/openssl@3/bin/openssl \
     /opt/homebrew/bin/openssl \
@@ -59,10 +49,6 @@ repair_openssl() {
 }
 
 repair_curl() {
-  if [ "${TERRAPOD_REPAIR_TEST_MODE:-0}" = 1 ]; then
-    command -v curl || fatal "curl is required for Management Core repair"
-    return
-  fi
   [ -x /usr/bin/curl ] || fatal "curl is required for Management Core repair"
   printf '%s\n' /usr/bin/curl
 }
@@ -167,25 +153,15 @@ repair_cleanup() {
 repair_management_core() {
   repair_require_non_root
 
-  test_mode="${TERRAPOD_REPAIR_TEST_MODE:-0}"
-  if [ "$test_mode" = 1 ]; then
-    release_base="${TERRAPOD_RELEASE_BASE_URL:-$OFFICIAL_RELEASE_BASE_URL}"
-    root_key_id="${TERRAPOD_RELEASE_ROOT_KEY_ID:-$EMBEDDED_RELEASE_ROOT_KEY_ID}"
-    root_public_key="${TERRAPOD_RELEASE_ROOT_PUBLIC_KEY:-$EMBEDDED_RELEASE_ROOT_PUBLIC_KEY}"
-  else
-    if [ -n "${TERRAPOD_RELEASE_BASE_URL:-}" ] ||
-      [ -n "${TERRAPOD_RELEASE_ROOT_KEY_ID:-}" ] ||
-      [ -n "${TERRAPOD_RELEASE_ROOT_PUBLIC_KEY:-}" ] ||
-      [ -n "${TERRAPOD_REPAIR_PLATFORM:-}" ] ||
-      [ -n "${TERRAPOD_OPENSSL:-}" ]; then
-      fatal "production repair refuses release trust, endpoint, platform, and verifier overrides"
-    fi
-    release_base="$OFFICIAL_RELEASE_BASE_URL"
-    root_key_id="$EMBEDDED_RELEASE_ROOT_KEY_ID"
-    root_public_key="$EMBEDDED_RELEASE_ROOT_PUBLIC_KEY"
-  fi
+  release_base="$OFFICIAL_RELEASE_BASE_URL"
+  root_key_id="$EMBEDDED_RELEASE_ROOT_KEY_ID"
+  root_public_key="$EMBEDDED_RELEASE_ROOT_PUBLIC_KEY"
 
-  case "$release_base" in https://*) ;; *) fatal "release endpoint must use HTTPS" ;; esac
+  case "$release_base" in
+    __*__|'') fatal "release endpoint is not embedded" ;;
+    https://*) ;;
+    *) fatal "release endpoint must use HTTPS" ;;
+  esac
   case "$root_key_id" in
     ''|__*__|*[!a-z0-9._-]*|.*) fatal "release root key ID is not embedded or canonical" ;;
   esac
@@ -208,8 +184,7 @@ repair_management_core() {
   releases="$terrapod_data/releases"
   cache_home="${XDG_CACHE_HOME:-$HOME/.cache}"
   repair_cache="$cache_home/terrapod/releases"
-  local_bin="$HOME/.local/bin"
-  for path in "$terrapod_data" "$releases" "$repair_cache" "$local_bin"; do
+  for path in "$terrapod_data" "$releases" "$repair_cache"; do
     [ ! -L "$path" ] || fatal "repair path must not be a symlink: $path"
     mkdir -p "$path" || fatal "failed to create repair directory: $path"
   done
@@ -271,11 +246,7 @@ repair_management_core() {
     fatal "signed release binary name does not match the platform"
 
   binary_download="$work/$binary_name"
-  source_download="$work/terrapod-source.tar.gz"
-  catalog_download="$work/resources.json"
   repair_download "$curl_bin" "$release_base/$binary_name" "$binary_download" "$binary_size"
-  repair_download "$curl_bin" "$release_base/terrapod-source.tar.gz" "$source_download" 1073741824
-  repair_download "$curl_bin" "$release_base/resources.json" "$catalog_download" 67108864
   repair_verify_file "$openssl_bin" "$binary_download" "$binary_size" "$binary_digest"
   chmod 755 "$binary_download" || fatal "failed to make verified repair binary executable"
   manifest_digest="$("$openssl_bin" dgst -sha256 -r "$manifest_file" | awk '{print $1}')" ||
@@ -284,20 +255,8 @@ repair_management_core() {
     XDG_DATA_HOME="$data_home" \
     XDG_CACHE_HOME="$cache_home" \
     "$binary_download" internal-repair-stage \
-      --manifest "$manifest_file" \
-      --signature "$signature_file" \
-      --binary "$binary_download" \
-      --source "$source_download" \
-      --catalog "$catalog_download" \
       --manifest-digest "$manifest_digest" ||
     fatal "verified Management Core could not stage and activate the signed release"
-
-  launcher_source="$terrapod_data/current/source/scripts/tpod-launcher.sh"
-  [ -f "$launcher_source" ] && [ ! -L "$launcher_source" ] ||
-    fatal "signed release does not contain the stable launcher"
-  cp "$launcher_source" "$local_bin/tpod"
-  cp "$launcher_source" "$local_bin/terrapod"
-  chmod 755 "$local_bin/tpod" "$local_bin/terrapod"
 
   repair_cleanup
   trap - 0 1 2 15

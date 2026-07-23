@@ -12,6 +12,7 @@ import (
 	"io"
 	"regexp"
 	"sort"
+	"strings"
 )
 
 const (
@@ -176,6 +177,29 @@ func (m Manifest) SourceAsset() (Asset, error) {
 
 func (m Manifest) CatalogAsset() (Asset, error) {
 	return m.singletonAsset("catalog")
+}
+
+func CompareStableVersions(left, right string) (int, error) {
+	if !stableSemVerPattern.MatchString(left) || !stableSemVerPattern.MatchString(right) {
+		return 0, errors.New("version is not stable SemVer")
+	}
+	leftParts := strings.Split(left, ".")
+	rightParts := strings.Split(right, ".")
+	for index := range leftParts {
+		if len(leftParts[index]) != len(rightParts[index]) {
+			if len(leftParts[index]) < len(rightParts[index]) {
+				return -1, nil
+			}
+			return 1, nil
+		}
+		if leftParts[index] < rightParts[index] {
+			return -1, nil
+		}
+		if leftParts[index] > rightParts[index] {
+			return 1, nil
+		}
+	}
+	return 0, nil
 }
 
 func (m Manifest) singletonAsset(kind string) (Asset, error) {

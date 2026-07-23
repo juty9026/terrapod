@@ -27,6 +27,29 @@ func TestVerifierVerifiesFixture(t *testing.T) {
 	}
 }
 
+func TestCompareStableVersions(t *testing.T) {
+	tests := []struct {
+		left, right string
+		want        int
+	}{
+		{"1.2.3", "1.2.3", 0},
+		{"1.2.4", "1.2.3", 1},
+		{"2.0.0", "10.0.0", -1},
+		{"100000000000000000000.0.0", "9.9.9", 1},
+	}
+	for _, test := range tests {
+		got, err := CompareStableVersions(test.left, test.right)
+		if err != nil || got != test.want {
+			t.Fatalf("CompareStableVersions(%q, %q)=%d,%v want %d", test.left, test.right, got, err, test.want)
+		}
+	}
+	for _, invalid := range []string{"v1.2.3", "1.2", "1.02.3", "1.2.3-beta"} {
+		if _, err := CompareStableVersions(invalid, "1.2.3"); err == nil {
+			t.Fatalf("invalid version %q accepted", invalid)
+		}
+	}
+}
+
 func TestVerifierVerifyManifest(t *testing.T) {
 	data := validManifestJSON(t)
 	privateKey := ed25519.NewKeyFromSeed(testSeed)

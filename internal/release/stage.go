@@ -27,6 +27,10 @@ type Stager struct {
 	ExpectedPlatform          Platform
 	afterSourceCopy           func()
 	beforeCommitValidation    func(string)
+	afterActivateRename       func() error
+	activateSync              func(string) error
+	beforeLauncherInstall     func(int) error
+	launcherSync              func(string) error
 }
 
 type stagedRecord struct {
@@ -182,9 +186,9 @@ func (s Stager) Stage(ctx context.Context, release VerifiedRelease, platform Pla
 	return Staged{Version: manifest.Version, Path: destination}, nil
 }
 
-// RepairAndActivate replaces only an invalid real directory for the same
-// signed version. It restores that directory if staging or activation fails.
-func (s Stager) RepairAndActivate(ctx context.Context, release VerifiedRelease, platform Platform) (Staged, error) {
+// RepairAndActivate commits a signed release and its stable launcher pair as
+// one recoverable transaction.
+func (s Stager) RepairAndActivate(ctx context.Context, release VerifiedRelease, platform Platform, launcherTargets [2]string) (Staged, error) {
 	manifest, err := s.verifyRelease(release)
 	if err != nil {
 		return Staged{}, err
@@ -197,57 +201,246 @@ func (s Stager) RepairAndActivate(ctx context.Context, release VerifiedRelease, 
 	}
 	destination := filepath.Join(s.ReleaseDir, manifest.Version)
 	info, statErr := os.Lstat(destination)
-	if errors.Is(statErr, os.ErrNotExist) {
-		staged, err := s.Stage(ctx, release, platform)
-		if err != nil {
-			return Staged{}, err
-		}
-		return staged, s.activateRepairedRelease(staged)
-	}
-	if statErr != nil {
+	releaseWasAbsent := errors.Is(statErr, os.ErrNotExist)
+	releaseBackup := ""
+	if statErr != nil && !releaseWasAbsent {
 		return Staged{}, statErr
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return Staged{}, errors.New("existing release is not a real directory")
-	}
-	if _, err := s.validateInstalledRelease(destination, manifest.Version, release.manifestData, release.signatureData); err == nil {
-		staged, err := s.Stage(ctx, release, platform)
-		if err != nil {
-			return Staged{}, err
+	if !releaseWasAbsent {
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return Staged{}, errors.New("existing release is not a real directory")
 		}
-		return staged, s.activateRepairedRelease(staged)
-	}
-	backup, err := os.MkdirTemp(s.ReleaseDir, ".repair-backup-")
-	if err != nil {
-		return Staged{}, err
-	}
-	if err := os.Remove(backup); err != nil {
-		return Staged{}, err
-	}
-	if err := os.Rename(destination, backup); err != nil {
-		return Staged{}, err
+		if _, err := s.validateInstalledRelease(destination, manifest.Version, release.manifestData, release.signatureData); err != nil {
+			releaseBackup, err = reserveSiblingPath(s.ReleaseDir, ".repair-backup-")
+			if err != nil {
+				return Staged{}, err
+			}
+			if err := os.Rename(destination, releaseBackup); err != nil {
+				return Staged{}, err
+			}
+		}
 	}
 	staged, err := s.Stage(ctx, release, platform)
 	if err != nil {
-		return Staged{}, errors.Join(err, restoreReplacedRelease(destination, backup))
-	}
-	if err := s.activateRepairedRelease(staged); err != nil {
-		return Staged{}, errors.Join(err, restoreReplacedRelease(destination, backup))
-	}
-	makeWritableForCleanup(backup)
-	if err := os.RemoveAll(backup); err != nil {
+		if releaseBackup != "" {
+			err = errors.Join(err, restoreReplacedRelease(destination, releaseBackup))
+		}
 		return Staged{}, err
+	}
+	if _, err := s.validateInstalledRelease(staged.Path, manifest.Version, release.manifestData, release.signatureData); err != nil {
+		return Staged{}, errors.Join(err, s.rollbackRepairRelease(destination, releaseBackup, releaseWasAbsent))
+	}
+	if err := s.installLaunchersAndActivate(staged, launcherTargets); err != nil {
+		return Staged{}, errors.Join(err, s.rollbackRepairRelease(destination, releaseBackup, releaseWasAbsent))
+	}
+	if releaseBackup != "" {
+		makeWritableForCleanup(releaseBackup)
+		_ = os.RemoveAll(releaseBackup)
 	}
 	return staged, nil
 }
 
-func (s Stager) activateRepairedRelease(staged Staged) error {
-	launcher := filepath.Join(staged.Path, "source", "scripts", "tpod-launcher.sh")
-	info, err := os.Lstat(launcher)
-	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() == 0 {
-		return errors.New("signed release does not contain a regular stable launcher")
+func reserveSiblingPath(parent, pattern string) (string, error) {
+	file, err := os.CreateTemp(parent, pattern)
+	if err != nil {
+		return "", err
 	}
-	return s.Activate(staged.Version)
+	name := file.Name()
+	if err := file.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Remove(name); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+func (s Stager) rollbackRepairRelease(destination, backup string, wasAbsent bool) error {
+	if backup != "" {
+		return restoreReplacedRelease(destination, backup)
+	}
+	if !wasAbsent {
+		return nil
+	}
+	if _, err := os.Lstat(destination); err == nil {
+		makeWritableForCleanup(destination)
+		if err := os.RemoveAll(destination); err != nil {
+			return err
+		}
+		return syncDirectory(filepath.Dir(destination))
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+type launcherBackup struct {
+	destination string
+	backup      string
+	existed     bool
+	prepared    bool
+}
+
+func (s Stager) installLaunchersAndActivate(staged Staged, targets [2]string) error {
+	parent, err := validateLauncherTargets(targets)
+	if err != nil {
+		return err
+	}
+	if err := ensureRealDirectory(parent, 0o755); err != nil {
+		return err
+	}
+	sourceRoot, err := os.OpenRoot(staged.Path)
+	if err != nil {
+		return err
+	}
+	defer sourceRoot.Close()
+	source, err := sourceRoot.Open("source/scripts/tpod-launcher.sh")
+	if err != nil {
+		return errors.New("signed release does not contain the stable launcher")
+	}
+	sourceInfo, err := source.Stat()
+	if err != nil || !sourceInfo.Mode().IsRegular() || sourceInfo.Size() <= 0 || sourceInfo.Size() > MaxManifestSize {
+		_ = source.Close()
+		return errors.New("signed release does not contain a bounded regular stable launcher")
+	}
+	launcherData, readErr := io.ReadAll(io.LimitReader(source, MaxManifestSize+1))
+	closeErr := source.Close()
+	if readErr != nil || closeErr != nil || int64(len(launcherData)) != sourceInfo.Size() {
+		return errors.New("failed to read signed stable launcher")
+	}
+	temporaries := [2]string{}
+	for index := range targets {
+		temporary, err := writeLauncherTemporary(parent, launcherData)
+		if err != nil {
+			cleanupLauncherTemporaries(temporaries)
+			return err
+		}
+		temporaries[index] = temporary
+	}
+	defer cleanupLauncherTemporaries(temporaries)
+	backups := [2]launcherBackup{}
+	for index, destination := range targets {
+		backups[index] = launcherBackup{destination: destination}
+		info, err := os.Lstat(destination)
+		if errors.Is(err, os.ErrNotExist) {
+			backups[index].prepared = true
+			continue
+		}
+		if err != nil {
+			_ = rollbackLaunchers(backups)
+			return err
+		}
+		if info.IsDir() {
+			_ = rollbackLaunchers(backups)
+			return fmt.Errorf("launcher destination is a directory: %s", destination)
+		}
+		backup, err := reserveSiblingPath(parent, ".launcher-backup-")
+		if err != nil {
+			_ = rollbackLaunchers(backups)
+			return err
+		}
+		if err := os.Rename(destination, backup); err != nil {
+			_ = rollbackLaunchers(backups)
+			return err
+		}
+		backups[index].backup = backup
+		backups[index].existed = true
+		backups[index].prepared = true
+	}
+	for index, destination := range targets {
+		if s.beforeLauncherInstall != nil {
+			if err := s.beforeLauncherInstall(index); err != nil {
+				return errors.Join(err, rollbackLaunchers(backups))
+			}
+		}
+		if err := os.Rename(temporaries[index], destination); err != nil {
+			return errors.Join(err, rollbackLaunchers(backups))
+		}
+		temporaries[index] = ""
+	}
+	if err := s.syncLauncherDirectory(parent); err != nil {
+		return errors.Join(err, rollbackLaunchers(backups))
+	}
+	for _, destination := range targets {
+		info, err := os.Lstat(destination)
+		if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o755 {
+			return errors.Join(errors.New("stable launcher postcondition failed"), rollbackLaunchers(backups))
+		}
+	}
+	if err := s.Activate(staged.Version); err != nil {
+		return errors.Join(err, rollbackLaunchers(backups))
+	}
+	for _, backup := range backups {
+		if backup.backup != "" {
+			_ = os.Remove(backup.backup)
+		}
+	}
+	return nil
+}
+
+func validateLauncherTargets(targets [2]string) (string, error) {
+	if !filepath.IsAbs(targets[0]) || !filepath.IsAbs(targets[1]) ||
+		filepath.Base(targets[0]) != "tpod" || filepath.Base(targets[1]) != "terrapod" ||
+		filepath.Dir(targets[0]) != filepath.Dir(targets[1]) {
+		return "", errors.New("repair launcher targets are invalid")
+	}
+	return filepath.Dir(targets[0]), nil
+}
+
+func writeLauncherTemporary(parent string, data []byte) (string, error) {
+	file, err := os.CreateTemp(parent, ".launcher-stage-")
+	if err != nil {
+		return "", err
+	}
+	name := file.Name()
+	if err := file.Chmod(0o755); err != nil {
+		_ = file.Close()
+		_ = os.Remove(name)
+		return "", err
+	}
+	_, writeErr := file.Write(data)
+	closeErr := errors.Join(file.Sync(), file.Close())
+	if writeErr != nil || closeErr != nil {
+		_ = os.Remove(name)
+		return "", errors.Join(writeErr, closeErr)
+	}
+	return name, nil
+}
+
+func cleanupLauncherTemporaries(paths [2]string) {
+	for _, path := range paths {
+		if path != "" {
+			_ = os.Remove(path)
+		}
+	}
+}
+
+func rollbackLaunchers(backups [2]launcherBackup) error {
+	var result error
+	for index := len(backups) - 1; index >= 0; index-- {
+		entry := backups[index]
+		if entry.destination == "" || !entry.prepared {
+			continue
+		}
+		if err := os.Remove(entry.destination); err != nil && !errors.Is(err, os.ErrNotExist) {
+			result = errors.Join(result, err)
+			continue
+		}
+		if entry.existed {
+			result = errors.Join(result, os.Rename(entry.backup, entry.destination))
+		}
+	}
+	if parent := filepath.Dir(backups[0].destination); parent != "." && parent != "" {
+		result = errors.Join(result, syncDirectory(parent))
+	}
+	return result
+}
+
+func (s Stager) syncLauncherDirectory(path string) error {
+	if s.launcherSync != nil {
+		return s.launcherSync(path)
+	}
+	return syncDirectory(path)
 }
 
 func restoreReplacedRelease(destination, backup string) error {
@@ -259,7 +452,10 @@ func restoreReplacedRelease(destination, backup string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	return os.Rename(backup, destination)
+	if err := os.Rename(backup, destination); err != nil {
+		return err
+	}
+	return syncDirectory(filepath.Dir(destination))
 }
 
 func (s Stager) expectedPlatform() Platform {
@@ -290,9 +486,18 @@ func (s Stager) Activate(version string) error {
 	if _, err := s.validateInstalledRelease(destination, version, nil, nil); err != nil {
 		return fmt.Errorf("validate release target: %w", err)
 	}
-	if info, err := os.Lstat(s.ActiveRelease); err == nil && info.Mode()&os.ModeSymlink == 0 {
-		return errors.New("current release path is not a symlink")
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+	oldTarget := ""
+	oldExists := false
+	if info, err := os.Lstat(s.ActiveRelease); err == nil {
+		if info.Mode()&os.ModeSymlink == 0 {
+			return errors.New("current release path is not a symlink")
+		}
+		oldTarget, err = os.Readlink(s.ActiveRelease)
+		if err != nil {
+			return err
+		}
+		oldExists = true
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	parent := filepath.Dir(s.ActiveRelease)
@@ -311,17 +516,68 @@ func (s Stager) Activate(version string) error {
 		return err
 	}
 	defer os.Remove(temp)
-	target, err := filepath.Rel(parent, destination)
-	if err != nil || target == ".." || strings.HasPrefix(target, ".."+string(filepath.Separator)) {
+	intendedTarget, err := filepath.Rel(parent, destination)
+	if err != nil || intendedTarget == ".." || strings.HasPrefix(intendedTarget, ".."+string(filepath.Separator)) {
 		return errors.New("release target escapes data directory")
 	}
-	if err := os.Symlink(target, temp); err != nil {
+	if err := os.Symlink(intendedTarget, temp); err != nil {
 		return err
 	}
 	if err := os.Rename(temp, s.ActiveRelease); err != nil {
 		return fmt.Errorf("activate release: %w", err)
 	}
-	return syncDirectory(parent)
+	var commitErr error
+	if s.afterActivateRename != nil {
+		commitErr = s.afterActivateRename()
+	}
+	if commitErr == nil {
+		target, err := os.Readlink(s.ActiveRelease)
+		if err != nil || target != intendedTarget {
+			commitErr = errors.New("active release postcondition failed")
+		}
+	}
+	if commitErr == nil {
+		commitErr = s.syncActiveDirectory(parent)
+	}
+	if commitErr != nil {
+		return errors.Join(commitErr, s.restoreActiveRelease(parent, oldTarget, oldExists))
+	}
+	return nil
+}
+
+func (s Stager) syncActiveDirectory(path string) error {
+	if s.activateSync != nil {
+		return s.activateSync(path)
+	}
+	return syncDirectory(path)
+}
+
+func (s Stager) restoreActiveRelease(parent, oldTarget string, oldExists bool) error {
+	if !oldExists {
+		if err := os.Remove(s.ActiveRelease); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return s.syncActiveDirectory(parent)
+	}
+	temporary, err := os.CreateTemp(parent, ".current-restore-")
+	if err != nil {
+		return err
+	}
+	name := temporary.Name()
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	defer os.Remove(name)
+	if err := os.Remove(name); err != nil {
+		return err
+	}
+	if err := os.Symlink(oldTarget, name); err != nil {
+		return err
+	}
+	if err := os.Rename(name, s.ActiveRelease); err != nil {
+		return err
+	}
+	return s.syncActiveDirectory(parent)
 }
 
 // LoadActive re-verifies the signed manifest and every staged artifact before

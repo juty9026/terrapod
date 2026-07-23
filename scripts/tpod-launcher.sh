@@ -2,7 +2,7 @@
 set -eu
 
 INSTALLER_VERSION="v1.0.0"
-INSTALLER_URL="https://raw.githubusercontent.com/juty9026/terrapod/$INSTALLER_VERSION/install.sh"
+INSTALLER_URL="https://github.com/juty9026/terrapod/releases/download/$INSTALLER_VERSION/install.sh"
 
 fatal() {
   printf '%s\n' "tpod launcher: $*" >&2
@@ -30,7 +30,8 @@ valid_release_version() {
   return 0
 }
 
-uid="$(id -u)" || fatal "failed to determine the effective user"
+[ -x /usr/bin/id ] || fatal "trusted /usr/bin/id is unavailable"
+uid="$(/usr/bin/id -u)" || fatal "failed to determine the effective user"
 case "$uid" in
   0)
     fatal "refusing to run as root"

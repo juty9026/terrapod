@@ -12,6 +12,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -101,6 +102,7 @@ func TestStagerStagesAndAtomicallyActivatesRelease(t *testing.T) {
 func TestRepairAndActivateReplacesPartialSameVersionAndRestoresItOnFailure(t *testing.T) {
 	root := realReleaseTempDir(t)
 	stager := testStager(Stager{ReleaseDir: filepath.Join(root, "releases"), ActiveRelease: filepath.Join(root, "current")})
+	launchers := [2]string{filepath.Join(root, "bin", "tpod"), filepath.Join(root, "bin", "terrapod")}
 	release := stagedFixture(t, root, Platform{OS: "linux", Arch: "amd64"}, sourceTar(t, map[string]string{"README.md": "hello", "scripts/tpod-launcher.sh": "#!/bin/sh\n"}))
 	partial := filepath.Join(stager.ReleaseDir, "1.2.3")
 	if err := os.MkdirAll(filepath.Join(partial, "bin"), 0o755); err != nil {
@@ -121,7 +123,7 @@ func TestRepairAndActivateReplacesPartialSameVersionAndRestoresItOnFailure(t *te
 	if err := os.WriteFile(release.Files[binary.Name], []byte("corrupt"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := stager.RepairAndActivate(context.Background(), release, Platform{OS: "linux", Arch: "amd64"}); err == nil {
+	if _, err := stager.RepairAndActivate(context.Background(), release, Platform{OS: "linux", Arch: "amd64"}, launchers); err == nil {
 		t.Fatal("repair accepted a corrupt signed asset")
 	}
 	if got, err := os.ReadFile(filepath.Join(partial, "bin", "tpod")); err != nil || string(got) != "broken" {
@@ -131,7 +133,7 @@ func TestRepairAndActivateReplacesPartialSameVersionAndRestoresItOnFailure(t *te
 	if err := os.WriteFile(release.Files[binary.Name], original, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	staged, err := stager.RepairAndActivate(context.Background(), release, Platform{OS: "linux", Arch: "amd64"})
+	staged, err := stager.RepairAndActivate(context.Background(), release, Platform{OS: "linux", Arch: "amd64"}, launchers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,11 +152,204 @@ func TestRepairAndActivateDoesNotActivateReleaseWithoutLauncher(t *testing.T) {
 	if err := os.Symlink(filepath.Join("releases", "0.9.0"), stager.ActiveRelease); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := stager.RepairAndActivate(context.Background(), release, Platform{OS: "linux", Arch: "amd64"}); err == nil {
+	launchers := [2]string{filepath.Join(root, "bin", "tpod"), filepath.Join(root, "bin", "terrapod")}
+	if _, err := stager.RepairAndActivate(context.Background(), release, Platform{OS: "linux", Arch: "amd64"}, launchers); err == nil {
 		t.Fatal("release without stable launcher activated")
 	}
 	if target, err := os.Readlink(stager.ActiveRelease); err != nil || target != filepath.Join("releases", "0.9.0") {
 		t.Fatalf("current=%q err=%v", target, err)
+	}
+}
+
+func TestRepairAndActivateRollsBackLaunchersAndCurrentOnCommitFailures(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*Stager)
+	}{
+		{"first launcher", func(s *Stager) {
+			s.beforeLauncherInstall = func(index int) error {
+				if index == 0 {
+					return errors.New("first launcher failure")
+				}
+				return nil
+			}
+		}},
+		{"second launcher", func(s *Stager) {
+			s.beforeLauncherInstall = func(index int) error {
+				if index == 1 {
+					return errors.New("second launcher failure")
+				}
+				return nil
+			}
+		}},
+		{"launcher fsync", func(s *Stager) {
+			s.launcherSync = func(string) error { return errors.New("launcher fsync failure") }
+		}},
+		{"activation", func(s *Stager) {
+			s.afterActivateRename = func() error { return errors.New("activation failure") }
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := realReleaseTempDir(t)
+			stager := testStager(Stager{ReleaseDir: filepath.Join(root, "releases"), ActiveRelease: filepath.Join(root, "current")})
+			tt.configure(&stager)
+			release := stagedFixture(t, root, Platform{OS: "linux", Arch: "amd64"}, sourceTar(t, map[string]string{"scripts/tpod-launcher.sh": "#!/bin/sh\nnew\n"}))
+			if err := os.MkdirAll(filepath.Join(stager.ReleaseDir, "0.9.0"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Join("releases", "0.9.0"), stager.ActiveRelease); err != nil {
+				t.Fatal(err)
+			}
+			launcherDir := filepath.Join(root, "bin")
+			if err := os.MkdirAll(launcherDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			targets := [2]string{filepath.Join(launcherDir, "tpod"), filepath.Join(launcherDir, "terrapod")}
+			for _, target := range targets {
+				if err := os.WriteFile(target, []byte("sentinel:"+filepath.Base(target)), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := stager.RepairAndActivate(context.Background(), release, Platform{OS: "linux", Arch: "amd64"}, targets); err == nil {
+				t.Fatal("injected transaction failure succeeded")
+			}
+			if target, err := os.Readlink(stager.ActiveRelease); err != nil || target != filepath.Join("releases", "0.9.0") {
+				t.Fatalf("current=%q err=%v", target, err)
+			}
+			for _, target := range targets {
+				got, err := os.ReadFile(target)
+				if err != nil || string(got) != "sentinel:"+filepath.Base(target) {
+					t.Fatalf("launcher %s=%q err=%v", target, got, err)
+				}
+			}
+			if _, err := os.Lstat(filepath.Join(stager.ReleaseDir, "1.2.3")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("failed repair left candidate release: %v", err)
+			}
+		})
+	}
+}
+
+func TestRepairAndActivateReplacesLauncherSymlinkWithoutFollowingIt(t *testing.T) {
+	root := realReleaseTempDir(t)
+	stager := testStager(Stager{ReleaseDir: filepath.Join(root, "releases"), ActiveRelease: filepath.Join(root, "current")})
+	release := stagedFixture(t, root, Platform{OS: "linux", Arch: "amd64"}, sourceTar(t, map[string]string{"scripts/tpod-launcher.sh": "#!/bin/sh\nnew\n"}))
+	launcherDir := filepath.Join(root, "bin")
+	if err := os.MkdirAll(launcherDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(root, "outside")
+	if err := os.WriteFile(outside, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	targets := [2]string{filepath.Join(launcherDir, "tpod"), filepath.Join(launcherDir, "terrapod")}
+	if err := os.Symlink(outside, targets[0]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stager.RepairAndActivate(context.Background(), release, Platform{OS: "linux", Arch: "amd64"}, targets); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Lstat(targets[0]); err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("tpod mode=%v err=%v", info.Mode(), err)
+	}
+	if got, err := os.ReadFile(outside); err != nil || string(got) != "outside" {
+		t.Fatalf("outside=%q err=%v", got, err)
+	}
+}
+
+func TestRepairAndActivatePreservesUnpreparedLauncherOnBackupFailure(t *testing.T) {
+	root := realReleaseTempDir(t)
+	stager := testStager(Stager{ReleaseDir: filepath.Join(root, "releases"), ActiveRelease: filepath.Join(root, "current")})
+	release := stagedFixture(t, root, Platform{OS: "linux", Arch: "amd64"}, sourceTar(t, map[string]string{"scripts/tpod-launcher.sh": "#!/bin/sh\nnew\n"}))
+	launcherDir := filepath.Join(root, "bin")
+	if err := os.MkdirAll(launcherDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	targets := [2]string{filepath.Join(launcherDir, "tpod"), filepath.Join(launcherDir, "terrapod")}
+	if err := os.WriteFile(targets[0], []byte("sentinel"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(targets[1], 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stager.RepairAndActivate(context.Background(), release, Platform{OS: "linux", Arch: "amd64"}, targets); err == nil {
+		t.Fatal("launcher directory destination accepted")
+	}
+	if got, err := os.ReadFile(targets[0]); err != nil || string(got) != "sentinel" {
+		t.Fatalf("first launcher=%q err=%v", got, err)
+	}
+	if info, err := os.Lstat(targets[1]); err != nil || !info.IsDir() {
+		t.Fatalf("second launcher info=%v err=%v", info, err)
+	}
+}
+
+func TestActivateRestoresOldCurrentOnSyncAndPostconditionFailure(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		configure func(*Stager)
+	}{
+		{"sync", func(s *Stager) {
+			calls := 0
+			s.activateSync = func(path string) error {
+				calls++
+				if calls == 1 {
+					return errors.New("sync failure")
+				}
+				return syncDirectory(path)
+			}
+		}},
+		{"postcondition", func(s *Stager) {
+			s.afterActivateRename = func() error {
+				if err := os.Remove(s.ActiveRelease); err != nil {
+					return err
+				}
+				return os.Symlink("releases/substituted", s.ActiveRelease)
+			}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := realReleaseTempDir(t)
+			stager := testStager(Stager{ReleaseDir: filepath.Join(root, "releases"), ActiveRelease: filepath.Join(root, "current")})
+			release := stagedFixture(t, root, Platform{OS: "linux", Arch: "amd64"}, sourceTar(t, map[string]string{"ok": "ok"}))
+			staged, err := stager.Stage(context.Background(), release, Platform{OS: "linux", Arch: "amd64"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("releases/0.9.0-exact", stager.ActiveRelease); err != nil {
+				t.Fatal(err)
+			}
+			test.configure(&stager)
+			if err := stager.Activate(staged.Version); err == nil {
+				t.Fatal("injected activation failure succeeded")
+			}
+			if target, err := os.Readlink(stager.ActiveRelease); err != nil || target != "releases/0.9.0-exact" {
+				t.Fatalf("current=%q err=%v", target, err)
+			}
+		})
+	}
+}
+
+func TestActivateRestoresAbsentCurrentOnSyncFailure(t *testing.T) {
+	root := realReleaseTempDir(t)
+	stager := testStager(Stager{ReleaseDir: filepath.Join(root, "releases"), ActiveRelease: filepath.Join(root, "current")})
+	release := stagedFixture(t, root, Platform{OS: "linux", Arch: "amd64"}, sourceTar(t, map[string]string{"ok": "ok"}))
+	staged, err := stager.Stage(context.Background(), release, Platform{OS: "linux", Arch: "amd64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	stager.activateSync = func(path string) error {
+		calls++
+		if calls == 1 {
+			return errors.New("sync failure")
+		}
+		return syncDirectory(path)
+	}
+	if err := stager.Activate(staged.Version); err == nil {
+		t.Fatal("injected activation sync failure succeeded")
+	}
+	if _, err := os.Lstat(stager.ActiveRelease); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("current was not restored to absence: %v", err)
 	}
 }
 
