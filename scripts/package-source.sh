@@ -32,7 +32,7 @@ mkdir -p "$(dirname "$output")"
 # Git trees contain tracked files in bytewise path order. git archive emits
 # their recorded modes with numeric owner/group 0; --mtime binds every entry
 # to the tagged commit time. gzip -n removes its own timestamp and filename.
-LC_ALL=C git -C "$root" archive --format=tar --mtime="@$timestamp" "$tag_commit" |
+LC_ALL=C git -C "$root" archive --format=tar --mtime="@$timestamp" "${tag_commit}^{tree}" |
   gzip -n >"$temporary"
 mv "$temporary" "$output"
 trap - EXIT HUP INT TERM
