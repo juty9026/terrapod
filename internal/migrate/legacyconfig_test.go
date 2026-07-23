@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -248,6 +249,42 @@ func TestApplyConfigConversionRemovesNewJSONWhenLegacyRewriteFails(t *testing.T)
 	}
 	if got, _ := os.ReadFile(legacyPath); !bytes.Equal(got, original) {
 		t.Fatal("failed atomic rewrite changed legacy config")
+	}
+}
+
+func TestApplyConfigConversionRestoresBothConfigsAfterPostRenameFailure(t *testing.T) {
+	root := t.TempDir()
+	legacyPath := filepath.Join(root, "legacy", "chezmoi.toml")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	original := mustRead(t, "testdata/chezmoi-current.toml")
+	if err := os.WriteFile(legacyPath, original, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	conversion, err := ConvertLegacyConfig(original, legacySchema())
+	if err != nil {
+		t.Fatal(err)
+	}
+	injected := errors.New("injected post-rename failure")
+	afterLegacyRename = func() error { return injected }
+	t.Cleanup(func() { afterLegacyRename = nil })
+
+	terrapodPath := filepath.Join(root, "independent", "config.json")
+	err = ApplyConfigConversion(legacyPath, terrapodPath, conversion, filepath.Join(root, "backup"))
+	if !errors.Is(err, injected) {
+		t.Fatalf("error = %v, want injected post-rename failure", err)
+	}
+	got, readErr := os.ReadFile(legacyPath)
+	if readErr != nil || !bytes.Equal(got, original) {
+		t.Fatalf("legacy config was not restored exactly: %v", readErr)
+	}
+	info, _ := os.Stat(legacyPath)
+	if info.Mode().Perm() != 0o640 {
+		t.Fatalf("restored legacy mode = %o, want 640", info.Mode().Perm())
+	}
+	if _, err := os.Lstat(terrapodPath); !os.IsNotExist(err) {
+		t.Fatalf("independent config remains after rollback: %v", err)
 	}
 }
 

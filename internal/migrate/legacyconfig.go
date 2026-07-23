@@ -39,6 +39,8 @@ var deprecatedManagedKeys = map[string]bool{
 	"terrapodPreset":            true,
 }
 
+var afterLegacyRename func() error
+
 func ConvertLegacyConfig(input []byte, schema model.ConfigSchema) (ConfigConversion, error) {
 	if bytes.IndexByte(input, 0) >= 0 {
 		return ConfigConversion{}, errors.New("legacy config contains NUL")
@@ -166,7 +168,13 @@ func ApplyConfigConversion(chezmoiPath, terrapodPath string, value ConfigConvers
 	if err := writeBackup(filepath.Join(backupDir, filepath.Base(chezmoiPath)), original, legacyInfo.Mode().Perm()); err != nil {
 		return fmt.Errorf("back up legacy chezmoi config: %w", err)
 	}
-	if err := writeAtomicBytes(chezmoiPath, value.RewrittenChezmoi, legacyInfo.Mode().Perm()); err != nil {
+	replaced, err := writeAtomicBytes(chezmoiPath, value.RewrittenChezmoi, legacyInfo.Mode().Perm(), afterLegacyRename)
+	if err != nil {
+		if replaced {
+			if _, restoreErr := writeAtomicBytes(chezmoiPath, original, legacyInfo.Mode().Perm(), nil); restoreErr != nil {
+				return fmt.Errorf("rewrite legacy chezmoi config: %v; restore original legacy config: %w", err, restoreErr)
+			}
+		}
 		return fmt.Errorf("rewrite legacy chezmoi config: %w", err)
 	}
 	keepNewConfig = true
@@ -370,36 +378,44 @@ func writeBackup(path string, contents []byte, mode os.FileMode) error {
 	return file.Close()
 }
 
-func writeAtomicBytes(path string, contents []byte, mode os.FileMode) error {
+func writeAtomicBytes(path string, contents []byte, mode os.FileMode, afterRename func() error) (bool, error) {
 	dir := filepath.Dir(path)
 	temp, err := os.CreateTemp(dir, ".terrapod-migrate-")
 	if err != nil {
-		return err
+		return false, err
 	}
 	tempPath := temp.Name()
 	defer os.Remove(tempPath)
 	if err := temp.Chmod(mode); err != nil {
 		_ = temp.Close()
-		return err
+		return false, err
 	}
 	if _, err := temp.Write(contents); err != nil {
 		_ = temp.Close()
-		return err
+		return false, err
 	}
 	if err := temp.Sync(); err != nil {
 		_ = temp.Close()
-		return err
+		return false, err
 	}
 	if err := temp.Close(); err != nil {
-		return err
+		return false, err
 	}
 	if err := os.Rename(tempPath, path); err != nil {
-		return err
+		return false, err
+	}
+	if afterRename != nil {
+		if err := afterRename(); err != nil {
+			return true, err
+		}
 	}
 	directory, err := os.Open(dir)
 	if err != nil {
-		return err
+		return true, err
 	}
 	defer directory.Close()
-	return directory.Sync()
+	if err := directory.Sync(); err != nil {
+		return true, err
+	}
+	return true, nil
 }
