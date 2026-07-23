@@ -423,10 +423,17 @@ func productionActiveCatalog(layout paths.Layout, compiled map[string]ed25519.Pu
 	if err != nil {
 		return catalog.Verified{}, err
 	}
-	if bound.Catalog.Release != version {
-		return catalog.Verified{}, errors.New("active catalog release differs from active Terrapod release")
+	if err := validateActiveCatalogRelease(bound, version); err != nil {
+		return catalog.Verified{}, err
 	}
 	return bound, nil
+}
+
+func validateActiveCatalogRelease(bound catalog.Verified, version string) error {
+	if bound.Catalog.Release != version {
+		return errors.New("active catalog release differs from active Terrapod release")
+	}
+	return nil
 }
 
 func productionSelfCheck(layout paths.Layout, compiled map[string]ed25519.PublicKey, releaseDir, expectedDigest string) error {

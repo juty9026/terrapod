@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -102,4 +104,70 @@ func TestRunRejectsInvalidReleaseInputs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRunRendersDevelopmentCatalogForStableReleaseBeforeHashing(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source.json")
+	outputCatalog := filepath.Join(dir, "resources.json")
+	sourceData := []byte(`{"version":1,"release":"development","config":{"version":1,"fields":[]},"resources":[]}` + "\n")
+	if err := os.WriteFile(source, sourceData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	args := []string{
+		"--version", "1.2.3", "--catalog-schema", "1", "--state-schema", "1",
+		"--catalog-source", source, "--catalog-output", outputCatalog,
+		"--asset", "binary,darwin,amd64," + write("tpod-darwin-amd64"),
+		"--asset", "binary,darwin,arm64," + write("tpod-darwin-arm64"),
+		"--asset", "binary,linux,amd64," + write("tpod-linux-amd64"),
+		"--asset", "binary,linux,arm64," + write("tpod-linux-arm64"),
+		"--asset", "source,,," + write("terrapod-source.tar.gz"),
+		"--asset", "catalog,,," + outputCatalog,
+	}
+	var first, second bytes.Buffer
+	if err := run(args, &first); err != nil {
+		t.Fatal(err)
+	}
+	firstCatalog, err := os.ReadFile(outputCatalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run(args, &second); err != nil {
+		t.Fatal(err)
+	}
+	secondCatalog, _ := os.ReadFile(outputCatalog)
+	if !bytes.Equal(firstCatalog, secondCatalog) || first.String() != second.String() {
+		t.Fatal("rendered catalog or manifest is not deterministic")
+	}
+	var rendered struct {
+		Release string `json:"release"`
+	}
+	if err := json.Unmarshal(firstCatalog, &rendered); err != nil || rendered.Release != "1.2.3" {
+		t.Fatalf("rendered catalog release=%q err=%v", rendered.Release, err)
+	}
+	unchanged, _ := os.ReadFile(source)
+	if !bytes.Equal(unchanged, sourceData) {
+		t.Fatal("rendering modified the development source catalog")
+	}
+	var manifest release.Manifest
+	if err := json.Unmarshal(first.Bytes(), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	for _, asset := range manifest.Assets {
+		if asset.Kind == "catalog" {
+			sum := sha256.Sum256(firstCatalog)
+			if asset.SHA256 != hex.EncodeToString(sum[:]) {
+				t.Fatalf("catalog digest=%q, want rendered digest", asset.SHA256)
+			}
+			return
+		}
+	}
+	t.Fatal("catalog asset is missing")
 }

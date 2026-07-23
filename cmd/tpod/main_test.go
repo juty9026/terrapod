@@ -30,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/juty9026/terrapod/internal/catalog"
 	"github.com/juty9026/terrapod/internal/chezmoi"
 	"github.com/juty9026/terrapod/internal/cli"
 	"github.com/juty9026/terrapod/internal/execx"
@@ -41,6 +42,17 @@ import (
 	"github.com/juty9026/terrapod/internal/resource/managementcore"
 	"github.com/juty9026/terrapod/internal/state"
 )
+
+func TestProductionActiveCatalogRequiresPublishedReleaseVersion(t *testing.T) {
+	published := catalog.Verified{Catalog: model.Catalog{Release: "1.2.3"}}
+	if err := validateActiveCatalogRelease(published, "1.2.3"); err != nil {
+		t.Fatalf("published catalog rejected: %v", err)
+	}
+	development := catalog.Verified{Catalog: model.Catalog{Release: "development"}}
+	if err := validateActiveCatalogRelease(development, "1.2.3"); err == nil {
+		t.Fatal("production loader accepted development source catalog")
+	}
+}
 
 func TestCompiledReleaseRootsRequireCanonicalCompleteLdflags(t *testing.T) {
 	oldID, oldKey := releaseRootKeyID, releaseRootPublicKey

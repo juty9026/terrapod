@@ -75,9 +75,10 @@ jobs:
           done
           artifacts/tpod-linux-amd64 internal-release-root-check
           cp "$RUNNER_TEMP/terrapod-source.tar.gz" artifacts/terrapod-source.tar.gz
-          cp catalog/v1/resources.json artifacts/resources.json
           go run ./cmd/release-manifest \
             --version "$version" --catalog-schema 1 --state-schema 1 \
+            --catalog-source catalog/v1/resources.json \
+            --catalog-output artifacts/resources.json \
             --asset binary,darwin,amd64,artifacts/tpod-darwin-amd64 \
             --asset binary,darwin,arm64,artifacts/tpod-darwin-arm64 \
             --asset binary,linux,amd64,artifacts/tpod-linux-amd64 \

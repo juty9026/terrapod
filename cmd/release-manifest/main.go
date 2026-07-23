@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/juty9026/terrapod/internal/model"
 	"github.com/juty9026/terrapod/internal/release"
 )
 
@@ -44,6 +45,8 @@ func run(args []string, output io.Writer) error {
 	version := flags.String("version", "", "stable SemVer without v prefix")
 	catalogSchema := flags.Int("catalog-schema", 0, "catalog schema version")
 	stateSchema := flags.Int("state-schema", 0, "state schema version")
+	catalogSource := flags.String("catalog-source", "", "development catalog source to render")
+	catalogOutput := flags.String("catalog-output", "", "rendered release catalog output")
 	flags.Var(&assets, "asset", "kind,os,arch,path (repeat exactly six times)")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -62,6 +65,17 @@ func run(args []string, output io.Writer) error {
 	}
 	if *stateSchema < release.CompiledMinStateSchema || *stateSchema > release.CompiledMaxStateSchema {
 		return fmt.Errorf("state schema %d is outside the compiled range", *stateSchema)
+	}
+	if (*catalogSource == "") != (*catalogOutput == "") {
+		return errors.New("catalog-source and catalog-output must be provided together")
+	}
+	if *catalogSource != "" {
+		if !catalogAssetUsesOutput(assets, *catalogOutput) {
+			return errors.New("catalog asset must use catalog-output")
+		}
+		if err := renderCatalog(*catalogSource, *catalogOutput, *version, *catalogSchema); err != nil {
+			return err
+		}
 	}
 
 	manifestAssets := make([]release.Asset, 0, len(assets))
@@ -124,6 +138,91 @@ func run(args []string, output io.Writer) error {
 	encoder.SetEscapeHTML(false)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(manifest)
+}
+
+func renderCatalog(source, output, version string, schemaVersion int) error {
+	sourcePath, err := filepath.Abs(source)
+	if err != nil {
+		return fmt.Errorf("resolve catalog source: %w", err)
+	}
+	outputPath, err := filepath.Abs(output)
+	if err != nil {
+		return fmt.Errorf("resolve catalog output: %w", err)
+	}
+	if sourcePath == outputPath {
+		return errors.New("catalog source and output must differ")
+	}
+	file, err := os.Open(sourcePath)
+	if err != nil {
+		return fmt.Errorf("open catalog source: %w", err)
+	}
+	decoder := json.NewDecoder(file)
+	decoder.DisallowUnknownFields()
+	var value model.Catalog
+	decodeErr := decoder.Decode(&value)
+	var trailing any
+	trailingErr := decoder.Decode(&trailing)
+	closeErr := file.Close()
+	if decodeErr != nil {
+		return fmt.Errorf("decode catalog source: %w", decodeErr)
+	}
+	if !errors.Is(trailingErr, io.EOF) {
+		if trailingErr == nil {
+			trailingErr = errors.New("multiple JSON values")
+		}
+		return fmt.Errorf("decode catalog source trailing data: %w", trailingErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close catalog source: %w", closeErr)
+	}
+	if value.Release != "development" {
+		return fmt.Errorf("catalog source release %q is not development", value.Release)
+	}
+	if value.Version != schemaVersion {
+		return fmt.Errorf("catalog version %d differs from manifest schema %d", value.Version, schemaVersion)
+	}
+	value.Release = version
+
+	temp, err := os.CreateTemp(filepath.Dir(outputPath), ".resources.json-")
+	if err != nil {
+		return fmt.Errorf("create rendered catalog: %w", err)
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+	if err := temp.Chmod(0o644); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("set rendered catalog mode: %w", err)
+	}
+	encoder := json.NewEncoder(temp)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(value); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("encode rendered catalog: %w", err)
+	}
+	if err := temp.Close(); err != nil {
+		return fmt.Errorf("close rendered catalog: %w", err)
+	}
+	if err := os.Rename(tempPath, outputPath); err != nil {
+		return fmt.Errorf("publish rendered catalog: %w", err)
+	}
+	return nil
+}
+
+func catalogAssetUsesOutput(assets []string, output string) bool {
+	want, err := filepath.Abs(output)
+	if err != nil {
+		return false
+	}
+	for _, specification := range assets {
+		parts := strings.SplitN(specification, ",", 4)
+		if len(parts) != 4 || parts[0] != "catalog" {
+			continue
+		}
+		got, err := filepath.Abs(parts[3])
+		return err == nil && got == want
+	}
+	return false
 }
 
 func inspectAsset(specification string) (release.Asset, error) {

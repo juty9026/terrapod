@@ -84,9 +84,10 @@ for platform in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64; do
   printf '%s\n' "$platform" >"$assets/tpod-$platform"
 done
 cp "$tmp_dir/source-1.tar.gz" "$assets/terrapod-source.tar.gz"
-cp "$repo_root/catalog/v1/resources.json" "$assets/resources.json"
 run_go run ./cmd/release-manifest \
   --version 1.2.3 --catalog-schema 1 --state-schema 1 \
+  --catalog-source "$repo_root/catalog/v1/resources.json" \
+  --catalog-output "$assets/resources.json" \
   --asset "binary,darwin,amd64,$assets/tpod-darwin-amd64" \
   --asset "binary,darwin,arm64,$assets/tpod-darwin-arm64" \
   --asset "binary,linux,amd64,$assets/tpod-linux-amd64" \
@@ -98,6 +99,10 @@ run_go run ./cmd/release-manifest \
 catalog_digest="$(shasum -a 256 "$assets/resources.json" | awk '{print $1}')"
 grep -F "\"sha256\": \"$catalog_digest\"" "$assets/release.json" >/dev/null ||
   fail "manifest contains the catalog digest"
+grep -F '"release": "1.2.3"' "$assets/resources.json" >/dev/null ||
+  fail "published catalog is bound to the stable release version"
+grep -F '"release": "development"' "$repo_root/catalog/v1/resources.json" >/dev/null ||
+  fail "release rendering leaves the development source catalog unchanged"
 
 openssl genpkey -algorithm Ed25519 -out "$tmp_dir/private.pem" >/dev/null 2>&1
 openssl pkey -in "$tmp_dir/private.pem" -pubout -out "$tmp_dir/public.pem" >/dev/null 2>&1
@@ -118,10 +123,12 @@ for required in \
   'CGO_ENABLED: "0"' \
   'scripts/build-tpod-release.sh' \
   'scripts/package-source.sh' \
+  '--catalog-source catalog/v1/resources.json' \
+  '--catalog-output artifacts/resources.json' \
   'RELEASE_SIGNING_PRIVATE_KEY' \
   'gh release create' \
   'install.sh'; do
-  printf '%s' "$workflow" | grep -F "$required" >/dev/null ||
+  printf '%s' "$workflow" | grep -F -- "$required" >/dev/null ||
     fail "release workflow contains $required"
 done
 printf '%s' "$workflow" | grep -F 'pull-requests: write' >/dev/null &&
