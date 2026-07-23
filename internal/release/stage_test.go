@@ -315,16 +315,20 @@ func TestStagerRejectsInvalidExecutableSegments(t *testing.T) {
 	binary.LittleEndian.PutUint32(linuxNonexec[68:], uint32(elf.PF_R))
 	linuxOverflow := linuxBinary(elf.EM_X86_64)
 	binary.LittleEndian.PutUint64(linuxOverflow[72:], ^uint64(0)-1)
+	linuxZeroOutside := linuxBinary(elf.EM_X86_64)
+	binary.LittleEndian.PutUint64(linuxZeroOutside[80:], 0x1000)
 	darwinNonexec := machoBinary(0x0100000c)
 	binary.LittleEndian.PutUint32(darwinNonexec[88:], 1)
 	binary.LittleEndian.PutUint32(darwinNonexec[92:], 1)
 	darwinOverflow := machoBinary(0x0100000c)
 	binary.LittleEndian.PutUint64(darwinOverflow[72:], ^uint64(0)-1)
+	darwinUnixThread := machoBinary(0x0100000c)
+	binary.LittleEndian.PutUint32(darwinUnixThread[104:], 5)
 	tests := []struct {
 		name     string
 		platform Platform
 		body     []byte
-	}{{"ELF nonexec", Platform{"linux", "amd64"}, linuxNonexec}, {"ELF overflow", Platform{"linux", "amd64"}, linuxOverflow}, {"ELF truncated", Platform{"linux", "amd64"}, linuxBinary(elf.EM_X86_64)[:100]}, {"Mach-O nonexec", Platform{"darwin", "arm64"}, darwinNonexec}, {"Mach-O overflow", Platform{"darwin", "arm64"}, darwinOverflow}, {"Mach-O truncated", Platform{"darwin", "arm64"}, machoBinary(0x0100000c)[:110]}}
+	}{{"ELF nonexec", Platform{"linux", "amd64"}, linuxNonexec}, {"ELF overflow", Platform{"linux", "amd64"}, linuxOverflow}, {"ELF truncated", Platform{"linux", "amd64"}, linuxBinary(elf.EM_X86_64)[:100]}, {"ELF zero entry outside segment", Platform{"linux", "amd64"}, linuxZeroOutside}, {"Mach-O nonexec", Platform{"darwin", "arm64"}, darwinNonexec}, {"Mach-O overflow", Platform{"darwin", "arm64"}, darwinOverflow}, {"Mach-O truncated", Platform{"darwin", "arm64"}, machoBinary(0x0100000c)[:110]}, {"Mach-O UNIXTHREAD only", Platform{"darwin", "arm64"}, darwinUnixThread}, {"Mach-O duplicate LC_MAIN", Platform{"darwin", "arm64"}, duplicateMachMain(0x0100000c)}}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			root := realReleaseTempDir(t)
@@ -514,6 +518,16 @@ func machoBinary(cpu uint32) []byte {
 	binary.LittleEndian.PutUint32(body[92:96], 5)
 	binary.LittleEndian.PutUint32(body[104:108], 0x80000028)
 	binary.LittleEndian.PutUint32(body[108:112], 24)
+	return body
+}
+func duplicateMachMain(cpu uint32) []byte {
+	body := append(machoBinary(cpu), make([]byte, 24)...)
+	binary.LittleEndian.PutUint32(body[16:20], 3)
+	binary.LittleEndian.PutUint32(body[20:24], 120)
+	binary.LittleEndian.PutUint64(body[64:72], uint64(len(body)))
+	binary.LittleEndian.PutUint64(body[80:88], uint64(len(body)))
+	binary.LittleEndian.PutUint32(body[128:132], 0x80000028)
+	binary.LittleEndian.PutUint32(body[132:136], 24)
 	return body
 }
 

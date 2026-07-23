@@ -310,7 +310,7 @@ func validateExecutable(name string, platform Platform) error {
 			return errors.New("binary executable architecture mismatch")
 		}
 		loadable := false
-		entryValid := file.Entry == 0
+		entryValid := false
 		for _, program := range file.Progs {
 			if program.Type != elf.PT_LOAD {
 				continue
@@ -320,7 +320,7 @@ func validateExecutable(name string, platform Platform) error {
 			}
 			if program.Flags&elf.PF_X != 0 && program.Filesz > 0 {
 				loadable = true
-				if file.Entry >= program.Vaddr && file.Entry-program.Vaddr < program.Memsz {
+				if file.Entry >= program.Vaddr && file.Entry-program.Vaddr < program.Filesz {
 					entryValid = true
 				}
 			}
@@ -362,10 +362,11 @@ func validateExecutable(name string, platform Platform) error {
 				if len(raw) < 24 {
 					return errors.New("binary has truncated Mach-O entry command")
 				}
+				if entryFound {
+					return errors.New("binary has duplicate Mach-O entry commands")
+				}
 				entryFound = true
 				entryOffset = file.ByteOrder.Uint64(raw[8:16])
-			} else if command == 5 {
-				entryFound = true
 			}
 			if segment, ok := load.(*macho.Segment); ok {
 				if segment.Offset > size || segment.Filesz > size-segment.Offset || segment.Memsz < segment.Filesz {
@@ -382,17 +383,15 @@ func validateExecutable(name string, platform Platform) error {
 		if !entryFound {
 			return errors.New("binary has no Mach-O entry command")
 		}
-		if entryOffset > 0 {
-			valid := false
-			for _, load := range file.Loads {
-				if segment, ok := load.(*macho.Segment); ok && segment.Prot&4 != 0 && entryOffset >= segment.Offset && entryOffset-segment.Offset < segment.Filesz {
-					valid = true
-					break
-				}
+		valid := false
+		for _, load := range file.Loads {
+			if segment, ok := load.(*macho.Segment); ok && segment.Prot&4 != 0 && entryOffset >= segment.Offset && entryOffset-segment.Offset < segment.Filesz {
+				valid = true
+				break
 			}
-			if !valid {
-				return errors.New("binary Mach-O entry point is outside executable segments")
-			}
+		}
+		if !valid {
+			return errors.New("binary Mach-O entry point is outside executable segments")
 		}
 		return nil
 	}
