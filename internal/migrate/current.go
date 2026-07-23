@@ -16,10 +16,19 @@ import (
 type CurrentResult struct {
 	Summary         reconcile.Summary
 	AlreadyComplete bool
+	Activated       bool
 }
 
 type CurrentPrepared struct {
-	Plan model.Plan
+	Plan       model.Plan
+	ApplyInput reconcile.ApplyInput
+	Binding    CurrentBinding
+}
+
+type CurrentBinding struct {
+	Release        string `json:"release"`
+	ManifestDigest string `json:"manifestDigest"`
+	CatalogDigest  string `json:"catalogDigest"`
 }
 
 type CurrentDependencies struct {
@@ -31,14 +40,15 @@ type CurrentDependencies struct {
 	Activate       func(context.Context, CurrentPrepared) error
 	Import         func(context.Context, CurrentPrepared) error
 	Reconcile      func(context.Context, CurrentPrepared, *state.Lock) (reconcile.Summary, error)
-	Resume         func(context.Context, model.Plan, *state.Lock) (reconcile.Summary, error)
-	FinalizeSource func(context.Context) error
+	Resume         func(context.Context, reconcile.ApplyInput, CurrentBinding, *state.Lock) (reconcile.Summary, error)
+	FinalizeSource func(context.Context, reconcile.ApplyInput, CurrentBinding, *state.Lock) error
 }
 
 type migrationMarker struct {
-	Version int        `json:"version"`
-	Phase   string     `json:"phase"`
-	Plan    model.Plan `json:"plan,omitempty"`
+	Version int                  `json:"version"`
+	Phase   string               `json:"phase"`
+	Input   reconcile.ApplyInput `json:"input,omitempty"`
+	Binding CurrentBinding       `json:"binding,omitempty"`
 }
 
 func RunCurrent(ctx context.Context, deps CurrentDependencies, printPlan func(model.Plan) error) (result CurrentResult, retErr error) {
@@ -60,7 +70,8 @@ func RunCurrent(ctx context.Context, deps CurrentDependencies, printPlan func(mo
 		return result, nil
 	}
 	if marker.Phase == "reconciled" {
-		if err := deps.FinalizeSource(ctx); err != nil {
+		result.Activated = true
+		if err := deps.FinalizeSource(ctx, marker.Input, marker.Binding, lock); err != nil {
 			return result, fmt.Errorf("migration: finalize legacy source: %w", err)
 		}
 		if err := writeMigrationMarker(deps.CompletionPath, migrationMarker{Version: 1, Phase: "complete"}); err != nil {
@@ -69,17 +80,18 @@ func RunCurrent(ctx context.Context, deps CurrentDependencies, printPlan func(mo
 		return result, nil
 	}
 	if marker.Phase == "applying" {
-		result.Summary, err = deps.Resume(ctx, marker.Plan, lock)
+		result.Activated = true
+		result.Summary, err = deps.Resume(ctx, marker.Input, marker.Binding, lock)
 		if err != nil {
 			return result, fmt.Errorf("migration: resume imported resources: %w", err)
 		}
 		if len(result.Summary.Unavailable) != 0 {
 			return result, errors.New("migration reconciliation has unavailable resources")
 		}
-		if err := writeMigrationMarker(deps.CompletionPath, migrationMarker{Version: 1, Phase: "reconciled"}); err != nil {
+		if err := writeMigrationMarker(deps.CompletionPath, migrationMarker{Version: 1, Phase: "reconciled", Input: marker.Input, Binding: marker.Binding}); err != nil {
 			return result, err
 		}
-		if err := deps.FinalizeSource(ctx); err != nil {
+		if err := deps.FinalizeSource(ctx, marker.Input, marker.Binding, lock); err != nil {
 			return result, fmt.Errorf("migration: finalize legacy source: %w", err)
 		}
 		if err := writeMigrationMarker(deps.CompletionPath, migrationMarker{Version: 1, Phase: "complete"}); err != nil {
@@ -108,10 +120,14 @@ func RunCurrent(ctx context.Context, deps CurrentDependencies, printPlan func(mo
 	if err := deps.Activate(ctx, prepared); err != nil {
 		return result, fmt.Errorf("migration: activate signed manager: %w", err)
 	}
+	result.Activated = true
 	if err := deps.Import(ctx, prepared); err != nil {
 		return result, fmt.Errorf("migration: import ownership: %w", err)
 	}
-	if err := writeMigrationMarker(deps.CompletionPath, migrationMarker{Version: 1, Phase: "applying", Plan: prepared.Plan}); err != nil {
+	if prepared.ApplyInput.Plan.ID == "" {
+		prepared.ApplyInput.Plan = prepared.Plan
+	}
+	if err := writeMigrationMarker(deps.CompletionPath, migrationMarker{Version: 1, Phase: "applying", Input: prepared.ApplyInput, Binding: prepared.Binding}); err != nil {
 		return result, err
 	}
 	result.Summary, err = deps.Reconcile(ctx, prepared, lock)
@@ -121,10 +137,10 @@ func RunCurrent(ctx context.Context, deps CurrentDependencies, printPlan func(mo
 	if len(result.Summary.Unavailable) != 0 {
 		return result, errors.New("migration reconciliation has unavailable resources")
 	}
-	if err := writeMigrationMarker(deps.CompletionPath, migrationMarker{Version: 1, Phase: "reconciled"}); err != nil {
+	if err := writeMigrationMarker(deps.CompletionPath, migrationMarker{Version: 1, Phase: "reconciled", Input: prepared.ApplyInput, Binding: prepared.Binding}); err != nil {
 		return result, err
 	}
-	if err := deps.FinalizeSource(ctx); err != nil {
+	if err := deps.FinalizeSource(ctx, prepared.ApplyInput, prepared.Binding, lock); err != nil {
 		return result, fmt.Errorf("migration: finalize legacy source: %w", err)
 	}
 	if err := writeMigrationMarker(deps.CompletionPath, migrationMarker{Version: 1, Phase: "complete"}); err != nil {
@@ -159,7 +175,8 @@ func readMigrationMarker(path string) (migrationMarker, error) {
 	var marker migrationMarker
 	if err := json.Unmarshal(contents, &marker); err != nil || marker.Version != 1 ||
 		(marker.Phase != "applying" && marker.Phase != "reconciled" && marker.Phase != "complete") ||
-		(marker.Phase == "applying" && marker.Plan.ID == "") {
+		((marker.Phase == "applying" || marker.Phase == "reconciled") &&
+			(marker.Input.Plan.ID == "" || marker.Binding.Release == "" || marker.Binding.ManifestDigest == "" || marker.Binding.CatalogDigest == "")) {
 		return migrationMarker{}, errors.New("migration: invalid completion marker")
 	}
 	return marker, nil
@@ -167,7 +184,8 @@ func readMigrationMarker(path string) (migrationMarker, error) {
 
 func writeMigrationMarker(path string, marker migrationMarker) error {
 	if marker.Version != 1 || (marker.Phase != "applying" && marker.Phase != "reconciled" && marker.Phase != "complete") ||
-		(marker.Phase == "applying" && marker.Plan.ID == "") {
+		((marker.Phase == "applying" || marker.Phase == "reconciled") &&
+			(marker.Input.Plan.ID == "" || marker.Binding.Release == "" || marker.Binding.ManifestDigest == "" || marker.Binding.CatalogDigest == "")) {
 		return errors.New("migration: invalid completion phase")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

@@ -104,8 +104,15 @@ func TestHiddenMigrateCurrentUnavailableReturnsForwardRecovery(t *testing.T) {
 		},
 	}
 	code, _, stderr := run(t, []string{"migrate-current"}, deps)
-	if code != exitUnavailable || !strings.Contains(stderr, "migration interrupted") || !strings.Contains(stderr, "tpod apply") || !strings.Contains(stderr, "install.sh --migrate") {
+	if code != exitUnavailable || !strings.Contains(stderr, "migration interrupted") || strings.Contains(stderr, "tpod apply") || !strings.Contains(stderr, "install.sh --migrate") {
 		t.Fatalf("code=%d stderr=%q", code, stderr)
+	}
+	deps.MigrateCurrent = func(context.Context, func(model.Plan) error) (migratepkg.CurrentResult, error) {
+		return migratepkg.CurrentResult{Activated: true, Summary: reconcile.Summary{Unavailable: map[model.ResourceID]string{"core.git": "conflict"}}}, errors.New("migration interrupted")
+	}
+	code, _, stderr = run(t, []string{"migrate-current"}, deps)
+	if code != exitUnavailable || !strings.Contains(stderr, "tpod apply") || !strings.Contains(stderr, "install.sh --migrate") {
+		t.Fatalf("activated code=%d stderr=%q", code, stderr)
 	}
 }
 

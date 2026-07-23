@@ -87,7 +87,12 @@ func configureCurrentMigration(deps *cli.Dependencies, layout paths.Layout, root
 					return migrate.CurrentPrepared{}, err
 				}
 				prepared = value
-				return migrate.CurrentPrepared{Plan: value.ownership.Plan}, nil
+				return migrate.CurrentPrepared{
+					Plan: value.ownership.Plan, ApplyInput: value.applyInput,
+					Binding: migrate.CurrentBinding{
+						Release: value.current.Catalog.Release, ManifestDigest: manifestDigest, CatalogDigest: value.current.Digest,
+					},
+				}, nil
 			},
 			Preflight: func(ctx context.Context, _ migrate.CurrentPrepared, _ *state.Lock) error {
 				if prepared == nil {
@@ -136,10 +141,10 @@ func configureCurrentMigration(deps *cli.Dependencies, layout paths.Layout, root
 			Reconcile: func(ctx context.Context, _ migrate.CurrentPrepared, lock *state.Lock) (reconcile.Summary, error) {
 				return prepared.engine.ApplyInputHeld(ctx, prepared.applyInput, lock)
 			},
-			Resume: func(ctx context.Context, plan model.Plan, lock *state.Lock) (reconcile.Summary, error) {
-				return resumeCurrentMigration(ctx, layout, roots, client, plan, lock)
+			Resume: func(ctx context.Context, input reconcile.ApplyInput, binding migrate.CurrentBinding, lock *state.Lock) (reconcile.Summary, error) {
+				return resumeCurrentMigration(ctx, layout, roots, client, input, binding, lock)
 			},
-			FinalizeSource: func(ctx context.Context) error {
+			FinalizeSource: func(ctx context.Context, input reconcile.ApplyInput, binding migrate.CurrentBinding, lock *state.Lock) error {
 				if _, err := os.Lstat(legacySource); errors.Is(err, os.ErrNotExist) {
 					return nil
 				}
@@ -155,12 +160,23 @@ func configureCurrentMigration(deps *cli.Dependencies, layout paths.Layout, root
 					}
 				}
 				return migrate.RemoveLegacySource(ctx, proof, git, func(context.Context) error {
-					active, err := productionActiveCatalog(layout, roots)
+					activeBinding, err := currentMigrationBinding(layout, roots)
 					if err != nil {
 						return err
 					}
-					if prepared != nil && active.Digest != prepared.current.Digest {
-						return errors.New("active signed catalog changed before source removal")
+					if activeBinding != binding {
+						return errors.New("active signed release changed before source removal")
+					}
+					_, engine, err := currentMigrationEngine(layout, client)
+					if err != nil {
+						return err
+					}
+					summary, err := engine.PreflightInputHeld(ctx, input, lock)
+					if err != nil {
+						return err
+					}
+					if len(summary.Unavailable) != 0 {
+						return errors.New("managed resources are not ready for legacy source removal")
 					}
 					return nil
 				})
@@ -351,40 +367,43 @@ func currentMigrationEngine(layout paths.Layout, client chezmoi.Client) (*state.
 	}, nil
 }
 
-func resumeCurrentMigration(ctx context.Context, layout paths.Layout, roots map[string]ed25519.PublicKey, client chezmoi.Client, plan model.Plan, lock *state.Lock) (reconcile.Summary, error) {
+func resumeCurrentMigration(ctx context.Context, layout paths.Layout, roots map[string]ed25519.PublicKey, client chezmoi.Client, input reconcile.ApplyInput, binding migrate.CurrentBinding, lock *state.Lock) (reconcile.Summary, error) {
+	activeBinding, err := currentMigrationBinding(layout, roots)
+	if err != nil {
+		return reconcile.Summary{}, err
+	}
+	if activeBinding != binding {
+		return reconcile.Summary{}, errors.New("active signed release differs from persisted migration binding")
+	}
+	_, engine, err := currentMigrationEngine(layout, client)
+	if err != nil {
+		return reconcile.Summary{}, err
+	}
+	return engine.ApplyInputHeld(ctx, input, lock)
+}
+
+func currentMigrationBinding(layout paths.Layout, roots map[string]ed25519.PublicKey) (migrate.CurrentBinding, error) {
 	current, err := productionActiveCatalog(layout, roots)
 	if err != nil {
-		return reconcile.Summary{}, err
+		return migrate.CurrentBinding{}, err
 	}
-	if current.Catalog.Release != plan.Release {
-		return reconcile.Summary{}, fmt.Errorf("active release %q differs from persisted migration release %q", current.Catalog.Release, plan.Release)
+	stager := release.Stager{
+		ReleaseDir: layout.ReleaseDir, ActiveRelease: layout.ActiveRelease,
+		Verifier: release.Verifier{CompiledKeys: roots}, ExpectedPlatform: release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH},
 	}
-	baseline, _, err := migrate.LoadLegacyBaseline(filepath.Join(layout.ActiveRelease, "source", "catalog", "v1", "legacy-current.json"))
+	version, err := stager.CurrentVersion()
 	if err != nil {
-		return reconcile.Summary{}, fmt.Errorf("load active legacy baseline: %w", err)
+		return migrate.CurrentBinding{}, err
 	}
-	cfg, err := config.Load(layout.ConfigFile)
+	_, verified, err := stager.Load(version)
 	if err != nil {
-		return reconcile.Summary{}, err
+		return migrate.CurrentBinding{}, err
 	}
-	profile, err := migrationProfile(cfg)
+	manifestDigest, err := verified.Manifest.Digest()
 	if err != nil {
-		return reconcile.Summary{}, err
+		return migrate.CurrentBinding{}, err
 	}
-	store, engine, err := currentMigrationEngine(layout, client)
-	if err != nil {
-		return reconcile.Summary{}, err
-	}
-	snapshot, err := store.Snapshot()
-	if err != nil {
-		return reconcile.Summary{}, err
-	}
-	desired := migrationDesired(current.Catalog, cfg, profile)
-	enabled, historical := migrationApplyResources(current.Catalog.Resources, baseline.Catalog.Resources, desired, snapshot.Ownership, baseline.Digest)
-	return engine.ApplyInputHeld(ctx, reconcile.ApplyInput{
-		Plan: plan, CurrentResources: append([]model.Resource(nil), current.Catalog.Resources...),
-		EnabledIDs: enabled, HistoricalResources: historical, CatalogDigest: current.Digest, Profile: profile,
-	}, lock)
+	return migrate.CurrentBinding{Release: current.Catalog.Release, ManifestDigest: manifestDigest, CatalogDigest: current.Digest}, nil
 }
 
 func persistLegacyOwnership(store *state.Store, receipts map[model.ResourceID]model.Ownership) error {

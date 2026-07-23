@@ -1621,7 +1621,7 @@ install_manager() {
       TPOD_MIGRATION_STAGED_VERSION="$release_version" \
         TPOD_MIGRATION_MANIFEST_DIGEST="$manifest_digest" \
         "$tpod_bin" migrate-current ||
-        fatal "Terrapod migration requires attention; the manager is active at $tpod_bin"
+        fatal "Terrapod migration requires attention; follow the recovery guidance above and rerun with --migrate"
       printf '%s\n' "Terrapod manager migration complete."
       ;;
     *)

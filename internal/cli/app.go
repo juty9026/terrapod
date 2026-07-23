@@ -190,11 +190,19 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 		renderApplySummary(stdout, result.Summary)
 		if err != nil {
 			fmt.Fprintln(stderr, err)
-			fmt.Fprintln(stderr, "Resolve unavailable resources and run 'tpod apply' as needed, then rerun 'install.sh --migrate' to complete legacy cleanup.")
+			if result.Activated {
+				fmt.Fprintln(stderr, "Resolve unavailable resources and run 'tpod apply' as needed, then rerun 'install.sh --migrate' to complete legacy cleanup.")
+			} else {
+				fmt.Fprintln(stderr, "Resolve the reported preflight conflicts, then rerun 'install.sh --migrate'.")
+			}
 			return exitUnavailable
 		}
 		if len(result.Summary.Unavailable) != 0 {
-			fmt.Fprintln(stderr, "Resolve unavailable resources and run 'tpod apply' as needed, then rerun 'install.sh --migrate' to complete legacy cleanup.")
+			if result.Activated {
+				fmt.Fprintln(stderr, "Resolve unavailable resources and run 'tpod apply' as needed, then rerun 'install.sh --migrate' to complete legacy cleanup.")
+			} else {
+				fmt.Fprintln(stderr, "Resolve the reported preflight conflicts, then rerun 'install.sh --migrate'.")
+			}
 			return exitUnavailable
 		}
 		return 0

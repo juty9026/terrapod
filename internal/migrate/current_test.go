@@ -56,8 +56,12 @@ func TestRunCurrentRetriesOnlySourceAfterReconciliation(t *testing.T) {
 	var order []string
 	deps := currentFixture(t, &order)
 	fail := true
-	deps.FinalizeSource = func(context.Context) error {
+	expectedBinding := CurrentBinding{Release: "1.2.3", ManifestDigest: "manifest-digest", CatalogDigest: "catalog-digest"}
+	deps.FinalizeSource = func(_ context.Context, _ reconcile.ApplyInput, binding CurrentBinding, _ *state.Lock) error {
 		order = append(order, "source")
+		if binding != expectedBinding {
+			t.Fatalf("source binding=%#v want=%#v", binding, expectedBinding)
+		}
 		if fail {
 			return errors.New("interrupted")
 		}
@@ -84,9 +88,18 @@ func TestRunCurrentResumesPersistedPlanAfterPartialReconciliation(t *testing.T) 
 	var order []string
 	deps := currentFixture(t, &order)
 	wantPlan := model.Plan{ID: "p", Release: "1.2.3", Unavailable: map[model.ResourceID]string{}}
+	wantInput := reconcile.ApplyInput{
+		Plan: wantPlan, CatalogDigest: "catalog-digest", Profile: model.ProfileMacOSTerminal,
+		HistoricalResources: map[model.ResourceID]reconcile.HistoricalResource{
+			"legacy.tool": {Resource: model.Resource{ID: "legacy.tool"}, CatalogDigest: "legacy-digest"},
+		},
+	}
 	deps.Prepare = func(context.Context) (CurrentPrepared, error) {
 		order = append(order, "prepare")
-		return CurrentPrepared{Plan: wantPlan}, nil
+		return CurrentPrepared{
+			Plan: wantPlan, ApplyInput: wantInput,
+			Binding: CurrentBinding{Release: "1.2.3", ManifestDigest: "manifest-digest", CatalogDigest: "catalog-digest"},
+		}, nil
 	}
 	deps.Reconcile = func(context.Context, CurrentPrepared, *state.Lock) (reconcile.Summary, error) {
 		order = append(order, "reconcile-partial")
@@ -104,10 +117,10 @@ func TestRunCurrentResumesPersistedPlanAfterPartialReconciliation(t *testing.T) 
 		t.Fatal("retry recomputed migration inspection")
 		return CurrentPrepared{}, nil
 	}
-	deps.Resume = func(_ context.Context, plan model.Plan, _ *state.Lock) (reconcile.Summary, error) {
+	deps.Resume = func(_ context.Context, input reconcile.ApplyInput, _ CurrentBinding, _ *state.Lock) (reconcile.Summary, error) {
 		order = append(order, "resume")
-		if !reflect.DeepEqual(plan, wantPlan) {
-			t.Fatalf("resume plan=%#v want=%#v", plan, wantPlan)
+		if !reflect.DeepEqual(input, wantInput) {
+			t.Fatalf("resume input=%#v want=%#v", input, wantInput)
 		}
 		return reconcile.Summary{Unavailable: map[model.ResourceID]string{}}, nil
 	}
@@ -127,7 +140,11 @@ func currentFixture(t *testing.T, order *[]string) CurrentDependencies {
 		LockDir: filepath.Join(root, "state"), CompletionPath: filepath.Join(root, "state", "migration-current.json"),
 		Prepare: func(context.Context) (CurrentPrepared, error) {
 			*order = append(*order, "prepare")
-			return CurrentPrepared{Plan: model.Plan{ID: "p", Unavailable: map[model.ResourceID]string{}}}, nil
+			plan := model.Plan{ID: "p", Release: "1.2.3", Unavailable: map[model.ResourceID]string{}}
+			return CurrentPrepared{
+				Plan: plan, ApplyInput: reconcile.ApplyInput{Plan: plan, CatalogDigest: "catalog-digest", Profile: model.ProfileMacOSTerminal},
+				Binding: CurrentBinding{Release: "1.2.3", ManifestDigest: "manifest-digest", CatalogDigest: "catalog-digest"},
+			}, nil
 		},
 		Preflight: func(context.Context, CurrentPrepared, *state.Lock) error {
 			*order = append(*order, "preflight")
@@ -140,10 +157,13 @@ func currentFixture(t *testing.T, order *[]string) CurrentDependencies {
 			*order = append(*order, "reconcile")
 			return reconcile.Summary{Unavailable: map[model.ResourceID]string{}}, nil
 		},
-		Resume: func(context.Context, model.Plan, *state.Lock) (reconcile.Summary, error) {
+		Resume: func(context.Context, reconcile.ApplyInput, CurrentBinding, *state.Lock) (reconcile.Summary, error) {
 			*order = append(*order, "resume")
 			return reconcile.Summary{Unavailable: map[model.ResourceID]string{}}, nil
 		},
-		FinalizeSource: func(context.Context) error { *order = append(*order, "source"); return nil },
+		FinalizeSource: func(context.Context, reconcile.ApplyInput, CurrentBinding, *state.Lock) error {
+			*order = append(*order, "source")
+			return nil
+		},
 	}
 }

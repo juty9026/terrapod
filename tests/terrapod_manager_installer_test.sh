@@ -91,6 +91,16 @@ contains "$events" "tpod:migrate-current" "migration must invoke staged hidden c
 absent "$events" "activate:signed-manager" "shell must not activate migration release before hidden preflight"
 absent "$events" "tpod:setup" "migration must not run setup"
 
+preflight_failure="$(make_case migration-preflight-failure)"
+if HOME="$preflight_failure/home" XDG_DATA_HOME="$preflight_failure/data" TERRAPOD_TEST_LOG="$preflight_failure/events" \
+  TERRAPOD_TEST_BREW="$preflight_failure/bin/brew" TERRAPOD_TEST_MIGRATE_STATUS=69 \
+  "$preflight_failure/install.sh" --migrate >"$preflight_failure/stdout" 2>"$preflight_failure/stderr"; then
+  fail "migration preflight failure must be non-zero"
+fi
+failure_stderr="$(cat "$preflight_failure/stderr")"
+contains "$failure_stderr" "rerun with --migrate" "preflight failure must provide retry guidance"
+absent "$failure_stderr" "manager is active" "preflight failure must not claim staged manager is active"
+
 invalid="$(make_case invalid)"
 if HOME="$invalid/home" TERRAPOD_TEST_LOG="$invalid/events" TERRAPOD_TEST_BREW="$invalid/bin/brew" \
   "$invalid/install.sh" --unknown >"$invalid/stdout" 2>"$invalid/stderr"; then
