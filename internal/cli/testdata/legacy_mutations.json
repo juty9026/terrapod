@@ -1,105 +1,1256 @@
 {
-  "version": 1,
+  "version": 2,
   "mutationSets": {
     "homebrew": [
-      {"resourceId":"management.homebrew","kind":"install","provider":"terrapod","package":"homebrew","destination":"brew"}
+      {
+        "resourceId": "management.homebrew",
+        "kind": "install",
+        "provider": "terrapod",
+        "package": "homebrew",
+        "destination": "brew",
+        "evidence": "literal"
+      }
     ],
     "core-formulas": [
-      {"resourceId":"core.bat","kind":"install","provider":"homebrew-formula","package":"bat","destination":"bat"},
-      {"resourceId":"core.btop","kind":"install","provider":"homebrew-formula","package":"btop","destination":"btop"},
-      {"resourceId":"core.chezmoi","kind":"install","provider":"homebrew-formula","package":"chezmoi","destination":"chezmoi"},
-      {"resourceId":"core.dust","kind":"install","provider":"homebrew-formula","package":"dust","destination":"dust"},
-      {"resourceId":"core.duf","kind":"install","provider":"homebrew-formula","package":"duf","destination":"duf"},
-      {"resourceId":"core.fastfetch","kind":"install","provider":"homebrew-formula","package":"fastfetch","destination":"fastfetch"},
-      {"resourceId":"core.fd","kind":"install","provider":"homebrew-formula","package":"fd","destination":"fd"},
-      {"resourceId":"core.fzf","kind":"install","provider":"homebrew-formula","package":"fzf","destination":"fzf"},
-      {"resourceId":"core.gh","kind":"install","provider":"homebrew-formula","package":"gh","destination":"gh"},
-      {"resourceId":"core.git","kind":"install","provider":"homebrew-formula","package":"git","destination":"git"},
-      {"resourceId":"core.git-delta","kind":"install","provider":"homebrew-formula","package":"git-delta","destination":"delta"},
-      {"resourceId":"core.gum","kind":"install","provider":"homebrew-formula","package":"gum","destination":"gum"},
-      {"resourceId":"core.lazygit","kind":"install","provider":"homebrew-formula","package":"lazygit","destination":"lazygit"},
-      {"resourceId":"core.lsd","kind":"install","provider":"homebrew-formula","package":"lsd","destination":"lsd"},
-      {"resourceId":"core.mise","kind":"install","provider":"homebrew-formula","package":"mise","destination":"mise"},
-      {"resourceId":"core.neovim","kind":"install","provider":"homebrew-formula","package":"neovim","destination":"nvim"},
-      {"resourceId":"core.ripgrep","kind":"install","provider":"homebrew-formula","package":"ripgrep","destination":"rg"},
-      {"resourceId":"core.starship","kind":"install","provider":"homebrew-formula","package":"starship","destination":"starship"},
-      {"resourceId":"core.zellij","kind":"install","provider":"homebrew-formula","package":"zellij","destination":"zellij"},
-      {"resourceId":"core.zoxide","kind":"install","provider":"homebrew-formula","package":"zoxide","destination":"zoxide"}
+      {
+        "resourceId": "core.bat",
+        "kind": "install",
+        "provider": "homebrew-formula",
+        "package": "bat",
+        "destination": "bat",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "core.btop",
+        "kind": "install",
+        "provider": "homebrew-formula",
+        "package": "btop",
+        "destination": "btop",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "core.chezmoi",
+        "kind": "install",
+        "provider": "homebrew-formula",
+        "package": "chezmoi",
+        "destination": "chezmoi",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "core.dust",
+        "kind": "install",
+        "provider": "homebrew-formula",
+        "package": "dust",
+        "destination": "dust",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "core.duf",
+        "kind": "install",
+        "provider": "homebrew-formula",
+        "package": "duf",
+        "destination": "duf",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "core.fastfetch",
+        "kind": "install",
+        "provider": "homebrew-formula",
+        "package": "fastfetch",
+        "destination": "fastfetch",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "core.fd",
+        "kind": "install",
+        "provider": "homebrew-formula",
+        "package": "fd",
+        "destination": "fd",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "core.fzf",
+        "kind": "install",
+        "provider": "homebrew-formula",
+        "package": "fzf",
+        "destination": "fzf",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "core.gh",
+        "kind": "install",
+        "provider": "homebrew-formula",
+        "package": "gh",
+        "destination": "gh",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "core.git",
+        "kind": "install",
+        "provider": "homebrew-formula",
+        "package": "git",
+        "destination": "git",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "core.git-delta",
+        "kind": "install",
+        "provider": "homebrew-formula",
+        "package": "git-delta",
+        "destination": "delta",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "core.gum",
+        "kind": "install",
+        "provider": "homebrew-formula",
+        "package": "gum",
+        "destination": "gum",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "core.lazygit",
+        "kind": "install",
+        "provider": "homebrew-formula",
+        "package": "lazygit",
+        "destination": "lazygit",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "core.lsd",
+        "kind": "install",
+        "provider": "homebrew-formula",
+        "package": "lsd",
+        "destination": "lsd",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "core.mise",
+        "kind": "install",
+        "provider": "homebrew-formula",
+        "package": "mise",
+        "destination": "mise",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "core.neovim",
+        "kind": "install",
+        "provider": "homebrew-formula",
+        "package": "neovim",
+        "destination": "nvim",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "core.ripgrep",
+        "kind": "install",
+        "provider": "homebrew-formula",
+        "package": "ripgrep",
+        "destination": "rg",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "core.starship",
+        "kind": "install",
+        "provider": "homebrew-formula",
+        "package": "starship",
+        "destination": "starship",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "core.zellij",
+        "kind": "install",
+        "provider": "homebrew-formula",
+        "package": "zellij",
+        "destination": "zellij",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "core.zoxide",
+        "kind": "install",
+        "provider": "homebrew-formula",
+        "package": "zoxide",
+        "destination": "zoxide",
+        "evidence": "hash-reviewed"
+      }
     ],
     "desktop-casks": [
-      {"resourceId":"optional-desktop.ghostty","kind":"install","provider":"homebrew-cask","package":"ghostty","destination":"Ghostty.app"},
-      {"resourceId":"optional-desktop.hammerspoon","kind":"install","provider":"homebrew-cask","package":"hammerspoon","destination":"Hammerspoon.app"},
-      {"resourceId":"optional-desktop.karabiner-elements","kind":"install","provider":"homebrew-cask","package":"karabiner-elements","destination":"Karabiner-Elements.app"},
-      {"resourceId":"optional-desktop.scroll-reverser","kind":"install","provider":"homebrew-cask","package":"scroll-reverser","destination":"Scroll Reverser.app"},
-      {"resourceId":"optional-desktop.raycast","kind":"install","provider":"homebrew-cask","package":"raycast","destination":"Raycast.app"},
-      {"resourceId":"optional-desktop.one-password-cli","kind":"install","provider":"homebrew-cask","package":"1password-cli","destination":"op"},
-      {"resourceId":"optional-desktop.istat-menus","kind":"install","provider":"homebrew-cask","package":"istat-menus","destination":"iStat Menus.app"},
-      {"resourceId":"optional-desktop.zed","kind":"install","provider":"homebrew-cask","package":"zed","destination":"Zed.app"},
-      {"resourceId":"optional-desktop.orca","kind":"install","provider":"homebrew-cask","package":"stablyai/orca/orca","destination":"Orca.app"}
+      {
+        "resourceId": "optional-desktop.ghostty",
+        "kind": "install",
+        "provider": "homebrew-cask",
+        "package": "ghostty",
+        "destination": "Ghostty.app",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "optional-desktop.hammerspoon",
+        "kind": "install",
+        "provider": "homebrew-cask",
+        "package": "hammerspoon",
+        "destination": "Hammerspoon.app",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "optional-desktop.karabiner-elements",
+        "kind": "install",
+        "provider": "homebrew-cask",
+        "package": "karabiner-elements",
+        "destination": "Karabiner-Elements.app",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "optional-desktop.scroll-reverser",
+        "kind": "install",
+        "provider": "homebrew-cask",
+        "package": "scroll-reverser",
+        "destination": "Scroll Reverser.app",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "optional-desktop.raycast",
+        "kind": "install",
+        "provider": "homebrew-cask",
+        "package": "raycast",
+        "destination": "Raycast.app",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "optional-desktop.one-password-cli",
+        "kind": "install",
+        "provider": "homebrew-cask",
+        "package": "1password-cli",
+        "destination": "op",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "optional-desktop.istat-menus",
+        "kind": "install",
+        "provider": "homebrew-cask",
+        "package": "istat-menus",
+        "destination": "iStat Menus.app",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "optional-desktop.zed",
+        "kind": "install",
+        "provider": "homebrew-cask",
+        "package": "zed",
+        "destination": "Zed.app",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "optional-desktop.orca",
+        "kind": "install",
+        "provider": "homebrew-cask",
+        "package": "stablyai/orca/orca",
+        "destination": "Orca.app",
+        "evidence": "literal"
+      }
     ],
     "apt-bootstrap": [
-      {"resourceId":"bootstrap-apt.build-essential","kind":"install","provider":"apt","package":"build-essential","destination":"dpkg"},
-      {"resourceId":"bootstrap-apt.ca-certificates","kind":"install","provider":"apt","package":"ca-certificates","destination":"dpkg"},
-      {"resourceId":"bootstrap-apt.curl","kind":"install","provider":"apt","package":"curl","destination":"dpkg"},
-      {"resourceId":"bootstrap-apt.file","kind":"install","provider":"apt","package":"file","destination":"dpkg"},
-      {"resourceId":"bootstrap-apt.git","kind":"install","provider":"apt","package":"git","destination":"dpkg"},
-      {"resourceId":"bootstrap-apt.libbz2-dev","kind":"install","provider":"apt","package":"libbz2-dev","destination":"dpkg"},
-      {"resourceId":"bootstrap-apt.libffi-dev","kind":"install","provider":"apt","package":"libffi-dev","destination":"dpkg"},
-      {"resourceId":"bootstrap-apt.liblzma-dev","kind":"install","provider":"apt","package":"liblzma-dev","destination":"dpkg"},
-      {"resourceId":"bootstrap-apt.libncursesw5-dev","kind":"install","provider":"apt","package":"libncursesw5-dev","destination":"dpkg"},
-      {"resourceId":"bootstrap-apt.libreadline-dev","kind":"install","provider":"apt","package":"libreadline-dev","destination":"dpkg"},
-      {"resourceId":"bootstrap-apt.libsqlite3-dev","kind":"install","provider":"apt","package":"libsqlite3-dev","destination":"dpkg"},
-      {"resourceId":"bootstrap-apt.libssl-dev","kind":"install","provider":"apt","package":"libssl-dev","destination":"dpkg"},
-      {"resourceId":"bootstrap-apt.libxml2-dev","kind":"install","provider":"apt","package":"libxml2-dev","destination":"dpkg"},
-      {"resourceId":"bootstrap-apt.libxmlsec1-dev","kind":"install","provider":"apt","package":"libxmlsec1-dev","destination":"dpkg"},
-      {"resourceId":"bootstrap-apt.procps","kind":"install","provider":"apt","package":"procps","destination":"dpkg"},
-      {"resourceId":"bootstrap-apt.tk-dev","kind":"install","provider":"apt","package":"tk-dev","destination":"dpkg"},
-      {"resourceId":"bootstrap-apt.unzip","kind":"install","provider":"apt","package":"unzip","destination":"dpkg"},
-      {"resourceId":"bootstrap-apt.xz-utils","kind":"install","provider":"apt","package":"xz-utils","destination":"dpkg"},
-      {"resourceId":"bootstrap-apt.zlib1g-dev","kind":"install","provider":"apt","package":"zlib1g-dev","destination":"dpkg"},
-      {"resourceId":"bootstrap-apt.zsh","kind":"install","provider":"apt","package":"zsh","destination":"dpkg"},
-      {"resourceId":"bootstrap-apt.zsh","kind":"configure","provider":"apt","package":"zsh","destination":"login-shell"}
+      {
+        "resourceId": "bootstrap-apt.build-essential",
+        "kind": "install",
+        "provider": "apt",
+        "package": "build-essential",
+        "destination": "dpkg",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "bootstrap-apt.ca-certificates",
+        "kind": "install",
+        "provider": "apt",
+        "package": "ca-certificates",
+        "destination": "dpkg",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "bootstrap-apt.curl",
+        "kind": "install",
+        "provider": "apt",
+        "package": "curl",
+        "destination": "dpkg",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "bootstrap-apt.file",
+        "kind": "install",
+        "provider": "apt",
+        "package": "file",
+        "destination": "dpkg",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "bootstrap-apt.git",
+        "kind": "install",
+        "provider": "apt",
+        "package": "git",
+        "destination": "dpkg",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "bootstrap-apt.libbz2-dev",
+        "kind": "install",
+        "provider": "apt",
+        "package": "libbz2-dev",
+        "destination": "dpkg",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "bootstrap-apt.libffi-dev",
+        "kind": "install",
+        "provider": "apt",
+        "package": "libffi-dev",
+        "destination": "dpkg",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "bootstrap-apt.liblzma-dev",
+        "kind": "install",
+        "provider": "apt",
+        "package": "liblzma-dev",
+        "destination": "dpkg",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "bootstrap-apt.libncursesw5-dev",
+        "kind": "install",
+        "provider": "apt",
+        "package": "libncursesw5-dev",
+        "destination": "dpkg",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "bootstrap-apt.libreadline-dev",
+        "kind": "install",
+        "provider": "apt",
+        "package": "libreadline-dev",
+        "destination": "dpkg",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "bootstrap-apt.libsqlite3-dev",
+        "kind": "install",
+        "provider": "apt",
+        "package": "libsqlite3-dev",
+        "destination": "dpkg",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "bootstrap-apt.libssl-dev",
+        "kind": "install",
+        "provider": "apt",
+        "package": "libssl-dev",
+        "destination": "dpkg",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "bootstrap-apt.libxml2-dev",
+        "kind": "install",
+        "provider": "apt",
+        "package": "libxml2-dev",
+        "destination": "dpkg",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "bootstrap-apt.libxmlsec1-dev",
+        "kind": "install",
+        "provider": "apt",
+        "package": "libxmlsec1-dev",
+        "destination": "dpkg",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "bootstrap-apt.procps",
+        "kind": "install",
+        "provider": "apt",
+        "package": "procps",
+        "destination": "dpkg",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "bootstrap-apt.tk-dev",
+        "kind": "install",
+        "provider": "apt",
+        "package": "tk-dev",
+        "destination": "dpkg",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "bootstrap-apt.unzip",
+        "kind": "install",
+        "provider": "apt",
+        "package": "unzip",
+        "destination": "dpkg",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "bootstrap-apt.xz-utils",
+        "kind": "install",
+        "provider": "apt",
+        "package": "xz-utils",
+        "destination": "dpkg",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "bootstrap-apt.zlib1g-dev",
+        "kind": "install",
+        "provider": "apt",
+        "package": "zlib1g-dev",
+        "destination": "dpkg",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "bootstrap-apt.zsh",
+        "kind": "install",
+        "provider": "apt",
+        "package": "zsh",
+        "destination": "dpkg",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "bootstrap-apt.zsh",
+        "kind": "configure",
+        "provider": "apt",
+        "package": "zsh",
+        "destination": "login-shell",
+        "evidence": "literal"
+      }
     ],
     "mise-tools": [
-      {"resourceId":"runtime.bun","kind":"install","provider":"mise","package":"bun","destination":"bun"},
-      {"resourceId":"runtime.node","kind":"install","provider":"mise","package":"node","destination":"node"},
-      {"resourceId":"runtime.python","kind":"install","provider":"mise","package":"python","destination":"python"},
-      {"resourceId":"runtime.uv","kind":"install","provider":"mise","package":"uv","destination":"uv"}
+      {
+        "resourceId": "runtime.bun",
+        "kind": "install",
+        "provider": "mise",
+        "package": "bun",
+        "destination": "bun",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "runtime.node",
+        "kind": "install",
+        "provider": "mise",
+        "package": "node",
+        "destination": "node",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "runtime.python",
+        "kind": "install",
+        "provider": "mise",
+        "package": "python",
+        "destination": "python",
+        "evidence": "hash-reviewed"
+      },
+      {
+        "resourceId": "runtime.uv",
+        "kind": "install",
+        "provider": "mise",
+        "package": "uv",
+        "destination": "uv",
+        "evidence": "hash-reviewed"
+      }
     ],
     "shell-checkouts": [
-      {"resourceId":"shell.oh-my-zsh","kind":"install","provider":"git","package":"oh-my-zsh","destination":".oh-my-zsh"},
-      {"resourceId":"shell.zinit","kind":"install","provider":"git","package":"zinit","destination":".local/share/zinit/zinit.git"},
-      {"resourceId":"shell.scm-breeze","kind":"install","provider":"git","package":"scm-breeze","destination":".scm_breeze"}
+      {
+        "resourceId": "shell.oh-my-zsh",
+        "kind": "install",
+        "provider": "git",
+        "package": "oh-my-zsh",
+        "destination": ".oh-my-zsh",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "shell.zinit",
+        "kind": "install",
+        "provider": "git",
+        "package": "zinit",
+        "destination": ".local/share/zinit/zinit.git",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "shell.scm-breeze",
+        "kind": "install",
+        "provider": "git",
+        "package": "scm-breeze",
+        "destination": ".scm_breeze",
+        "evidence": "literal"
+      }
     ],
     "ai-casks": [
-      {"resourceId":"optional-ai.antigravity-cli","kind":"install","provider":"homebrew-cask","package":"antigravity-cli","destination":"agy"},
-      {"resourceId":"optional-ai.claude-code","kind":"install","provider":"homebrew-cask","package":"claude-code","destination":"claude"},
-      {"resourceId":"optional-ai.codex","kind":"install","provider":"homebrew-cask","package":"codex","destination":"codex"}
+      {
+        "resourceId": "optional-ai.antigravity-cli",
+        "kind": "install",
+        "provider": "homebrew-cask",
+        "package": "antigravity-cli",
+        "destination": "agy",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "optional-ai.claude-code",
+        "kind": "install",
+        "provider": "homebrew-cask",
+        "package": "claude-code",
+        "destination": "claude",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "optional-ai.codex",
+        "kind": "install",
+        "provider": "homebrew-cask",
+        "package": "codex",
+        "destination": "codex",
+        "evidence": "literal"
+      }
     ],
     "font": [
-      {"resourceId":"font.jetendard","kind":"install","provider":"jetendard","package":"jetendard","destination":"Library/Fonts"}
+      {
+        "resourceId": "font.jetendard",
+        "kind": "install",
+        "provider": "jetendard",
+        "package": "jetendard",
+        "destination": "Library/Fonts",
+        "evidence": "literal"
+      }
     ],
     "karabiner": [
-      {"resourceId":"integration.karabiner-opener","kind":"action","provider":"karabiner","package":"karabiner-opener","destination":"Karabiner-Elements"}
+      {
+        "resourceId": "integration.karabiner-opener",
+        "kind": "action",
+        "provider": "karabiner",
+        "package": "karabiner-opener",
+        "destination": "Karabiner-Elements",
+        "evidence": "literal"
+      }
     ],
     "settings": [
-      {"resourceId":"integration.jetendard-zed","kind":"configure","provider":"json-fields","package":"jetendard-zed","destination":".config/zed/settings.json"},
-      {"resourceId":"integration.jetendard-orca","kind":"configure","provider":"json-fields","package":"jetendard-orca","destination":"Library/Application Support/orca/profiles/*/orca-data.json"}
+      {
+        "resourceId": "integration.jetendard-zed",
+        "kind": "configure",
+        "provider": "json-fields",
+        "package": "jetendard-zed",
+        "destination": ".config/zed/settings.json",
+        "evidence": "literal"
+      },
+      {
+        "resourceId": "integration.jetendard-orca",
+        "kind": "configure",
+        "provider": "json-fields",
+        "package": "jetendard-orca",
+        "destination": "Library/Application Support/orca/profiles/*/orca-data.json",
+        "evidence": "literal"
+      }
     ]
   },
   "scripts": [
-    {"path":"run_onchange_before_00-bootstrap-ubuntu.sh.tmpl","renderProfiles":["vps-shell"],"bindings":[{"profiles":["vps-shell"],"presets":["minimal","development","workstation"],"sets":["apt-bootstrap"]}]},
-    {"path":"run_onchange_before_10-bootstrap-homebrew.sh.tmpl","renderProfiles":["macos-terminal","vps-shell"],"bindings":[{"profiles":["macos-terminal","vps-shell"],"presets":["minimal","development","workstation"],"sets":["homebrew","core-formulas"]},{"profiles":["macos-terminal"],"presets":["workstation"],"sets":["desktop-casks"]}]},
-    {"path":"run_before_11-retry-homebrew-core.sh.tmpl","renderProfiles":["macos-terminal","vps-shell"],"bindings":[{"profiles":["macos-terminal","vps-shell"],"presets":["minimal","development","workstation"],"sets":["core-formulas"]}]},
-    {"path":"run_before_13-retry-homebrew-desktop-apps.sh.tmpl","renderProfiles":["macos-terminal"],"bindings":[{"profiles":["macos-terminal"],"presets":["workstation"],"sets":["desktop-casks"]}]},
-    {"path":"run_onchange_after_20-install-mise-tools.sh.tmpl","renderProfiles":["macos-terminal","vps-shell"],"bindings":[{"profiles":["macos-terminal","vps-shell"],"presets":["minimal","development","workstation"],"sets":["mise-tools"]}]},
-    {"path":"run_after_21-retry-mise-tools.sh.tmpl","renderProfiles":["macos-terminal","vps-shell"],"bindings":[{"profiles":["macos-terminal","vps-shell"],"presets":["minimal","development","workstation"],"sets":["mise-tools"]}]},
-    {"path":"run_onchange_before_30-install-shell-integrations.sh.tmpl","renderProfiles":["macos-terminal","vps-shell"],"bindings":[{"profiles":["macos-terminal","vps-shell"],"presets":["minimal","development","workstation"],"sets":["shell-checkouts"]}]},
-    {"path":"run_before_31-retry-shell-integrations.sh.tmpl","renderProfiles":["macos-terminal","vps-shell"],"bindings":[{"profiles":["macos-terminal","vps-shell"],"presets":["minimal","development","workstation"],"sets":["shell-checkouts"]}]},
-    {"path":"run_onchange_after_50-open-karabiner-if-needed.sh.tmpl","renderProfiles":["macos-terminal"],"bindings":[{"profiles":["macos-terminal"],"presets":["workstation"],"sets":["karabiner"]}]},
-    {"path":"run_onchange_before_60-install-ai-cli-tools.sh.tmpl","renderProfiles":["macos-terminal","vps-shell"],"bindings":[{"profiles":["macos-terminal","vps-shell"],"presets":["development","workstation"],"sets":["ai-casks"]}]},
-    {"path":"run_onchange_after_65-install-jetendard-font.sh.tmpl","renderProfiles":["macos-terminal"],"bindings":[{"profiles":["macos-terminal"],"presets":["minimal","development","workstation"],"sets":["font"]}]},
-    {"path":"run_before_02-retry-jetendard-font.sh.tmpl","renderProfiles":["macos-terminal"],"bindings":[{"profiles":["macos-terminal"],"presets":["minimal","development","workstation"],"sets":["font"]}]},
-    {"path":"run_after_70-apply-jetendard-settings.sh.tmpl","renderProfiles":["macos-terminal"],"bindings":[{"profiles":["macos-terminal"],"presets":["minimal","development","workstation"],"sets":["settings"]}]}
+    {
+      "path": "run_onchange_before_00-bootstrap-ubuntu.sh.tmpl",
+      "condition": "profile in [vps-shell]",
+      "renders": [
+        {
+          "key": "macos-terminal/minimal",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "rendered": false,
+          "mutationSets": [
+
+          ]
+        },
+        {
+          "key": "macos-terminal/development",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "rendered": false,
+          "mutationSets": [
+
+          ]
+        },
+        {
+          "key": "macos-terminal/workstation",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "rendered": false,
+          "mutationSets": [
+
+          ]
+        },
+        {
+          "key": "vps-shell/minimal",
+          "sha256": "43a5a76fcb75a8144cc104abf4f3c9266ddc28e1c328a69474a3fc5a5d4522db",
+          "rendered": true,
+          "mutationSets": [
+            "apt-bootstrap"
+          ]
+        },
+        {
+          "key": "vps-shell/development",
+          "sha256": "43a5a76fcb75a8144cc104abf4f3c9266ddc28e1c328a69474a3fc5a5d4522db",
+          "rendered": true,
+          "mutationSets": [
+            "apt-bootstrap"
+          ]
+        },
+        {
+          "key": "vps-shell/workstation",
+          "sha256": "43a5a76fcb75a8144cc104abf4f3c9266ddc28e1c328a69474a3fc5a5d4522db",
+          "rendered": true,
+          "mutationSets": [
+            "apt-bootstrap"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "run_onchange_before_10-bootstrap-homebrew.sh.tmpl",
+      "condition": "profile in [macos-terminal,vps-shell]",
+      "renders": [
+        {
+          "key": "macos-terminal/minimal",
+          "sha256": "f91ef678c905752575cbc21eebfe9ad6b10e420315ee466e72af94fe8efedfb8",
+          "rendered": true,
+          "mutationSets": [
+            "homebrew",
+            "core-formulas"
+          ]
+        },
+        {
+          "key": "macos-terminal/development",
+          "sha256": "f91ef678c905752575cbc21eebfe9ad6b10e420315ee466e72af94fe8efedfb8",
+          "rendered": true,
+          "mutationSets": [
+            "homebrew",
+            "core-formulas"
+          ]
+        },
+        {
+          "key": "macos-terminal/workstation",
+          "sha256": "1be2ecb7b30ba9503e8e49e45ee55ce3d329d78126f2f2c2228235492ba1b780",
+          "rendered": true,
+          "mutationSets": [
+            "homebrew",
+            "core-formulas",
+            "desktop-casks"
+          ]
+        },
+        {
+          "key": "vps-shell/minimal",
+          "sha256": "d7486afcf7b39ed468a88f1efb334ebf46792f02c554ba7ac7d39c1722f854ec",
+          "rendered": true,
+          "mutationSets": [
+            "homebrew",
+            "core-formulas"
+          ]
+        },
+        {
+          "key": "vps-shell/development",
+          "sha256": "d7486afcf7b39ed468a88f1efb334ebf46792f02c554ba7ac7d39c1722f854ec",
+          "rendered": true,
+          "mutationSets": [
+            "homebrew",
+            "core-formulas"
+          ]
+        },
+        {
+          "key": "vps-shell/workstation",
+          "sha256": "d7486afcf7b39ed468a88f1efb334ebf46792f02c554ba7ac7d39c1722f854ec",
+          "rendered": true,
+          "mutationSets": [
+            "homebrew",
+            "core-formulas"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "run_before_11-retry-homebrew-core.sh.tmpl",
+      "condition": "profile in [macos-terminal,vps-shell]",
+      "renders": [
+        {
+          "key": "macos-terminal/minimal",
+          "sha256": "ec48cf470be0d7e02d8f82724028d825737011f16813690de5cac3158ac13b04",
+          "rendered": true,
+          "mutationSets": [
+            "core-formulas"
+          ]
+        },
+        {
+          "key": "macos-terminal/development",
+          "sha256": "ec48cf470be0d7e02d8f82724028d825737011f16813690de5cac3158ac13b04",
+          "rendered": true,
+          "mutationSets": [
+            "core-formulas"
+          ]
+        },
+        {
+          "key": "macos-terminal/workstation",
+          "sha256": "ec48cf470be0d7e02d8f82724028d825737011f16813690de5cac3158ac13b04",
+          "rendered": true,
+          "mutationSets": [
+            "core-formulas"
+          ]
+        },
+        {
+          "key": "vps-shell/minimal",
+          "sha256": "fb252829b28874c980417bf084ac936c0c2849c0ebcc4b0d3168b876e028973b",
+          "rendered": true,
+          "mutationSets": [
+            "core-formulas"
+          ]
+        },
+        {
+          "key": "vps-shell/development",
+          "sha256": "fb252829b28874c980417bf084ac936c0c2849c0ebcc4b0d3168b876e028973b",
+          "rendered": true,
+          "mutationSets": [
+            "core-formulas"
+          ]
+        },
+        {
+          "key": "vps-shell/workstation",
+          "sha256": "fb252829b28874c980417bf084ac936c0c2849c0ebcc4b0d3168b876e028973b",
+          "rendered": true,
+          "mutationSets": [
+            "core-formulas"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "run_before_13-retry-homebrew-desktop-apps.sh.tmpl",
+      "condition": "profile in [macos-terminal]",
+      "renders": [
+        {
+          "key": "macos-terminal/minimal",
+          "sha256": "45b8264b10b65e7f1da073f1fcc65462f45197acde4387c55c6abbb135c65296",
+          "rendered": true,
+          "mutationSets": [
+
+          ]
+        },
+        {
+          "key": "macos-terminal/development",
+          "sha256": "45b8264b10b65e7f1da073f1fcc65462f45197acde4387c55c6abbb135c65296",
+          "rendered": true,
+          "mutationSets": [
+
+          ]
+        },
+        {
+          "key": "macos-terminal/workstation",
+          "sha256": "8b854e50bc0a93a7c3dce4093f9c57a1ddb3be869d4baa4152a3a15d02d044c9",
+          "rendered": true,
+          "mutationSets": [
+            "desktop-casks"
+          ]
+        },
+        {
+          "key": "vps-shell/minimal",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "rendered": false,
+          "mutationSets": [
+
+          ]
+        },
+        {
+          "key": "vps-shell/development",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "rendered": false,
+          "mutationSets": [
+
+          ]
+        },
+        {
+          "key": "vps-shell/workstation",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "rendered": false,
+          "mutationSets": [
+
+          ]
+        }
+      ]
+    },
+    {
+      "path": "run_onchange_after_20-install-mise-tools.sh.tmpl",
+      "condition": "profile in [macos-terminal,vps-shell]",
+      "renders": [
+        {
+          "key": "macos-terminal/minimal",
+          "sha256": "5166d9308ba23de1971858f11e407092f45f1d7bd04bde8759ee0df9d363fd05",
+          "rendered": true,
+          "mutationSets": [
+            "mise-tools"
+          ]
+        },
+        {
+          "key": "macos-terminal/development",
+          "sha256": "5166d9308ba23de1971858f11e407092f45f1d7bd04bde8759ee0df9d363fd05",
+          "rendered": true,
+          "mutationSets": [
+            "mise-tools"
+          ]
+        },
+        {
+          "key": "macos-terminal/workstation",
+          "sha256": "5166d9308ba23de1971858f11e407092f45f1d7bd04bde8759ee0df9d363fd05",
+          "rendered": true,
+          "mutationSets": [
+            "mise-tools"
+          ]
+        },
+        {
+          "key": "vps-shell/minimal",
+          "sha256": "eab9f330e31f49c9398e453069bce5f7e47b15fcc0c13d69a20b21be682f8150",
+          "rendered": true,
+          "mutationSets": [
+            "mise-tools"
+          ]
+        },
+        {
+          "key": "vps-shell/development",
+          "sha256": "eab9f330e31f49c9398e453069bce5f7e47b15fcc0c13d69a20b21be682f8150",
+          "rendered": true,
+          "mutationSets": [
+            "mise-tools"
+          ]
+        },
+        {
+          "key": "vps-shell/workstation",
+          "sha256": "eab9f330e31f49c9398e453069bce5f7e47b15fcc0c13d69a20b21be682f8150",
+          "rendered": true,
+          "mutationSets": [
+            "mise-tools"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "run_after_21-retry-mise-tools.sh.tmpl",
+      "condition": "profile in [macos-terminal,vps-shell]",
+      "renders": [
+        {
+          "key": "macos-terminal/minimal",
+          "sha256": "e19037e50c0de336b99e6a30ae950be9a40b9251c5d220f171c24d6336bface5",
+          "rendered": true,
+          "mutationSets": [
+            "mise-tools"
+          ]
+        },
+        {
+          "key": "macos-terminal/development",
+          "sha256": "e19037e50c0de336b99e6a30ae950be9a40b9251c5d220f171c24d6336bface5",
+          "rendered": true,
+          "mutationSets": [
+            "mise-tools"
+          ]
+        },
+        {
+          "key": "macos-terminal/workstation",
+          "sha256": "e19037e50c0de336b99e6a30ae950be9a40b9251c5d220f171c24d6336bface5",
+          "rendered": true,
+          "mutationSets": [
+            "mise-tools"
+          ]
+        },
+        {
+          "key": "vps-shell/minimal",
+          "sha256": "fc491693926fff834a577f9e14cf0b078aec7d4f78ce956cf836fde5546f9aa0",
+          "rendered": true,
+          "mutationSets": [
+            "mise-tools"
+          ]
+        },
+        {
+          "key": "vps-shell/development",
+          "sha256": "fc491693926fff834a577f9e14cf0b078aec7d4f78ce956cf836fde5546f9aa0",
+          "rendered": true,
+          "mutationSets": [
+            "mise-tools"
+          ]
+        },
+        {
+          "key": "vps-shell/workstation",
+          "sha256": "fc491693926fff834a577f9e14cf0b078aec7d4f78ce956cf836fde5546f9aa0",
+          "rendered": true,
+          "mutationSets": [
+            "mise-tools"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "run_onchange_before_30-install-shell-integrations.sh.tmpl",
+      "condition": "profile in [macos-terminal,vps-shell]",
+      "renders": [
+        {
+          "key": "macos-terminal/minimal",
+          "sha256": "ee532f223af9955923b21224443feef59b21b7bf2b7f64fc1279e0cdf868a089",
+          "rendered": true,
+          "mutationSets": [
+            "shell-checkouts"
+          ]
+        },
+        {
+          "key": "macos-terminal/development",
+          "sha256": "ee532f223af9955923b21224443feef59b21b7bf2b7f64fc1279e0cdf868a089",
+          "rendered": true,
+          "mutationSets": [
+            "shell-checkouts"
+          ]
+        },
+        {
+          "key": "macos-terminal/workstation",
+          "sha256": "ee532f223af9955923b21224443feef59b21b7bf2b7f64fc1279e0cdf868a089",
+          "rendered": true,
+          "mutationSets": [
+            "shell-checkouts"
+          ]
+        },
+        {
+          "key": "vps-shell/minimal",
+          "sha256": "6bb62a4aef0c774392b5b53008e4423636205122e4e97dedd67acc4ef2b7d6ab",
+          "rendered": true,
+          "mutationSets": [
+            "shell-checkouts"
+          ]
+        },
+        {
+          "key": "vps-shell/development",
+          "sha256": "6bb62a4aef0c774392b5b53008e4423636205122e4e97dedd67acc4ef2b7d6ab",
+          "rendered": true,
+          "mutationSets": [
+            "shell-checkouts"
+          ]
+        },
+        {
+          "key": "vps-shell/workstation",
+          "sha256": "6bb62a4aef0c774392b5b53008e4423636205122e4e97dedd67acc4ef2b7d6ab",
+          "rendered": true,
+          "mutationSets": [
+            "shell-checkouts"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "run_before_31-retry-shell-integrations.sh.tmpl",
+      "condition": "profile in [macos-terminal,vps-shell]",
+      "renders": [
+        {
+          "key": "macos-terminal/minimal",
+          "sha256": "54d0c17e904b59185429e7486bc3ff02b75edab18cfa4eb9f67dcc97cd6439a4",
+          "rendered": true,
+          "mutationSets": [
+            "shell-checkouts"
+          ]
+        },
+        {
+          "key": "macos-terminal/development",
+          "sha256": "54d0c17e904b59185429e7486bc3ff02b75edab18cfa4eb9f67dcc97cd6439a4",
+          "rendered": true,
+          "mutationSets": [
+            "shell-checkouts"
+          ]
+        },
+        {
+          "key": "macos-terminal/workstation",
+          "sha256": "54d0c17e904b59185429e7486bc3ff02b75edab18cfa4eb9f67dcc97cd6439a4",
+          "rendered": true,
+          "mutationSets": [
+            "shell-checkouts"
+          ]
+        },
+        {
+          "key": "vps-shell/minimal",
+          "sha256": "6c97c5a2996d6e7ce15a61f2ada6e90c63a2468559768dffb611e58e760c61df",
+          "rendered": true,
+          "mutationSets": [
+            "shell-checkouts"
+          ]
+        },
+        {
+          "key": "vps-shell/development",
+          "sha256": "6c97c5a2996d6e7ce15a61f2ada6e90c63a2468559768dffb611e58e760c61df",
+          "rendered": true,
+          "mutationSets": [
+            "shell-checkouts"
+          ]
+        },
+        {
+          "key": "vps-shell/workstation",
+          "sha256": "6c97c5a2996d6e7ce15a61f2ada6e90c63a2468559768dffb611e58e760c61df",
+          "rendered": true,
+          "mutationSets": [
+            "shell-checkouts"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "run_onchange_after_50-open-karabiner-if-needed.sh.tmpl",
+      "condition": "profile in [macos-terminal]",
+      "renders": [
+        {
+          "key": "macos-terminal/minimal",
+          "sha256": "54e4c921a0a9ca633c2e490aea5a83f087a3f57193dc2cc3a6b265e93282dd87",
+          "rendered": true,
+          "mutationSets": [
+
+          ]
+        },
+        {
+          "key": "macos-terminal/development",
+          "sha256": "54e4c921a0a9ca633c2e490aea5a83f087a3f57193dc2cc3a6b265e93282dd87",
+          "rendered": true,
+          "mutationSets": [
+
+          ]
+        },
+        {
+          "key": "macos-terminal/workstation",
+          "sha256": "a1111ac448935cc86bdcfd54f42af5d331336037b7505b544abf9eec93b85460",
+          "rendered": true,
+          "mutationSets": [
+            "karabiner"
+          ]
+        },
+        {
+          "key": "vps-shell/minimal",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "rendered": false,
+          "mutationSets": [
+
+          ]
+        },
+        {
+          "key": "vps-shell/development",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "rendered": false,
+          "mutationSets": [
+
+          ]
+        },
+        {
+          "key": "vps-shell/workstation",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "rendered": false,
+          "mutationSets": [
+
+          ]
+        }
+      ]
+    },
+    {
+      "path": "run_onchange_before_60-install-ai-cli-tools.sh.tmpl",
+      "condition": "profile in [macos-terminal,vps-shell]",
+      "renders": [
+        {
+          "key": "macos-terminal/minimal",
+          "sha256": "bd6f0d4781fe13260a5b1c698ca5afcc56345837db0fc69a0a82db9760f11047",
+          "rendered": true,
+          "mutationSets": [
+
+          ]
+        },
+        {
+          "key": "macos-terminal/development",
+          "sha256": "a89c614c81627ce26e332d652573a97b14bdab235c005f79c4eacbca3ffae74d",
+          "rendered": true,
+          "mutationSets": [
+            "ai-casks"
+          ]
+        },
+        {
+          "key": "macos-terminal/workstation",
+          "sha256": "a89c614c81627ce26e332d652573a97b14bdab235c005f79c4eacbca3ffae74d",
+          "rendered": true,
+          "mutationSets": [
+            "ai-casks"
+          ]
+        },
+        {
+          "key": "vps-shell/minimal",
+          "sha256": "bd6f0d4781fe13260a5b1c698ca5afcc56345837db0fc69a0a82db9760f11047",
+          "rendered": true,
+          "mutationSets": [
+
+          ]
+        },
+        {
+          "key": "vps-shell/development",
+          "sha256": "5644f925858a47e494eebd9c0235b3ba3931d3e0af28fcdb75434c7ff580f538",
+          "rendered": true,
+          "mutationSets": [
+            "ai-casks"
+          ]
+        },
+        {
+          "key": "vps-shell/workstation",
+          "sha256": "5644f925858a47e494eebd9c0235b3ba3931d3e0af28fcdb75434c7ff580f538",
+          "rendered": true,
+          "mutationSets": [
+            "ai-casks"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "run_onchange_after_65-install-jetendard-font.sh.tmpl",
+      "condition": "profile in [macos-terminal]",
+      "renders": [
+        {
+          "key": "macos-terminal/minimal",
+          "sha256": "4da23188ece61def6188b421a4d7e16b5689b055cc0e9a9b644b0cdfefd4dced",
+          "rendered": true,
+          "mutationSets": [
+            "font"
+          ]
+        },
+        {
+          "key": "macos-terminal/development",
+          "sha256": "4da23188ece61def6188b421a4d7e16b5689b055cc0e9a9b644b0cdfefd4dced",
+          "rendered": true,
+          "mutationSets": [
+            "font"
+          ]
+        },
+        {
+          "key": "macos-terminal/workstation",
+          "sha256": "4da23188ece61def6188b421a4d7e16b5689b055cc0e9a9b644b0cdfefd4dced",
+          "rendered": true,
+          "mutationSets": [
+            "font"
+          ]
+        },
+        {
+          "key": "vps-shell/minimal",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "rendered": false,
+          "mutationSets": [
+
+          ]
+        },
+        {
+          "key": "vps-shell/development",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "rendered": false,
+          "mutationSets": [
+
+          ]
+        },
+        {
+          "key": "vps-shell/workstation",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "rendered": false,
+          "mutationSets": [
+
+          ]
+        }
+      ]
+    },
+    {
+      "path": "run_before_02-retry-jetendard-font.sh.tmpl",
+      "condition": "profile in [macos-terminal]",
+      "renders": [
+        {
+          "key": "macos-terminal/minimal",
+          "sha256": "a680195265a5958dd645ee9dcbc2b6df8264171e9b0321b90bd7da161d6ef74e",
+          "rendered": true,
+          "mutationSets": [
+            "font"
+          ]
+        },
+        {
+          "key": "macos-terminal/development",
+          "sha256": "a680195265a5958dd645ee9dcbc2b6df8264171e9b0321b90bd7da161d6ef74e",
+          "rendered": true,
+          "mutationSets": [
+            "font"
+          ]
+        },
+        {
+          "key": "macos-terminal/workstation",
+          "sha256": "a680195265a5958dd645ee9dcbc2b6df8264171e9b0321b90bd7da161d6ef74e",
+          "rendered": true,
+          "mutationSets": [
+            "font"
+          ]
+        },
+        {
+          "key": "vps-shell/minimal",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "rendered": false,
+          "mutationSets": [
+
+          ]
+        },
+        {
+          "key": "vps-shell/development",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "rendered": false,
+          "mutationSets": [
+
+          ]
+        },
+        {
+          "key": "vps-shell/workstation",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "rendered": false,
+          "mutationSets": [
+
+          ]
+        }
+      ]
+    },
+    {
+      "path": "run_after_70-apply-jetendard-settings.sh.tmpl",
+      "condition": "profile in [macos-terminal]",
+      "renders": [
+        {
+          "key": "macos-terminal/minimal",
+          "sha256": "ce115927ae4ba08dcd55e0db5a3279031f386ce231e318fcb5d597486bc68a41",
+          "rendered": true,
+          "mutationSets": [
+            "settings"
+          ]
+        },
+        {
+          "key": "macos-terminal/development",
+          "sha256": "ce115927ae4ba08dcd55e0db5a3279031f386ce231e318fcb5d597486bc68a41",
+          "rendered": true,
+          "mutationSets": [
+            "settings"
+          ]
+        },
+        {
+          "key": "macos-terminal/workstation",
+          "sha256": "ce115927ae4ba08dcd55e0db5a3279031f386ce231e318fcb5d597486bc68a41",
+          "rendered": true,
+          "mutationSets": [
+            "settings"
+          ]
+        },
+        {
+          "key": "vps-shell/minimal",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "rendered": false,
+          "mutationSets": [
+
+          ]
+        },
+        {
+          "key": "vps-shell/development",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "rendered": false,
+          "mutationSets": [
+
+          ]
+        },
+        {
+          "key": "vps-shell/workstation",
+          "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "rendered": false,
+          "mutationSets": [
+
+          ]
+        }
+      ]
+    }
   ]
 }

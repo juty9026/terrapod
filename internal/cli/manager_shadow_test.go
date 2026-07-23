@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,13 +24,19 @@ type shadowManifest struct {
 }
 type mutation struct {
 	ResourceID, Kind, Provider, Package, Destination string
+	Evidence                                         string
 }
 type shadowScript struct {
-	Path           string
-	RenderProfiles []string        `json:"renderProfiles"`
-	Bindings       []shadowBinding `json:"bindings"`
+	Path      string
+	Condition string         `json:"condition"`
+	Renders   []shadowRender `json:"renders"`
 }
-type shadowBinding struct{ Profiles, Presets, Sets []string }
+type shadowRender struct {
+	Key      string
+	SHA256   string   `json:"sha256"`
+	Rendered bool     `json:"rendered"`
+	Sets     []string `json:"mutationSets"`
+}
 
 var brewLine = regexp.MustCompile(`(?m)^brew "([^"]+)"`)
 var caskLine = regexp.MustCompile(`(?m)^cask "([^"]+)"`)
@@ -45,6 +53,9 @@ func TestManagerShadowParityUsesRenderedMutationEvidence(t *testing.T) {
 	wantPaths := make([]string, len(manifest.Scripts))
 	for i, script := range manifest.Scripts {
 		wantPaths[i] = script.Path
+		if script.Condition == "" || len(script.Renders) != 6 {
+			t.Fatalf("%s reviewed condition/renders are incomplete", script.Path)
+		}
 	}
 	sort.Strings(wantPaths)
 	gotPaths := make([]string, len(scripts))
@@ -56,6 +67,7 @@ func TestManagerShadowParityUsesRenderedMutationEvidence(t *testing.T) {
 		t.Fatalf("script inventory changed: got=%v want=%v", gotPaths, wantPaths)
 	}
 
+	renderCount := 0
 	for _, profile := range []model.Profile{model.ProfileMacOSTerminal, model.ProfileVPSShell} {
 		for _, preset := range []string{"minimal", "development", "workstation"} {
 			cfg, flat := shadowConfig(profile, preset)
@@ -65,18 +77,24 @@ func TestManagerShadowParityUsesRenderedMutationEvidence(t *testing.T) {
 			}
 			for _, script := range manifest.Scripts {
 				output := renderShadowScript(t, repo, script.Path, flat)
-				shouldRender := containsString(script.RenderProfiles, string(profile))
-				if (len(bytes.TrimSpace(output)) != 0) != shouldRender {
+				render := exactRender(t, script, string(profile), preset)
+				renderCount++
+				digest := fmt.Sprintf("%x", sha256.Sum256(output))
+				if digest != render.SHA256 {
+					t.Fatalf("%s %s/%s exact rendered bytes changed: got sha256=%s want=%s", script.Path, profile, preset, digest, render.SHA256)
+				}
+				if (len(bytes.TrimSpace(output)) != 0) != render.Rendered {
 					t.Fatalf("%s %s/%s render condition changed", script.Path, profile, preset)
 				}
-				want := expectedMutations(t, manifest, script, string(profile), preset)
-				got := extractMutations(t, string(output), cfg, catalog, byProviderPackage)
-				sortMutations(want)
+				want := renderMutations(t, manifest, render)
+				got := extractMutations(t, string(output), cfg, byProviderPackage)
+				literalWant := literalMutations(want)
+				sortMutations(literalWant)
 				sortMutations(got)
-				if !reflect.DeepEqual(got, want) {
+				if !reflect.DeepEqual(got, literalWant) {
 					t.Fatalf("%s %s/%s mutations changed:\ngot  %#v\nwant %#v", script.Path, profile, preset, got, want)
 				}
-				for _, change := range got {
+				for _, change := range want {
 					owner, ok := byID[change.ResourceID]
 					if !ok || owner.Provider != change.Provider || owner.Package != change.Package {
 						t.Fatalf("mutation has no exact catalog owner: %#v", change)
@@ -88,13 +106,16 @@ func TestManagerShadowParityUsesRenderedMutationEvidence(t *testing.T) {
 			}
 		}
 	}
+	if renderCount != 78 {
+		t.Fatalf("reviewed render count = %d, want 78", renderCount)
+	}
 }
 
 func loadShadowManifest(t *testing.T, path string) shadowManifest {
 	t.Helper()
 	var value shadowManifest
 	data, err := os.ReadFile(path)
-	if err != nil || json.Unmarshal(data, &value) != nil || value.Version != 1 {
+	if err != nil || json.Unmarshal(data, &value) != nil || value.Version != 2 {
 		t.Fatalf("load manifest: %v", err)
 	}
 	return value
@@ -165,25 +186,38 @@ func renderShadowScript(t *testing.T, repo, name string, data map[string]any) []
 	return output
 }
 
-func expectedMutations(t *testing.T, manifest shadowManifest, script shadowScript, profile, preset string) []mutation {
+func exactRender(t *testing.T, script shadowScript, profile, preset string) shadowRender {
+	t.Helper()
+	var found *shadowRender
+	for i := range script.Renders {
+		candidate := &script.Renders[i]
+		if candidate.Key == profile+"/"+preset {
+			if found != nil {
+				t.Fatalf("duplicate render %s/%s for %s", profile, preset, script.Path)
+			}
+			found = candidate
+		}
+	}
+	if found == nil {
+		t.Fatalf("missing render %s/%s for %s", profile, preset, script.Path)
+	}
+	return *found
+}
+
+func renderMutations(t *testing.T, manifest shadowManifest, render shadowRender) []mutation {
 	t.Helper()
 	var result []mutation
-	for _, binding := range script.Bindings {
-		if !containsString(binding.Profiles, profile) || !containsString(binding.Presets, preset) {
-			continue
+	for _, name := range render.Sets {
+		set, ok := manifest.MutationSets[name]
+		if !ok {
+			t.Fatalf("unknown mutation set %q in render %q", name, render.Key)
 		}
-		for _, set := range binding.Sets {
-			mutations, ok := manifest.MutationSets[set]
-			if !ok {
-				t.Fatalf("unknown mutation set %s", set)
-			}
-			result = append(result, mutations...)
-		}
+		result = append(result, set...)
 	}
 	return result
 }
 
-func extractMutations(t *testing.T, output string, cfg model.Config, catalog model.Catalog, byPair map[string]model.Resource) []mutation {
+func extractMutations(t *testing.T, output string, cfg model.Config, byPair map[string]model.Resource) []mutation {
 	t.Helper()
 	var result []mutation
 	add := func(provider, pkg, kind, destination string) {
@@ -191,17 +225,10 @@ func extractMutations(t *testing.T, output string, cfg model.Config, catalog mod
 		if !ok {
 			t.Fatalf("rendered mutation has no catalog pair %s/%s", provider, pkg)
 		}
-		result = append(result, mutation{string(item.ID), kind, provider, pkg, destination})
+		result = append(result, mutation{ResourceID: string(item.ID), Kind: kind, Provider: provider, Package: pkg, Destination: destination, Evidence: "literal"})
 	}
 	if strings.Contains(output, "raw.githubusercontent.com/Homebrew/install/HEAD/install.sh") {
 		add("terrapod", "homebrew", "install", "brew")
-	}
-	if strings.Contains(output, "terrapod_homebrew_core_run_bundle") {
-		for _, item := range catalog.Resources {
-			if item.Provider == "homebrew-formula" {
-				add(item.Provider, item.Package, "install", item.Commands[0])
-			}
-		}
 	}
 	for _, match := range caskLine.FindAllStringSubmatch(output, -1) {
 		destination := caskDestination(match[1])
@@ -214,13 +241,6 @@ func extractMutations(t *testing.T, output string, cfg model.Config, catalog mod
 		}
 		if strings.Contains(output, "chsh -s \"$zsh_path\"") {
 			add("apt", "zsh", "configure", "login-shell")
-		}
-	}
-	if strings.Contains(output, `"$mise_bin" install --yes -C "$HOME"`) {
-		for _, item := range catalog.Resources {
-			if item.Provider == "mise" {
-				add("mise", item.Package, "install", item.Commands[0])
-			}
 		}
 	}
 	if strings.Contains(output, "ohmyzsh/ohmyzsh/master/tools/install.sh") {
@@ -245,6 +265,16 @@ func extractMutations(t *testing.T, output string, cfg model.Config, catalog mod
 	}
 	for _, match := range brewLine.FindAllStringSubmatch(output, -1) {
 		add("homebrew-formula", match[1], "install", byPair["homebrew-formula\x00"+match[1]].Commands[0])
+	}
+	return result
+}
+
+func literalMutations(values []mutation) []mutation {
+	var result []mutation
+	for _, value := range values {
+		if value.Evidence == "literal" {
+			result = append(result, value)
+		}
 	}
 	return result
 }

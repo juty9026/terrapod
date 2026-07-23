@@ -559,6 +559,7 @@ func TestChezmoiDispatchesOnlyExplicitReadOnlyPassthrough(t *testing.T) {
 func TestComposeRegistryRegistersEveryPlan02And03Adapter(t *testing.T) {
 	fixture := &resource.Fixture{}
 	registry, err := ComposeRegistry(AdapterSet{
+		ManagementCore:  fixture,
 		HomebrewFormula: fixture,
 		HomebrewCask:    fixture,
 		APT:             fixture,
@@ -577,6 +578,7 @@ func TestComposeRegistryRegistersEveryPlan02And03Adapter(t *testing.T) {
 		typeName model.ResourceType
 		provider string
 	}{
+		{model.ResourceManagementCore, "terrapod"},
 		{model.ResourcePackage, "homebrew-formula"},
 		{model.ResourcePackage, "homebrew-cask"},
 		{model.ResourcePackage, "apt"},
@@ -595,7 +597,7 @@ func TestComposeRegistryRegistersEveryPlan02And03Adapter(t *testing.T) {
 }
 
 func TestComposeRegistryRejectsMissingAdapter(t *testing.T) {
-	if _, err := ComposeRegistry(AdapterSet{}); err == nil || !strings.Contains(err.Error(), "homebrew-formula") {
+	if _, err := ComposeRegistry(AdapterSet{}); err == nil || !strings.Contains(err.Error(), "management-core") {
 		t.Fatalf("ComposeRegistry error = %v", err)
 	}
 }

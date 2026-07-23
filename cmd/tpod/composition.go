@@ -28,6 +28,7 @@ import (
 	"github.com/juty9026/terrapod/internal/resource/integration"
 	"github.com/juty9026/terrapod/internal/resource/jetendard"
 	"github.com/juty9026/terrapod/internal/resource/managedfiles"
+	"github.com/juty9026/terrapod/internal/resource/managementcore"
 	"github.com/juty9026/terrapod/internal/state"
 )
 
@@ -48,6 +49,10 @@ func productionPlanner(layout paths.Layout, store *state.Store, client chezmoi.C
 		return nil, errors.New("production composition requires state")
 	}
 	tools := fixedProviderPaths()
+	management, err := managementcore.NewHomebrew(tools.brew, layout.HomeDir)
+	if err != nil {
+		return nil, err
+	}
 	runner := execx.NewRunner([]string{"LC_ALL"}, nil, os.Geteuid)
 	formulaProvider, err := homebrew.New(homebrew.Formula, tools.brew, filepath.Join(layout.StateDir, "recovery", "homebrew"), runner, homebrew.AppPolicy{})
 	if err != nil {
@@ -126,7 +131,8 @@ func productionPlanner(layout paths.Layout, store *state.Store, client chezmoi.C
 	if err != nil {
 		return nil, err
 	}
-	registry, err := cli.ComposeRegistry(cli.AdapterSet{
+	return composeProductionPlanner(cli.AdapterSet{
+		ManagementCore:  management,
 		HomebrewFormula: formulaTransfer,
 		HomebrewCask:    caskTransfer,
 		APT:             aptTransfer,
@@ -138,6 +144,10 @@ func productionPlanner(layout paths.Layout, store *state.Store, client chezmoi.C
 		PlistFields:     integrations,
 		Karabiner:       integrations,
 	})
+}
+
+func composeProductionPlanner(adapters cli.AdapterSet) (*planner.Planner, error) {
+	registry, err := cli.ComposeRegistry(adapters)
 	if err != nil {
 		return nil, err
 	}

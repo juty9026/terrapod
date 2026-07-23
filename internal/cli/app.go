@@ -57,6 +57,7 @@ type Dependencies struct {
 // AdapterSet is the composition boundary for every typed provider introduced
 // by the package and managed-resource plans.
 type AdapterSet struct {
+	ManagementCore  resource.Adapter
 	HomebrewFormula resource.Adapter
 	HomebrewCask    resource.Adapter
 	APT             resource.Adapter
@@ -76,6 +77,7 @@ func ComposeRegistry(adapters AdapterSet) (resource.Registry, error) {
 		provider     string
 		adapter      resource.Adapter
 	}{
+		{model.ResourceManagementCore, "terrapod", adapters.ManagementCore},
 		{model.ResourcePackage, "homebrew-formula", adapters.HomebrewFormula},
 		{model.ResourcePackage, "homebrew-cask", adapters.HomebrewCask},
 		{model.ResourcePackage, "apt", adapters.APT},

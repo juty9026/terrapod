@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,8 +10,13 @@ import (
 	"testing"
 
 	"github.com/juty9026/terrapod/internal/chezmoi"
+	"github.com/juty9026/terrapod/internal/cli"
 	"github.com/juty9026/terrapod/internal/execx"
+	"github.com/juty9026/terrapod/internal/model"
 	"github.com/juty9026/terrapod/internal/paths"
+	"github.com/juty9026/terrapod/internal/planner"
+	"github.com/juty9026/terrapod/internal/resource"
+	"github.com/juty9026/terrapod/internal/resource/managementcore"
 	"github.com/juty9026/terrapod/internal/state"
 )
 
@@ -75,6 +82,110 @@ func TestProductionPlannerComposesRealStateBoundAdapters(t *testing.T) {
 	if err != nil || got == nil {
 		t.Fatalf("productionPlanner = %#v, %v", got, err)
 	}
+}
+
+func TestProductionRegistryBuildsEveryEnabledResourceForAllConfigurations(t *testing.T) {
+	catalog := productionTestCatalog(t)
+	fixture := &resource.Fixture{Observations: make(map[model.ResourceID]model.Observation)}
+	for _, item := range catalog.Resources {
+		fixture.Observations[item.ID] = model.Observation{
+			Present: true, Healthy: true, Provider: item.Provider, Package: item.Package,
+			Paths: map[string]string{"actual": filepath.Join(t.TempDir(), string(item.ID))},
+		}
+	}
+	management := productionTestManagement(t, filepath.Join(t.TempDir(), "brew"), true)
+	configured, err := composeProductionPlanner(productionTestAdapters(management, fixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, profile := range []model.Profile{model.ProfileMacOSTerminal, model.ProfileVPSShell} {
+		for _, preset := range []string{"minimal", "development", "workstation"} {
+			plan, err := configured.Build(context.Background(), planner.Input{
+				Catalog: catalog, CatalogDigest: "fixture-digest", Profile: profile,
+				Config: productionTestConfig(profile, preset), Snapshot: model.Snapshot{Ownership: map[model.ResourceID]model.Ownership{}},
+			})
+			if err != nil {
+				t.Fatalf("Build(%s/%s): %v", profile, preset, err)
+			}
+			if len(plan.Unavailable) != 0 {
+				t.Fatalf("Build(%s/%s) unavailable = %#v", profile, preset, plan.Unavailable)
+			}
+		}
+	}
+}
+
+func TestProductionRegistryReportsOnlyDeliberatelyMissingHomebrew(t *testing.T) {
+	catalog := productionTestCatalog(t)
+	fixture := &resource.Fixture{Observations: make(map[model.ResourceID]model.Observation)}
+	for _, item := range catalog.Resources {
+		fixture.Observations[item.ID] = model.Observation{Present: true, Healthy: true, Provider: item.Provider, Package: item.Package, Paths: map[string]string{}}
+	}
+	management := productionTestManagement(t, filepath.Join(t.TempDir(), "missing", "brew"), false)
+	configured, err := composeProductionPlanner(productionTestAdapters(management, fixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := configured.Build(context.Background(), planner.Input{
+		Catalog: catalog, CatalogDigest: "fixture-digest", Profile: model.ProfileMacOSTerminal,
+		Config: productionTestConfig(model.ProfileMacOSTerminal, "minimal"), Snapshot: model.Snapshot{Ownership: map[model.ResourceID]model.Ownership{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Unavailable) != 1 || !strings.Contains(plan.Unavailable["management.homebrew"], "bootstrap or repair") {
+		t.Fatalf("unavailable = %#v", plan.Unavailable)
+	}
+	for _, reason := range plan.Unavailable {
+		if strings.Contains(reason, "adapter unavailable") {
+			t.Fatalf("production registry missing adapter: %s", reason)
+		}
+	}
+}
+
+func productionTestCatalog(t *testing.T) model.Catalog {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("..", "..", "catalog", "v1", "resources.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value model.Catalog
+	if err := json.Unmarshal(data, &value); err != nil {
+		t.Fatal(err)
+	}
+	return value
+}
+
+func productionTestManagement(t *testing.T, binary string, present bool) resource.Adapter {
+	t.Helper()
+	if present {
+		if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	adapter, err := managementcore.NewHomebrew(binary, filepath.Dir(binary))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return adapter
+}
+
+func productionTestAdapters(management resource.Adapter, fixture resource.Adapter) cli.AdapterSet {
+	return cli.AdapterSet{
+		ManagementCore: management, HomebrewFormula: fixture, HomebrewCask: fixture,
+		APT: fixture, Mise: fixture, ManagedFiles: fixture, GitCheckout: fixture,
+		Jetendard: fixture, JSONFields: fixture, PlistFields: fixture, Karabiner: fixture,
+	}
+}
+
+func productionTestConfig(profile model.Profile, preset string) model.Config {
+	enabled := preset != "minimal"
+	groups := preset == "workstation"
+	return model.Config{Version: 1, Terrapod: map[string]any{
+		"profile": string(profile), "enableEditorStack": enabled, "enableAiCliTools": enabled,
+		"enableDevelopmentWorkspace": enabled, "enableMacosAppGroupTerminalApps": groups,
+		"enableMacosAppGroupAutomation": groups, "enableMacosAppGroupLauncher": groups,
+		"enableMacosAppGroupMonitoring": groups, "enableMacosAppGroupDevelopmentApps": groups,
+	}}
 }
 
 func index(values []string, target string) int {
