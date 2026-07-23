@@ -288,7 +288,7 @@ prepare_repair_fixture() {
   catalog_digest="$(sha256_file "$fixture_dir/resources.json")"
 
   cat >"$fixture_dir/release.json" <<EOF
-{"version":"1.2.3","catalogSchema":1,"stateSchema":1,"trustedKeys":[],"assets":[{"kind":"binary","os":"darwin","arch":"amd64","name":"tpod-darwin-amd64","size":$darwin_amd64_size,"sha256":"$darwin_amd64_digest"},{"kind":"binary","os":"darwin","arch":"arm64","name":"tpod-darwin-arm64","size":$darwin_arm64_size,"sha256":"$darwin_arm64_digest"},{"kind":"binary","os":"linux","arch":"amd64","name":"tpod-linux-amd64","size":$linux_amd64_size,"sha256":"$linux_amd64_digest"},{"kind":"binary","os":"linux","arch":"arm64","name":"tpod-linux-arm64","size":$linux_arm64_size,"sha256":"$linux_arm64_digest"},{"kind":"source","name":"terrapod-source.tar.gz","size":$source_size,"sha256":"$source_digest"},{"kind":"catalog","name":"resources.json","size":$catalog_size,"sha256":"$catalog_digest"}]}
+{"version":"1.2.3","catalogSchema":1,"stateSchema":1,"assets":[{"kind":"binary","os":"darwin","arch":"amd64","name":"tpod-darwin-amd64","size":$darwin_amd64_size,"sha256":"$darwin_amd64_digest"},{"kind":"binary","os":"darwin","arch":"arm64","name":"tpod-darwin-arm64","size":$darwin_arm64_size,"sha256":"$darwin_arm64_digest"},{"kind":"binary","os":"linux","arch":"amd64","name":"tpod-linux-amd64","size":$linux_amd64_size,"sha256":"$linux_amd64_digest"},{"kind":"binary","os":"linux","arch":"arm64","name":"tpod-linux-arm64","size":$linux_arm64_size,"sha256":"$linux_arm64_digest"},{"kind":"source","name":"terrapod-source.tar.gz","size":$source_size,"sha256":"$source_digest"},{"kind":"catalog","name":"resources.json","size":$catalog_size,"sha256":"$catalog_digest"}]}
 EOF
 
   cp "$shared_dir/platform" "$fixture_dir/platform"
@@ -2765,7 +2765,7 @@ fi
 
 sh "$repo_root/tests/terrapod_manager_installer_test.sh"
 
-repair_case="$(make_case_dir signed-management-core-repair)"
+repair_case="$(make_case_dir unsigned-management-core-repair)"
 mkdir -p \
   "$repair_case/xdg-state/terrapod/journals" \
   "$repair_case/xdg-config/terrapod" \
@@ -2778,6 +2778,8 @@ printf '%s\n' '#!/bin/sh' 'exit 0' >"$repair_case/xdg-data/terrapod/releases/0.9
 chmod +x "$repair_case/xdg-data/terrapod/releases/0.9.0/bin/tpod"
 ln -s releases/0.9.0 "$repair_case/xdg-data/terrapod/current"
 prepare_repair_fixture "$repair_case"
+assert_not_contains "$(cat "$repair_case/release-fixture/release.json")" '"trustedKeys"' \
+  "repair fixture uses the unsigned manifest contract"
 repair_log="$repair_case/repair-calls"
 : >"$repair_log"
 TERRAPOD_STUB_CALL_LOG="$repair_log"
