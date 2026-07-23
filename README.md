@@ -16,7 +16,7 @@ verified Terrapod catalog.
 Run the Terrapod first-run installer on a supported machine.
 
 ```sh
-sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/install.sh)"
+sh -c "$(curl -fsLS https://github.com/juty9026/terrapod/releases/latest/download/install.sh)"
 ```
 
 The first-run installer installs standard-prefix Homebrew, then installs
@@ -184,7 +184,7 @@ The signed resource catalog declares the 20 mandatory CLI formulae for both prof
 Run the installer on macOS.
 
 ```sh
-sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/install.sh)"
+sh -c "$(curl -fsLS https://github.com/juty9026/terrapod/releases/latest/download/install.sh)"
 ```
 
 On macOS, typed adapters reconcile the initial terminal environment:
@@ -227,7 +227,7 @@ installer warns and continues. The VPS profile is read-only by default, so no
 GitHub authentication is required for the initial setup. Run the installer.
 
 ```sh
-sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/install.sh)"
+sh -c "$(curl -fsLS https://github.com/juty9026/terrapod/releases/latest/download/install.sh)"
 ```
 
 Ubuntu 24.04 installs Homebrew at `/home/linuxbrew/.linuxbrew` for every Preset.
