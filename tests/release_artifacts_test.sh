@@ -64,12 +64,63 @@ validate_no_runner_tool_reinstall() {
       sed -n -E 's/^[[:space:]]*(go[[:space:]]+install([[:space:]]|$).*)/\1/p'
   )"
 
-  [ "$apt_install_lines" = 'sudo apt-get install -y zsh' ] &&
-    [ "$go_install_lines" = 'go install github.com/twpayne/chezmoi/v2/cmd/chezmoi@v2.71.1' ] ||
+  [ "$apt_install_lines" = 'sudo apt-get install -y "$chezmoi_deb" zsh' ] &&
+    [ -z "$go_install_lines" ] ||
     return 1
 
   if printf '%s\n' "$workflow_contract" |
     grep -E '^[[:space:]]*(-[[:space:]]+uses:.*mise|mise[[:space:]]+install([[:space:]]|$))' >/dev/null; then
+    return 1
+  fi
+}
+
+executable_line_number() {
+  contract="$1"
+  expected_line="$2"
+  matches="$(
+    printf '%s\n' "$contract" |
+      sed 's/^[[:space:]]*//' |
+      grep -n -F -x -- "$expected_line"
+  )" || return 1
+
+  [ "$(printf '%s\n' "$matches" | wc -l | tr -d ' ')" -eq 1 ] || return 1
+  printf '%s\n' "${matches%%:*}"
+}
+
+validate_test_prerequisite_contract() {
+  test_job_contract="$1"
+
+  executable_line_number "$test_job_contract" \
+    'chezmoi_url="https://github.com/twpayne/chezmoi/releases/download/v2.71.1/chezmoi_2.71.1_linux_amd64.deb"' >/dev/null ||
+    return 1
+  executable_line_number "$test_job_contract" \
+    'chezmoi_deb="$RUNNER_TEMP/chezmoi_2.71.1_linux_amd64.deb"' >/dev/null ||
+    return 1
+  curl_line="$(
+    executable_line_number "$test_job_contract" \
+      'curl --fail --location --proto '\''=https'\'' --proto-redir '\''=https'\'' --output "$chezmoi_deb" "$chezmoi_url"'
+  )" || return 1
+  checksum_line="$(
+    executable_line_number "$test_job_contract" \
+      'printf '\''%s  %s\n'\'' '\''49b68f441f60fbf84a79928e35076ccd4d0d7d5c050924c27d03bda25a7024eb'\'' "$chezmoi_deb" | sha256sum -c -'
+  )" || return 1
+  executable_line_number "$test_job_contract" 'sudo apt-get update' >/dev/null ||
+    return 1
+  apt_install_line="$(
+    executable_line_number "$test_job_contract" \
+      'sudo apt-get install -y "$chezmoi_deb" zsh'
+  )" || return 1
+  version_line="$(
+    executable_line_number "$test_job_contract" 'chezmoi --version'
+  )" || return 1
+
+  [ "$curl_line" -lt "$checksum_line" ] &&
+    [ "$checksum_line" -lt "$apt_install_line" ] &&
+    [ "$apt_install_line" -lt "$version_line" ] ||
+    return 1
+
+  if printf '%s\n' "$test_job_contract" |
+    grep -E 'go[[:space:]]+install[[:space:]]+github\.com/twpayne/chezmoi|GITHUB_PATH' >/dev/null; then
     return 1
   fi
 }
@@ -213,6 +264,49 @@ pass "manifest binds all release assets"
 
 workflow="$(cat "$repo_root/.github/workflows/release.yml")"
 test_job="$(printf '%s\n' "$workflow" | sed -n '/^  test:$/,/^  release:$/p')"
+prerequisite_fixture='          chezmoi_url="https://github.com/twpayne/chezmoi/releases/download/v2.71.1/chezmoi_2.71.1_linux_amd64.deb"
+          chezmoi_deb="$RUNNER_TEMP/chezmoi_2.71.1_linux_amd64.deb"
+          curl --fail --location --proto '\''=https'\'' --proto-redir '\''=https'\'' --output "$chezmoi_deb" "$chezmoi_url"
+          printf '\''%s  %s\n'\'' '\''49b68f441f60fbf84a79928e35076ccd4d0d7d5c050924c27d03bda25a7024eb'\'' "$chezmoi_deb" | sha256sum -c -
+          sudo apt-get update
+          sudo apt-get install -y "$chezmoi_deb" zsh
+          chezmoi --version'
+wrong_package_fixture="$(
+  printf '%s\n' "$prerequisite_fixture" |
+    sed 's|chezmoi_2.71.1_linux_amd64\.deb|cmd/chezmoi|'
+)"
+if validate_test_prerequisite_contract "$wrong_package_fixture"; then
+  fail "release prerequisite contract rejects the wrong chezmoi package path"
+fi
+missing_checksum_fixture="$(
+  printf '%s\n' "$prerequisite_fixture" |
+    sed '/sha256sum -c/d'
+)"
+if validate_test_prerequisite_contract "$missing_checksum_fixture"; then
+  fail "release prerequisite contract rejects a missing checksum verification"
+fi
+commented_checksum_fixture="$(
+  printf '%s\n' "$prerequisite_fixture" |
+    sed '/sha256sum -c/s/^[[:space:]]*/          # /'
+)"
+if validate_test_prerequisite_contract "$commented_checksum_fixture"; then
+  fail "release prerequisite contract rejects a commented checksum verification"
+fi
+misordered_checksum_fixture="$(
+  printf '%s\n' "$prerequisite_fixture" |
+    awk '
+      /sha256sum -c/ { checksum = $0; next }
+      { print }
+      /apt-get install -y/ { print checksum }
+    '
+)"
+if validate_test_prerequisite_contract "$misordered_checksum_fixture"; then
+  fail "release prerequisite contract rejects checksum verification after apt install"
+fi
+validate_test_prerequisite_contract "$prerequisite_fixture" ||
+  fail "release prerequisite fixture models the required verified package install"
+validate_test_prerequisite_contract "$test_job" ||
+  fail "release test job installs the verified pinned chezmoi package and zsh"
 for runner_tool in mise jq gh; do
   if validate_no_runner_tool_reinstall \
     "$(printf '%s\n' "$workflow"; printf '          sudo apt-get install -y %s\n' "$runner_tool")"; then
@@ -224,20 +318,10 @@ if validate_no_runner_tool_reinstall \
   fail "release workflow contract rejects go install of mise"
 fi
 validate_no_runner_tool_reinstall \
-  "$(printf '%s\n' "$workflow"; printf '%s\n' '          # sudo apt-get install -y jq' '          echo "go install github.com/jdx/mise@v1.0.0"')" ||
+  "$(printf '%s\n' "$prerequisite_fixture"; printf '%s\n' '          # sudo apt-get install -y jq' '          echo "go install github.com/jdx/mise@v1.0.0"')" ||
   fail "release workflow install contract ignores documentation"
 validate_no_runner_tool_reinstall "$workflow" ||
   fail "release workflow only installs required test prerequisites"
-[ "$(printf '%s\n' "$workflow" | grep -c -F 'go install github.com/twpayne/chezmoi/v2/cmd/chezmoi@')" -eq 1 ] ||
-  fail "release workflow installs chezmoi exactly once"
-printf '%s\n' "$test_job" | grep -F 'go install github.com/twpayne/chezmoi/v2/cmd/chezmoi@v2.71.1' >/dev/null ||
-  fail "release test job installs pinned chezmoi v2.71.1"
-printf '%s\n' "$test_job" | grep -F 'echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"' >/dev/null ||
-  fail "release test job exposes GOPATH bin to later steps"
-printf '%s\n' "$test_job" | grep -F '"$(go env GOPATH)/bin/chezmoi" --version' >/dev/null ||
-  fail "release test job verifies the installed chezmoi binary"
-printf '%s\n' "$test_job" | grep -F 'apt-get install -y zsh' >/dev/null ||
-  fail "release test job installs zsh with Ubuntu package tooling"
 printf '%s' "$workflow" | grep -F 'release_base="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download"' >/dev/null ||
   fail "versioned installer repairs from the latest stable release base"
 for required in \
