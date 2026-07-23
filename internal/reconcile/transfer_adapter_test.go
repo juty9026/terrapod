@@ -10,6 +10,7 @@ import (
 	"github.com/juty9026/terrapod/internal/provider/legacy"
 	"github.com/juty9026/terrapod/internal/resource"
 	"github.com/juty9026/terrapod/internal/state"
+	"github.com/juty9026/terrapod/internal/testutil"
 )
 
 type transferProvider struct {
@@ -69,7 +70,7 @@ func (p *transferProvider) Inspect(context.Context, model.Resource) (model.Obser
 }
 
 func TestEngineRunsRealTransferPreflightWithoutPrivilege(t *testing.T) {
-	home := t.TempDir()
+	home := testutil.WorkspaceTempDir(t)
 	backend := &transferProvider{name: "homebrew-cask", pkg: "claude-code"}
 	desired, _ := resource.NewProviderAdapter(backend, func(context.Context, model.Resource, model.Observation, model.Ownership) ([]model.Operation, error) {
 		return nil, nil
