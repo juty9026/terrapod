@@ -182,6 +182,86 @@ func (s Stager) Stage(ctx context.Context, release VerifiedRelease, platform Pla
 	return Staged{Version: manifest.Version, Path: destination}, nil
 }
 
+// RepairAndActivate replaces only an invalid real directory for the same
+// signed version. It restores that directory if staging or activation fails.
+func (s Stager) RepairAndActivate(ctx context.Context, release VerifiedRelease, platform Platform) (Staged, error) {
+	manifest, err := s.verifyRelease(release)
+	if err != nil {
+		return Staged{}, err
+	}
+	if s.ReleaseDir == "" || s.ActiveRelease == "" || filepath.Dir(s.ActiveRelease) != filepath.Dir(s.ReleaseDir) {
+		return Staged{}, errors.New("invalid release layout")
+	}
+	if err := ensureRealDirectory(s.ReleaseDir, 0o755); err != nil {
+		return Staged{}, fmt.Errorf("prepare releases: %w", err)
+	}
+	destination := filepath.Join(s.ReleaseDir, manifest.Version)
+	info, statErr := os.Lstat(destination)
+	if errors.Is(statErr, os.ErrNotExist) {
+		staged, err := s.Stage(ctx, release, platform)
+		if err != nil {
+			return Staged{}, err
+		}
+		return staged, s.activateRepairedRelease(staged)
+	}
+	if statErr != nil {
+		return Staged{}, statErr
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return Staged{}, errors.New("existing release is not a real directory")
+	}
+	if _, err := s.validateInstalledRelease(destination, manifest.Version, release.manifestData, release.signatureData); err == nil {
+		staged, err := s.Stage(ctx, release, platform)
+		if err != nil {
+			return Staged{}, err
+		}
+		return staged, s.activateRepairedRelease(staged)
+	}
+	backup, err := os.MkdirTemp(s.ReleaseDir, ".repair-backup-")
+	if err != nil {
+		return Staged{}, err
+	}
+	if err := os.Remove(backup); err != nil {
+		return Staged{}, err
+	}
+	if err := os.Rename(destination, backup); err != nil {
+		return Staged{}, err
+	}
+	staged, err := s.Stage(ctx, release, platform)
+	if err != nil {
+		return Staged{}, errors.Join(err, restoreReplacedRelease(destination, backup))
+	}
+	if err := s.activateRepairedRelease(staged); err != nil {
+		return Staged{}, errors.Join(err, restoreReplacedRelease(destination, backup))
+	}
+	makeWritableForCleanup(backup)
+	if err := os.RemoveAll(backup); err != nil {
+		return Staged{}, err
+	}
+	return staged, nil
+}
+
+func (s Stager) activateRepairedRelease(staged Staged) error {
+	launcher := filepath.Join(staged.Path, "source", "scripts", "tpod-launcher.sh")
+	info, err := os.Lstat(launcher)
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() == 0 {
+		return errors.New("signed release does not contain a regular stable launcher")
+	}
+	return s.Activate(staged.Version)
+}
+
+func restoreReplacedRelease(destination, backup string) error {
+	if _, err := os.Lstat(destination); err == nil {
+		makeWritableForCleanup(destination)
+		if err := os.RemoveAll(destination); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return os.Rename(backup, destination)
+}
+
 func (s Stager) expectedPlatform() Platform {
 	if s.ExpectedPlatform.OS == "" && s.ExpectedPlatform.Arch == "" {
 		return Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}
@@ -424,6 +504,7 @@ func validateExecutable(name string, platform Platform) error {
 		loadable := false
 		entryFound := false
 		entryOffset := uint64(0)
+		entryIsVirtualAddress := false
 		for _, load := range file.Loads {
 			raw := load.Raw()
 			if len(raw) < 8 {
@@ -440,8 +521,23 @@ func validateExecutable(name string, platform Platform) error {
 				entryFound = true
 				entryOffset = file.ByteOrder.Uint64(raw[8:16])
 			}
+			if command == 0x5 {
+				if file.Cpu != macho.CpuAmd64 || len(raw) != 184 ||
+					file.ByteOrder.Uint32(raw[4:8]) != 184 ||
+					file.ByteOrder.Uint32(raw[8:12]) != 4 ||
+					file.ByteOrder.Uint32(raw[12:16]) != 42 {
+					return errors.New("binary has malformed Mach-O UNIXTHREAD entry command")
+				}
+				if entryFound {
+					return errors.New("binary has duplicate Mach-O entry commands")
+				}
+				entryFound = true
+				entryIsVirtualAddress = true
+				entryOffset = file.ByteOrder.Uint64(raw[144:152])
+			}
 			if segment, ok := load.(*macho.Segment); ok {
-				if segment.Offset > size || segment.Filesz > size-segment.Offset || segment.Memsz < segment.Filesz {
+				if segment.Offset > size || segment.Filesz > size-segment.Offset ||
+					((segment.Maxprot != 0 || segment.Prot != 0) && segment.Memsz < segment.Filesz) {
 					return errors.New("binary Mach-O segment is out of file bounds")
 				}
 				if segment.Maxprot&4 != 0 && segment.Prot&4 != 0 && segment.Filesz > 0 {
@@ -457,9 +553,15 @@ func validateExecutable(name string, platform Platform) error {
 		}
 		valid := false
 		for _, load := range file.Loads {
-			if segment, ok := load.(*macho.Segment); ok && segment.Maxprot&4 != 0 && segment.Prot&4 != 0 && segment.Filesz > 0 && entryOffset >= segment.Offset && entryOffset-segment.Offset < segment.Filesz {
-				valid = true
-				break
+			if segment, ok := load.(*macho.Segment); ok && segment.Maxprot&4 != 0 && segment.Prot&4 != 0 && segment.Filesz > 0 {
+				start := segment.Offset
+				if entryIsVirtualAddress {
+					start = segment.Addr
+				}
+				if entryOffset >= start && entryOffset-start < segment.Filesz {
+					valid = true
+					break
+				}
 			}
 		}
 		if !valid {

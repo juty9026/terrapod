@@ -77,6 +77,31 @@ func TestClientLatestStableDownloadsVerifiedAssets(t *testing.T) {
 	}
 }
 
+func TestNewLocalVerifiedReleaseBindsOnlyCanonicalLocalAssets(t *testing.T) {
+	private := ed25519.NewKeyFromSeed(testSeed)
+	manifest := validManifest(t)
+	data := encodeManifest(t, manifest)
+	signature := signManifest(t, "root", private, data)
+	verifier := testVerifier(private.Public().(ed25519.PublicKey))
+
+	got, err := NewLocalVerifiedRelease(data, signature, map[string]string{"tpod-linux-amd64": "/private/tpod"}, verifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Files["tpod-linux-amd64"] != "/private/tpod" {
+		t.Fatalf("files=%v", got.Files)
+	}
+	if _, err := NewLocalVerifiedRelease(data, signature, map[string]string{"../tpod": "/private/tpod"}, verifier); err == nil {
+		t.Fatal("unsafe local asset name accepted")
+	}
+	if _, err := NewLocalVerifiedRelease(data, signature, map[string]string{"tpod-linux-amd64": ""}, verifier); err == nil {
+		t.Fatal("empty local asset path accepted")
+	}
+	if _, err := NewLocalVerifiedRelease(append(data, ' '), signature, nil, verifier); err == nil {
+		t.Fatal("modified manifest accepted")
+	}
+}
+
 func TestClientRejectsUnsafeResponsesAndCleansTemps(t *testing.T) {
 	private := ed25519.NewKeyFromSeed(testSeed)
 	tests := []struct {

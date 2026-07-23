@@ -2,10 +2,306 @@
 set -eu
 
 DEFAULT_SOURCE_REPO="https://github.com/juty9026/terrapod.git"
+OFFICIAL_RELEASE_BASE_URL="https://github.com/juty9026/terrapod/releases/latest/download"
+EMBEDDED_RELEASE_ROOT_KEY_ID="__TERRAPOD_RELEASE_ROOT_KEY_ID__"
+EMBEDDED_RELEASE_ROOT_PUBLIC_KEY="__TERRAPOD_RELEASE_ROOT_PUBLIC_KEY__"
 
 fatal() {
   printf '%s\n' "terrapod installer: $*" >&2
   exit 1
+}
+
+repair_require_non_root() {
+  uid="$(id -u)" || fatal "failed to determine the effective user"
+  case "$uid" in
+    0)
+      fatal "Management Core repair must run as a non-root user"
+      ;;
+    ''|*[!0-9]*)
+      fatal "invalid effective user ID: $uid"
+      ;;
+  esac
+}
+
+repair_platform() {
+  if [ "${TERRAPOD_REPAIR_TEST_MODE:-0}" = 1 ] && [ -n "${TERRAPOD_REPAIR_PLATFORM:-}" ]; then
+    printf '%s\n' "$TERRAPOD_REPAIR_PLATFORM"
+    return
+  fi
+
+  case "$(uname -s):$(uname -m)" in
+    Darwin:x86_64) printf '%s\n' darwin/amd64 ;;
+    Darwin:arm64|Darwin:aarch64) printf '%s\n' darwin/arm64 ;;
+    Linux:x86_64) printf '%s\n' linux/amd64 ;;
+    Linux:arm64|Linux:aarch64) printf '%s\n' linux/arm64 ;;
+    *) fatal "unsupported repair platform: $(uname -s)/$(uname -m)" ;;
+  esac
+}
+
+repair_openssl() {
+  if [ "${TERRAPOD_REPAIR_TEST_MODE:-0}" = 1 ] && [ -n "${TERRAPOD_OPENSSL:-}" ]; then
+    [ -x "$TERRAPOD_OPENSSL" ] || fatal "configured repair OpenSSL is not executable"
+    printf '%s\n' "$TERRAPOD_OPENSSL"
+    return
+  fi
+
+  for candidate in \
+    /opt/homebrew/opt/openssl@3/bin/openssl \
+    /opt/homebrew/bin/openssl \
+    /home/linuxbrew/.linuxbrew/opt/openssl@3/bin/openssl \
+    /usr/bin/openssl; do
+    if [ -x "$candidate" ] && "$candidate" version 2>/dev/null | grep -E '^OpenSSL 3[.]' >/dev/null; then
+      printf '%s\n' "$candidate"
+      return
+    fi
+  done
+  fatal "OpenSSL 3 is required to verify the signed Terrapod release"
+}
+
+repair_curl() {
+  if [ "${TERRAPOD_REPAIR_TEST_MODE:-0}" = 1 ]; then
+    command -v curl || fatal "curl is required for Management Core repair"
+    return
+  fi
+  [ -x /usr/bin/curl ] || fatal "curl is required for Management Core repair"
+  printf '%s\n' /usr/bin/curl
+}
+
+repair_download() {
+  curl_bin="$1"
+  url="$2"
+  destination="$3"
+  maximum_size="$4"
+
+  case "$url" in
+    https://*) ;;
+    *) fatal "repair download URL must use HTTPS: $url" ;;
+  esac
+  "$curl_bin" -fL --proto '=https' --proto-redir '=https' \
+    --connect-timeout 15 --max-time 120 --max-filesize "$maximum_size" \
+    -o "$destination" "$url" ||
+    fatal "failed to download signed release input: $url"
+  actual_size="$(wc -c <"$destination" | tr -d ' ')"
+  case "$actual_size" in ''|*[!0-9]*) fatal "failed to measure repair download" ;; esac
+  [ "$actual_size" -gt 0 ] && [ "$actual_size" -le "$maximum_size" ] ||
+    fatal "repair download exceeds its size limit: $url"
+}
+
+repair_json_field() {
+  input="$1"
+  field="$2"
+  sed -n 's/.*"'"$field"'":"\([^"]*\)".*/\1/p' "$input"
+}
+
+repair_asset_field() {
+  object="$1"
+  field="$2"
+  case "$field" in
+    size)
+      printf '%s\n' "$object" | sed -n 's/.*"size":\([0-9][0-9]*\).*/\1/p'
+      ;;
+    *)
+      printf '%s\n' "$object" | sed -n 's/.*"'"$field"'":"\([^"]*\)".*/\1/p'
+      ;;
+  esac
+}
+
+repair_select_asset() {
+  objects="$1"
+  kind="$2"
+  os_name="${3:-}"
+  arch="${4:-}"
+
+  matches="$(grep -F '"kind":"'"$kind"'"' "$objects" || true)"
+  if [ -n "$os_name" ]; then
+    matches="$(printf '%s\n' "$matches" | grep -F '"os":"'"$os_name"'"' || true)"
+  fi
+  if [ -n "$arch" ]; then
+    matches="$(printf '%s\n' "$matches" | grep -F '"arch":"'"$arch"'"' || true)"
+  fi
+  [ "$(printf '%s\n' "$matches" | awk 'NF { count++ } END { print count+0 }')" -eq 1 ] ||
+    fatal "signed release manifest has an invalid $kind asset set"
+  printf '%s\n' "$matches"
+}
+
+repair_validate_asset() {
+  object="$1"
+  name="$(repair_asset_field "$object" name)"
+  size="$(repair_asset_field "$object" size)"
+  digest="$(repair_asset_field "$object" sha256)"
+
+  case "$name" in ''|*[!a-z0-9._-]*|.*) fatal "signed release has an unsafe asset name" ;; esac
+  case "$size" in ''|*[!0-9]*) fatal "signed release has an invalid asset size" ;; esac
+  [ "$size" -gt 0 ] && [ "$size" -le 8589934592 ] ||
+    fatal "signed release asset size is outside the repair limit"
+  case "$digest" in
+    ''|*[!0-9a-f]*) fatal "signed release has an invalid SHA-256" ;;
+  esac
+  [ "${#digest}" -eq 64 ] || fatal "signed release has an invalid SHA-256"
+  printf '%s|%s|%s\n' "$name" "$size" "$digest"
+}
+
+repair_verify_file() {
+  openssl_bin="$1"
+  path="$2"
+  expected_size="$3"
+  expected_digest="$4"
+
+  actual_size="$(wc -c <"$path" | tr -d ' ')"
+  [ "$actual_size" = "$expected_size" ] ||
+    fatal "signed release asset size mismatch: ${path##*/}"
+  actual_digest="$("$openssl_bin" dgst -sha256 -r "$path" | awk '{print $1}')" ||
+    fatal "failed to hash signed release asset"
+  [ "$actual_digest" = "$expected_digest" ] ||
+    fatal "signed release asset checksum mismatch: ${path##*/}"
+}
+
+repair_cleanup() {
+  if [ -n "${REPAIR_WORK:-}" ] && [ -d "$REPAIR_WORK" ] && [ ! -L "$REPAIR_WORK" ]; then
+    chmod -R u+w "$REPAIR_WORK" 2>/dev/null || true
+    rm -rf "$REPAIR_WORK"
+  fi
+  REPAIR_WORK=
+}
+
+repair_management_core() {
+  repair_require_non_root
+
+  test_mode="${TERRAPOD_REPAIR_TEST_MODE:-0}"
+  if [ "$test_mode" = 1 ]; then
+    release_base="${TERRAPOD_RELEASE_BASE_URL:-$OFFICIAL_RELEASE_BASE_URL}"
+    root_key_id="${TERRAPOD_RELEASE_ROOT_KEY_ID:-$EMBEDDED_RELEASE_ROOT_KEY_ID}"
+    root_public_key="${TERRAPOD_RELEASE_ROOT_PUBLIC_KEY:-$EMBEDDED_RELEASE_ROOT_PUBLIC_KEY}"
+  else
+    if [ -n "${TERRAPOD_RELEASE_BASE_URL:-}" ] ||
+      [ -n "${TERRAPOD_RELEASE_ROOT_KEY_ID:-}" ] ||
+      [ -n "${TERRAPOD_RELEASE_ROOT_PUBLIC_KEY:-}" ] ||
+      [ -n "${TERRAPOD_REPAIR_PLATFORM:-}" ] ||
+      [ -n "${TERRAPOD_OPENSSL:-}" ]; then
+      fatal "production repair refuses release trust, endpoint, platform, and verifier overrides"
+    fi
+    release_base="$OFFICIAL_RELEASE_BASE_URL"
+    root_key_id="$EMBEDDED_RELEASE_ROOT_KEY_ID"
+    root_public_key="$EMBEDDED_RELEASE_ROOT_PUBLIC_KEY"
+  fi
+
+  case "$release_base" in https://*) ;; *) fatal "release endpoint must use HTTPS" ;; esac
+  case "$root_key_id" in
+    ''|__*__|*[!a-z0-9._-]*|.*) fatal "release root key ID is not embedded or canonical" ;;
+  esac
+  case "$root_public_key" in
+    ''|__*__|*[!A-Za-z0-9+/=]*) fatal "release root public key is not embedded or canonical" ;;
+  esac
+
+  platform="$(repair_platform)"
+  os_name="${platform%/*}"
+  arch="${platform#*/}"
+  case "$platform" in
+    darwin/amd64|darwin/arm64|linux/amd64|linux/arm64) ;;
+    *) fatal "unsupported repair platform: $platform" ;;
+  esac
+
+  openssl_bin="$(repair_openssl)"
+  curl_bin="$(repair_curl)"
+  data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+  terrapod_data="$data_home/terrapod"
+  releases="$terrapod_data/releases"
+  cache_home="${XDG_CACHE_HOME:-$HOME/.cache}"
+  repair_cache="$cache_home/terrapod/releases"
+  local_bin="$HOME/.local/bin"
+  for path in "$terrapod_data" "$releases" "$repair_cache" "$local_bin"; do
+    [ ! -L "$path" ] || fatal "repair path must not be a symlink: $path"
+    mkdir -p "$path" || fatal "failed to create repair directory: $path"
+  done
+
+  work="$(mktemp -d "$repair_cache/.repair-XXXXXX")" ||
+    fatal "failed to create private repair staging directory"
+  REPAIR_WORK="$work"
+  trap repair_cleanup 0
+  trap 'exit 1' 1 2 15
+  chmod 700 "$work" || fatal "failed to protect repair staging directory"
+  manifest_file="$work/release.json"
+  signature_file="$work/release.json.sig"
+  repair_download "$curl_bin" "$release_base/release.json" "$manifest_file" 1048576
+  repair_download "$curl_bin" "$release_base/release.json.sig" "$signature_file" 1048576
+
+  compact_signature="$work/signature.compact"
+  tr -d '[:space:]' <"$signature_file" >"$compact_signature"
+  signature_key_id="$(repair_json_field "$compact_signature" keyId)"
+  signature_algorithm="$(repair_json_field "$compact_signature" algorithm)"
+  signature_value="$(repair_json_field "$compact_signature" signature)"
+  [ "$signature_key_id" = "$root_key_id" ] || fatal "release signature uses an untrusted key ID"
+  [ "$signature_algorithm" = ed25519 ] || fatal "release signature algorithm is not Ed25519"
+  case "$signature_value" in ''|*[!A-Za-z0-9+/=]*) fatal "release signature is not canonical base64" ;; esac
+  [ "$(cat "$compact_signature")" = "{\"keyId\":\"$signature_key_id\",\"algorithm\":\"ed25519\",\"signature\":\"$signature_value\"}" ] ||
+    fatal "release signature envelope is not canonical"
+
+  public_raw="$work/public.raw"
+  public_der="$work/public.der"
+  signature_raw="$work/signature.raw"
+  printf '%s' "$root_public_key" | "$openssl_bin" base64 -d -A >"$public_raw" 2>/dev/null ||
+    fatal "failed to decode embedded release public key"
+  [ "$(wc -c <"$public_raw" | tr -d ' ')" -eq 32 ] ||
+    fatal "embedded release public key has invalid length"
+  [ "$("$openssl_bin" base64 -A -in "$public_raw")" = "$root_public_key" ] ||
+    fatal "embedded release public key is not canonical base64"
+  printf '\060\052\060\005\006\003\053\145\160\003\041\000' >"$public_der"
+  cat "$public_raw" >>"$public_der"
+  printf '%s' "$signature_value" | "$openssl_bin" base64 -d -A >"$signature_raw" 2>/dev/null ||
+    fatal "failed to decode release signature"
+  [ "$(wc -c <"$signature_raw" | tr -d ' ')" -eq 64 ] ||
+    fatal "release signature has invalid length"
+  [ "$("$openssl_bin" base64 -A -in "$signature_raw")" = "$signature_value" ] ||
+    fatal "release signature is not canonical base64"
+  "$openssl_bin" pkeyutl -verify -rawin -pubin -inkey "$public_der" \
+    -in "$manifest_file" -sigfile "$signature_raw" >/dev/null 2>&1 ||
+    fatal "release manifest signature verification failed"
+
+  compact_manifest="$work/manifest.compact"
+  tr -d '[:space:]' <"$manifest_file" >"$compact_manifest"
+  tr '{}' '\n\n' <"$compact_manifest" >"$work/manifest.objects"
+  binary_object="$(repair_select_asset "$work/manifest.objects" binary "$os_name" "$arch")"
+  binary_fields="$(repair_validate_asset "$binary_object")"
+  old_ifs="$IFS"
+  IFS='|'
+  set -- $binary_fields
+  binary_name="$1"; binary_size="$2"; binary_digest="$3"
+  IFS="$old_ifs"
+  [ "$binary_name" = "tpod-$os_name-$arch" ] ||
+    fatal "signed release binary name does not match the platform"
+
+  binary_download="$work/$binary_name"
+  source_download="$work/terrapod-source.tar.gz"
+  catalog_download="$work/resources.json"
+  repair_download "$curl_bin" "$release_base/$binary_name" "$binary_download" "$binary_size"
+  repair_download "$curl_bin" "$release_base/terrapod-source.tar.gz" "$source_download" 1073741824
+  repair_download "$curl_bin" "$release_base/resources.json" "$catalog_download" 67108864
+  repair_verify_file "$openssl_bin" "$binary_download" "$binary_size" "$binary_digest"
+  chmod 755 "$binary_download" || fatal "failed to make verified repair binary executable"
+  manifest_digest="$("$openssl_bin" dgst -sha256 -r "$manifest_file" | awk '{print $1}')" ||
+    fatal "failed to hash verified release manifest"
+  HOME="$HOME" \
+    XDG_DATA_HOME="$data_home" \
+    XDG_CACHE_HOME="$cache_home" \
+    "$binary_download" internal-repair-stage \
+      --manifest "$manifest_file" \
+      --signature "$signature_file" \
+      --binary "$binary_download" \
+      --source "$source_download" \
+      --catalog "$catalog_download" \
+      --manifest-digest "$manifest_digest" ||
+    fatal "verified Management Core could not stage and activate the signed release"
+
+  launcher_source="$terrapod_data/current/source/scripts/tpod-launcher.sh"
+  [ -f "$launcher_source" ] && [ ! -L "$launcher_source" ] ||
+    fatal "signed release does not contain the stable launcher"
+  cp "$launcher_source" "$local_bin/tpod"
+  cp "$launcher_source" "$local_bin/terrapod"
+  chmod 755 "$local_bin/tpod" "$local_bin/terrapod"
+
+  repair_cleanup
+  trap - 0 1 2 15
+  printf '%s\n' "terrapod installer: repaired Management Core"
 }
 
 user_local_bin_dir() {
@@ -1288,6 +1584,21 @@ print_first_run_warning_completion() {
 }
 
 main() {
+  case "$#" in
+    0)
+      ;;
+    1)
+      if [ "$1" = --repair ]; then
+        repair_management_core
+        return
+      fi
+      fatal "unsupported argument: $1"
+      ;;
+    *)
+      fatal "usage: install.sh [--repair]"
+      ;;
+  esac
+
   profile="$(detect_profile)"
   if [ "${TERRAPOD_PRINT_EXPECTED_HOMEBREW_PATH:-}" = 1 ]; then
     expected_homebrew_path "$profile" "$(machine_arch)"

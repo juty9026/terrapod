@@ -8,18 +8,59 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"debug/elf"
+	"debug/macho"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
+func TestValidateExecutableAcceptsGoDarwinBinaries(t *testing.T) {
+	for _, arch := range []string{"arm64", "amd64"} {
+		t.Run(arch, func(t *testing.T) {
+			output := filepath.Join(t.TempDir(), "tpod")
+			command := exec.Command("go", "build", "-o", output, "../../cmd/tpod")
+			command.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=darwin", "GOARCH="+arch)
+			if result, err := command.CombinedOutput(); err != nil {
+				t.Fatalf("go build: %v\n%s", err, result)
+			}
+			if err := validateExecutable(output, Platform{OS: "darwin", Arch: arch}); err != nil {
+				logMachOSegments(t, output)
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func logMachOSegments(t *testing.T, path string) {
+	t.Helper()
+	info, statErr := os.Stat(path)
+	file, openErr := macho.Open(path)
+	if statErr != nil || openErr != nil {
+		t.Logf("Mach-O diagnostics: stat=%v open=%v", statErr, openErr)
+		return
+	}
+	defer file.Close()
+	t.Logf("Mach-O diagnostics: size=%d type=%v cpu=%v loads=%d", info.Size(), file.Type, file.Cpu, len(file.Loads))
+	for index, load := range file.Loads {
+		if segment, ok := load.(*macho.Segment); ok {
+			t.Logf("segment[%d] name=%q offset=%d filesz=%d memsz=%d maxprot=%d prot=%d", index, segment.Name, segment.Offset, segment.Filesz, segment.Memsz, segment.Maxprot, segment.Prot)
+			continue
+		}
+		raw := load.Raw()
+		if len(raw) >= 4 && file.ByteOrder.Uint32(raw[:4]) == 0x80000028 {
+			t.Logf("load[%d] LC_MAIN bytes=%d entryoff=%d", index, len(raw), file.ByteOrder.Uint64(raw[8:16]))
+		}
+	}
+}
+
 func TestStagerStagesAndAtomicallyActivatesRelease(t *testing.T) {
 	root := realReleaseTempDir(t)
-	release := stagedFixture(t, root, Platform{OS: "linux", Arch: "amd64"}, sourceTar(t, map[string]string{"README.md": "hello"}))
+	release := stagedFixture(t, root, Platform{OS: "linux", Arch: "amd64"}, sourceTar(t, map[string]string{"README.md": "hello", "scripts/tpod-launcher.sh": "#!/bin/sh\n"}))
 	s := testStager(Stager{ReleaseDir: filepath.Join(root, "data", "releases"), ActiveRelease: filepath.Join(root, "data", "current")})
 	got, err := s.Stage(context.Background(), release, Platform{OS: "linux", Arch: "amd64"})
 	if err != nil {
@@ -54,6 +95,66 @@ func TestStagerStagesAndAtomicallyActivatesRelease(t *testing.T) {
 	after, _ := os.Readlink(s.ActiveRelease)
 	if after != target {
 		t.Fatalf("failed activation changed current to %q", after)
+	}
+}
+
+func TestRepairAndActivateReplacesPartialSameVersionAndRestoresItOnFailure(t *testing.T) {
+	root := realReleaseTempDir(t)
+	stager := testStager(Stager{ReleaseDir: filepath.Join(root, "releases"), ActiveRelease: filepath.Join(root, "current")})
+	release := stagedFixture(t, root, Platform{OS: "linux", Arch: "amd64"}, sourceTar(t, map[string]string{"README.md": "hello", "scripts/tpod-launcher.sh": "#!/bin/sh\n"}))
+	partial := filepath.Join(stager.ReleaseDir, "1.2.3")
+	if err := os.MkdirAll(filepath.Join(partial, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(partial, "bin", "tpod"), []byte("broken"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("releases", "1.2.3"), stager.ActiveRelease); err != nil {
+		t.Fatal(err)
+	}
+
+	binary, _ := release.Manifest.BinaryAsset("linux", "amd64")
+	original, err := os.ReadFile(release.Files[binary.Name])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(release.Files[binary.Name], []byte("corrupt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stager.RepairAndActivate(context.Background(), release, Platform{OS: "linux", Arch: "amd64"}); err == nil {
+		t.Fatal("repair accepted a corrupt signed asset")
+	}
+	if got, err := os.ReadFile(filepath.Join(partial, "bin", "tpod")); err != nil || string(got) != "broken" {
+		t.Fatalf("partial release was not restored: body=%q err=%v", got, err)
+	}
+
+	if err := os.WriteFile(release.Files[binary.Name], original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	staged, err := stager.RepairAndActivate(context.Background(), release, Platform{OS: "linux", Arch: "amd64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := stager.LoadActive(staged.Version); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRepairAndActivateDoesNotActivateReleaseWithoutLauncher(t *testing.T) {
+	root := realReleaseTempDir(t)
+	stager := testStager(Stager{ReleaseDir: filepath.Join(root, "releases"), ActiveRelease: filepath.Join(root, "current")})
+	release := stagedFixture(t, root, Platform{OS: "linux", Arch: "amd64"}, sourceTar(t, map[string]string{"README.md": "hello"}))
+	if err := os.MkdirAll(filepath.Join(stager.ReleaseDir, "0.9.0"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("releases", "0.9.0"), stager.ActiveRelease); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stager.RepairAndActivate(context.Background(), release, Platform{OS: "linux", Arch: "amd64"}); err == nil {
+		t.Fatal("release without stable launcher activated")
+	}
+	if target, err := os.Readlink(stager.ActiveRelease); err != nil || target != filepath.Join("releases", "0.9.0") {
+		t.Fatalf("current=%q err=%v", target, err)
 	}
 }
 

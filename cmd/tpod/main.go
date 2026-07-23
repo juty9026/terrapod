@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"syscall"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/juty9026/terrapod/internal/model"
 	"github.com/juty9026/terrapod/internal/paths"
 	"github.com/juty9026/terrapod/internal/planner"
+	"github.com/juty9026/terrapod/internal/release"
 	"github.com/juty9026/terrapod/internal/state"
 	updatepkg "github.com/juty9026/terrapod/internal/update"
 )
@@ -53,6 +55,14 @@ func main() {
 		if err == nil && os.Geteuid() == 0 {
 			err = errors.New("self-check must run as a non-root user")
 		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "internal-repair-stage" {
+		err := repairManagementCore(layout, homeErr, os.Args[2:])
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -111,6 +121,78 @@ func main() {
 	}
 	code := cli.Run(ctx, os.Args[1:], deps)
 	os.Exit(code)
+}
+
+func repairManagementCore(layout paths.Layout, homeErr error, args []string) error {
+	if homeErr != nil {
+		return homeErr
+	}
+	if os.Geteuid() == 0 {
+		return errors.New("repair staging must run as a non-root user")
+	}
+	if len(args) != 12 ||
+		args[0] != "--manifest" ||
+		args[2] != "--signature" ||
+		args[4] != "--binary" ||
+		args[6] != "--source" ||
+		args[8] != "--catalog" ||
+		args[10] != "--manifest-digest" {
+		return errors.New("usage: tpod internal-repair-stage --manifest <path> --signature <path> --binary <path> --source <path> --catalog <path> --manifest-digest <sha256>")
+	}
+	roots, err := compiledReleaseRoots()
+	if err != nil {
+		return err
+	}
+	manifestData, err := readRepairMetadata(args[1])
+	if err != nil {
+		return err
+	}
+	signatureData, err := readRepairMetadata(args[3])
+	if err != nil {
+		return err
+	}
+	verifier := release.Verifier{CompiledKeys: roots}
+	verified, err := release.NewLocalVerifiedRelease(manifestData, signatureData, map[string]string{
+		filepath.Base(args[5]): args[5],
+		filepath.Base(args[7]): args[7],
+		filepath.Base(args[9]): args[9],
+	}, verifier)
+	if err != nil {
+		return err
+	}
+	digest, err := verified.Manifest.Digest()
+	if err != nil {
+		return err
+	}
+	if digest != args[11] {
+		return errors.New("repair manifest digest differs from the shell-verified manifest")
+	}
+	stager := release.Stager{
+		ReleaseDir:       layout.ReleaseDir,
+		ActiveRelease:    layout.ActiveRelease,
+		Verifier:         verifier,
+		ExpectedPlatform: release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH},
+	}
+	_, err = stager.RepairAndActivate(context.Background(), verified, release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH})
+	return err
+}
+
+func readRepairMetadata(path string) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() <= 0 || info.Size() > release.MaxManifestSize {
+		return nil, errors.New("repair metadata must be a bounded regular file")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) != info.Size() {
+		return nil, errors.New("repair metadata changed while reading")
+	}
+	return data, nil
 }
 
 func compiledReleaseRoots() (map[string]ed25519.PublicKey, error) {

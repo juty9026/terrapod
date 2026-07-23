@@ -48,6 +48,32 @@ type githubAsset struct {
 	URL  string `json:"browser_download_url"`
 }
 
+// NewLocalVerifiedRelease verifies signed metadata and binds it to already
+// downloaded assets. Stager rechecks every declared size and checksum before
+// committing the release.
+func NewLocalVerifiedRelease(manifestData, signatureData []byte, files map[string]string, verifier Verifier) (VerifiedRelease, error) {
+	manifest, err := verifier.VerifyManifest(manifestData, signatureData)
+	if err != nil {
+		return VerifiedRelease{}, err
+	}
+	release := VerifiedRelease{
+		Manifest:      manifest,
+		Files:         make(map[string]string, len(files)),
+		manifestData:  append([]byte(nil), manifestData...),
+		signatureData: append([]byte(nil), signatureData...),
+	}
+	for name, path := range files {
+		if !assetNamePattern.MatchString(name) || path == "" {
+			return VerifiedRelease{}, fmt.Errorf("invalid local release asset %q", name)
+		}
+		release.Files[name] = path
+	}
+	if err := release.sealManifest(); err != nil {
+		return VerifiedRelease{}, err
+	}
+	return release, nil
+}
+
 func (c Client) LatestStable(ctx context.Context) (VerifiedRelease, error) {
 	endpoint := c.Endpoint
 	if endpoint == "" {
