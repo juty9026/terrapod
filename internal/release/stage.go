@@ -309,6 +309,9 @@ func validateExecutable(name string, platform Platform) error {
 		if file.Machine != want {
 			return errors.New("binary executable architecture mismatch")
 		}
+		if file.Entry == 0 {
+			return errors.New("binary ELF entry point must be non-zero")
+		}
 		loadable := false
 		entryValid := false
 		for _, program := range file.Progs {
@@ -385,7 +388,7 @@ func validateExecutable(name string, platform Platform) error {
 		}
 		valid := false
 		for _, load := range file.Loads {
-			if segment, ok := load.(*macho.Segment); ok && segment.Prot&4 != 0 && entryOffset >= segment.Offset && entryOffset-segment.Offset < segment.Filesz {
+			if segment, ok := load.(*macho.Segment); ok && segment.Maxprot&4 != 0 && segment.Prot&4 != 0 && segment.Filesz > 0 && entryOffset >= segment.Offset && entryOffset-segment.Offset < segment.Filesz {
 				valid = true
 				break
 			}

@@ -315,8 +315,8 @@ func TestStagerRejectsInvalidExecutableSegments(t *testing.T) {
 	binary.LittleEndian.PutUint32(linuxNonexec[68:], uint32(elf.PF_R))
 	linuxOverflow := linuxBinary(elf.EM_X86_64)
 	binary.LittleEndian.PutUint64(linuxOverflow[72:], ^uint64(0)-1)
-	linuxZeroOutside := linuxBinary(elf.EM_X86_64)
-	binary.LittleEndian.PutUint64(linuxZeroOutside[80:], 0x1000)
+	linuxZeroEntry := linuxBinary(elf.EM_X86_64)
+	binary.LittleEndian.PutUint64(linuxZeroEntry[24:], 0)
 	darwinNonexec := machoBinary(0x0100000c)
 	binary.LittleEndian.PutUint32(darwinNonexec[88:], 1)
 	binary.LittleEndian.PutUint32(darwinNonexec[92:], 1)
@@ -328,7 +328,7 @@ func TestStagerRejectsInvalidExecutableSegments(t *testing.T) {
 		name     string
 		platform Platform
 		body     []byte
-	}{{"ELF nonexec", Platform{"linux", "amd64"}, linuxNonexec}, {"ELF overflow", Platform{"linux", "amd64"}, linuxOverflow}, {"ELF truncated", Platform{"linux", "amd64"}, linuxBinary(elf.EM_X86_64)[:100]}, {"ELF zero entry outside segment", Platform{"linux", "amd64"}, linuxZeroOutside}, {"Mach-O nonexec", Platform{"darwin", "arm64"}, darwinNonexec}, {"Mach-O overflow", Platform{"darwin", "arm64"}, darwinOverflow}, {"Mach-O truncated", Platform{"darwin", "arm64"}, machoBinary(0x0100000c)[:110]}, {"Mach-O UNIXTHREAD only", Platform{"darwin", "arm64"}, darwinUnixThread}, {"Mach-O duplicate LC_MAIN", Platform{"darwin", "arm64"}, duplicateMachMain(0x0100000c)}}
+	}{{"ELF nonexec", Platform{"linux", "amd64"}, linuxNonexec}, {"ELF overflow", Platform{"linux", "amd64"}, linuxOverflow}, {"ELF truncated", Platform{"linux", "amd64"}, linuxBinary(elf.EM_X86_64)[:100]}, {"ELF zero entry", Platform{"linux", "amd64"}, linuxZeroEntry}, {"Mach-O nonexec", Platform{"darwin", "arm64"}, darwinNonexec}, {"Mach-O overflow", Platform{"darwin", "arm64"}, darwinOverflow}, {"Mach-O truncated", Platform{"darwin", "arm64"}, machoBinary(0x0100000c)[:110]}, {"Mach-O UNIXTHREAD only", Platform{"darwin", "arm64"}, darwinUnixThread}, {"Mach-O duplicate LC_MAIN", Platform{"darwin", "arm64"}, duplicateMachMain(0x0100000c)}, {"Mach-O entry segment lacks max execute", Platform{"darwin", "arm64"}, machEntryInNonMaxExecutableSegment(0x0100000c)}}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			root := realReleaseTempDir(t)
@@ -482,6 +482,7 @@ func linuxBinary(machine elf.Machine) []byte {
 	binary.LittleEndian.PutUint16(b[16:], 2)
 	binary.LittleEndian.PutUint16(b[18:], uint16(machine))
 	binary.LittleEndian.PutUint32(b[20:], 1)
+	binary.LittleEndian.PutUint64(b[24:], 16)
 	binary.LittleEndian.PutUint64(b[32:], 64)
 	binary.LittleEndian.PutUint16(b[52:], 64)
 	binary.LittleEndian.PutUint16(b[54:], 56)
@@ -528,6 +529,30 @@ func duplicateMachMain(cpu uint32) []byte {
 	binary.LittleEndian.PutUint64(body[80:88], uint64(len(body)))
 	binary.LittleEndian.PutUint32(body[128:132], 0x80000028)
 	binary.LittleEndian.PutUint32(body[132:136], 24)
+	return body
+}
+func machEntryInNonMaxExecutableSegment(cpu uint32) []byte {
+	body := make([]byte, 256)
+	binary.LittleEndian.PutUint32(body[0:4], 0xfeedfacf)
+	binary.LittleEndian.PutUint32(body[4:8], cpu)
+	binary.LittleEndian.PutUint32(body[12:16], 2)
+	binary.LittleEndian.PutUint32(body[16:20], 3)
+	binary.LittleEndian.PutUint32(body[20:24], 168)
+	writeSegment := func(offset int, name string, fileOffset, fileSize uint64, maxprot, prot uint32) {
+		binary.LittleEndian.PutUint32(body[offset:offset+4], 0x19)
+		binary.LittleEndian.PutUint32(body[offset+4:offset+8], 72)
+		copy(body[offset+8:offset+24], []byte(name))
+		binary.LittleEndian.PutUint64(body[offset+32:offset+40], fileSize)
+		binary.LittleEndian.PutUint64(body[offset+40:offset+48], fileOffset)
+		binary.LittleEndian.PutUint64(body[offset+48:offset+56], fileSize)
+		binary.LittleEndian.PutUint32(body[offset+56:offset+60], maxprot)
+		binary.LittleEndian.PutUint32(body[offset+60:offset+64], prot)
+	}
+	writeSegment(32, "__TEXT", 0, 100, 5, 5)
+	writeSegment(104, "__BAD", 200, 56, 1, 5)
+	binary.LittleEndian.PutUint32(body[176:180], 0x80000028)
+	binary.LittleEndian.PutUint32(body[180:184], 24)
+	binary.LittleEndian.PutUint64(body[184:192], 220)
 	return body
 }
 
