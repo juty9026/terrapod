@@ -1362,7 +1362,7 @@ func equalStagedFiles(left, right []stagedFile) bool {
 
 func makeWritableForCleanup(root string) {
 	_ = filepath.WalkDir(root, func(name string, entry os.DirEntry, err error) error {
-		if err == nil {
+		if err == nil && entry.Type().IsDir() {
 			_ = os.Chmod(name, 0o700)
 		}
 		return nil

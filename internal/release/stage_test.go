@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -34,6 +35,83 @@ func TestValidateExecutableAcceptsGoDarwinBinaries(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestMakeWritableForCleanupChangesOnlyDirectories(t *testing.T) {
+	root := realReleaseTempDir(t)
+	outside := filepath.Join(root, "outside")
+	slot := filepath.Join(root, "releases", ".recovery", "1.2.3")
+	nested := filepath.Join(slot, "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	symlinkTarget := filepath.Join(outside, "symlink-target")
+	hardlinkTarget := filepath.Join(outside, "hardlink-target")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(symlinkTarget, []byte("symlink outside"), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hardlinkTarget, []byte("hardlink outside"), 0o440); err != nil {
+		t.Fatal(err)
+	}
+	symlinkEntry := filepath.Join(nested, "symlink")
+	hardlinkEntry := filepath.Join(nested, "hardlink")
+	fifoEntry := filepath.Join(nested, "fifo")
+	if err := os.Symlink(symlinkTarget, symlinkEntry); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(hardlinkTarget, hardlinkEntry); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(fifoEntry, 0); err != nil {
+		t.Fatal(err)
+	}
+	symlinkBefore, err := os.Stat(symlinkTarget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hardlinkBefore, err := os.Stat(hardlinkTarget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(nested, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(slot, 0o555); err != nil {
+		t.Fatal(err)
+	}
+
+	makeWritableForCleanup(slot)
+
+	if info, err := os.Lstat(fifoEntry); err != nil || info.Mode().Perm() != 0 || info.Mode()&os.ModeNamedPipe == 0 {
+		t.Fatalf("FIFO mode=%v err=%v", info, err)
+	}
+	if err := os.RemoveAll(slot); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(slot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("recovery slot remains: %v", err)
+	}
+	for _, check := range []struct {
+		path       string
+		body       string
+		mode       os.FileMode
+		beforeInfo os.FileInfo
+	}{
+		{symlinkTarget, "symlink outside", 0o400, symlinkBefore},
+		{hardlinkTarget, "hardlink outside", 0o440, hardlinkBefore},
+	} {
+		body, err := os.ReadFile(check.path)
+		if err != nil || string(body) != check.body {
+			t.Fatalf("outside %s body=%q err=%v", check.path, body, err)
+		}
+		after, err := os.Stat(check.path)
+		if err != nil || after.Mode().Perm() != check.mode || !os.SameFile(check.beforeInfo, after) {
+			t.Fatalf("outside %s info=%v err=%v", check.path, after, err)
+		}
 	}
 }
 
