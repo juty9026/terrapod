@@ -114,6 +114,7 @@ type Ownership struct {
 	Package       string                     `json:"package"`
 	Paths         map[string]string          `json:"paths"`
 	PriorValues   map[string]json.RawMessage `json:"priorValues"`
+	PriorUnknown  bool                       `json:"priorUnknown,omitempty"`
 }
 
 type Observation struct {

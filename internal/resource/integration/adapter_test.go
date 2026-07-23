@@ -110,6 +110,84 @@ func TestAbsentFieldPruneRemovesOnlyTouchedField(t *testing.T) {
 	}
 }
 
+func TestUnknownLegacyPriorPruneBacksUpAndRemovesOnlyOwnedField(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	path := filepath.Join(home, "settings.json")
+	original := []byte(`{"keep":true,"font":"Jetendard"}`)
+	mustWrite(t, path, original, 0o600)
+	store, _ := state.Open(filepath.Join(t.TempDir(), "state"))
+	a := &Adapter{Home: home, State: store}
+	item := jsonItem("integration.legacy-unknown", "settings.json", map[string]any{"/font": "Jetendard"})
+	digest, err := digestValue(fieldValue{Exists: true, Value: "Jetendard"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := fieldKey("settings.json", "/font")
+	owned := model.Ownership{
+		ResourceID: item.ID, Provider: item.Provider, Package: item.Package,
+		Paths: map[string]string{key: digest}, PriorValues: map[string]json.RawMessage{},
+		PriorUnknown: true,
+	}
+	if err := store.PutOwnership(owned); err != nil {
+		t.Fatal(err)
+	}
+	prune, err := a.PlanHistorical(context.Background(), item, model.Observation{}, owned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := executeAuthorized(t, a, store, item, prune[0]); !result.Success {
+		t.Fatal(result.Detail)
+	}
+	var got map[string]any
+	contents, _ := os.ReadFile(path)
+	_ = json.Unmarshal(contents, &got)
+	if got["keep"] != true {
+		t.Fatalf("unrelated field changed: %#v", got)
+	}
+	if _, exists := got["font"]; exists {
+		t.Fatalf("owned field remains: %#v", got)
+	}
+	backup, err := os.ReadFile(path + unknownPriorBackupSuffix)
+	if err != nil || string(backup) != string(original) {
+		t.Fatalf("backup=%q err=%v", backup, err)
+	}
+}
+
+func TestUnknownLegacyPriorPruneRefusesMismatchedBackup(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	path := filepath.Join(home, "settings.json")
+	original := []byte(`{"keep":true,"font":"Jetendard"}`)
+	mustWrite(t, path, original, 0o600)
+	mustWrite(t, path+unknownPriorBackupSuffix, []byte(`{"unrelated":"backup"}`), 0o600)
+	store, _ := state.Open(filepath.Join(t.TempDir(), "state"))
+	a := &Adapter{Home: home, State: store}
+	item := jsonItem("integration.legacy-backup-conflict", "settings.json", map[string]any{"/font": "Jetendard"})
+	digest, _ := digestValue(fieldValue{Exists: true, Value: "Jetendard"})
+	key := fieldKey("settings.json", "/font")
+	owned := model.Ownership{
+		ResourceID: item.ID, Provider: item.Provider, Package: item.Package,
+		Paths: map[string]string{key: digest}, PriorValues: map[string]json.RawMessage{},
+		PriorUnknown: true,
+	}
+	if err := store.PutOwnership(owned); err != nil {
+		t.Fatal(err)
+	}
+	prune, err := a.PlanHistorical(context.Background(), item, model.Observation{}, owned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := executeAuthorized(t, a, store, item, prune[0])
+	if result.Success || !strings.Contains(result.Detail, "does not match") {
+		t.Fatalf("result=%#v", result)
+	}
+	contents, _ := os.ReadFile(path)
+	if string(contents) != string(original) {
+		t.Fatalf("source mutated: %s", contents)
+	}
+}
+
 func TestPruneReplayAcceptsAlreadyRestoredPrior(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, "settings.json")

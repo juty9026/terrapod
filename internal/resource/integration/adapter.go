@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -36,6 +37,8 @@ const (
 	HandlerJetendardZed    = "jetendard-zed"
 	HandlerJetendardOrca   = "jetendard-orca"
 	HandlerKarabinerOpener = "karabiner-opener"
+
+	unknownPriorBackupSuffix = ".terrapod-legacy-backup"
 )
 
 type Karabiner interface {
@@ -240,8 +243,12 @@ func (a *Adapter) Plan(ctx context.Context, item model.Resource, _ model.Observa
 		}
 	}
 	if owned.ResourceID != "" {
-		if err := validatePriorKeys(d, owned.PriorValues); err != nil {
-			return nil, err
+		if !owned.PriorUnknown {
+			if err := validatePriorKeys(d, owned.PriorValues); err != nil {
+				return nil, err
+			}
+		} else if len(owned.PriorValues) != 0 {
+			return nil, errors.New("integration: unknown prior receipt cannot contain prior values")
 		}
 		if err := validateManagedKeys(d, owned.Paths); err != nil {
 			return nil, err
@@ -348,8 +355,12 @@ func (a *Adapter) PlanHistorical(_ context.Context, item model.Resource, _ model
 	if err != nil {
 		return nil, err
 	}
-	if err := validatePriorKeys(d, owned.PriorValues); err != nil {
-		return nil, err
+	if !owned.PriorUnknown {
+		if err := validatePriorKeys(d, owned.PriorValues); err != nil {
+			return nil, err
+		}
+	} else if len(owned.PriorValues) != 0 {
+		return nil, errors.New("integration: unknown prior receipt cannot contain prior values")
 	}
 	if err := validateManagedKeys(d, owned.Paths); err != nil {
 		return nil, err
@@ -367,13 +378,6 @@ func (a *Adapter) PlanHistorical(_ context.Context, item model.Resource, _ model
 			if err != nil {
 				return nil, err
 			}
-			prior, ok, err := decodePrior(owned.PriorValues[key])
-			if err != nil {
-				return nil, err
-			}
-			if !ok {
-				return nil, fmt.Errorf("integration: missing prior receipt for %s%s", target.relative, pointer)
-			}
 			desiredDigest, err := digestValue(fieldValue{Exists: true, Value: desired})
 			if err != nil {
 				return nil, err
@@ -386,14 +390,28 @@ func (a *Adapter) PlanHistorical(_ context.Context, item model.Resource, _ model
 			if err != nil {
 				return nil, err
 			}
-			matchesPrior, err := sameField(current, prior)
-			if err != nil {
-				return nil, err
+			matchesPrior := false
+			if owned.PriorUnknown {
+				if current.Exists && currentDigest != last {
+					return nil, fmt.Errorf("integration conflict at %s%s: refusing to prune a user edit", target.relative, pointer)
+				}
+			} else {
+				prior, ok, err := decodePrior(owned.PriorValues[key])
+				if err != nil {
+					return nil, err
+				}
+				if !ok {
+					return nil, fmt.Errorf("integration: missing prior receipt for %s%s", target.relative, pointer)
+				}
+				matchesPrior, err = sameField(current, prior)
+				if err != nil {
+					return nil, err
+				}
+				if currentDigest != last && !matchesPrior {
+					return nil, fmt.Errorf("integration conflict at %s%s: refusing to prune a user edit", target.relative, pointer)
+				}
 			}
-			if currentDigest != last && !matchesPrior {
-				return nil, fmt.Errorf("integration conflict at %s%s: refusing to prune a user edit", target.relative, pointer)
-			}
-			needsMutation = needsMutation || !matchesPrior
+			needsMutation = needsMutation || (owned.PriorUnknown && current.Exists) || (!owned.PriorUnknown && !matchesPrior)
 			currentState, err := pathState(current)
 			if err != nil {
 				return nil, err
@@ -494,7 +512,7 @@ func (a *Adapter) execute(ctx context.Context, item model.Resource, op model.Ope
 	if err := a.validateMutation(d, op, owned, false); err != nil {
 		return err
 	}
-	if owned.ResourceID == "" || d.pathGlob != "" {
+	if (owned.ResourceID == "" || d.pathGlob != "") && !owned.PriorUnknown {
 		priors, err := a.captureMissing(d, targets, owned.PriorValues)
 		if err != nil {
 			return err
@@ -638,6 +656,16 @@ func (a *Adapter) requiresRestore(d declaration, owned model.Ownership) (bool, e
 			return false, err
 		}
 		for pointer := range d.fields {
+			if owned.PriorUnknown {
+				current, err := doc.get(pointer)
+				if err != nil {
+					return false, err
+				}
+				if current.Exists {
+					return true, nil
+				}
+				continue
+			}
 			prior, ok, err := decodePrior(owned.PriorValues[fieldKey(target.relative, pointer)])
 			if err != nil {
 				return false, err
@@ -761,6 +789,7 @@ func (a *Adapter) restore(d declaration, owned model.Ownership, op model.Operati
 		if !exists {
 			continue
 		}
+		dirty := false
 		for pointer := range d.fields {
 			current, err := doc.get(pointer)
 			if err != nil {
@@ -773,6 +802,15 @@ func (a *Adapter) restore(d declaration, owned model.Ownership, op model.Operati
 			}
 			if err := validateCurrentMutation(key, current, field, owned, true); err != nil {
 				return fmt.Errorf("integration conflict at %s%s: field changed immediately before prune", target.relative, pointer)
+			}
+			if owned.PriorUnknown {
+				if current.Exists {
+					if err := doc.remove(pointer); err != nil {
+						return err
+					}
+					dirty = true
+				}
+				continue
 			}
 			prior, ok, err := decodePrior(owned.PriorValues[key])
 			if err != nil {
@@ -796,8 +834,16 @@ func (a *Adapter) restore(d declaration, owned model.Ownership, op model.Operati
 					return err
 				}
 			}
+			dirty = true
 		}
-		changes = append(changes, change{target, doc})
+		if owned.PriorUnknown && dirty {
+			if err := archiveUnknownPrior(target.absolute); err != nil {
+				return err
+			}
+		}
+		if dirty {
+			changes = append(changes, change{target, doc})
+		}
 	}
 	for _, change := range changes {
 		contents, err := change.doc.bytes()
@@ -808,6 +854,48 @@ func (a *Adapter) restore(d declaration, owned model.Ownership, op model.Operati
 			return err
 		}
 	}
+	return nil
+}
+
+func archiveUnknownPrior(path string) error {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("integration: read unknown-prior backup source: %w", err)
+	}
+	backup := path + unknownPriorBackupSuffix
+	file, err := os.OpenFile(backup, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		info, statErr := os.Lstat(backup)
+		if statErr != nil || !info.Mode().IsRegular() {
+			return errors.New("integration: unknown-prior backup path is unsafe")
+		}
+		existing, readErr := os.ReadFile(backup)
+		if readErr != nil || !bytes.Equal(existing, contents) {
+			return errors.New("integration: unknown-prior backup does not match current source")
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("integration: create unknown-prior backup: %w", err)
+	}
+	complete := false
+	defer func() {
+		if !complete {
+			_ = os.Remove(backup)
+		}
+	}()
+	if _, err := file.Write(contents); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("integration: write unknown-prior backup: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("integration: sync unknown-prior backup: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("integration: close unknown-prior backup: %w", err)
+	}
+	complete = true
 	return nil
 }
 

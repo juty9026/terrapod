@@ -58,7 +58,7 @@ func TestEnginePreservesIntegrationPriorValues(t *testing.T) {
 	}
 	item := model.Resource{ID: "integration.test", Type: model.ResourceIntegration, Provider: "json-fields", Package: "settings"}
 	want := json.RawMessage(`{"exists":true,"value":"private"}`)
-	if err := store.PutOwnership(model.Ownership{ResourceID: item.ID, Provider: item.Provider, Package: item.Package, Paths: map[string]string{}, PriorValues: map[string]json.RawMessage{"settings.json#/token": want}}); err != nil {
+	if err := store.PutOwnership(model.Ownership{ResourceID: item.ID, Provider: item.Provider, Package: item.Package, Paths: map[string]string{}, PriorValues: map[string]json.RawMessage{"settings.json#/token": want}, PriorUnknown: true}); err != nil {
 		t.Fatal(err)
 	}
 	engine := Engine{State: store, CatalogDigest: "signed"}
@@ -66,7 +66,7 @@ func TestEnginePreservesIntegrationPriorValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	owned := mustSnapshot(t, store).Ownership[item.ID]
-	if !jsonEqual(owned.PriorValues["settings.json#/token"], want) || owned.CatalogDigest != "signed" {
+	if !jsonEqual(owned.PriorValues["settings.json#/token"], want) || owned.CatalogDigest != "signed" || !owned.PriorUnknown {
 		t.Fatalf("ownership = %#v", owned)
 	}
 }

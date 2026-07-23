@@ -313,6 +313,7 @@ func TestPutAndDeleteOwnershipPersistAtomically(t *testing.T) {
 		Package:       "ripgrep",
 		Paths:         map[string]string{"binary": "/opt/homebrew/bin/rg"},
 		PriorValues:   map[string]json.RawMessage{"enabled": json.RawMessage("true")},
+		PriorUnknown:  true,
 	}
 	if err := store.PutOwnership(ownership); err != nil {
 		t.Fatal(err)
@@ -326,7 +327,7 @@ func TestPutAndDeleteOwnershipPersistAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := snapshot.Ownership[ownership.ResourceID]; got.Package != ownership.Package || got.CatalogDigest != ownership.CatalogDigest {
+	if got := snapshot.Ownership[ownership.ResourceID]; got.Package != ownership.Package || got.CatalogDigest != ownership.CatalogDigest || !got.PriorUnknown {
 		t.Fatalf("ownership=%#v, want %#v", got, ownership)
 	}
 	assertNoTemporaryFiles(t, dir)

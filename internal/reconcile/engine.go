@@ -930,6 +930,7 @@ func (e *Engine) own(item model.Resource, observed model.Observation) error {
 		}
 	}
 	priorValues := make(map[string]json.RawMessage)
+	priorUnknown := false
 	if item.Type == model.ResourceIntegration {
 		snapshot, err := e.State.Snapshot()
 		if err != nil {
@@ -942,8 +943,9 @@ func (e *Engine) own(item model.Resource, observed model.Observation) error {
 		for key, value := range current.PriorValues {
 			priorValues[key] = append(json.RawMessage(nil), value...)
 		}
+		priorUnknown = current.PriorUnknown
 	}
-	return e.State.PutOwnership(model.Ownership{ResourceID: item.ID, CatalogDigest: e.CatalogDigest, Provider: item.Provider, Package: item.Package, Paths: paths, PriorValues: priorValues})
+	return e.State.PutOwnership(model.Ownership{ResourceID: item.ID, CatalogDigest: e.CatalogDigest, Provider: item.Provider, Package: item.Package, Paths: paths, PriorValues: priorValues, PriorUnknown: priorUnknown})
 }
 
 func (e *Engine) record(ctx context.Context, operation model.Operation, success bool, detail string) error {
