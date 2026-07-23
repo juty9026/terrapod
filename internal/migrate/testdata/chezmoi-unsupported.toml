@@ -1,0 +1,6 @@
+[data]
+profile = "vps-shell"
+enableEditorStack = true
+note = """
+data.enableAiCliTools = true
+"""
