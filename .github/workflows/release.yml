@@ -23,11 +23,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          go install github.com/twpayne/chezmoi/v2/cmd/chezmoi@v2.71.1
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-          "$(go env GOPATH)/bin/chezmoi" --version
+          chezmoi_url="https://github.com/twpayne/chezmoi/releases/download/v2.71.1/chezmoi_2.71.1_linux_amd64.deb"
+          chezmoi_deb="$RUNNER_TEMP/chezmoi_2.71.1_linux_amd64.deb"
+          curl --fail --location --proto '=https' --proto-redir '=https' --output "$chezmoi_deb" "$chezmoi_url"
+          printf '%s  %s\n' '49b68f441f60fbf84a79928e35076ccd4d0d7d5c050924c27d03bda25a7024eb' "$chezmoi_deb" | sha256sum -c -
           sudo apt-get update
-          sudo apt-get install -y zsh
+          sudo apt-get install -y "$chezmoi_deb" zsh
+          chezmoi --version
       - name: Validate stable tag and repository state
         shell: bash
         run: |
