@@ -2,7 +2,7 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update -y && apt-get install -y \
-    build-essential ca-certificates curl file git procps sudo zsh \
+    build-essential ca-certificates curl file git jq procps sudo zsh \
   && rm -rf /var/lib/apt/lists/* \
   && useradd --create-home --shell /usr/bin/zsh terrapod \
   && printf '%s\n' 'terrapod ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/terrapod \
@@ -15,13 +15,20 @@ RUN NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.co
 COPY --chown=terrapod:terrapod . /workspace
 
 RUN eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" \
-  && sed -n '/^brew "[^"]*"$/s/"$/", args: ["force-bottle"]/p' \
-       /workspace/Brewfile > /tmp/Brewfile.bottles \
-  && HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file=/tmp/Brewfile.bottles
+  && jq -r '.resources[] \
+       | select(.provider == "homebrew-formula" and (.profiles | index("vps-shell"))) \
+       | .package' /workspace/catalog/v1/resources.json > /tmp/formulae \
+  && [ "$(wc -l </tmp/formulae)" -eq 20 ] \
+  && xargs brew install --force-bottle </tmp/formulae
 
 RUN eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" \
   && records=/tmp/homebrew-cli-records \
-  && TERRAPOD_PRINT_HOMEBREW_CLI_RECORDS=1 /workspace/dot_local/bin/executable_terrapod >"$records" \
+  && jq -r '.resources[] \
+       | select(.provider == "homebrew-formula" and (.profiles | index("vps-shell"))) \
+       | .package as $package \
+       | .commands[] \
+       | [$package, .] \
+       | @tsv' /workspace/catalog/v1/resources.json >"$records" \
   && [ "$(wc -l <"$records")" -eq 20 ] \
   && while IFS="$(printf '\t')" read -r formula command; do \
        command_path="$(command -v "$command")"; \
@@ -34,7 +41,7 @@ RUN eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" \
 RUN eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" \
   && chezmoi execute-template \
        --source /workspace \
-       --override-data '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}}}' \
+       --override-data '{"terrapod":{"profile":"vps-shell","enableEditorStack":false,"enableAiCliTools":false,"enableDevelopmentWorkspace":false,"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":false,"enableMacosAppGroupMonitoring":false,"enableMacosAppGroupDevelopmentApps":false}}' \
        --file /workspace/dot_config/mise/config.toml.tmpl > /tmp/mise.toml \
   && cat /tmp/mise.toml \
   && ! grep -F 'aqua:' /tmp/mise.toml \

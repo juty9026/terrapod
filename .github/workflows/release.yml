@@ -1,0 +1,143 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.0"
+      - name: Validate stable tag and repository state
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "${GITHUB_REF_NAME}^{commit}")"
+          test -z "$(git status --porcelain)"
+          ! git submodule status --recursive | grep -E '^[+-]|^U'
+      - name: Run tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./...
+          for test_script in tests/*_test.sh; do
+            sh "$test_script"
+          done
+
+  release:
+    needs: test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      CGO_ENABLED: "0"
+      RELEASE_ROOT_KEY_ID: ${{ vars.RELEASE_ROOT_KEY_ID }}
+      RELEASE_ROOT_PUBLIC_KEY: ${{ vars.RELEASE_ROOT_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.0"
+      - name: Build reproducible release inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "${GITHUB_REF_NAME}^{commit}")"
+          test -z "$(git status --porcelain)"
+          ! git submodule status --recursive | grep -E '^[+-]|^U'
+          test -n "$RELEASE_ROOT_KEY_ID"
+          test -n "$RELEASE_ROOT_PUBLIC_KEY"
+
+          version="${GITHUB_REF_NAME#v}"
+          scripts/package-source.sh "$GITHUB_REF_NAME" "$RUNNER_TEMP/terrapod-source.tar.gz"
+          mkdir artifacts
+          for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64; do
+            goos="${target%/*}"
+            goarch="${target#*/}"
+            GOOS="$goos" GOARCH="$goarch" \
+              scripts/build-tpod-release.sh "artifacts/tpod-${goos}-${goarch}"
+          done
+          artifacts/tpod-linux-amd64 internal-release-root-check
+          cp "$RUNNER_TEMP/terrapod-source.tar.gz" artifacts/terrapod-source.tar.gz
+          go run ./cmd/release-manifest \
+            --version "$version" --catalog-schema 1 --state-schema 1 \
+            --catalog-source catalog/v1/resources.json \
+            --catalog-output artifacts/resources.json \
+            --asset binary,darwin,amd64,artifacts/tpod-darwin-amd64 \
+            --asset binary,darwin,arm64,artifacts/tpod-darwin-arm64 \
+            --asset binary,linux,amd64,artifacts/tpod-linux-amd64 \
+            --asset binary,linux,arm64,artifacts/tpod-linux-arm64 \
+            --asset source,,,artifacts/terrapod-source.tar.gz \
+            --asset catalog,,,artifacts/resources.json \
+            >artifacts/release.json
+
+          release_base="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download"
+          sed \
+            -e "s|__TERRAPOD_RELEASE_BASE_URL__|${release_base}|g" \
+            -e "s|__TERRAPOD_RELEASE_ROOT_KEY_ID__|${RELEASE_ROOT_KEY_ID}|g" \
+            -e "s|__TERRAPOD_RELEASE_ROOT_PUBLIC_KEY__|${RELEASE_ROOT_PUBLIC_KEY}|g" \
+            install.sh >artifacts/install.sh
+          chmod 0755 artifacts/install.sh
+          ! grep -E '__TERRAPOD_RELEASE_(BASE_URL|ROOT_KEY_ID|ROOT_PUBLIC_KEY)__' artifacts/install.sh
+      - name: Sign and verify manifest
+        shell: bash
+        env:
+          RELEASE_SIGNING_PRIVATE_KEY: ${{ secrets.RELEASE_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          private_key="$RUNNER_TEMP/terrapod-release-private.pem"
+          public_key="$RUNNER_TEMP/terrapod-release-public.pem"
+          signature="$RUNNER_TEMP/terrapod-release-signature"
+          trap 'rm -f "$private_key" "$public_key" "$signature"' EXIT
+          umask 077
+          printf '%s' "$RELEASE_SIGNING_PRIVATE_KEY" | base64 --decode >"$private_key"
+          openssl pkey -in "$private_key" -pubout -out "$public_key"
+          derived_public_key="$(
+            openssl pkey -pubin -in "$public_key" -outform DER |
+              tail -c 32 |
+              base64 -w 0
+          )"
+          test "$derived_public_key" = "$RELEASE_ROOT_PUBLIC_KEY"
+          openssl pkeyutl -sign -rawin -inkey "$private_key" \
+            -in artifacts/release.json -out "$signature"
+          openssl pkeyutl -verify -rawin -pubin -inkey "$public_key" \
+            -in artifacts/release.json -sigfile "$signature"
+          encoded_signature="$(base64 -w 0 <"$signature")"
+          printf '{"keyId":"%s","algorithm":"ed25519","signature":"%s"}\n' \
+            "$RELEASE_ROOT_KEY_ID" "$encoded_signature" >artifacts/release.json.sig
+          ! grep -R -E 'BEGIN (ED25519 |)PRIVATE KEY' artifacts
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            artifacts/tpod-darwin-amd64 \
+            artifacts/tpod-darwin-arm64 \
+            artifacts/tpod-linux-amd64 \
+            artifacts/tpod-linux-arm64 \
+            artifacts/terrapod-source.tar.gz \
+            artifacts/resources.json \
+            artifacts/release.json \
+            artifacts/release.json.sig \
+            artifacts/install.sh

@@ -197,10 +197,20 @@ assert_not_contains 'Charm APT' \
   "README removes the Charm APT trust boundary"
 assert_not_contains 'mise from the official mise APT repository' \
   "README removes mise APT ownership"
-assert_contains 'HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade' \
-  "README documents restore-only apply semantics"
-assert_contains 'Existing mise, APT, and vendor-installed payloads are not removed automatically.' \
-  "README documents non-destructive migration"
+assert_contains '`~/.config/terrapod/config.json`' \
+  "README documents the independent Terrapod config"
+assert_contains 'declared-root ownership' \
+  "README documents the ownership boundary"
+assert_not_contains '| `gitAllowedSigners` |' \
+  "README excludes unrelated chezmoi data from the Terrapod config table"
+assert_not_contains '"gitAllowedSigners"' \
+  "README excludes unrelated chezmoi data from Terrapod JSON examples"
+assert_contains '`gitAllowedSigners` is not an independent Terrapod config field.' \
+  "README documents the unrelated chezmoi root-data boundary"
+assert_contains 'The authoring workflow must use chezmoi directly to render or apply it;' \
+  "README documents how unrelated chezmoi root data is applied"
+assert_not_contains 'Then reconcile the environment.' \
+  "README does not imply tpod applies unrelated chezmoi root data"
 assert_contains '## What Terrapod Leaves Alone' \
   "README documents product boundaries near the top"
 assert_contains '## Daily Commands' \
@@ -227,32 +237,54 @@ assert_contains 'It sets only the font-family keys used by Ghostty, Zed buffers 
   "README directly documents the app-key-only settings scope"
 assert_contains 'Restart Ghostty, Zed, or Orca if an existing window still uses a cached font.' \
   "README directly documents cached-font restart guidance"
-assert_contains 'Terrapod does not uninstall existing JetBrains Mono Nerd Font or D2Coding copies.' \
-  "README documents non-destructive legacy font migration"
 assert_contains 'Quit Orca before rerunning `tpod apply` when Jetendard settings are deferred.' \
   "README documents Orca font-setting recovery"
 assert_contains 'separate from `enableDevelopmentWorkspace`' \
   "README documents macOS Desktop App Stack separation from enableDevelopmentWorkspace"
 assert_contains 'casks can affect shared applications' \
   "README documents why macOS Desktop App Stack remains separate"
-assert_contains '`terrapod update` refreshes the Terrapod Source Repository through `chezmoi update --exclude scripts`.' \
-  "README documents Terrapod update as source maintenance"
+assert_contains '`tpod update` fetches the latest stable signed Terrapod release' \
+  "README documents the signed stable Terrapod update"
+assert_contains "It does not upgrade or remove packages outside Terrapod's ownership state." \
+  "README limits update reconciliation to Terrapod-owned packages"
 assert_contains 'Terrapod does not run broad Homebrew, APT, or mise upgrades.' \
   "README states Terrapod does not run broad package or tool upgrades"
-assert_contains 'Use OS package managers directly only when intentionally updating OS-managed packages.' \
-  "README keeps OS package upgrades outside Terrapod"
-assert_contains 'Use mise directly when intentionally updating development runtimes.' \
-  "README keeps Development Runtime Manager upgrades outside Terrapod"
+assert_contains '`tpod plan`' \
+  "README documents plan"
+assert_contains '`tpod apply`' \
+  "README documents apply"
+assert_contains '`tpod update`' \
+  "README documents update"
+assert_contains '`tpod resolve <resource-id>`' \
+  "README documents conflict resolution"
+assert_contains 'automatically prunes Terrapod-owned resources' \
+  "README documents automatic owned-resource pruning"
+assert_contains 'never uses `brew uninstall --zap`' \
+  "README documents the Homebrew uninstall boundary"
+assert_contains '`ready`' \
+  "README documents ready state"
+assert_contains '`unavailable`' \
+  "README documents unavailable state"
+assert_contains 'read-only chezmoi escape hatch' \
+  "README documents constrained direct chezmoi access"
+assert_contains '`install.sh --migrate`' \
+  "README documents the maintainer migration"
+assert_contains 'authoring checkout is separate from the active signed release' \
+  "README documents authoring and active release separation"
+assert_contains '`install.sh --repair`' \
+  "README documents repair"
+assert_contains '`macos-terminal` and `vps-shell`' \
+  "README documents supported profiles"
 assert_raycast_restore_contains '`enableMacosAppGroupLauncher`' \
   "README Raycast restore procedure mentions launcher App Group"
-assert_contains 'Opting out of an optional stack excludes its files from chezmoi management; it does not remove files already present on a machine.' \
-  "README documents non-destructive optional stack opt-out"
-assert_contains 'brew upgrade --cask claude-code codex antigravity-cli' \
-  "README documents targeted AI CLI upgrades"
 assert_contains '`enableMacosAppGroupAiApps` is deprecated and is not treated as an alias' \
   "README documents explicit development-apps key migration"
-assert_contains 'Terrapod does not remove legacy vendor-installed AI CLI binaries.' \
-  "README documents non-destructive legacy AI CLI migration"
+assert_not_contains 'keeps package-manager upgrades outside its scope' \
+  "README removes the bootstrap-only package boundary"
+assert_not_contains 'does not uninstall' \
+  "README removes non-destructive ownership language"
+assert_not_contains 'Opting out of an optional stack excludes its files from chezmoi management; it does not remove files already present on a machine.' \
+  "README removes non-destructive optional stack opt-out"
 
 assert_contains 'Minimal VPS' \
   "README includes a minimal VPS example"

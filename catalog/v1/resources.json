@@ -1,0 +1,636 @@
+{
+  "version": 1,
+  "release": "development",
+  "config": {
+    "version": 1,
+    "fields": [
+      {"id": "profile", "kind": "string", "required": true},
+      {"id": "enableEditorStack", "kind": "bool", "required": false, "default": false},
+      {"id": "enableAiCliTools", "kind": "bool", "required": false, "default": false},
+      {"id": "enableDevelopmentWorkspace", "kind": "bool", "required": false, "default": false},
+      {"id": "enableMacosAppGroupTerminalApps", "kind": "bool", "required": false, "default": false},
+      {"id": "enableMacosAppGroupAutomation", "kind": "bool", "required": false, "default": false},
+      {"id": "enableMacosAppGroupLauncher", "kind": "bool", "required": false, "default": false},
+      {"id": "enableMacosAppGroupMonitoring", "kind": "bool", "required": false, "default": false},
+      {"id": "enableMacosAppGroupDevelopmentApps", "kind": "bool", "required": false, "default": false}
+    ]
+  },
+  "resources": [
+    {
+      "id": "core.bat",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "bat",
+      "commands": ["bat"],
+      "metadata": {"legacy.homebrew.package": "bat", "legacy.mise.package": "aqua:sharkdp/bat"}
+    },
+    {
+      "id": "core.btop",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "btop",
+      "commands": ["btop"],
+      "metadata": {"legacy.homebrew.package": "btop", "legacy.mise.package": "aqua:aristocratos/btop", "legacy.mise.profile": "vps-shell"}
+    },
+    {
+      "id": "core.chezmoi",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "chezmoi",
+      "commands": ["chezmoi"],
+      "metadata": {"legacy.homebrew.package": "chezmoi"}
+    },
+    {
+      "id": "core.dust",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "dust",
+      "commands": ["dust"],
+      "metadata": {"legacy.homebrew.package": "dust", "legacy.mise.package": "aqua:bootandy/dust"}
+    },
+    {
+      "id": "core.duf",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "duf",
+      "commands": ["duf"],
+      "metadata": {"legacy.homebrew.package": "duf", "legacy.mise.package": "aqua:muesli/duf"}
+    },
+    {
+      "id": "core.fastfetch",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "fastfetch",
+      "commands": ["fastfetch"],
+      "metadata": {"legacy.homebrew.package": "fastfetch", "legacy.mise.package": "aqua:fastfetch-cli/fastfetch"}
+    },
+    {
+      "id": "core.fd",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "fd",
+      "commands": ["fd"],
+      "metadata": {"legacy.homebrew.package": "fd", "legacy.mise.package": "aqua:sharkdp/fd"}
+    },
+    {
+      "id": "core.fzf",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "fzf",
+      "commands": ["fzf"],
+      "metadata": {"legacy.homebrew.package": "fzf", "legacy.mise.package": "aqua:junegunn/fzf"}
+    },
+    {
+      "id": "core.gh",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "gh",
+      "commands": ["gh"],
+      "metadata": {"legacy.homebrew.package": "gh", "legacy.mise.package": "aqua:cli/cli"}
+    },
+    {
+      "id": "core.git",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "git",
+      "commands": ["git"],
+      "metadata": {"legacy.homebrew.package": "git"}
+    },
+    {
+      "id": "core.git-delta",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "git-delta",
+      "commands": ["delta"],
+      "metadata": {"legacy.homebrew.package": "git-delta", "legacy.mise.package": "aqua:dandavison/delta"}
+    },
+    {
+      "id": "core.gum",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "gum",
+      "commands": ["gum"],
+      "metadata": {"legacy.apt.package": "gum", "legacy.apt.profile": "vps-shell", "legacy.homebrew.package": "gum"}
+    },
+    {
+      "id": "core.lazygit",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "lazygit",
+      "commands": ["lazygit"],
+      "metadata": {"legacy.homebrew.package": "lazygit", "legacy.mise.package": "aqua:jesseduffield/lazygit"}
+    },
+    {
+      "id": "core.lsd",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "lsd",
+      "commands": ["lsd"],
+      "metadata": {"legacy.homebrew.package": "lsd", "legacy.mise.package": "aqua:lsd-rs/lsd"}
+    },
+    {
+      "id": "core.mise",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "mise",
+      "commands": ["mise"],
+      "metadata": {"legacy.apt.package": "mise", "legacy.apt.profile": "vps-shell", "legacy.homebrew.package": "mise"}
+    },
+    {
+      "id": "core.neovim",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "neovim",
+      "commands": ["nvim"],
+      "metadata": {"legacy.homebrew.package": "neovim", "legacy.mise.package": "aqua:neovim/neovim"}
+    },
+    {
+      "id": "core.ripgrep",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "ripgrep",
+      "commands": ["rg"],
+      "metadata": {"legacy.homebrew.package": "ripgrep", "legacy.mise.package": "aqua:BurntSushi/ripgrep"}
+    },
+    {
+      "id": "core.starship",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "starship",
+      "commands": ["starship"],
+      "metadata": {"legacy.homebrew.package": "starship", "legacy.mise.package": "aqua:starship/starship"}
+    },
+    {
+      "id": "core.zellij",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "zellij",
+      "commands": ["zellij"],
+      "metadata": {"legacy.homebrew.package": "zellij", "legacy.mise.package": "aqua:zellij-org/zellij"}
+    },
+    {
+      "id": "core.zoxide",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-formula",
+      "package": "zoxide",
+      "commands": ["zoxide"],
+      "metadata": {"legacy.homebrew.package": "zoxide", "legacy.mise.package": "aqua:ajeetdsouza/zoxide"}
+    },
+    {
+      "id": "optional-ai.antigravity-cli",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "antigravity-cli",
+      "commands": ["agy"],
+      "metadata": {
+        "enabledByAnyConfig.enableAiCliTools": "true",
+        "enabledByAnyConfig.enableDevelopmentWorkspace": "true",
+        "legacy.homebrew.package": "antigravity-cli",
+        "legacy.vendor.receipt": "antigravity-native",
+        "legacy.vendor.uninstall": "antigravity-native"
+      }
+    },
+    {
+      "id": "optional-ai.claude-code",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "claude-code",
+      "commands": ["claude"],
+      "metadata": {
+        "enabledByAnyConfig.enableAiCliTools": "true",
+        "enabledByAnyConfig.enableDevelopmentWorkspace": "true",
+        "legacy.homebrew.package": "claude-code",
+        "legacy.vendor.receipt": "claude-native",
+        "legacy.vendor.uninstall": "claude-native"
+      }
+    },
+    {
+      "id": "optional-ai.codex",
+      "type": "package",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "codex",
+      "commands": ["codex"],
+      "metadata": {
+        "enabledByAnyConfig.enableAiCliTools": "true",
+        "enabledByAnyConfig.enableDevelopmentWorkspace": "true",
+        "legacy.homebrew.package": "codex",
+        "legacy.vendor.receipt": "codex-standalone",
+        "legacy.vendor.uninstall": "codex-standalone"
+      }
+    },
+    {
+      "id": "optional-desktop.ghostty",
+      "type": "package",
+      "profiles": ["macos-terminal"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "ghostty",
+      "commands": [],
+      "metadata": {"enabledByConfig": "enableMacosAppGroupTerminalApps", "legacy.homebrew.package": "ghostty"}
+    },
+    {
+      "id": "optional-desktop.hammerspoon",
+      "type": "package",
+      "profiles": ["macos-terminal"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "hammerspoon",
+      "commands": [],
+      "metadata": {"enabledByConfig": "enableMacosAppGroupAutomation", "legacy.homebrew.package": "hammerspoon"}
+    },
+    {
+      "id": "optional-desktop.karabiner-elements",
+      "type": "package",
+      "profiles": ["macos-terminal"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "karabiner-elements",
+      "commands": [],
+      "metadata": {"enabledByConfig": "enableMacosAppGroupAutomation", "legacy.homebrew.package": "karabiner-elements"}
+    },
+    {
+      "id": "optional-desktop.scroll-reverser",
+      "type": "package",
+      "profiles": ["macos-terminal"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "scroll-reverser",
+      "commands": [],
+      "metadata": {"enabledByConfig": "enableMacosAppGroupAutomation", "legacy.homebrew.package": "scroll-reverser"}
+    },
+    {
+      "id": "optional-desktop.raycast",
+      "type": "package",
+      "profiles": ["macos-terminal"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "raycast",
+      "commands": [],
+      "metadata": {"enabledByConfig": "enableMacosAppGroupLauncher", "legacy.homebrew.package": "raycast"}
+    },
+    {
+      "id": "optional-desktop.one-password-cli",
+      "type": "package",
+      "profiles": ["macos-terminal"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "1password-cli",
+      "commands": [],
+      "metadata": {"enabledByConfig": "enableMacosAppGroupLauncher", "legacy.homebrew.package": "1password-cli"}
+    },
+    {
+      "id": "optional-desktop.istat-menus",
+      "type": "package",
+      "profiles": ["macos-terminal"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "istat-menus",
+      "commands": [],
+      "metadata": {"enabledByConfig": "enableMacosAppGroupMonitoring", "legacy.homebrew.package": "istat-menus"}
+    },
+    {
+      "id": "optional-desktop.zed",
+      "type": "package",
+      "profiles": ["macos-terminal"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "zed",
+      "commands": [],
+      "metadata": {"enabledByConfig": "enableMacosAppGroupDevelopmentApps", "legacy.homebrew.package": "zed"}
+    },
+    {
+      "id": "optional-desktop.orca",
+      "type": "package",
+      "profiles": ["macos-terminal"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "homebrew-cask",
+      "package": "stablyai/orca/orca",
+      "commands": [],
+      "metadata": {"enabledByConfig": "enableMacosAppGroupDevelopmentApps", "legacy.homebrew.package": "stablyai/orca/orca"}
+    },
+    {
+      "id": "bootstrap-apt.build-essential",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "build-essential", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.ca-certificates",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "ca-certificates", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.curl",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "curl", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.file",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "file", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.git",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "git", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.libbz2-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "libbz2-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.libffi-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "libffi-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.liblzma-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "liblzma-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.libncursesw5-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "libncursesw5-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.libreadline-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "libreadline-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.libsqlite3-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "libsqlite3-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.libssl-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "libssl-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.libxml2-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "libxml2-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.libxmlsec1-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "libxmlsec1-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.procps",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "procps", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.tk-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "tk-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.unzip",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "unzip", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.xz-utils",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "xz-utils", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.zlib1g-dev",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "zlib1g-dev", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "bootstrap-apt.zsh",
+      "type": "package", "profiles": ["vps-shell"], "dependsOn": [],
+      "versionPolicy": "tracked", "provider": "apt", "package": "zsh", "commands": [],
+      "metadata": {"bootstrapOnly": "true"}
+    },
+    {
+      "id": "dotfiles.home",
+      "type": "managed-files",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": ["core.chezmoi"],
+      "versionPolicy": "tracked",
+      "provider": "chezmoi",
+      "package": "home",
+      "commands": [],
+      "metadata": {"managedFiles.scope": "."}
+    },
+    {
+      "id": "management.homebrew",
+      "type": "management-core",
+      "profiles": ["macos-terminal", "vps-shell"],
+      "dependsOn": [],
+      "versionPolicy": "tracked",
+      "provider": "terrapod",
+      "package": "homebrew",
+      "commands": ["brew"],
+      "metadata": {}
+    },
+    {
+      "id": "font.jetendard",
+      "type": "archive", "profiles": ["macos-terminal"], "dependsOn": [],
+      "versionPolicy": "pinned", "provider": "jetendard", "package": "jetendard", "commands": [],
+      "metadata": {
+        "asset.url": "https://github.com/kuskhan/jetendard/releases/download/v0.1.0/Jetendard-TTF.zip",
+        "asset.sha256": "399ab416895c01ddc1d43db509d7aa7cede4ad209f597ae8639c6d0194c2b133",
+        "asset.format": "zip",
+        "asset.tag": "v0.1.0",
+        "font.destination": "Library/Fonts",
+        "font.files": "{\"Jetendard-Bold.ttf\":\"330f8c4b6d80b13fa4c8eeded163b9169aa0a4a3d07edc52b2219d081932f6d7\",\"Jetendard-BoldItalic.ttf\":\"541e3baa879d21c6b4465e7c2de1ebc216ba9515e6f091ac693bf95a923536cc\",\"Jetendard-ExtraBold.ttf\":\"e0712ff5b600b8f9e6e28a11de73a73aadc93be91b2facb1deaba0bea7605940\",\"Jetendard-ExtraBoldItalic.ttf\":\"f34f68116656b21fe899867c01ea51fb4e7f42fa9bf72cbbbb22c7bfd11a0bb9\",\"Jetendard-ExtraLight.ttf\":\"7d961631ae788b4865a9112d206a1df08f13b74bd471f5e56ca63cd58faf6d97\",\"Jetendard-ExtraLightItalic.ttf\":\"157102c472ac9201162a2438a126baacd049a85db1583d38599fe41e7e71f1ec\",\"Jetendard-Italic.ttf\":\"e9fb1f7d644fe1c11f12d3686033ffc51d92fb4b9eb73c3d0e00373fb24ff72e\",\"Jetendard-Light.ttf\":\"ece351c6f076c57e40f6986ec13489cf97259f6d98592d4013b26d785a389552\",\"Jetendard-LightItalic.ttf\":\"ade8c9c225499ad6ce2a94d34881d0ec0287fa8be738700db5e393f7f3bdad6e\",\"Jetendard-Medium.ttf\":\"59a61620e2fa79944f04b01e11ac2073678644020f5090aa702c399a3a8ccfa8\",\"Jetendard-MediumItalic.ttf\":\"e9b6a39e55895dfe6bdd5c70c0d631efcc3601d6a74127da9c587964deab4d0e\",\"Jetendard-Regular.ttf\":\"2a9eb39d9013fbaf7b6474ae5e37af2de0b4c2a92827cb730ea3c9151dde69c9\",\"Jetendard-SemiBold.ttf\":\"f1585fadae0623c01b0a2c3c660ed033ea7e2621b63cda69704d4a6d35fc9e86\",\"Jetendard-SemiBoldItalic.ttf\":\"1ced772935513c40be8d369df0c496744b7d14c606e1c9cad654c4c885bac06a\",\"Jetendard-Thin.ttf\":\"560794bb320c390da93b7ea03fd0d216b84717c690b10f04c709bd429476920a\",\"Jetendard-ThinItalic.ttf\":\"b4e736571a125364b8542e04f063e865449530489d532dd5417fe913ab640d30\"}"
+      }
+    },
+    {
+      "id": "integration.jetendard-zed",
+      "type": "integration", "profiles": ["macos-terminal"], "dependsOn": ["font.jetendard"],
+      "versionPolicy": "tracked", "provider": "json-fields", "package": "jetendard-zed", "commands": [],
+      "metadata": {
+        "integration.handler": "jetendard-zed",
+        "integration.path": ".config/zed/settings.json",
+        "integration.format": "jsonc",
+        "integration.fields": "{\"/buffer_font_family\":\"Jetendard\",\"/terminal/font_family\":\"Jetendard\"}"
+      }
+    },
+    {
+      "id": "integration.jetendard-orca",
+      "type": "integration", "profiles": ["macos-terminal"], "dependsOn": ["font.jetendard"],
+      "versionPolicy": "tracked", "provider": "json-fields", "package": "jetendard-orca", "commands": [],
+      "metadata": {
+        "integration.handler": "jetendard-orca",
+        "integration.pathGlob": "Library/Application Support/orca/profiles/*/orca-data.json",
+        "integration.format": "json",
+        "integration.fields": "{\"/settings/terminalFontFamily\":\"Jetendard\"}"
+      }
+    },
+    {
+      "id": "integration.karabiner-opener",
+      "type": "integration", "profiles": ["macos-terminal"], "dependsOn": ["optional-desktop.karabiner-elements"],
+      "versionPolicy": "tracked", "provider": "karabiner", "package": "karabiner-opener", "commands": [],
+      "metadata": {
+        "enabledByConfig": "enableMacosAppGroupAutomation",
+        "integration.handler": "karabiner-opener"
+      }
+    },
+    {
+      "id": "shell.oh-my-zsh",
+      "type": "git-checkout", "profiles": ["macos-terminal", "vps-shell"], "dependsOn": ["core.git"],
+      "versionPolicy": "pinned", "provider": "git", "package": "oh-my-zsh", "commands": [],
+      "metadata": {
+        "git.remote": "https://github.com/ohmyzsh/ohmyzsh.git",
+        "git.ref": "refs/heads/master",
+        "git.commit": "e1d1f0dcd53d87096e5bfa48cb1c30d37cb7e5bf",
+        "git.destination": ".oh-my-zsh",
+        "git.verifyFiles": "oh-my-zsh.sh"
+      }
+    },
+    {
+      "id": "shell.zinit",
+      "type": "git-checkout", "profiles": ["macos-terminal", "vps-shell"], "dependsOn": ["core.git"],
+      "versionPolicy": "pinned", "provider": "git", "package": "zinit", "commands": [],
+      "metadata": {
+        "git.remote": "https://github.com/zdharma-continuum/zinit.git",
+        "git.ref": "refs/tags/v3.15.0",
+        "git.commit": "429ab136312dfce68ad7d87a0ecb08c5063e7287",
+        "git.destination": ".local/share/zinit/zinit.git",
+        "git.verifyFiles": "zinit.zsh"
+      }
+    },
+    {
+      "id": "shell.scm-breeze",
+      "type": "git-checkout", "profiles": ["macos-terminal", "vps-shell"], "dependsOn": ["core.git"],
+      "versionPolicy": "pinned", "provider": "git", "package": "scm-breeze", "commands": [],
+      "metadata": {
+        "git.remote": "https://github.com/scmbreeze/scm_breeze.git",
+        "git.ref": "refs/heads/main",
+        "git.commit": "2d17ef533c90efbedee922e055b84869d9abf16a",
+        "git.destination": ".scm_breeze",
+        "git.verifyFiles": "install.sh"
+      }
+    },
+    {
+      "id": "runtime.bun",
+      "type": "package", "profiles": ["macos-terminal", "vps-shell"], "dependsOn": ["core.mise"],
+      "versionPolicy": "pinned", "provider": "mise", "package": "bun", "commands": ["bun"],
+      "metadata": {"version": "latest"}
+    },
+    {
+      "id": "runtime.node",
+      "type": "package", "profiles": ["macos-terminal", "vps-shell"], "dependsOn": ["core.mise"],
+      "versionPolicy": "pinned", "provider": "mise", "package": "node", "commands": ["node"],
+      "metadata": {"version": "24"}
+    },
+    {
+      "id": "runtime.python",
+      "type": "package", "profiles": ["macos-terminal", "vps-shell"], "dependsOn": ["core.mise"],
+      "versionPolicy": "pinned", "provider": "mise", "package": "python", "commands": ["python"],
+      "metadata": {"version": "3.13"}
+    },
+    {
+      "id": "runtime.uv",
+      "type": "package", "profiles": ["macos-terminal", "vps-shell"], "dependsOn": ["core.mise"],
+      "versionPolicy": "pinned", "provider": "mise", "package": "uv", "commands": ["uv", "uvx"],
+      "metadata": {"version": "latest"}
+    }
+  ]
+}

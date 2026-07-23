@@ -1,0 +1,22 @@
+[sourceState]
+branch = "main"
+
+[data]
+email = "minu@example.com"
+# profile = "vps-shell" and a harmless """ marker in a comment
+note = "enableEditorStack = false"
+profile = "macos-terminal"
+enableEditorStack = true
+"enableAiCliTools" = false
+'enableDevelopmentWorkspace' = true
+enableMacosAppGroupTerminalApps = true
+enableMacosAppGroupAutomation = false
+enableMacosAppGroupLauncher = true
+enableMacosAppGroupMonitoring = false
+enableMacosAppGroupDevelopmentApps = true
+enableMacosAppGroupAiApps = true
+enableMacosDesktopApps = true
+terrapodPreset = "workstation"
+
+[edit]
+command = "nvim"

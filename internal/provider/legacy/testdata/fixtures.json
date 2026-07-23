@@ -1,0 +1,8 @@
+{
+  "knownVendorKinds": [
+    "antigravity-native",
+    "claude-native",
+    "codex-standalone"
+  ],
+  "unknownVendorKind": "unknown-native"
+}

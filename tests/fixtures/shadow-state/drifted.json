@@ -1,0 +1,11 @@
+{
+  "Ownership": {
+    "core.alpha": {
+      "resourceId": "core.alpha",
+      "catalogDigest": "fixture-digest",
+      "provider": "fixture",
+      "package": "alpha"
+    }
+  },
+  "AppliedCatalogs": ["fixture-digest"]
+}

@@ -72,7 +72,7 @@ function zja() {
   zellij attach "$session"
 }
 
-{{ if (default false (get . "enableDevelopmentWorkspace")) -}}
+{{ if and (hasKey . "terrapod") (default false .terrapod.enableDevelopmentWorkspace) -}}
 alias zd="zellij --layout dev"
 function zdac() {
   local session="${1:-${PWD:t}}"

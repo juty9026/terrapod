@@ -1,0 +1,1 @@
+Homebrew adapter tests inject bounded execx request results while preserving the trusted production brew path in every request.

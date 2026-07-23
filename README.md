@@ -2,10 +2,14 @@
 
 🌐 Language: **English** | [한국어](README.ko.md)
 
-Terrapod is a small landing pod for your machines: it brings your familiar
-shell, editor, runtime, and desktop habits to a fresh Mac or Ubuntu 24.04 VPS.
+Terrapod is a small landing pod for your machines: a personal development
+environment manager that brings your familiar shell, editor, runtime, and
+desktop habits to a fresh Mac or Ubuntu 24.04 VPS.
 
-Under the hood, Terrapod uses chezmoi as the apply engine and keeps package-manager upgrades outside its scope.
+Under the hood, Terrapod uses chezmoi as the apply engine for managed files and
+typed adapters for packages, runtimes, fonts, and Git checkouts. Its
+declared-root ownership boundary means it manages only resources declared by a
+verified Terrapod catalog.
 
 ## Quick Start
 
@@ -16,18 +20,26 @@ sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/ins
 ```
 
 The first-run installer installs standard-prefix Homebrew, then installs
-`chezmoi` and `gum` through Homebrew before Terrapod Setup. It initializes
-`https://github.com/juty9026/terrapod.git`, launches Setup from the checked-out
-source repository, and runs the initial declared-state apply only after setup
-succeeds. After the initial apply completes, the installer prints
+`chezmoi` and `gum` through Homebrew before Terrapod Setup. It installs the
+latest stable signed release, launches Setup from that release, and runs the
+initial declared-state apply only after setup succeeds. The authoring checkout is separate from the active signed release, so editing a checkout cannot change
+the active manager until a signed release is installed. After the initial apply completes, the installer prints
 `tpod help` so the short day-to-day command is immediately visible.
+Maintainers may clone the authoring checkout from
+`https://github.com/juty9026/terrapod.git`; that checkout is never the active
+runtime source.
+
+Existing maintainer machines from the pre-manager implementation use the
+one-shot `install.sh --migrate` path. It converts legacy chezmoi data into
+`~/.config/terrapod/config.json`, imports eligible existing resources into
+Terrapod ownership, reconciles them, and removes the legacy source only after
+verification. New installations and routine updates never run this migration.
 
 Terrapod Setup is the first-run review step. It asks you to choose a Preset,
 shows the concrete Terrapod-managed machine-local settings that Preset would
 write, lets you customize those settings, and asks for confirmation before it
 writes them. If setup is cancelled or fails, the installer stops before the
-initial apply and prints a resume command for the checked-out source
-repository.
+initial apply and prints the exact command that resumes the signed installer.
 
 Terrapod Setup is an interactive first-run prompt. Routine Terrapod command
 output remains operational and scan-friendly after bootstrap.
@@ -39,9 +51,11 @@ before apply with guidance text. There is no plain text fallback.
 
 You do not need to install `chezmoi` manually before running this installer.
 
-After bootstrap, use `tpod` for normal checks and source updates.
+After bootstrap, use `tpod` for routine management and signed updates.
 
 ```sh
+tpod plan
+tpod apply
 tpod status
 tpod doctor
 tpod update
@@ -50,6 +64,7 @@ tpod update
 ## What Terrapod Carries
 
 - Machine profiles for a macOS terminal workstation and an Ubuntu 24.04 VPS.
+- Stable resource IDs and ownership receipts for every Terrapod-managed resource.
 - Presets that unfold into concrete machine-local settings.
 - Optional stacks for rich editor configuration, AI CLI tools, and development workspace surfaces.
 - macOS App Groups for selected desktop tools.
@@ -83,7 +98,11 @@ terminal environment and rerun `terrapod setup`.
 
 ## What Terrapod Leaves Alone
 
-Terrapod applies this repository's declared dotfiles state. It does not own the whole operating system.
+Terrapod owns only resources under a declared root in the verified catalog. It
+does not inspect, upgrade, or remove undeclared packages. If a declared package
+already exists, Terrapod reports that it will take ownership and then either
+imports it completely or leaves the resource unavailable; there is no partially
+managed state.
 
 - Broad Homebrew or APT upgrades
 - mise-managed tool and runtime upgrades
@@ -101,15 +120,43 @@ Use `tpod` as the day-to-day management command after bootstrap.
 tpod status
 tpod doctor
 tpod diff
+tpod plan
 tpod apply
 tpod update
+tpod resolve <resource-id>
 terrapod status
 ```
 
-`terrapod update` refreshes the Terrapod Source Repository through `chezmoi update --exclude scripts`.
-It does not run Homebrew, APT, or mise upgrades.
+`tpod plan` inspects actual state without mutation. `tpod apply` executes that
+plan, upgrades only Terrapod-owned packages when the catalog requires it, and
+automatically prunes Terrapod-owned resources that are no longer desired.
+Package removal is provider-specific and never uses `brew uninstall --zap`, so
+Homebrew cask support files remain outside Terrapod's ownership boundary.
 
-Direct chezmoi use remains an advanced escape hatch.
+`tpod update` fetches the latest stable signed Terrapod release, verifies its
+manifest and every release asset, prints the complete plan, and then atomically
+activates the new Management Core before reconciling Terrapod-owned resources.
+It does not upgrade or remove packages outside Terrapod's ownership state.
+
+Each resource is either `ready` or `unavailable`. An unavailable resource and
+its dependents are not mutated. For a managed-file conflict, inspect the plan
+and run `tpod resolve <resource-id>` to choose the desired state explicitly,
+then rerun `tpod plan` or `tpod apply`.
+
+Stable GitHub Releases contain four static `tpod` binaries for macOS and Linux
+on `amd64` and `arm64`, the immutable source archive, the signed resource
+catalog, `release.json`, `release.json.sig`, and a versioned `install.sh`.
+Release manifests are signed with Ed25519; private signing keys are never
+included in source archives or release assets.
+
+If the stable launcher reports that the active Management Core is missing or
+broken, run the exact versioned `install.sh --repair` command printed by the
+launcher. Repair verifies the same signed release inputs and restores only the
+Management Core; it does not apply resources or rewrite machine configuration.
+
+Direct access is a read-only chezmoi escape hatch. Terrapod fixes the active
+signed source, independent config, destination, and script exclusion; mutating
+chezmoi subcommands are rejected.
 
 ```sh
 terrapod chezmoi -- cd
@@ -124,10 +171,13 @@ warning remains unresolved.
 
 ## Platform Details
 
+The supported profiles are `macos-terminal` and `vps-shell`; the latter targets
+Ubuntu 24.04 LTS on `x86_64` and `aarch64`.
+
 Homebrew is the Modern CLI Provider for the Core Shell Stack on both supported profiles.
 mise is the Development Runtime Manager for Bun, Node.js, Python, and uv.
 The first-run installer installs `chezmoi` and `gum` through Homebrew before Terrapod Setup.
-The shared `Brewfile` declares the 20 mandatory CLI formulae for both profiles.
+The signed resource catalog declares the 20 mandatory CLI formulae for both profiles.
 
 ### macOS
 
@@ -137,11 +187,11 @@ Run the installer on macOS.
 sh -c "$(curl -fsLS https://raw.githubusercontent.com/juty9026/terrapod/main/install.sh)"
 ```
 
-On macOS, the initial apply also runs setup scripts under `.chezmoiscripts` for the initial terminal environment:
+On macOS, typed adapters reconcile the initial terminal environment:
 
 On Apple Silicon, Homebrew installs at `/opt/homebrew`; on Intel Macs, it installs at `/usr/local`.
 
-- Standard-prefix Homebrew and the shared 20-formula `Brewfile` bundle
+- Standard-prefix Homebrew and the catalog-declared 20-formula CLI set
 - Core Shell Stack CLIs such as ripgrep, neovim, zellij, lazygit, GitHub CLI (`gh`), starship, and mise through Homebrew
 - Jetendard terminal font from the latest stable GitHub release
 - Oh My Zsh, zinit, and SCM Breeze
@@ -149,12 +199,11 @@ On Apple Silicon, Homebrew installs at `/opt/homebrew`; on Intel Macs, it instal
 - pnpm through Node.js Corepack
 - Optional AI Tool Stack casks through Homebrew when that stack is enabled
 
-Terrapod installs every TTF in that Jetendard release and verifies the asset digest published by GitHub. Terrapod checks the latest Jetendard release only when its managed font installer source changes or a failed install is retried. It sets only the font-family keys used by Ghostty, Zed buffers and terminals, and Orca terminals. Quit Orca before rerunning `tpod apply` when Jetendard settings are deferred. Terrapod does not uninstall existing JetBrains Mono Nerd Font or D2Coding copies. Restart Ghostty, Zed, or Orca if an existing window still uses a cached font.
+Terrapod installs every TTF in that Jetendard release and verifies the asset digest published by GitHub. Terrapod checks the latest Jetendard release only when its managed font installer source changes or a failed install is retried. It sets only the font-family keys used by Ghostty, Zed buffers and terminals, and Orca terminals. Quit Orca before rerunning `tpod apply` when Jetendard settings are deferred. Restart Ghostty, Zed, or Orca if an existing window still uses a cached font.
 
 macOS desktop applications are split into opt-in App Groups controlled by
-machine-local data keys. During Homebrew bootstrap, chezmoi renders selected
-groups from `Brewfile.macos-desktop-apps.tmpl` into a temporary Brewfile and
-installs that rendered bundle:
+independent Terrapod config. Typed Homebrew adapters reconcile the selected
+catalog resources:
 
 - `terminal-apps`: Ghostty.
 - `automation`: Hammerspoon, Karabiner-Elements, and Scroll Reverser.
@@ -164,7 +213,8 @@ installs that rendered bundle:
 
 When installing Orca, Terrapod trusts only the fully-qualified `stablyai/orca/orca` cask, not the entire `stablyai/orca` tap.
 
-Machine-specific Homebrew packages should live outside the tracked `Brewfile`.
+Machine-specific Homebrew packages remain outside Terrapod unless the signed
+catalog declares them.
 
 ### Ubuntu 24.04 VPS
 
@@ -186,11 +236,11 @@ prerequisites; Terrapod adds no third-party APT repository. Homebrew then
 installs `chezmoi` and `gum`. The installer adds Homebrew and `~/.local/bin` to
 `PATH` for bootstrap, and managed zsh sessions restore those paths after reconnecting.
 
-On Ubuntu, the initial apply runs setup scripts for the VPS shell profile:
+On Ubuntu, typed adapters reconcile the VPS shell profile:
 
 - APT system and Homebrew bootstrap prerequisites only
 - Python build dependencies required by the mise-managed Python runtime
-- Standard-prefix Homebrew and the shared 20-formula `Brewfile` bundle
+- Standard-prefix Homebrew and the catalog-declared 20-formula CLI set
 - Oh My Zsh, zinit, and SCM Breeze
 - Core Shell Stack CLIs such as ripgrep, neovim, zellij, lazygit, GitHub CLI (`gh`), starship, and mise through Homebrew
 - Bun, Node.js 24, Python 3.13, and uv/uvx through mise
@@ -208,56 +258,23 @@ If the login shell could not be changed automatically, switch it after the first
 chsh -s "$(command -v zsh)"
 ```
 
-Terrapod handles normal management after bootstrap. For an unusual recovery
-path, install `chezmoi` manually and initialize
-`https://github.com/juty9026/terrapod.git` directly, then review and apply the
-result.
+Terrapod handles normal management after bootstrap. If the Management Core is
+unavailable, use the exact signed `install.sh --repair` command printed by the
+launcher.
 
 ### Intentional Upgrades
 
-Homebrew owns shared user-facing CLI tools and the enabled Optional AI Tool
-Stack on both profiles. APT owns only Ubuntu system and bootstrap prerequisites.
-mise owns only the Development Runtime Stack.
+`tpod apply` reconciles the active signed catalog. It installs missing declared
+packages, upgrades only Terrapod-owned packages, and automatically prunes
+Terrapod-owned resources removed from desired state. Terrapod does not run broad
+Homebrew, APT, or mise upgrades and never changes packages that are outside its
+ownership state.
 
-`tpod apply` restores missing Homebrew packages with
-`HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade`; it never performs an
-automatic update, upgrade, or removal. Existing mise, APT, and vendor-installed payloads are not removed automatically.
-
-Use OS package managers directly only when intentionally updating OS-managed packages.
-
-```sh
-# macOS
-brew update
-brew upgrade
-
-# Ubuntu
-sudo apt update
-sudo apt upgrade
-```
-
-Intentional CLI upgrades are explicit Homebrew operations. Upgrade all
-Homebrew-managed CLIs with `brew update` and `brew upgrade`, or target only the
-AI CLI casks when that is the intended scope.
-
-```sh
-brew update
-brew upgrade --cask claude-code codex antigravity-cli
-```
-
-Use mise directly when intentionally updating development runtimes.
-
-```sh
-mise outdated
-mise upgrade
-```
-
-Use `--bump` only when intentionally moving beyond configured major/minor
-ranges, such as changing Node.js from the current `24` line to a newer major.
-
-```sh
-mise outdated --bump
-mise upgrade --bump
-```
+When a desired package already exists under another installation source, the
+typed adapter plans a complete ownership transfer. If safe transfer cannot be
+verified, that resource becomes `unavailable` and Terrapod leaves it unchanged.
+Resolve managed-file conflicts with `tpod resolve <resource-id>`; package-source
+conflicts remain unavailable until their reported external cause is corrected.
 
 ## Manual Restore
 
@@ -279,16 +296,15 @@ When Raycast changes need to be shared across workstations, export a fresh
 
 ## Local Overrides
 
-Machine-local options are configured outside this repo with
-`chezmoi edit-config`. Keep only the option names, defaults, and examples here;
-do not commit workstation-specific values.
+Machine-local options live in Terrapod's independent config at
+`~/.config/terrapod/config.json`, not in chezmoi data. Use `tpod setup` or
+`terrapod configure <Preset>` to write it; do not commit workstation-specific
+values.
 
 Run `tpod setup` or `terrapod configure <Preset>` first so Terrapod writes a
-complete managed setup config. Routine commands treat the setup config as
-complete only when `profile` and every managed optional stack and macOS App
-Group key are present, including disabled keys. When editing manually, change
-values in the existing `[data]` section instead of replacing it with a partial
-snippet.
+complete managed setup config. Routine commands validate it against the schema
+in the active signed catalog and add defaults for new optional fields. Unknown
+legacy fields are pruned during the versioned config migration.
 
 Optional stack profiles and macOS App Group settings are disabled by default.
 
@@ -303,7 +319,6 @@ Optional stack profiles and macOS App Group settings are disabled by default.
 | `enableMacosAppGroupLauncher` | `false` | Installs the launcher macOS App Group: Raycast and 1Password CLI. |
 | `enableMacosAppGroupMonitoring` | `false` | Installs the monitoring macOS App Group: iStat Menus. |
 | `enableMacosAppGroupDevelopmentApps` | `false` | Installs the development-apps macOS App Group: Zed and Orca ADE (`stablyai/orca/orca`). |
-| `gitAllowedSigners` | `[]` | Adds workstation-specific SSH signing identities to `~/.ssh/allowed_signers`. |
 
 When `enableDevelopmentWorkspace` is `true`, it enables both the Optional Editor Stack and Optional AI Tool Stack
 even when `enableEditorStack` or `enableAiCliTools` are recorded as false.
@@ -311,12 +326,12 @@ even when `enableEditorStack` or `enableAiCliTools` are recorded as false.
 macOS Desktop App Stack installation remains separate from `enableDevelopmentWorkspace`
 because desktop casks can affect shared applications outside one user's home directory.
 
-Opting out of an optional stack excludes its files from chezmoi management; it does not remove files already present on a machine.
+Opting out of an optional stack removes its Terrapod-owned resources on the next
+apply. Files and packages that Terrapod never owned remain untouched.
 
-Terrapod preserves existing mise-, APT-, and vendor-installed payloads. When a
-legacy command shadows a mandatory Homebrew command, `tpod status` reports the
-ownership warning and `tpod doctor` fails with manual cleanup guidance. Legacy
-AI CLI shadowing remains advisory. Terrapod does not remove legacy vendor-installed AI CLI binaries.
+When a declared resource is already installed, the plan announces ownership
+transfer. Apply creates the required recovery material and records ownership
+only after verification; otherwise the resource is `unavailable`.
 
 `enableMacosAppGroupAiApps` is deprecated and is not treated as an alias for `enableMacosAppGroupDevelopmentApps`. Run `tpod setup` or `terrapod configure <Preset>` to migrate explicitly; Terrapod does not install Zed based on the old selection.
 
@@ -329,55 +344,62 @@ Terrapod-managed `.zshrc` exposes these Zellij helpers:
 
 ### Optional stack profile examples
 
-The examples below show values to keep or change inside an existing complete
-`[data]` section. They are not standalone config files.
+The examples below show values to keep or change inside the `terrapod` object of
+an existing complete managed setup config. They are not standalone config files.
 
 Minimal VPS:
 
-```toml
-profile = "vps-shell"
-enableEditorStack = false
-enableAiCliTools = false
-enableDevelopmentWorkspace = false
-enableMacosAppGroupTerminalApps = false
-enableMacosAppGroupAutomation = false
-enableMacosAppGroupLauncher = false
-enableMacosAppGroupMonitoring = false
-enableMacosAppGroupDevelopmentApps = false
+```json
+{
+  "profile": "vps-shell",
+  "enableEditorStack": false,
+  "enableAiCliTools": false,
+  "enableDevelopmentWorkspace": false,
+  "enableMacosAppGroupTerminalApps": false,
+  "enableMacosAppGroupAutomation": false,
+  "enableMacosAppGroupLauncher": false,
+  "enableMacosAppGroupMonitoring": false,
+  "enableMacosAppGroupDevelopmentApps": false
+}
 ```
 
 Editor-only machine:
 
-```toml
-enableEditorStack = true
+```json
+{
+  "enableEditorStack": true
+}
 ```
 
 AI-only machine:
 
-```toml
-enableAiCliTools = true
+```json
+{
+  "enableAiCliTools": true
+}
 ```
 
 Full development workspace machine:
 
-```toml
-enableEditorStack = false
-enableAiCliTools = false
-enableDevelopmentWorkspace = true
+```json
+{
+  "enableEditorStack": false,
+  "enableAiCliTools": false,
+  "enableDevelopmentWorkspace": true
+}
 ```
 
-Git signing identities can be configured alongside any profile.
+`gitAllowedSigners` is not an independent Terrapod config field. It remains
+unrelated chezmoi root data for maintainers who manually render the authoring
+checkout. In that separate workflow, place it under `[data]` in a chezmoi
+config. The authoring workflow must use chezmoi directly to render or apply it;
+`tpod apply` does not consume it.
 
 ```toml
+[data]
 gitAllowedSigners = [
   "name@company.com ssh-ed25519 AAAA_COMPANY_PUBLIC_KEY company",
 ]
-```
-
-Then apply the dotfiles.
-
-```sh
-terrapod apply
 ```
 
 ## Repository Conventions

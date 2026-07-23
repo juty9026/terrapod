@@ -1,0 +1,396 @@
+package legacy
+
+import (
+	"context"
+	"errors"
+	"reflect"
+	"testing"
+
+	"github.com/juty9026/terrapod/internal/execx"
+	"github.com/juty9026/terrapod/internal/model"
+	"github.com/juty9026/terrapod/internal/provider"
+	aptprovider "github.com/juty9026/terrapod/internal/provider/apt"
+)
+
+type queueRunner struct {
+	results  []execx.Result
+	errors   []error
+	requests []execx.Request
+}
+
+func (r *queueRunner) Run(_ context.Context, request execx.Request) (execx.Result, error) {
+	r.requests = append(r.requests, request)
+	i := len(r.requests) - 1
+	var result execx.Result
+	var err error
+	if i < len(r.results) {
+		result = r.results[i]
+	}
+	if i < len(r.errors) {
+		err = r.errors[i]
+	}
+	return result, err
+}
+
+type providerFixture struct {
+	inspected model.Resource
+	operation model.Operation
+}
+
+func (f *providerFixture) Name() string { return "apt" }
+func (f *providerFixture) Inspect(_ context.Context, resource model.Resource) (model.Observation, error) {
+	f.inspected = resource
+	return model.Observation{Present: true, Provider: "apt", Package: resource.Package}, nil
+}
+func (f *providerFixture) Simulate(_ context.Context, operation model.Operation) (provider.ChangeSet, error) {
+	f.operation = operation
+	return provider.ChangeSet{Removes: []string{operation.Package}}, nil
+}
+func (f *providerFixture) Execute(_ context.Context, operation model.Operation) error {
+	f.operation = operation
+	return nil
+}
+func (f *providerFixture) Verify(context.Context, model.Resource) (model.Observation, error) {
+	return model.Observation{}, nil
+}
+
+func TestAPTHandlerAdaptsExactHistoricalBootstrapPackage(t *testing.T) {
+	fixture := &providerFixture{}
+	handler, err := newAPTHandler(fixture, &queueRunner{results: []execx.Result{{Stdout: []byte("/usr/bin/gum\n")}}}, fakePaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := model.Resource{ID: "core.gum", Type: model.ResourcePackage, Provider: "homebrew-formula", Package: "gum", Commands: []string{"gum"}, VersionPolicy: model.VersionTracked, Metadata: map[string]string{"legacy.apt.package": "gum", "legacy.apt.profile": "vps-shell"}}
+	d := Declaration{Kind: APT, Package: "gum"}
+	receipt, err := handler.inspect(context.Background(), r, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !receipt.Present || receipt.Paths["gum"] != "/usr/bin/gum" || fixture.inspected.Metadata["bootstrapOnly"] != "true" {
+		t.Fatalf("receipt=%#v inspected=%#v", receipt, fixture.inspected)
+	}
+	changes, err := handler.simulateRemoval(context.Background(), r, d)
+	if err != nil || !reflect.DeepEqual(changes.Removes, []string{"gum"}) {
+		t.Fatalf("changes=%#v error=%v", changes, err)
+	}
+	unrelated, _ := newAPTHandler(&providerFixture{}, &queueRunner{results: []execx.Result{{Stdout: []byte("/usr/bin/not-gum\n")}}}, fakePaths{})
+	unrelatedReceipt, err := unrelated.inspect(context.Background(), r, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unrelatedReceipt.Paths) != 0 {
+		t.Fatalf("unrelated APT receipt trusted: %#v", unrelatedReceipt)
+	}
+}
+
+func TestAPTHandlerIntegratesWithRealAdapter(t *testing.T) {
+	runner := &queueRunner{results: []execx.Result{
+		{Stdout: []byte("gum\tii \t0.14.5\tno\n")},
+		{Stdout: []byte("/usr/bin/gum\n")},
+		{Stdout: []byte("Remv gum [0.14.5]\n0 upgraded, 0 newly installed, 1 to remove and 0 not upgraded.\n")},
+		{Stdout: []byte("gum\tii \t0.14.5\tno\n")},
+	}}
+	adapter, err := aptprovider.New(aptprovider.AptGetPath, aptprovider.DpkgQueryPath, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := newAPTHandler(adapter, runner, fakePaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource := model.Resource{ID: "core.gum", Type: model.ResourcePackage, Provider: "homebrew-formula", Package: "gum", Commands: []string{"gum"}, VersionPolicy: model.VersionTracked, Metadata: map[string]string{"legacy.apt.package": "gum", "legacy.apt.profile": "vps-shell"}}
+	declaration := Declaration{Kind: APT, Package: "gum"}
+	receipt, err := handler.inspect(context.Background(), resource, declaration)
+	if err != nil || !receipt.Present || receipt.Paths["gum"] != "/usr/bin/gum" {
+		t.Fatalf("receipt=%#v error=%v", receipt, err)
+	}
+	changes, err := handler.simulateRemoval(context.Background(), resource, declaration)
+	if err != nil || !reflect.DeepEqual(changes.Removes, []string{"gum"}) {
+		t.Fatalf("changes=%#v error=%v", changes, err)
+	}
+	want := []execx.Request{
+		{Path: aptprovider.DpkgQueryPath, Args: []string{"--show", "--showformat=${binary:Package}\\t${db:Status-Abbrev}\\t${Version}\\t${Essential}\\n", "gum"}, Env: map[string]string{"LC_ALL": "C"}},
+		{Path: aptprovider.DpkgQueryPath, Args: []string{"--listfiles", "gum"}, Env: map[string]string{"LC_ALL": "C"}},
+		{Path: aptprovider.AptGetPath, Args: []string{"-s", "remove", "--", "gum"}, Env: map[string]string{"LC_ALL": "C"}, Privilege: true},
+		{Path: aptprovider.DpkgQueryPath, Args: []string{"--show", "--showformat=${binary:Package}\\t${db:Status-Abbrev}\\t${Version}\\t${Essential}\\n", "gum"}, Env: map[string]string{"LC_ALL": "C"}},
+	}
+	if !reflect.DeepEqual(runner.requests, want) {
+		t.Fatalf("requests=%#v want=%#v", runner.requests, want)
+	}
+}
+
+func TestMiseHandlerUsesExactAllowlistedToolAndVersion(t *testing.T) {
+	runner := &queueRunner{results: []execx.Result{
+		{Stdout: []byte(`{"aqua:BurntSushi/ripgrep":[{"version":"14.1.1","installed":true}]}`)},
+		{Stdout: []byte("/data/mise/installs/aqua-BurntSushi-ripgrep/14.1.1\n")},
+		{Stdout: []byte("/data/mise/installs/aqua-BurntSushi-ripgrep/14.1.1/bin/rg\n")},
+		{},
+	}}
+	handler, err := newMiseHandler("/opt/homebrew/bin/mise", "/data/mise", runner, fakePaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := Declaration{Kind: Mise, Package: "aqua:BurntSushi/ripgrep"}
+	miseResource := resource(map[string]string{"legacy.mise.package": "aqua:BurntSushi/ripgrep"})
+	receipt, err := handler.inspect(context.Background(), miseResource, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !receipt.Present || receipt.Paths["rg"] == "" {
+		t.Fatalf("receipt=%#v", receipt)
+	}
+	if err := handler.remove(context.Background(), miseResource, d); err != nil {
+		t.Fatal(err)
+	}
+	for index, request := range runner.requests[:3] {
+		if len(request.Args) == 0 || request.Args[0] == "exec" {
+			t.Fatalf("inspection request[%d] may execute a tool: %v", index, request.Args)
+		}
+		for _, argument := range request.Args {
+			if argument == "--yes" || argument == "install" || argument == "uninstall" {
+				t.Fatalf("inspection request[%d] may mutate: %v", index, request.Args)
+			}
+		}
+	}
+	if got, want := runner.requests[2].Args, []string{"which", "rg", "--tool=aqua:BurntSushi/ripgrep@14.1.1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("which args=%v want=%v", got, want)
+	}
+	want := []string{"uninstall", "--yes", "aqua:BurntSushi/ripgrep@14.1.1"}
+	if got := runner.requests[3].Args; !reflect.DeepEqual(got, want) {
+		t.Fatalf("uninstall args=%v want=%v", got, want)
+	}
+}
+
+func TestMiseHandlerRejectsUnknownTool(t *testing.T) {
+	handler, err := newMiseHandler("/opt/homebrew/bin/mise", "/data/mise", &queueRunner{}, fakePaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = handler.inspect(context.Background(), resource(nil), Declaration{Kind: Mise, Package: "aqua:unknown/tool"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestMiseHandlerRemovesEveryExactInstalledVersionInSortedOrder(t *testing.T) {
+	runner := &queueRunner{results: []execx.Result{
+		{Stdout: []byte(`{"aqua:BurntSushi/ripgrep":[{"version":"15.0.0","installed":true},{"version":"14.1.1","installed":true}]}`)},
+		{Stdout: []byte("/data/mise/rg/14.1.1\n")}, {Stdout: []byte("/data/mise/rg/14.1.1/rg\n")},
+		{Stdout: []byte("/data/mise/rg/15.0.0\n")}, {Stdout: []byte("/data/mise/rg/15.0.0/rg\n")}, {}, {},
+	}}
+	paths := fakePaths{commands: map[string]string{"rg": "/data/mise/rg/15.0.0/rg"}}
+	handler, err := newMiseHandler("/opt/homebrew/bin/mise", "/data/mise", runner, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := resource(map[string]string{"legacy.mise.package": "aqua:BurntSushi/ripgrep"})
+	d := Declaration{Kind: Mise, Package: "aqua:BurntSushi/ripgrep"}
+	receipt, err := handler.inspect(context.Background(), r, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Paths["rg"] != "/data/mise/rg/15.0.0/rg" {
+		t.Fatalf("receipt=%#v", receipt)
+	}
+	if err := handler.remove(context.Background(), r, d); err != nil {
+		t.Fatal(err)
+	}
+	wants := [][]string{{"uninstall", "--yes", "aqua:BurntSushi/ripgrep@14.1.1"}, {"uninstall", "--yes", "aqua:BurntSushi/ripgrep@15.0.0"}}
+	for index, want := range wants {
+		if got := runner.requests[5+index].Args; !reflect.DeepEqual(got, want) {
+			t.Fatalf("args[%d]=%v want=%v", index, got, want)
+		}
+	}
+}
+
+func TestLegacyHandlerRootsRejectBroadAndTemporaryLocations(t *testing.T) {
+	if _, err := newMiseHandler("/opt/homebrew/bin/mise", "/", &queueRunner{}, fakePaths{}); err == nil {
+		t.Fatal("accepted root mise data")
+	}
+	paths := fakePaths{}
+	c, err := New(paths, WithHomebrew("/tmp/legacy-homebrew", &queueRunner{}))
+	if err == nil || c != nil {
+		t.Fatal("accepted temporary Homebrew prefix")
+	}
+	if _, err := newMiseHandler("/opt/homebrew/bin/mise", "/safe/mise", &queueRunner{}, fakePaths{resolved: map[string]string{"/safe/mise": "/"}}); err == nil {
+		t.Fatal("accepted mise data root resolving to filesystem root")
+	}
+}
+
+func TestHomebrewHandlerRequiresPackageReceiptAndTargetsUninstall(t *testing.T) {
+	runner := &queueRunner{results: []execx.Result{{Stdout: []byte(`{"formulae":[{"name":"ripgrep","full_name":"ripgrep","installed":[{"version":"14.1.1"}]}],"casks":[]}`)}, {Stdout: []byte("/custom/homebrew/bin/rg\n")}, {}}}
+	handler, err := newHomebrewHandler("/custom/homebrew/bin/brew", runner, fakePaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := Declaration{Kind: Homebrew, Package: "ripgrep"}
+	brewResource := resource(map[string]string{"legacy.homebrew.package": "ripgrep"})
+	receipt, err := handler.inspect(context.Background(), brewResource, d)
+	if err != nil || !receipt.Present || receipt.Paths["rg"] != "/custom/homebrew/bin/rg" {
+		t.Fatalf("receipt=%#v error=%v", receipt, err)
+	}
+	if err := handler.remove(context.Background(), brewResource, d); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := runner.requests[0].Args, []string{"info", "--json=v2", "--formula", "ripgrep"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("info args=%v want=%v", got, want)
+	}
+	if got, want := runner.requests[1].Args, []string{"list", "--verbose", "--formula", "ripgrep"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("list args=%v want=%v", got, want)
+	}
+	if got, want := runner.requests[2].Args, []string{"uninstall", "--formula", "ripgrep"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("args=%v want=%v", got, want)
+	}
+
+	absentRunner := &queueRunner{results: []execx.Result{{Stdout: []byte(`{"formulae":[{"name":"ripgrep","full_name":"ripgrep","installed":[]}],"casks":[]}`)}}}
+	absent, err := newHomebrewHandler("/custom/homebrew/bin/brew", absentRunner, fakePaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err = absent.inspect(context.Background(), brewResource, d)
+	if err != nil || receipt.Present {
+		t.Fatalf("prefix-only receipt=%#v error=%v", receipt, err)
+	}
+}
+
+func TestHomebrewReceiptDoesNotTrustUnrelatedExecutable(t *testing.T) {
+	runner := &queueRunner{results: []execx.Result{{Stdout: []byte(`{"formulae":[{"name":"ripgrep","full_name":"ripgrep","installed":[{"version":"14.1.1"}]}],"casks":[]}`)}, {Stdout: []byte("/custom/homebrew/Cellar/ripgrep/14.1.1/bin/not-rg\n")}}}
+	handler, err := newHomebrewHandler("/custom/homebrew/bin/brew", runner, fakePaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := resource(map[string]string{"legacy.homebrew.package": "ripgrep"})
+	receipt, err := handler.inspect(context.Background(), r, Declaration{Kind: Homebrew, Package: "ripgrep"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(receipt.Paths) != 0 {
+		t.Fatalf("unrelated Homebrew receipt trusted: %#v", receipt)
+	}
+}
+
+func TestHomebrewReceiptIgnoresDuplicateCompletionBasename(t *testing.T) {
+	runner := &queueRunner{results: []execx.Result{
+		{Stdout: []byte("{\"formulae\":[{\"name\":\"ripgrep\",\"full_name\":\"ripgrep\",\"installed\":[{\"version\":\"14.1.1\"}]}],\"casks\":[]}\n")},
+		{Stdout: []byte("/custom/homebrew/Cellar/ripgrep/14.1.1/bin/rg\n/custom/homebrew/share/bash-completion/completions/rg\n")},
+	}}
+	paths := fakePaths{resolved: map[string]string{
+		"/custom/homebrew/bin/rg": "/custom/homebrew/Cellar/ripgrep/14.1.1/bin/rg",
+	}}
+	handler, err := newHomebrewHandler("/custom/homebrew/bin/brew", runner, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource := resource(map[string]string{"legacy.homebrew.package": "ripgrep"})
+	receipt, err := handler.inspect(context.Background(), resource, Declaration{Kind: Homebrew, Package: "ripgrep"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := receipt.Paths["rg"]; got != "/custom/homebrew/bin/rg" {
+		t.Fatalf("command path=%q", got)
+	}
+}
+
+func TestHomebrewReceiptDoesNotJoinUnrelatedCommandTarget(t *testing.T) {
+	runner := &queueRunner{results: []execx.Result{
+		{Stdout: []byte("{\"formulae\":[{\"name\":\"ripgrep\",\"full_name\":\"ripgrep\",\"installed\":[{\"version\":\"14.1.1\"}]}],\"casks\":[]}\n")},
+		{Stdout: []byte("/custom/homebrew/Cellar/ripgrep/14.1.1/bin/not-rg\n")},
+	}}
+	paths := fakePaths{resolved: map[string]string{
+		"/custom/homebrew/bin/rg": "/custom/homebrew/Cellar/unrelated/1.0/bin/rg",
+	}}
+	handler, err := newHomebrewHandler("/custom/homebrew/bin/brew", runner, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := handler.inspect(context.Background(), resource(map[string]string{"legacy.homebrew.package": "ripgrep"}), Declaration{Kind: Homebrew, Package: "ripgrep"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(receipt.Paths) != 0 {
+		t.Fatalf("unrelated command target trusted: %#v", receipt)
+	}
+}
+
+func TestHomebrewReceiptRejectsCommandSymlinkEscapingPrefix(t *testing.T) {
+	runner := &queueRunner{results: []execx.Result{
+		{Stdout: []byte("{\"formulae\":[{\"name\":\"ripgrep\",\"full_name\":\"ripgrep\",\"installed\":[{\"version\":\"14.1.1\"}]}],\"casks\":[]}\n")},
+		{Stdout: []byte("/custom/homebrew/Cellar/ripgrep/14.1.1/bin/rg\n")},
+	}}
+	paths := fakePaths{resolved: map[string]string{"/custom/homebrew/bin/rg": "/tmp/rg"}}
+	handler, err := newHomebrewHandler("/custom/homebrew/bin/brew", runner, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := handler.inspect(context.Background(), resource(map[string]string{"legacy.homebrew.package": "ripgrep"}), Declaration{Kind: Homebrew, Package: "ripgrep"}); err == nil {
+		t.Fatal("accepted command symlink escaping trusted prefix")
+	}
+}
+
+func TestHomebrewReceiptRejectsAmbiguousBinAndSbinLinks(t *testing.T) {
+	owned := "/custom/homebrew/Cellar/ripgrep/14.1.1/bin/rg"
+	runner := &queueRunner{results: []execx.Result{
+		{Stdout: []byte("{\"formulae\":[{\"name\":\"ripgrep\",\"full_name\":\"ripgrep\",\"installed\":[{\"version\":\"14.1.1\"}]}],\"casks\":[]}\n")},
+		{Stdout: []byte(owned + "\n")},
+	}}
+	paths := fakePaths{resolved: map[string]string{
+		"/custom/homebrew/bin/rg":  owned,
+		"/custom/homebrew/sbin/rg": owned,
+	}}
+	handler, err := newHomebrewHandler("/custom/homebrew/bin/brew", runner, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := handler.inspect(context.Background(), resource(map[string]string{"legacy.homebrew.package": "ripgrep"}), Declaration{Kind: Homebrew, Package: "ripgrep"}); err == nil {
+		t.Fatal("accepted ambiguous bin and sbin command links")
+	}
+}
+
+func TestHomebrewHandlerDetectsCaskButRefusesSharedArtifactMutation(t *testing.T) {
+	runner := &queueRunner{results: []execx.Result{{Stdout: []byte(`{"formulae":[],"casks":[{"token":"codex","full_token":"homebrew/cask/codex","installed":"1.2.3"}]}`)}, {Stdout: []byte("/custom/homebrew/Caskroom/codex/1.2.3/codex\n")}}}
+	handler, err := newHomebrewHandler("/custom/homebrew/bin/brew", runner, fakePaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := model.Resource{ID: "optional-ai.codex", Type: model.ResourcePackage, Provider: "homebrew-cask", Package: "codex", Commands: []string{"codex"}, Metadata: map[string]string{"legacy.homebrew.package": "codex"}}
+	d := Declaration{Kind: Homebrew, Package: "codex"}
+	if _, err := handler.inspect(context.Background(), r, d); err != nil {
+		t.Fatal(err)
+	}
+	var unsupported *ErrUnsupportedSource
+	if _, err := handler.simulateRemoval(context.Background(), r, d); !errors.As(err, &unsupported) {
+		t.Fatalf("error=%v", err)
+	}
+	if len(runner.requests) != 2 {
+		t.Fatalf("unexpected mutation requests=%#v", runner.requests)
+	}
+}
+
+func TestHomebrewHandlerRejectsStandardPrefixAndUnsafeKind(t *testing.T) {
+	if _, err := newHomebrewHandler("/opt/homebrew/bin/brew", &queueRunner{}, fakePaths{}); err == nil {
+		t.Fatal("accepted standard Homebrew")
+	}
+}
+
+func TestStructuredReceiptsRejectDuplicateKeysAndTrailingValues(t *testing.T) {
+	miseCases := [][]byte{
+		[]byte("{\"aqua:BurntSushi/ripgrep\":[],\"aqua:BurntSushi/ripgrep\":[]}"),
+		[]byte("{\"aqua:BurntSushi/ripgrep\":[{\"version\":\"14\",\"version\":\"15\",\"installed\":true}]}"),
+		[]byte("{\"aqua:BurntSushi/ripgrep\":[]} {}"),
+	}
+	for _, contents := range miseCases {
+		if _, _, err := parseMiseInventory(contents, "aqua:BurntSushi/ripgrep"); err == nil {
+			t.Fatalf("accepted mise receipt %s", contents)
+		}
+	}
+	brewCases := [][]byte{
+		[]byte("{\"formulae\":[],\"formulae\":[],\"casks\":[]}"),
+		[]byte("{\"formulae\":[{\"name\":\"ripgrep\",\"name\":\"fd\",\"installed\":[{\"version\":\"14\"}]}],\"casks\":[]}"),
+		[]byte("{\"formulae\":[],\"casks\":[]} {}"),
+	}
+	for _, contents := range brewCases {
+		if _, err := parseBrewReceipt(contents, brewFormula, "ripgrep"); err == nil {
+			t.Fatalf("accepted Homebrew receipt %s", contents)
+		}
+	}
+}

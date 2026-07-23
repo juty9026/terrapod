@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+[ "${LC_ALL:-}" = "C" ] || exit 9
+[ "$#" -eq 4 ] || exit 64
+[ "$1" = "-s" ] || exit 64
+[ "$2" = "install" ] || exit 64
+[ "$3" = "--" ] || exit 64
+[ "$4" = "curl" ] || exit 64
+printf '%s\n' \
+  'Inst curl (8.0 fixture [amd64])' \
+  '0 upgraded, 1 newly installed, 0 to remove and 0 not upgraded.'

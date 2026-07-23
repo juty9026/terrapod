@@ -199,7 +199,7 @@ fi
 
 pass "default shell does not expose the Optional Development Workspace attach-or-create helper"
 
-render_zshrc '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableAiCliTools":true}'
+render_zshrc '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"terrapod":{"enableEditorStack":false,"enableAiCliTools":true,"enableDevelopmentWorkspace":false}}'
 
 cd "$tmp_dir/start" || fail "could not enter test start directory"
 source "$tmp_dir/home/.zshrc"
@@ -308,7 +308,7 @@ fi
 assert_pwd "$tmp_dir/worktree-main" "cancelled wcd should leave the current directory unchanged"
 pass "cancelled wcd keeps the current directory"
 
-render_zshrc '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableDevelopmentWorkspace":true}'
+render_zshrc '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"terrapod":{"enableEditorStack":false,"enableDevelopmentWorkspace":true}}'
 source "$tmp_dir/home/.zshrc"
 
 if ! alias zd >/dev/null 2>&1; then

@@ -14,13 +14,13 @@ tests/**
 .config/cmux
 .config/cmux/**
 
-{{ if not (or (default false (get . "enableEditorStack")) (default false (get . "enableDevelopmentWorkspace"))) }}
+{{ if or (not (hasKey . "terrapod")) (not (or (default false .terrapod.enableEditorStack) (default false .terrapod.enableDevelopmentWorkspace))) }}
 # Optional Editor Stack entries are opt-in for every machine profile.
 .config/nvim
 .config/nvim/**
 {{ end }}
 
-{{ if not (default false (get . "enableDevelopmentWorkspace")) }}
+{{ if or (not (hasKey . "terrapod")) (not (default false .terrapod.enableDevelopmentWorkspace)) }}
 # Optional Development Workspace entries are opt-in for every machine profile.
 .config/zellij/layouts
 .config/zellij/layouts/**
@@ -28,13 +28,6 @@ tests/**
 
 {{ if ne .chezmoi.os "darwin" }}
 # macOS Terminal Profile entries are not part of the VPS Shell Profile.
-.chezmoiscripts/13-retry-homebrew-desktop-apps.sh
-.chezmoiscripts/02-retry-jetendard-font.sh
-.chezmoiscripts/50-open-karabiner-if-needed.sh
-.chezmoiscripts/65-install-jetendard-font.sh
-.chezmoiscripts/70-apply-jetendard-settings.sh
-.local/lib/terrapod/jetendard-font
-.local/lib/terrapod/jetendard-settings
 .config/ghostty
 .config/ghostty/**
 .config/karabiner
