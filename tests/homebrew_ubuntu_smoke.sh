@@ -14,6 +14,15 @@ if grep -F '/workspace/Brewfile' "$dockerfile" >/dev/null; then
   printf '%s\n' "not ok - Ubuntu smoke still uses the deleted Brewfile" >&2
   exit 1
 fi
+for deleted_path in \
+  '/workspace/dot_local/bin/executable_terrapod' \
+  '/workspace/.chezmoiscripts'
+do
+  if grep -F "$deleted_path" "$dockerfile" >/dev/null; then
+    printf '%s\n' "not ok - Ubuntu smoke still uses deleted shell path: $deleted_path" >&2
+    exit 1
+  fi
+done
 
 if ! command -v docker >/dev/null 2>&1; then
   printf '%s\n' "ok - SKIP Ubuntu Homebrew smoke: docker is unavailable"

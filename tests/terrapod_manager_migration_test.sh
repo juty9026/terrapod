@@ -47,7 +47,7 @@ mise exec go@1.26.0 -- go test ./cmd/tpod \
 
 run_scenario ./internal/migrate TestRunCurrentRetriesOnlySourceAfterReconciliation \
   "interruption after desired install resumes before legacy removal"
-run_scenario ./internal/migrate TestPlanLegacyOwnershipAdoptsTransfersPrunesAndDoesNotInfer \
+run_scenario ./internal/migrate TestPlanLegacyOwnershipUnknownProvenanceIsUnavailableWithoutMutation \
   "unknown legacy provenance remains unavailable"
 run_scenario ./internal/migrate TestPlanLegacyOwnershipRefusesModifiedManagedTarget \
   "modified managed files block migration"
@@ -57,11 +57,11 @@ run_scenario ./internal/update TestContinueRejectsNewActualUnavailableAndKeepsJo
   "post-activation update failure remains resumable"
 run_scenario ./internal/resolve TestResolveDisplaysEveryExactBlockerAndDefaultsToCancellation \
   "unmanaged blocker removal requires confirmation"
-run_scenario ./internal/cli TestMissingConfigPrintsSetupGuidanceWithoutLoadingOtherData \
+run_scenario ./internal/cli TestMissingConfigBlocksApplyBeforeMutationDependenciesLoad \
   "lost config blocks manager planning before mutation dependencies load"
 run_scenario ./internal/state TestAcquireRejectsLiveLock \
   "live reconciliation lock rejects concurrent mutation"
-run_scenario ./internal/reconcile TestApplyReportsEnabledNoOpResourcesAndPlanUnavailable \
+run_scenario ./internal/reconcile TestRepeatedApplySecondPlanAndApplyAreExactNoOp \
   "repeated apply reports ready resources without mutation"
 
 printf '%s\n' "ok - Terrapod manager migration contract"

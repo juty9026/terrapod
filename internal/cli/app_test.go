@@ -198,6 +198,38 @@ func TestMissingConfigPrintsSetupGuidanceWithoutLoadingOtherData(t *testing.T) {
 	}
 }
 
+func TestMissingConfigBlocksApplyBeforeMutationDependenciesLoad(t *testing.T) {
+	loadedCatalog := false
+	openedState := false
+	applied := false
+	deps := Dependencies{
+		Geteuid: func() int { return 501 },
+		Paths:   paths.Layout{ConfigFile: "/home/me/.config/terrapod/config.json"},
+		LoadConfig: func() (model.Config, error) {
+			return model.Config{}, &config.ErrMissing{Path: "/home/me/.config/terrapod/config.json"}
+		},
+		LoadCatalog: func() (catalog.Verified, error) {
+			loadedCatalog = true
+			return catalog.Verified{}, nil
+		},
+		OpenState: func() (*state.Store, error) {
+			openedState = true
+			return nil, errors.New("state must not open")
+		},
+		Apply: func(context.Context, reconcile.ApplyInput) (reconcile.Summary, error) {
+			applied = true
+			return reconcile.Summary{}, nil
+		},
+	}
+	code, _, stderr := run(t, []string{"apply"}, deps)
+	if code == 0 || !strings.Contains(stderr, "config is missing") {
+		t.Fatalf("Run(apply) = %d, stderr=%q", code, stderr)
+	}
+	if loadedCatalog || openedState || applied {
+		t.Fatalf("lost config reached mutation dependencies: catalog=%v state=%v apply=%v", loadedCatalog, openedState, applied)
+	}
+}
+
 func TestUpdateAndHiddenContinuationDispatch(t *testing.T) {
 	deps := Dependencies{Geteuid: func() int { return 501 }, Update: func(context.Context) (updatepkg.Result, error) {
 		return updatepkg.Result{Handoff: true, JournalID: "journal"}, nil

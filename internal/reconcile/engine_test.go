@@ -12,6 +12,7 @@ import (
 
 	"github.com/juty9026/terrapod/internal/legacydecl"
 	"github.com/juty9026/terrapod/internal/model"
+	"github.com/juty9026/terrapod/internal/planner"
 	"github.com/juty9026/terrapod/internal/provider"
 	"github.com/juty9026/terrapod/internal/resource"
 	"github.com/juty9026/terrapod/internal/state"
@@ -29,6 +30,7 @@ type fixtureAdapter struct {
 	canceled                     []model.Operation
 	observationPaths             map[string]string
 	boundResources               []model.Resource
+	plan                         func(model.Resource, model.Observation, model.Ownership) []model.Operation
 }
 
 func TestEnginePersistsArchiveManifestPaths(t *testing.T) {
@@ -99,7 +101,10 @@ func (f *fixtureAdapter) Inspect(_ context.Context, item model.Resource) (model.
 	}
 	return f.observation(item), nil
 }
-func (f *fixtureAdapter) Plan(context.Context, model.Resource, model.Observation, model.Ownership) ([]model.Operation, error) {
+func (f *fixtureAdapter) Plan(_ context.Context, item model.Resource, observed model.Observation, owned model.Ownership) ([]model.Operation, error) {
+	if f.plan != nil {
+		return f.plan(item, observed, owned), nil
+	}
 	return nil, nil
 }
 func (f *fixtureAdapter) Execute(_ context.Context, operation model.Operation) model.OperationResult {
@@ -684,6 +689,59 @@ func TestApplyReportsEnabledNoOpResourcesAndPlanUnavailable(t *testing.T) {
 	summary, err := engine.Apply(context.Background(), model.Plan{ID: "p", Unavailable: map[model.ResourceID]string{unavailable.ID: "not supported"}})
 	if err != nil || len(summary.Ready) != 1 || summary.Ready[0] != ready.ID || summary.Unavailable[unavailable.ID] != "not supported" {
 		t.Fatalf("summary=%#v err=%v", summary, err)
+	}
+}
+
+func TestRepeatedApplySecondPlanAndApplyAreExactNoOp(t *testing.T) {
+	item := pkg("core.alpha", "fixture")
+	item.Profiles = []model.Profile{model.ProfileVPSShell}
+	adapter := &fixtureAdapter{fail: map[string]bool{}}
+	adapter.plan = func(item model.Resource, observed model.Observation, _ model.Ownership) []model.Operation {
+		if observed.Present {
+			return nil
+		}
+		return []model.Operation{op(item, "install-core.alpha", model.OperationInstall)}
+	}
+	engine, store := testEngine(t, map[string]*fixtureAdapter{"fixture": adapter}, item)
+	build := func() model.Plan {
+		snapshot, err := store.Snapshot()
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan, err := planner.New(engine.Registry).Build(context.Background(), planner.Input{
+			Catalog:       model.Catalog{Version: 1, Release: "v1", Resources: []model.Resource{item}},
+			CatalogDigest: "signed",
+			Config:        model.Config{Version: 1, Terrapod: map[string]any{"profile": "vps-shell"}},
+			Profile:       model.ProfileVPSShell,
+			Snapshot:      snapshot,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return plan
+	}
+
+	first := build()
+	if len(first.Operations) != 1 {
+		t.Fatalf("first plan operations=%#v", first.Operations)
+	}
+	if _, err := engine.Apply(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+
+	adapter.events = nil
+	second := build()
+	if len(second.Operations) != 0 || len(second.Unavailable) != 0 {
+		t.Fatalf("second plan=%#v", second)
+	}
+	summary, err := engine.Apply(context.Background(), second)
+	if err != nil || len(summary.Ready) != 1 || summary.Ready[0] != item.ID {
+		t.Fatalf("second apply summary=%#v err=%v", summary, err)
+	}
+	for _, event := range adapter.events {
+		if strings.HasPrefix(event, "execute:") {
+			t.Fatalf("second apply mutated provider: %v", adapter.events)
+		}
 	}
 }
 

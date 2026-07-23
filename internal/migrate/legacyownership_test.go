@@ -12,6 +12,7 @@ import (
 
 	"github.com/juty9026/terrapod/internal/catalog"
 	"github.com/juty9026/terrapod/internal/model"
+	legacyprovider "github.com/juty9026/terrapod/internal/provider/legacy"
 	"github.com/juty9026/terrapod/internal/resource"
 )
 
@@ -19,11 +20,15 @@ type ownershipAdapter struct {
 	operations map[model.ResourceID][]model.Operation
 	historical map[model.ResourceID][]model.Operation
 	observed   map[model.ResourceID]model.Observation
+	inspectErr map[model.ResourceID]error
 	planned    []model.ResourceID
 	pruned     []model.ResourceID
 }
 
 func (a *ownershipAdapter) Inspect(_ context.Context, item model.Resource) (model.Observation, error) {
+	if err := a.inspectErr[item.ID]; err != nil {
+		return model.Observation{}, err
+	}
 	if observed, ok := a.observed[item.ID]; ok {
 		return observed, nil
 	}
@@ -186,6 +191,45 @@ func TestPlanLegacyOwnershipRefusesModifiedManagedTarget(t *testing.T) {
 	}
 	if !strings.Contains(result.Plan.Unavailable[item.ID], "modified") || len(result.Plan.Operations) != 0 || len(result.Receipts) != 0 {
 		t.Fatalf("modified target was not isolated: %#v", result)
+	}
+}
+
+func TestPlanLegacyOwnershipUnknownProvenanceIsUnavailableWithoutMutation(t *testing.T) {
+	item := model.Resource{
+		ID: "core.git", Type: model.ResourcePackage, Provider: "homebrew-formula",
+		Package: "git", VersionPolicy: model.VersionTracked,
+	}
+	adapter := &ownershipAdapter{inspectErr: map[model.ResourceID]error{
+		item.ID: &legacyprovider.ErrUnknownProvenance{
+			ResourceID: item.ID,
+			Command:    "git",
+			Path:       "/usr/local/bin/git",
+		},
+	}}
+	registry := resource.NewRegistry()
+	if err := registry.Register(item.Type, item.Provider, adapter); err != nil {
+		t.Fatal(err)
+	}
+	result, err := PlanLegacyOwnership(context.Background(), LegacyOwnershipInput{
+		Baseline: catalog.Verified{
+			Catalog: model.Catalog{Release: LegacyBaselineRelease, Resources: []model.Resource{item, legacyManagementItem("homebrew-core")}},
+			Digest:  "legacy", KeyID: LegacyBaselineKeyID,
+		},
+		Current:  catalog.Verified{Catalog: model.Catalog{Release: "v1", Resources: []model.Resource{item}}, Digest: "current"},
+		Registry: registry,
+		Desired:  map[model.ResourceID]bool{item.ID: true},
+		Actual: map[model.ResourceID]LegacyArtifact{
+			item.ID: {Observation: model.Observation{Present: true}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Plan.Unavailable[item.ID], "unknown provenance") {
+		t.Fatalf("Unavailable = %#v", result.Plan.Unavailable)
+	}
+	if len(result.Plan.Operations) != 0 || len(result.Receipts) != 0 || len(adapter.planned) != 0 || len(adapter.pruned) != 0 {
+		t.Fatalf("unknown provenance mutated migration state: result=%#v adapter=%#v", result, adapter)
 	}
 }
 
