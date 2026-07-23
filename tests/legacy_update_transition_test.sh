@@ -52,6 +52,9 @@ done >>"$TERRAPOD_TEST_MANAGER_LOG"
 MANAGER
 chmod +x "$manager"
 mv "$manager" "$HOME/.local/bin/terrapod"
+ln -s terrapod "$HOME/.local/bin/tpod.new"
+mv -f "$HOME/.local/bin/tpod.new" "$HOME/.local/bin/tpod"
+[ "${TERRAPOD_TEST_POST_ACTIVATION_FAILURE:-0}" = 0 ] || exit 23
 INSTALLER
 
 materialize_bridge() {
@@ -136,6 +139,43 @@ fi
 grep -F 'manager migration did not complete' "$migration_case/stderr" >/dev/null ||
   fail "failed migration explains that the command is retryable"
 assert_bridge_retryable "$migration_case" "failed migration"
+
+post_activation_case="$tmp_dir/post-activation-failure"
+materialize_bridge "$post_activation_case"
+cp "$post_activation_case/home/.local/bin/terrapod" \
+  "$post_activation_case/original-terrapod"
+original_tpod_target="$(readlink "$post_activation_case/home/.local/bin/tpod")"
+if HOME="$post_activation_case/home" TMPDIR="$post_activation_case/tmp" PATH="$stub_bin:$PATH" \
+  TERRAPOD_TEST_INSTALLER_SOURCE="$installer_stub" \
+  TERRAPOD_TEST_CURL_LOG="$post_activation_case/curl.log" \
+  TERRAPOD_TEST_MIGRATION_LOG="$post_activation_case/migration.log" \
+  TERRAPOD_TEST_MANAGER_LOG="$post_activation_case/manager.log" \
+  TERRAPOD_TEST_POST_ACTIVATION_FAILURE=1 \
+  "$post_activation_case/home/.local/bin/tpod" update >"$post_activation_case/stdout" 2>"$post_activation_case/stderr"; then
+  fail "post-activation migration failure fails the transition"
+fi
+cmp "$post_activation_case/original-terrapod" \
+  "$post_activation_case/home/.local/bin/terrapod" >/dev/null ||
+  fail "post-activation failure restores the exact legacy bridge content"
+[ -L "$post_activation_case/home/.local/bin/tpod" ] ||
+  fail "post-activation failure restores tpod as a symlink"
+[ "$(readlink "$post_activation_case/home/.local/bin/tpod")" = "$original_tpod_target" ] ||
+  fail "post-activation failure restores the original tpod symlink target"
+[ ! -e "$post_activation_case/manager.log" ] ||
+  fail "post-activation failure does not invoke the manager"
+
+HOME="$post_activation_case/home" TMPDIR="$post_activation_case/tmp" PATH="$stub_bin:$PATH" \
+  TERRAPOD_TEST_INSTALLER_SOURCE="$installer_stub" \
+  TERRAPOD_TEST_CURL_LOG="$post_activation_case/retry-curl.log" \
+  TERRAPOD_TEST_MIGRATION_LOG="$post_activation_case/retry-migration.log" \
+  TERRAPOD_TEST_MANAGER_LOG="$post_activation_case/retry-manager.log" \
+  "$post_activation_case/home/.local/bin/tpod" update ||
+  fail "restored bridge retries the same command"
+grep -Fx 'installer-arg:--migrate' \
+  "$post_activation_case/retry-migration.log" >/dev/null ||
+  fail "restored bridge retries internal migration"
+grep -Fx 'manager-arg:update' "$post_activation_case/retry-manager.log" >/dev/null ||
+  fail "restored bridge forwards the retried command"
 
 replacement_case="$tmp_dir/replacement-missing"
 materialize_bridge "$replacement_case"
