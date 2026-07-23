@@ -107,6 +107,10 @@ assert_contains "$korean_readme" '🌐 언어: [English](README.md) | **한국�
   "README.ko.md has the agreed language switcher"
 assert_not_contains "$korean_readme" '번역본' \
   "README.ko.md does not label itself as a translation"
+assert_contains "$korean_readme" 'sh -c "$(curl -fsLS https://github.com/juty9026/terrapod/releases/latest/download/install.sh)"' \
+  "README.ko.md documents the full installer command"
+assert_not_contains "$korean_readme" 'https://raw.githubusercontent.com/juty9026/terrapod/main/install.sh' \
+  "README.ko.md does not document the unresolved raw installer URL"
 assert_contains "$korean_readme" '`terrapod configure <Preset>`는 script-friendly Preset configuration' \
   "README.ko.md documents configure as script-friendly Preset configuration"
 assert_contains "$korean_readme" 'command입니다. 지원되는 Preset 정확히 하나의 concrete settings를 쓰고,' \
