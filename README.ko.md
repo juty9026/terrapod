@@ -305,7 +305,6 @@ Optional stack profile과 macOS App Group setting은 기본적으로 disabled입
 | `enableMacosAppGroupLauncher` | `false` | launcher macOS App Group인 Raycast와 1Password CLI를 설치합니다. |
 | `enableMacosAppGroupMonitoring` | `false` | monitoring macOS App Group인 iStat Menus를 설치합니다. |
 | `enableMacosAppGroupDevelopmentApps` | `false` | development-apps macOS App Group인 Zed와 Orca ADE(`stablyai/orca/orca`)를 설치합니다. |
-| `gitAllowedSigners` | `[]` | workstation-specific SSH signing identity를 `~/.ssh/allowed_signers`에 추가합니다. |
 
 `enableDevelopmentWorkspace`가 `true`이면 `enableEditorStack`이나 `enableAiCliTools`가 false로 기록되어 있어도 Optional Editor Stack과 Optional AI Tool Stack이 함께 활성화됩니다.
 
@@ -374,14 +373,16 @@ Full development workspace machine:
 }
 ```
 
-Git signing identity는 어느 profile과도 함께 설정할 수 있습니다.
+`gitAllowedSigners`는 independent Terrapod config field가 아닙니다. maintainer가
+authoring checkout을 직접 render할 때 사용하는 unrelated chezmoi root data로
+남아 있습니다. 이 별도 workflow에서는 chezmoi config의 `[data]` 아래에 두며,
+`tpod apply`는 이 값을 사용하지 않습니다.
 
-```json
-{
-  "gitAllowedSigners": [
-    "name@company.com ssh-ed25519 AAAA_COMPANY_PUBLIC_KEY company"
-  ]
-}
+```toml
+[data]
+gitAllowedSigners = [
+  "name@company.com ssh-ed25519 AAAA_COMPANY_PUBLIC_KEY company",
+]
 ```
 
 그 다음 environment를 reconcile합니다.

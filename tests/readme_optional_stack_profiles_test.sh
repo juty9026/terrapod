@@ -201,6 +201,12 @@ assert_contains '`~/.config/terrapod/config.json`' \
   "README documents the independent Terrapod config"
 assert_contains 'declared-root ownership' \
   "README documents the ownership boundary"
+assert_not_contains '| `gitAllowedSigners` |' \
+  "README excludes unrelated chezmoi data from the Terrapod config table"
+assert_not_contains '"gitAllowedSigners"' \
+  "README excludes unrelated chezmoi data from Terrapod JSON examples"
+assert_contains '`gitAllowedSigners` is not an independent Terrapod config field.' \
+  "README documents the unrelated chezmoi root-data boundary"
 assert_contains '## What Terrapod Leaves Alone' \
   "README documents product boundaries near the top"
 assert_contains '## Daily Commands' \

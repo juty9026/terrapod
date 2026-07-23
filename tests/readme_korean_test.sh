@@ -155,6 +155,12 @@ assert_contains "$korean_readme" '`~/.config/terrapod/config.json`' \
   "README.ko.md documents the independent Terrapod config"
 assert_contains "$korean_readme" 'declared-root ownership' \
   "README.ko.md documents the ownership boundary"
+assert_not_contains "$korean_readme" '| `gitAllowedSigners` |' \
+  "README.ko.md excludes unrelated chezmoi data from the Terrapod config table"
+assert_not_contains "$korean_readme" '"gitAllowedSigners"' \
+  "README.ko.md excludes unrelated chezmoi data from Terrapod JSON examples"
+assert_contains "$korean_readme" '`gitAllowedSigners`는 independent Terrapod config field가 아닙니다.' \
+  "README.ko.md documents the unrelated chezmoi root-data boundary"
 assert_contains "$korean_readme" '`development-apps`: Zed와 Orca ADE(`stablyai/orca/orca`).' \
   "README.ko.md documents Zed and Orca ADE in the development-apps inventory"
 assert_contains "$korean_readme" '| `enableMacosAppGroupDevelopmentApps` | `false` | development-apps macOS App Group인 Zed와 Orca ADE(`stablyai/orca/orca`)를 설치합니다. |' \
