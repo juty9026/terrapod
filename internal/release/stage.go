@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	archivepkg "github.com/juty9026/terrapod/internal/resource/archive"
@@ -23,6 +24,9 @@ type Staged struct{ Version, Path string }
 type Stager struct {
 	ReleaseDir, ActiveRelease string
 	Verifier                  Verifier
+	ExpectedPlatform          Platform
+	afterSourceCopy           func()
+	beforeCommitValidation    func(string)
 }
 
 type stagedRecord struct {
@@ -47,6 +51,9 @@ func (s Stager) Stage(ctx context.Context, release VerifiedRelease, platform Pla
 	}
 	if !supportedPlatform(platform.OS, platform.Arch) {
 		return Staged{}, fmt.Errorf("unsupported platform %s/%s", platform.OS, platform.Arch)
+	}
+	if platform != s.expectedPlatform() {
+		return Staged{}, fmt.Errorf("requested platform %s/%s differs from expected %s/%s", platform.OS, platform.Arch, s.expectedPlatform().OS, s.expectedPlatform().Arch)
 	}
 	if s.ReleaseDir == "" || s.ActiveRelease == "" {
 		return Staged{}, errors.New("release paths are required")
@@ -133,7 +140,10 @@ func (s Stager) Stage(ctx context.Context, release VerifiedRelease, platform Pla
 	if err := copyVerifiedFile(sourcePath, filepath.Join(staging, ".artifacts", "source.tar.gz"), sourceAsset, 0o444); err != nil {
 		return Staged{}, err
 	}
-	files, err := extractSource(sourcePath, filepath.Join(staging, "source"))
+	if s.afterSourceCopy != nil {
+		s.afterSourceCopy()
+	}
+	files, err := extractSource(filepath.Join(staging, ".artifacts", "source.tar.gz"), filepath.Join(staging, "source"))
 	if err != nil {
 		return Staged{}, err
 	}
@@ -141,11 +151,21 @@ func (s Stager) Stage(ctx context.Context, release VerifiedRelease, platform Pla
 	if err := writeRecord(filepath.Join(staging, ".stage.json"), record); err != nil {
 		return Staged{}, err
 	}
+	if s.beforeCommitValidation != nil {
+		s.beforeCommitValidation(staging)
+	}
 	if err := makeTreeImmutable(staging); err != nil {
 		return Staged{}, err
 	}
 	if err := syncTree(staging); err != nil {
 		return Staged{}, err
+	}
+	validated, err := s.validateInstalledRelease(staging, manifest.Version, release.manifestData, release.signatureData)
+	if err != nil {
+		return Staged{}, fmt.Errorf("validate completed release: %w", err)
+	}
+	if validated.OS != platform.OS || validated.Arch != platform.Arch {
+		return Staged{}, errors.New("completed release platform differs")
 	}
 	if _, err := os.Lstat(destination); err == nil {
 		return Staged{}, errors.New("release appeared while staging")
@@ -160,6 +180,13 @@ func (s Stager) Stage(ctx context.Context, release VerifiedRelease, platform Pla
 		return Staged{}, err
 	}
 	return Staged{Version: manifest.Version, Path: destination}, nil
+}
+
+func (s Stager) expectedPlatform() Platform {
+	if s.ExpectedPlatform.OS == "" && s.ExpectedPlatform.Arch == "" {
+		return Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}
+	}
+	return s.ExpectedPlatform
 }
 
 func (s Stager) Activate(version string) error {
@@ -246,6 +273,11 @@ func (s Stager) verifyRelease(release VerifiedRelease) (Manifest, error) {
 }
 
 func validateExecutable(name string, platform Platform) error {
+	info, err := os.Stat(name)
+	if err != nil {
+		return err
+	}
+	size := uint64(info.Size())
 	input, err := os.Open(name)
 	if err != nil {
 		return err
@@ -278,14 +310,26 @@ func validateExecutable(name string, platform Platform) error {
 			return errors.New("binary executable architecture mismatch")
 		}
 		loadable := false
+		entryValid := file.Entry == 0
 		for _, program := range file.Progs {
-			if program.Type == elf.PT_LOAD && program.Flags&elf.PF_X != 0 && program.Filesz > 0 {
+			if program.Type != elf.PT_LOAD {
+				continue
+			}
+			if program.Off > size || program.Filesz > size-program.Off || program.Memsz < program.Filesz {
+				return errors.New("binary ELF load segment is out of file bounds")
+			}
+			if program.Flags&elf.PF_X != 0 && program.Filesz > 0 {
 				loadable = true
-				break
+				if file.Entry >= program.Vaddr && file.Entry-program.Vaddr < program.Memsz {
+					entryValid = true
+				}
 			}
 		}
 		if !loadable {
 			return errors.New("binary has no executable ELF load segment")
+		}
+		if !entryValid {
+			return errors.New("binary ELF entry point is outside executable segments")
 		}
 		return nil
 	}
@@ -306,14 +350,49 @@ func validateExecutable(name string, platform Platform) error {
 			return errors.New("binary executable architecture mismatch")
 		}
 		loadable := false
+		entryFound := false
+		entryOffset := uint64(0)
 		for _, load := range file.Loads {
-			if segment, ok := load.(*macho.Segment); ok && segment.Filesz > 0 {
-				loadable = true
-				break
+			raw := load.Raw()
+			if len(raw) < 8 {
+				return errors.New("binary has malformed Mach-O load command")
+			}
+			command := file.ByteOrder.Uint32(raw[:4])
+			if command == 0x80000028 {
+				if len(raw) < 24 {
+					return errors.New("binary has truncated Mach-O entry command")
+				}
+				entryFound = true
+				entryOffset = file.ByteOrder.Uint64(raw[8:16])
+			} else if command == 5 {
+				entryFound = true
+			}
+			if segment, ok := load.(*macho.Segment); ok {
+				if segment.Offset > size || segment.Filesz > size-segment.Offset || segment.Memsz < segment.Filesz {
+					return errors.New("binary Mach-O segment is out of file bounds")
+				}
+				if segment.Maxprot&4 != 0 && segment.Prot&4 != 0 && segment.Filesz > 0 {
+					loadable = true
+				}
 			}
 		}
 		if !loadable {
 			return errors.New("binary has no Mach-O load segment")
+		}
+		if !entryFound {
+			return errors.New("binary has no Mach-O entry command")
+		}
+		if entryOffset > 0 {
+			valid := false
+			for _, load := range file.Loads {
+				if segment, ok := load.(*macho.Segment); ok && segment.Prot&4 != 0 && entryOffset >= segment.Offset && entryOffset-segment.Offset < segment.Filesz {
+					valid = true
+					break
+				}
+			}
+			if !valid {
+				return errors.New("binary Mach-O entry point is outside executable segments")
+			}
 		}
 		return nil
 	}
@@ -436,7 +515,11 @@ func (s Stager) validateInstalledRelease(root, version string, expectedManifest,
 	if err != nil {
 		return stagedRecord{}, err
 	}
-	binaryAsset, err := manifest.BinaryAsset(record.OS, record.Arch)
+	expected := s.expectedPlatform()
+	if record.OS != expected.OS || record.Arch != expected.Arch {
+		return stagedRecord{}, errors.New("release record platform differs from expected platform")
+	}
+	binaryAsset, err := manifest.BinaryAsset(expected.OS, expected.Arch)
 	if err != nil {
 		return stagedRecord{}, err
 	}

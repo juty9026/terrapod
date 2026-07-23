@@ -10,6 +10,7 @@ import (
 	"debug/elf"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,7 +90,7 @@ func TestStagerAcceptsMachOAndRejectsExecutableOSMismatch(t *testing.T) {
 	root := realReleaseTempDir(t)
 	archive := sourceTar(t, map[string]string{"ok": "ok"})
 	darwin := stagedFixture(t, root, Platform{OS: "darwin", Arch: "arm64"}, archive)
-	s := testStager(Stager{ReleaseDir: filepath.Join(root, "releases"), ActiveRelease: filepath.Join(root, "current")})
+	s := testStager(Stager{ReleaseDir: filepath.Join(root, "releases"), ActiveRelease: filepath.Join(root, "current"), ExpectedPlatform: Platform{OS: "darwin", Arch: "arm64"}})
 	if _, err := s.Stage(context.Background(), darwin, Platform{OS: "darwin", Arch: "arm64"}); err != nil {
 		t.Fatal(err)
 	}
@@ -225,6 +226,122 @@ func TestStagerRejectsEveryInstalledReleaseTamperWithoutChangingCurrent(t *testi
 	}
 }
 
+func TestStagerExtractsCopiedArchiveAndPrevalidatesCompletedTree(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		corruptTree bool
+		wantFailure bool
+	}{{"cache replacement is isolated", false, false}, {"tree mismatch blocks commit", true, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := realReleaseTempDir(t)
+			release := stagedFixture(t, root, Platform{OS: "linux", Arch: "amd64"}, sourceTar(t, map[string]string{"ok": "A"}))
+			source, _ := release.Manifest.SourceAsset()
+			s := testStager(Stager{ReleaseDir: filepath.Join(root, "releases"), ActiveRelease: filepath.Join(root, "current")})
+			s.afterSourceCopy = func() {
+				if err := os.WriteFile(release.Files[source.Name], sourceTar(t, map[string]string{"ok": "B"}), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.corruptTree {
+				s.beforeCommitValidation = func(stage string) {
+					name := filepath.Join(stage, "source", "ok")
+					if err := os.Chmod(name, 0o600); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(name, []byte("B"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			staged, err := s.Stage(context.Background(), release, Platform{OS: "linux", Arch: "amd64"})
+			if tc.wantFailure {
+				if err == nil {
+					t.Fatal("mismatched completed tree committed")
+				}
+				if _, statErr := os.Lstat(filepath.Join(s.ReleaseDir, "1.2.3")); !os.IsNotExist(statErr) {
+					t.Fatalf("release visible: %v", statErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := os.ReadFile(filepath.Join(staged.Path, "source", "ok"))
+			if err != nil || string(body) != "A" {
+				t.Fatalf("source=%q err=%v", body, err)
+			}
+		})
+	}
+}
+
+func TestActivateRejectsSignedCrossPlatformSubstitution(t *testing.T) {
+	root := realReleaseTempDir(t)
+	release := stagedFixture(t, root, Platform{OS: "linux", Arch: "amd64"}, sourceTar(t, map[string]string{"ok": "ok"}))
+	s := testStager(Stager{ReleaseDir: filepath.Join(root, "data", "releases"), ActiveRelease: filepath.Join(root, "data", "current")})
+	staged, err := s.Stage(context.Background(), release, Platform{OS: "linux", Arch: "amd64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	darwin, _ := release.Manifest.BinaryAsset("darwin", "arm64")
+	body, err := os.ReadFile(release.Files[darwin.Name])
+	if err != nil {
+		t.Fatal(err)
+	}
+	binaryPath := filepath.Join(staged.Path, "bin", "tpod")
+	if err := os.Chmod(binaryPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(binaryPath, body, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(binaryPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rewriteStageRecord(t, staged.Path, func(record *stagedRecord) { record.OS = "darwin"; record.Arch = "arm64"; record.Binary = darwin })
+	if err := os.Symlink(filepath.Join("releases", "1.0.0"), s.ActiveRelease); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Activate("1.2.3"); err == nil {
+		t.Fatal("cross-platform release activated")
+	}
+	target, _ := os.Readlink(s.ActiveRelease)
+	if target != filepath.Join("releases", "1.0.0") {
+		t.Fatalf("current changed: %q", target)
+	}
+}
+
+func TestStagerRejectsInvalidExecutableSegments(t *testing.T) {
+	linuxNonexec := linuxBinary(elf.EM_X86_64)
+	binary.LittleEndian.PutUint32(linuxNonexec[68:], uint32(elf.PF_R))
+	linuxOverflow := linuxBinary(elf.EM_X86_64)
+	binary.LittleEndian.PutUint64(linuxOverflow[72:], ^uint64(0)-1)
+	darwinNonexec := machoBinary(0x0100000c)
+	binary.LittleEndian.PutUint32(darwinNonexec[88:], 1)
+	binary.LittleEndian.PutUint32(darwinNonexec[92:], 1)
+	darwinOverflow := machoBinary(0x0100000c)
+	binary.LittleEndian.PutUint64(darwinOverflow[72:], ^uint64(0)-1)
+	tests := []struct {
+		name     string
+		platform Platform
+		body     []byte
+	}{{"ELF nonexec", Platform{"linux", "amd64"}, linuxNonexec}, {"ELF overflow", Platform{"linux", "amd64"}, linuxOverflow}, {"ELF truncated", Platform{"linux", "amd64"}, linuxBinary(elf.EM_X86_64)[:100]}, {"Mach-O nonexec", Platform{"darwin", "arm64"}, darwinNonexec}, {"Mach-O overflow", Platform{"darwin", "arm64"}, darwinOverflow}, {"Mach-O truncated", Platform{"darwin", "arm64"}, machoBinary(0x0100000c)[:110]}}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := realReleaseTempDir(t)
+			release := stagedFixture(t, root, tc.platform, sourceTar(t, map[string]string{"ok": "ok"}))
+			asset, _ := release.Manifest.BinaryAsset(tc.platform.OS, tc.platform.Arch)
+			if err := os.WriteFile(release.Files[asset.Name], tc.body, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			bindFixtureFile(t, &release, asset.Name)
+			s := testStager(Stager{ReleaseDir: filepath.Join(root, "releases"), ActiveRelease: filepath.Join(root, "current"), ExpectedPlatform: tc.platform})
+			if _, err := s.Stage(context.Background(), release, tc.platform); err == nil {
+				t.Fatal("invalid executable accepted")
+			}
+		})
+	}
+}
+
 func flipInstalledByte(t *testing.T, name string, mode os.FileMode) {
 	t.Helper()
 	data, err := os.ReadFile(name)
@@ -245,6 +362,28 @@ func flipInstalledByte(t *testing.T, name string, mode os.FileMode) {
 		t.Fatal(err)
 	}
 }
+func rewriteStageRecord(t *testing.T, root string, edit func(*stagedRecord)) {
+	t.Helper()
+	name := filepath.Join(root, ".stage.json")
+	record, err := readRecord(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edit(&record)
+	data, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(name, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(name, append(data, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(name, 0o444); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func stagedFixture(t *testing.T, root string, platform Platform, archive []byte) VerifiedRelease {
 	t.Helper()
@@ -258,22 +397,18 @@ func stagedFixture(t *testing.T, root string, platform Platform, archive []byte)
 		var body []byte
 		switch m.Assets[i].Kind {
 		case "binary":
-			if m.Assets[i].OS == platform.OS && m.Assets[i].Arch == platform.Arch {
-				if platform.OS == "linux" {
-					if platform.Arch == "amd64" {
-						body = linuxBinary(elf.EM_X86_64)
-					} else {
-						body = linuxBinary(elf.EM_AARCH64)
-					}
-				} else if platform.OS == "darwin" {
-					cpu := uint32(0x01000007)
-					if platform.Arch == "arm64" {
-						cpu = 0x0100000c
-					}
-					body = machoBinary(cpu)
+			if m.Assets[i].OS == "linux" {
+				if m.Assets[i].Arch == "amd64" {
+					body = linuxBinary(elf.EM_X86_64)
+				} else {
+					body = linuxBinary(elf.EM_AARCH64)
 				}
-			} else {
-				body = []byte("unused")
+			} else if m.Assets[i].OS == "darwin" {
+				cpu := uint32(0x01000007)
+				if m.Assets[i].Arch == "arm64" {
+					cpu = 0x0100000c
+				}
+				body = machoBinary(cpu)
 			}
 		case "source":
 			body = archive
@@ -312,6 +447,9 @@ func bindFixtureFile(t *testing.T, r *VerifiedRelease, name string) {
 func testStager(stager Stager) Stager {
 	private := ed25519.NewKeyFromSeed(testSeed)
 	stager.Verifier = testVerifier(private.Public().(ed25519.PublicKey))
+	if stager.ExpectedPlatform.OS == "" {
+		stager.ExpectedPlatform = Platform{OS: "linux", Arch: "amd64"}
+	}
 	return stager
 }
 func resignFixture(t *testing.T, release *VerifiedRelease) {
@@ -361,17 +499,21 @@ func malformedELF() []byte {
 	return body
 }
 func machoBinary(cpu uint32) []byte {
-	body := make([]byte, 104)
+	body := make([]byte, 128)
 	binary.LittleEndian.PutUint32(body[0:4], 0xfeedfacf)
 	binary.LittleEndian.PutUint32(body[4:8], cpu)
 	binary.LittleEndian.PutUint32(body[12:16], 2)
-	binary.LittleEndian.PutUint32(body[16:20], 1)
-	binary.LittleEndian.PutUint32(body[20:24], 72)
+	binary.LittleEndian.PutUint32(body[16:20], 2)
+	binary.LittleEndian.PutUint32(body[20:24], 96)
 	binary.LittleEndian.PutUint32(body[32:36], 0x19)
 	binary.LittleEndian.PutUint32(body[36:40], 72)
 	copy(body[40:56], []byte("__TEXT"))
 	binary.LittleEndian.PutUint64(body[64:72], uint64(len(body)))
 	binary.LittleEndian.PutUint64(body[80:88], uint64(len(body)))
+	binary.LittleEndian.PutUint32(body[88:92], 5)
+	binary.LittleEndian.PutUint32(body[92:96], 5)
+	binary.LittleEndian.PutUint32(body[104:108], 0x80000028)
+	binary.LittleEndian.PutUint32(body[108:112], 24)
 	return body
 }
 
