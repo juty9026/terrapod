@@ -198,6 +198,9 @@ digest_two="$(shasum -a 256 "$tmp_dir/source-2.tar.gz" | awk '{print $1}')"
 [ "$digest_one" = "$digest_two" ] || fail "source archives are reproducible"
 [ "$(od -An -t u1 -j 4 -N 4 "$tmp_dir/source-1.tar.gz" | tr -d ' ')" = "0000" ] ||
   fail "gzip timestamp is zero"
+first_archive_entry="$(gzip -dc "$tmp_dir/source-1.tar.gz" | dd bs=100 count=1 2>/dev/null | tr -d '\000')"
+[ "$first_archive_entry" != pax_global_header ] ||
+  fail "source archive starts with an unsupported global PAX header"
 archive_names="$(tar -tzf "$tmp_dir/source-1.tar.gz")"
 [ "$archive_names" = "$(printf '%s\n' "$archive_names" | LC_ALL=C sort)" ] ||
   fail "source archive paths are bytewise sorted"
