@@ -392,19 +392,14 @@ Full development workspace machine:
 `gitAllowedSigners` is not an independent Terrapod config field. It remains
 unrelated chezmoi root data for maintainers who manually render the authoring
 checkout. In that separate workflow, place it under `[data]` in a chezmoi
-config; `tpod apply` does not consume it.
+config. The authoring workflow must use chezmoi directly to render or apply it;
+`tpod apply` does not consume it.
 
 ```toml
 [data]
 gitAllowedSigners = [
   "name@company.com ssh-ed25519 AAAA_COMPANY_PUBLIC_KEY company",
 ]
-```
-
-Then reconcile the environment.
-
-```sh
-tpod apply
 ```
 
 ## Repository Conventions

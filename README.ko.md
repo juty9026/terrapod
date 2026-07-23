@@ -376,6 +376,7 @@ Full development workspace machine:
 `gitAllowedSigners`는 independent Terrapod config field가 아닙니다. maintainer가
 authoring checkout을 직접 render할 때 사용하는 unrelated chezmoi root data로
 남아 있습니다. 이 별도 workflow에서는 chezmoi config의 `[data]` 아래에 두며,
+authoring workflow가 chezmoi를 직접 사용해 render 또는 apply해야 합니다.
 `tpod apply`는 이 값을 사용하지 않습니다.
 
 ```toml
@@ -383,12 +384,6 @@ authoring checkout을 직접 render할 때 사용하는 unrelated chezmoi root d
 gitAllowedSigners = [
   "name@company.com ssh-ed25519 AAAA_COMPANY_PUBLIC_KEY company",
 ]
-```
-
-그 다음 environment를 reconcile합니다.
-
-```sh
-tpod apply
 ```
 
 ## Repository Conventions

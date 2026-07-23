@@ -207,6 +207,10 @@ assert_not_contains '"gitAllowedSigners"' \
   "README excludes unrelated chezmoi data from Terrapod JSON examples"
 assert_contains '`gitAllowedSigners` is not an independent Terrapod config field.' \
   "README documents the unrelated chezmoi root-data boundary"
+assert_contains 'The authoring workflow must use chezmoi directly to render or apply it;' \
+  "README documents how unrelated chezmoi root data is applied"
+assert_not_contains 'Then reconcile the environment.' \
+  "README does not imply tpod applies unrelated chezmoi root data"
 assert_contains '## What Terrapod Leaves Alone' \
   "README documents product boundaries near the top"
 assert_contains '## Daily Commands' \
