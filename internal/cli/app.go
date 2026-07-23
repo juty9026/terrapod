@@ -292,7 +292,7 @@ func Run(ctx context.Context, args []string, deps Dependencies) int {
 	}
 	if command == "update" {
 		if deps.Update == nil {
-			fmt.Fprintln(stderr, "internal error: signed update is not configured")
+			fmt.Fprintln(stderr, "internal error: stable update is not configured")
 			return exitFailure
 		}
 		result, updateErr := deps.Update(ctx)
@@ -425,11 +425,11 @@ func buildReconciliation(ctx context.Context, deps Dependencies, upgrade bool) (
 		return reconciliation{}, err
 	}
 	if deps.LoadCatalog == nil {
-		return reconciliation{}, errors.New("internal error: signed catalog loader is not configured")
+		return reconciliation{}, errors.New("internal error: release-bound catalog loader is not configured")
 	}
 	verified, err := deps.LoadCatalog()
 	if err != nil {
-		return reconciliation{}, fmt.Errorf("load signed catalog: %w", err)
+		return reconciliation{}, fmt.Errorf("load release-bound catalog: %w", err)
 	}
 	if deps.OpenState == nil {
 		return reconciliation{}, errors.New("internal error: read-only state loader is not configured")

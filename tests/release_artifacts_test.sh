@@ -22,6 +22,37 @@ run_go() {
   fi
 }
 
+extract_published_assets() {
+  awk '
+    /gh release create/ { publish = 1; next }
+    publish && /^[[:space:]]+/ {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      continued = line ~ /\\$/
+      sub(/[[:space:]]*\\$/, "", line)
+      if (line !~ /^--/) {
+        print line
+      }
+      if (!continued) {
+        exit
+      }
+      next
+    }
+    publish { exit }
+  '
+}
+
+extractor_fixture='          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            artifacts/release.json \
+            extra-release-note.txt'
+extractor_expected='artifacts/release.json
+extra-release-note.txt'
+extractor_actual="$(printf '%s\n' "$extractor_fixture" | extract_published_assets)"
+[ "$extractor_actual" = "$extractor_expected" ] ||
+  fail "release asset extractor includes every positional asset"
+pass "release asset extractor includes every positional asset"
+
 [ -x "$repo_root/scripts/package-source.sh" ] || fail "source packager is executable"
 [ -f "$repo_root/.github/workflows/release.yml" ] || fail "release workflow exists"
 
@@ -141,19 +172,27 @@ artifacts/terrapod-source.tar.gz
 artifacts/resources.json
 artifacts/release.json
 artifacts/install.sh'
-published_assets="$(
-  printf '%s\n' "$workflow" |
-    awk '
-      /gh release create/ { publish = 1; next }
-      publish && /^[[:space:]]+artifacts\// {
-        sub(/^[[:space:]]+/, "")
-        sub(/[[:space:]]*\\$/, "")
-        print
-      }
-    '
-)"
+published_assets="$(printf '%s\n' "$workflow" | extract_published_assets)"
 [ "$published_assets" = "$expected_assets" ] ||
   fail "release workflow must publish exactly the expected eight assets"
 printf '%s' "$workflow" | grep -F 'pull-requests: write' >/dev/null &&
   fail "release workflow requests unrelated permissions"
 pass "release workflow has the required bounded publication steps"
+
+for removed in \
+  'RELEASE_ROOT_KEY_ID' \
+  'RELEASE_ROOT_PUBLIC_KEY' \
+  'RELEASE_SIGNING_PRIVATE_KEY' \
+  'release\.json\.sig' \
+  'crypto/ed25519'
+do
+  if grep -R -n -E "$removed" \
+    "$repo_root/cmd" \
+    "$repo_root/internal" \
+    "$repo_root/scripts" \
+    "$repo_root/install.sh" \
+    "$repo_root/.github/workflows/release.yml" >/dev/null; then
+    fail "production implementation contains removed signing term $removed"
+  fi
+done
+pass "production implementation has no removed signing dependencies"

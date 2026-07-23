@@ -16,13 +16,13 @@ type Adapter interface {
 	Verify(context.Context, model.Resource) (model.Observation, error)
 }
 
-// BoundExecutor receives the exact signed resource selected by reconciliation.
+// BoundExecutor receives the exact declared resource selected by reconciliation.
 // It is used by adapters whose mutation authority includes resource metadata.
 type BoundExecutor interface {
 	ExecuteResource(context.Context, model.Resource, model.Operation) model.OperationResult
 }
 
-// HistoricalPlanner plans removal using a signed historical resource and its
+// HistoricalPlanner plans removal using a release-bound historical resource and its
 // ownership receipt. Adapters implement it when desired and historical state
 // cannot be distinguished from the Resource value alone.
 type HistoricalPlanner interface {

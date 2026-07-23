@@ -49,7 +49,7 @@ func (a *ownershipAdapter) Verify(ctx context.Context, item model.Resource) (mod
 	return a.Inspect(ctx, item)
 }
 
-func TestLoadLegacyBaselineVerifiesSignedCompleteCatalog(t *testing.T) {
+func TestLoadLegacyBaselineValidatesCompleteCatalog(t *testing.T) {
 	_, file, _, _ := runtime.Caller(0)
 	path := filepath.Join(filepath.Dir(file), "..", "..", "catalog", "v1", "legacy-current.json")
 	verified, markers, err := LoadLegacyBaseline(path)
@@ -60,7 +60,7 @@ func TestLoadLegacyBaselineVerifiesSignedCompleteCatalog(t *testing.T) {
 		t.Fatalf("incomplete baseline: release=%q resources=%d", verified.Catalog.Release, len(verified.Catalog.Resources))
 	}
 	if !containsString(markers, "homebrew-core") || !containsString(markers, "ai-cli-tools") {
-		t.Fatalf("warning markers not declared by signed baseline: %v", markers)
+		t.Fatalf("warning markers not declared by release-bound baseline: %v", markers)
 	}
 
 	var current model.Catalog
@@ -96,14 +96,7 @@ func TestLoadLegacyBaselineVerifiesSignedCompleteCatalog(t *testing.T) {
 	if err := os.WriteFile(tampered, contents, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	signature, err := os.ReadFile(path + ".sig")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(tampered+".sig", signature, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := LoadLegacyBaseline(tampered); err == nil || !strings.Contains(err.Error(), "verification failed") {
+	if _, _, err := LoadLegacyBaseline(tampered); err == nil {
 		t.Fatalf("tampered baseline error=%v", err)
 	}
 }
@@ -135,8 +128,8 @@ func TestPlanLegacyOwnershipAdoptsTransfersPrunesAndDoesNotInfer(t *testing.T) {
 		{ID: "integration.old", Type: model.ResourceIntegration, Provider: "json-fields", Package: "old", VersionPolicy: model.VersionTracked},
 		legacyManagementItem("homebrew-core"),
 	}
-	baseline := catalog.Verified{Catalog: model.Catalog{Release: LegacyBaselineRelease, Resources: resources}, Digest: "legacy-digest", KeyID: LegacyBaselineKeyID}
-	current := catalog.Verified{Catalog: model.Catalog{Release: "v1", Resources: resources[:2]}, Digest: "current-digest", KeyID: "release"}
+	baseline := catalog.Verified{Catalog: model.Catalog{Release: LegacyBaselineRelease, Resources: resources}, Digest: "legacy-digest"}
+	current := catalog.Verified{Catalog: model.Catalog{Release: "v1", Resources: resources[:2]}, Digest: "current-digest"}
 	result, err := PlanLegacyOwnership(context.Background(), LegacyOwnershipInput{
 		Baseline: baseline,
 		Current:  current,
@@ -181,7 +174,7 @@ func TestPlanLegacyOwnershipRefusesModifiedManagedTarget(t *testing.T) {
 	_ = registry.Register(model.ResourceManagedFiles, "chezmoi", adapter)
 	item := model.Resource{ID: "optional.old-file", Type: model.ResourceManagedFiles, Provider: "chezmoi", Package: "old-file", VersionPolicy: model.VersionTracked}
 	result, err := PlanLegacyOwnership(context.Background(), LegacyOwnershipInput{
-		Baseline: catalog.Verified{Catalog: model.Catalog{Release: LegacyBaselineRelease, Resources: []model.Resource{item, legacyManagementItem("homebrew-core")}}, Digest: "legacy", KeyID: LegacyBaselineKeyID},
+		Baseline: catalog.Verified{Catalog: model.Catalog{Release: LegacyBaselineRelease, Resources: []model.Resource{item, legacyManagementItem("homebrew-core")}}, Digest: "legacy"},
 		Current:  catalog.Verified{Catalog: model.Catalog{Release: "v1"}, Digest: "current"},
 		Registry: registry,
 		Actual:   map[model.ResourceID]LegacyArtifact{item.ID: {Observation: model.Observation{Present: true}, Modified: true}},
@@ -213,7 +206,7 @@ func TestPlanLegacyOwnershipUnknownProvenanceIsUnavailableWithoutMutation(t *tes
 	result, err := PlanLegacyOwnership(context.Background(), LegacyOwnershipInput{
 		Baseline: catalog.Verified{
 			Catalog: model.Catalog{Release: LegacyBaselineRelease, Resources: []model.Resource{item, legacyManagementItem("homebrew-core")}},
-			Digest:  "legacy", KeyID: LegacyBaselineKeyID,
+			Digest:  "legacy",
 		},
 		Current:  catalog.Verified{Catalog: model.Catalog{Release: "v1", Resources: []model.Resource{item}}, Digest: "current"},
 		Registry: registry,
@@ -251,7 +244,7 @@ func TestPlanLegacyOwnershipDerivesManagedConflictFromTypedInspection(t *testing
 	result, err := PlanLegacyOwnership(context.Background(), LegacyOwnershipInput{
 		Baseline: catalog.Verified{
 			Catalog: model.Catalog{Release: LegacyBaselineRelease, Resources: []model.Resource{item, legacyManagementItem("homebrew-core")}},
-			Digest:  "legacy", KeyID: LegacyBaselineKeyID,
+			Digest:  "legacy",
 		},
 		Current:  catalog.Verified{Catalog: model.Catalog{Release: "v1", Resources: []model.Resource{item}}, Digest: "current"},
 		Registry: registry,

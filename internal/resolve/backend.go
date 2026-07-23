@@ -70,7 +70,7 @@ func (b *PackageBackend) Prepare(ctx context.Context, id model.ResourceID, lock 
 		return Attempt{}, err
 	}
 	if _, ok := b.engine.Registry.Lookup(item.Type, item.Provider); !ok {
-		return Attempt{}, fmt.Errorf("resolve: no signed adapter for resource %q", id)
+		return Attempt{}, fmt.Errorf("resolve: no declared adapter for resource %q", id)
 	}
 	if !operation.RequiresPrivilege {
 		return Attempt{}, errors.New("resolve: APT conflict operation must require privilege")

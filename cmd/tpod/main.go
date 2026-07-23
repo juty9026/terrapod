@@ -79,7 +79,7 @@ func main() {
 			return config.Load(layout.ConfigFile)
 		},
 		LoadCatalog: func() (catalog.Verified, error) {
-			return catalog.Verified{}, errors.New("signed catalog is not configured in shadow build")
+			return catalog.Verified{}, errors.New("release-bound catalog is not configured in shadow build")
 		},
 	}
 	if homeErr == nil {

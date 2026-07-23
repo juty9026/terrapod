@@ -291,7 +291,7 @@ func (a *Adapter) Plan(ctx context.Context, item model.Resource, _ model.Observa
 		return []model.Operation{operation(item, model.OperationRestore)}, nil
 	}
 	if current.remote != d.remote {
-		return nil, errors.New("git-checkout conflict: origin remote differs from signed declaration")
+		return nil, errors.New("git-checkout conflict: origin remote differs from release-bound declaration")
 	}
 	if !current.clean {
 		return nil, errors.New("git-checkout conflict: tracked local modifications exist")
@@ -306,7 +306,7 @@ func (a *Adapter) Plan(ctx context.Context, item model.Resource, _ model.Observa
 }
 
 func (a *Adapter) Execute(context.Context, model.Operation) model.OperationResult {
-	return model.OperationResult{Detail: "git-checkout: signed resource is required", FinishedAt: time.Now().UTC()}
+	return model.OperationResult{Detail: "git-checkout: declared resource is required", FinishedAt: time.Now().UTC()}
 }
 
 func (a *Adapter) ExecuteResource(ctx context.Context, item model.Resource, op model.Operation) model.OperationResult {
@@ -1187,7 +1187,7 @@ func (a *Adapter) stage(ctx context.Context, d declaration) (cap stagingCapabili
 		return cap, err
 	}
 	if strings.TrimSpace(string(fetched)) != d.commit {
-		return cap, errors.New("git-checkout: fetched ref does not match signed commit")
+		return cap, errors.New("git-checkout: fetched ref does not match declared commit")
 	}
 	if _, err := a.gitPrivate(ctx, private, "checkout", "--detach", "--force", d.commit); err != nil {
 		return cap, err
@@ -1462,7 +1462,7 @@ func (a *Adapter) update(ctx context.Context, item model.Resource, op model.Oper
 		return err
 	}
 	if strings.TrimSpace(string(fetched)) != d.commit {
-		return errors.New("git-checkout: fetched ref does not match signed commit")
+		return errors.New("git-checkout: fetched ref does not match declared commit")
 	}
 	// Fetch mutates only Git metadata. Reinspect the worktree immediately before
 	// checkout, and omit --force so a concurrent user edit fails closed.
@@ -1496,7 +1496,7 @@ func (a *Adapter) update(ctx context.Context, item model.Resource, op model.Oper
 	status, err := a.gitSnapshot(ctx, snapshot, quarantinedWorktree, "status", "--porcelain", "--untracked-files=no")
 	if err != nil || len(status) != 0 {
 		if !before.clean {
-			return errors.New("git-checkout: dirty worktree is neither current nor signed desired state")
+			return errors.New("git-checkout: dirty worktree is neither current nor declared desired state")
 		}
 		return errors.New("git-checkout: desired worktree verification failed")
 	}

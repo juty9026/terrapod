@@ -1,9 +1,7 @@
 package catalog
 
 import (
-	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -18,24 +16,17 @@ import (
 	"github.com/juty9026/terrapod/internal/model"
 )
 
-const testKeyID = "test-2026"
-
-var testSeed = []byte("0123456789abcdef0123456789abcdef")
-
-func TestLoadVerified(t *testing.T) {
+func TestLoad(t *testing.T) {
 	catalogBytes := readFixture(t)
-	path, signatures := writeSignedCatalog(t, catalogBytes, testKeyID)
+	path := writeCatalog(t, catalogBytes)
 
-	got, err := LoadVerified(path, signatures)
+	got, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	wantDigest := sha256.Sum256(catalogBytes)
 	if got.Digest != hex.EncodeToString(wantDigest[:]) {
 		t.Fatalf("Digest = %q, want %x", got.Digest, wantDigest)
-	}
-	if got.KeyID != testKeyID {
-		t.Fatalf("KeyID = %q, want %q", got.KeyID, testKeyID)
 	}
 	if got.Catalog.Release != "test-2026" || len(got.Catalog.Resources) != 1 {
 		t.Fatalf("Catalog = %#v", got.Catalog)
@@ -47,8 +38,8 @@ func TestSeedCatalogHasCurrentConfigSchemaAndHomebrewResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path, signatures := writeSignedCatalog(t, contents, testKeyID)
-	got, err := LoadVerified(path, signatures)
+	path := writeCatalog(t, contents)
+	got, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,114 +277,13 @@ func sortedStringKeys(values map[string]string) []string {
 	return keys
 }
 
-func TestLoadVerifiedRejectsUntrustedBytes(t *testing.T) {
-	tests := []struct {
-		name       string
-		catalogMut func([]byte) []byte
-		envelope   func([]byte) []byte
-		keyID      string
-		want       string
-	}{
-		{
-			name: "one byte catalog mutation",
-			catalogMut: func(input []byte) []byte {
-				mutated := append([]byte(nil), input...)
-				mutated[len(mutated)-2] ^= 1
-				return mutated
-			},
-			want: "signature verification failed",
-		},
-		{name: "unknown key ID", keyID: "unknown-2026", want: "unknown signature key ID"},
-		{
-			name: "unknown algorithm",
-			envelope: func(signature []byte) []byte {
-				return envelopeJSON(t, testKeyID, "rsa", base64.StdEncoding.EncodeToString(signature), "")
-			},
-			want: "unsupported signature algorithm",
-		},
-		{
-			name: "invalid base64",
-			envelope: func([]byte) []byte {
-				return envelopeJSON(t, testKeyID, "ed25519", "%%%", "")
-			},
-			want: "decode signature",
-		},
-		{
-			name: "wrong signature length",
-			envelope: func([]byte) []byte {
-				return envelopeJSON(t, testKeyID, "ed25519", base64.StdEncoding.EncodeToString([]byte("short")), "")
-			},
-			want: "signature length",
-		},
-		{
-			name: "embedded newline in base64",
-			envelope: func(signature []byte) []byte {
-				encoded := base64.StdEncoding.EncodeToString(signature)
-				encoded = encoded[:20] + "\n" + encoded[20:]
-				return envelopeJSON(t, testKeyID, "ed25519", encoded, "")
-			},
-			want: "non-canonical signature encoding",
-		},
-		{
-			name: "noncanonical trailing bits",
-			envelope: func(signature []byte) []byte {
-				return envelopeJSON(t, testKeyID, "ed25519", noncanonicalBase64Alias(t, signature), "")
-			},
-			want: "decode signature",
-		},
-		{
-			name: "unknown envelope field",
-			envelope: func(signature []byte) []byte {
-				return envelopeJSON(t, testKeyID, "ed25519", base64.StdEncoding.EncodeToString(signature), `,"extra":true`)
-			},
-			want: "decode signature envelope",
-		},
-		{
-			name: "trailing envelope JSON",
-			envelope: func(signature []byte) []byte {
-				return append(envelopeJSON(t, testKeyID, "ed25519", base64.StdEncoding.EncodeToString(signature), ""), []byte(" {}")...)
-			},
-			want: "trailing JSON",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			original := readFixture(t)
-			path, signatures := writeSignedCatalog(t, original, testKeyID)
-			if tt.catalogMut != nil {
-				if err := os.WriteFile(path, tt.catalogMut(original), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if tt.keyID != "" {
-				signature := ed25519.Sign(ed25519.NewKeyFromSeed(testSeed), original)
-				if err := os.WriteFile(path+".sig", envelopeJSON(t, tt.keyID, "ed25519", base64.StdEncoding.EncodeToString(signature), ""), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if tt.envelope != nil {
-				signature := ed25519.Sign(ed25519.NewKeyFromSeed(testSeed), original)
-				if err := os.WriteFile(path+".sig", tt.envelope(signature), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
-
-			_, err := LoadVerified(path, signatures)
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("LoadVerified() error = %v, want containing %q", err, tt.want)
-			}
-		})
-	}
-}
-
-func TestLoadVerifiedRejectsUnknownCatalogField(t *testing.T) {
+func TestLoadRejectsUnknownCatalogField(t *testing.T) {
 	input := catalogObject(t)
 	input["unexpected"] = true
 	assertCatalogError(t, input, "unknown field")
 }
 
-func TestLoadVerifiedRejectsInvalidCatalog(t *testing.T) {
+func TestLoadRejectsInvalidCatalog(t *testing.T) {
 	tests := []struct {
 		name string
 		edit func(map[string]any)
@@ -514,7 +404,7 @@ func TestLoadVerifiedRejectsInvalidCatalog(t *testing.T) {
 	}
 }
 
-func TestLoadVerifiedRejectsUnsafePackageIdentifiers(t *testing.T) {
+func TestLoadRejectsUnsafePackageIdentifiers(t *testing.T) {
 	for _, identifier := range []string{"../ripgrep", "-rf", "rip grep", "ripgrep\nnext", "ripgrep;touch", "$(touch)", "rípgrep"} {
 		t.Run(identifier, func(t *testing.T) {
 			input := catalogObject(t)
@@ -524,7 +414,7 @@ func TestLoadVerifiedRejectsUnsafePackageIdentifiers(t *testing.T) {
 	}
 }
 
-func TestLoadVerifiedValidatesConfigGateMetadata(t *testing.T) {
+func TestLoadValidatesConfigGateMetadata(t *testing.T) {
 	tests := []struct {
 		name string
 		edit func(map[string]any)
@@ -585,7 +475,7 @@ func TestLoadVerifiedValidatesConfigGateMetadata(t *testing.T) {
 	}
 }
 
-func TestLoadVerifiedAllowsAnyConfigGateAndUnrelatedProviderMetadata(t *testing.T) {
+func TestLoadAllowsAnyConfigGateAndUnrelatedProviderMetadata(t *testing.T) {
 	input := catalogObject(t)
 	resourcesOf(input)[0]["metadata"] = map[string]any{
 		"enabledByAnyConfig.enableAiCliTools":           "true",
@@ -596,13 +486,13 @@ func TestLoadVerifiedAllowsAnyConfigGateAndUnrelatedProviderMetadata(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	path, signatures := writeSignedCatalog(t, contents, testKeyID)
-	if _, err := LoadVerified(path, signatures); err != nil {
+	path := writeCatalog(t, contents)
+	if _, err := Load(path); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestLoadVerifiedRequiresNonOverlappingManagedFileScopes(t *testing.T) {
+func TestLoadRequiresNonOverlappingManagedFileScopes(t *testing.T) {
 	managed := func(id, scope string) map[string]any {
 		return map[string]any{"id": id, "type": "managed-files", "profiles": []any{"macos-terminal"}, "dependsOn": []any{}, "versionPolicy": "tracked", "provider": "chezmoi", "package": id, "commands": []any{}, "metadata": map[string]any{model.ManagedFilesScopeMetadataKey: scope}}
 	}
@@ -627,7 +517,7 @@ func TestLoadVerifiedRequiresNonOverlappingManagedFileScopes(t *testing.T) {
 	})
 }
 
-func TestLoadVerifiedBoundsCatalogAndSignature(t *testing.T) {
+func TestLoadBoundsCatalog(t *testing.T) {
 	t.Run("exact catalog limit", func(t *testing.T) {
 		contents := readFixture(t)
 		fixtureSize := len(contents)
@@ -635,54 +525,22 @@ func TestLoadVerifiedBoundsCatalogAndSignature(t *testing.T) {
 		for i := fixtureSize; i < len(contents); i++ {
 			contents[i] = ' '
 		}
-		path, signatures := writeSignedCatalog(t, contents, testKeyID)
-		if _, err := LoadVerified(path, signatures); err != nil {
-			t.Fatalf("LoadVerified() error = %v at exact 4 MiB", err)
+		path := writeCatalog(t, contents)
+		if _, err := Load(path); err != nil {
+			t.Fatalf("Load() error = %v at exact 4 MiB", err)
 		}
 	})
 
 	t.Run("catalog", func(t *testing.T) {
-		path, signatures := writeSignedCatalog(t, readFixture(t), testKeyID)
+		path := writeCatalog(t, readFixture(t))
 		if err := os.WriteFile(path, make([]byte, 4*1024*1024+1), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		_, err := LoadVerified(path, signatures)
+		_, err := Load(path)
 		if err == nil || !strings.Contains(err.Error(), "exceeds 4 MiB") {
-			t.Fatalf("LoadVerified() error = %v", err)
+			t.Fatalf("Load() error = %v", err)
 		}
 	})
-
-	t.Run("signature", func(t *testing.T) {
-		path, signatures := writeSignedCatalog(t, readFixture(t), testKeyID)
-		if err := os.WriteFile(path+".sig", make([]byte, 4*1024*1024+1), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		_, err := LoadVerified(path, signatures)
-		if err == nil || !strings.Contains(err.Error(), "exceeds 4 MiB") {
-			t.Fatalf("LoadVerified() error = %v", err)
-		}
-	})
-}
-
-func noncanonicalBase64Alias(t *testing.T, contents []byte) string {
-	t.Helper()
-	encoded := base64.StdEncoding.EncodeToString(contents)
-	if len(contents)%3 != 1 || !strings.HasSuffix(encoded, "==") {
-		t.Fatalf("fixture length = %d, want base64 with two padding bytes", len(contents))
-	}
-	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-	position := len(encoded) - 3
-	value := strings.IndexByte(alphabet, encoded[position])
-	if value < 0 || value&0x0f != 0 {
-		t.Fatalf("canonical final sextet = %q", encoded[position])
-	}
-	alias := []byte(encoded)
-	alias[position] = alphabet[value|1]
-	decoded, err := base64.StdEncoding.DecodeString(string(alias))
-	if err != nil || !reflect.DeepEqual(decoded, contents) {
-		t.Fatalf("constructed alias does not decode to original bytes: %v", err)
-	}
-	return string(alias)
 }
 
 func readFixture(t *testing.T) []byte {
@@ -694,33 +552,13 @@ func readFixture(t *testing.T) []byte {
 	return contents
 }
 
-func writeSignedCatalog(t *testing.T, contents []byte, keyID string) (string, SignatureSet) {
+func writeCatalog(t *testing.T, contents []byte) string {
 	t.Helper()
-	privateKey := ed25519.NewKeyFromSeed(testSeed)
 	path := filepath.Join(t.TempDir(), "catalog.json")
 	if err := os.WriteFile(path, contents, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	signature := ed25519.Sign(privateKey, contents)
-	envelope := envelopeJSON(t, keyID, "ed25519", base64.StdEncoding.EncodeToString(signature), "")
-	if err := os.WriteFile(path+".sig", envelope, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return path, SignatureSet{PublicKeys: map[string]ed25519.PublicKey{testKeyID: privateKey.Public().(ed25519.PublicKey)}}
-}
-
-func envelopeJSON(t *testing.T, keyID, algorithm, signature, extra string) []byte {
-	t.Helper()
-	return []byte(`{"keyId":` + quoted(t, keyID) + `,"algorithm":` + quoted(t, algorithm) + `,"signature":` + quoted(t, signature) + extra + `}`)
-}
-
-func quoted(t *testing.T, value string) string {
-	t.Helper()
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(encoded)
+	return path
 }
 
 func catalogObject(t *testing.T) map[string]any {
@@ -760,9 +598,9 @@ func assertCatalogError(t *testing.T, input map[string]any, want string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path, signatures := writeSignedCatalog(t, contents, testKeyID)
-	_, err = LoadVerified(path, signatures)
+	path := writeCatalog(t, contents)
+	_, err = Load(path)
 	if err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("LoadVerified() error = %v, want containing %q", err, want)
+		t.Fatalf("Load() error = %v, want containing %q", err, want)
 	}
 }

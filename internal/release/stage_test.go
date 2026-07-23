@@ -150,8 +150,8 @@ func TestStagerStagesAndAtomicallyActivatesRelease(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(got.Path, "release.json")); err != nil {
 		t.Fatalf("release.json: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(got.Path, "release.json.sig")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("release.json.sig exists or cannot be inspected: %v", err)
+	if _, err := os.Stat(filepath.Join(got.Path, "release.json"+".sig")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("release signature envelope exists or cannot be inspected: %v", err)
 	}
 	if info, err := os.Stat(filepath.Join(got.Path, "bin", "tpod")); err != nil || info.Mode().Perm() != 0o755 {
 		t.Fatalf("binary mode=%v err=%v", info.Mode(), err)

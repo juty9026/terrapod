@@ -1,5 +1,5 @@
 // Package legacy recognizes and removes only package sources explicitly named
-// by the signed resource catalog.
+// by the release-bound Resource Catalog.
 package legacy
 
 import (

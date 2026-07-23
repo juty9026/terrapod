@@ -265,7 +265,7 @@ func (a *Adapter) PlanHistorical(_ context.Context, item model.Resource, _ model
 }
 
 func (a *Adapter) Execute(context.Context, model.Operation) model.OperationResult {
-	return model.OperationResult{Detail: "jetendard: signed resource is required", FinishedAt: time.Now().UTC()}
+	return model.OperationResult{Detail: "jetendard: declared resource is required", FinishedAt: time.Now().UTC()}
 }
 
 func (a *Adapter) ExecuteResource(ctx context.Context, item model.Resource, op model.Operation) model.OperationResult {
@@ -322,7 +322,7 @@ func (a *Adapter) execute(ctx context.Context, item model.Resource, op model.Ope
 	}
 	if len(collisions) != 0 {
 		if op.Kind != model.OperationRestore {
-			return errors.New("jetendard: pre-existing signed font requires takeover replan")
+			return errors.New("jetendard: pre-existing declared font requires takeover replan")
 		}
 		if err := a.backupPreExisting(item, d, collisions); err != nil {
 			return err
@@ -366,11 +366,11 @@ func (a *Adapter) install(ctx context.Context, item model.Resource, d declaratio
 		return errors.New("jetendard: archive contains no Jetendard TTF files")
 	}
 	if len(desired) != len(d.files) {
-		return errors.New("jetendard: archive font manifest differs from signed catalog")
+		return errors.New("jetendard: archive font manifest differs from Resource Catalog")
 	}
 	for name, font := range desired {
 		if d.files[name] != font.digest {
-			return fmt.Errorf("jetendard: font %q differs from signed catalog manifest", name)
+			return fmt.Errorf("jetendard: font %q differs from Resource Catalog manifest", name)
 		}
 	}
 	txn, err := a.prepareTransaction(item, d, op, fonts, desired, owned)
@@ -796,7 +796,7 @@ func validateTransactionAuthority(txn transaction, item model.Resource, d declar
 	for _, entry := range txn.Entries {
 		if entry.Remove {
 			if _, stillDesired := d.files[entry.Name]; stillDesired {
-				return errors.New("jetendard: transaction removes a signed font")
+				return errors.New("jetendard: transaction removes a declared font")
 			}
 			if owned.Paths[filepath.Join(fonts, entry.Name)] != entry.OldDigest {
 				return errors.New("jetendard: transaction removes a font outside exact ownership")
@@ -804,12 +804,12 @@ func validateTransactionAuthority(txn transaction, item model.Resource, d declar
 			continue
 		}
 		if d.files[entry.Name] != entry.NewDigest {
-			return errors.New("jetendard: transaction install differs from signed font manifest")
+			return errors.New("jetendard: transaction install differs from declared font manifest")
 		}
 		installNames[entry.Name] = true
 	}
 	if len(installNames) != len(d.files) {
-		return errors.New("jetendard: transaction omits signed fonts")
+		return errors.New("jetendard: transaction omits declared fonts")
 	}
 	return nil
 }
@@ -1077,7 +1077,7 @@ func (a *Adapter) Prune(_ context.Context, item model.Resource, op model.Operati
 
 func (a *Adapter) declaration(item model.Resource) (declaration, error) {
 	if item.ID != ResourceID || item.Type != model.ResourceArchive || item.Provider != Provider || item.Package != "jetendard" {
-		return declaration{}, errors.New("jetendard: unsupported signed resource")
+		return declaration{}, errors.New("jetendard: unsupported declared resource")
 	}
 	if item.VersionPolicy != model.VersionPinned {
 		return declaration{}, errors.New("jetendard: apply requires resolved pinned metadata")
@@ -1091,19 +1091,19 @@ func (a *Adapter) declaration(item model.Resource) (declaration, error) {
 		return declaration{}, errors.New("jetendard: destination must be Library/Fonts")
 	}
 	if len(item.Metadata[MetadataFiles]) == 0 || len(item.Metadata[MetadataFiles]) > 64<<10 {
-		return declaration{}, errors.New("jetendard: signed font manifest is missing or too large")
+		return declaration{}, errors.New("jetendard: declared font manifest is missing or too large")
 	}
 	decoder := json.NewDecoder(strings.NewReader(item.Metadata[MetadataFiles]))
 	if err := decoder.Decode(&d.files); err != nil || len(d.files) == 0 || len(d.files) > 64 {
-		return declaration{}, errors.New("jetendard: invalid signed font manifest")
+		return declaration{}, errors.New("jetendard: invalid declared font manifest")
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return declaration{}, errors.New("jetendard: trailing signed font manifest data")
+		return declaration{}, errors.New("jetendard: trailing declared font manifest data")
 	}
 	for name, digest := range d.files {
 		if !fontPattern.MatchString(name) || !rawSHA256Pattern.MatchString(digest) {
-			return declaration{}, errors.New("jetendard: invalid signed font manifest entry")
+			return declaration{}, errors.New("jetendard: invalid declared font manifest entry")
 		}
 		d.files[name] = "sha256:" + digest
 	}

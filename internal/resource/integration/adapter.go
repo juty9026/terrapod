@@ -429,7 +429,7 @@ func (a *Adapter) PlanHistorical(_ context.Context, item model.Resource, _ model
 }
 
 func (a *Adapter) Execute(context.Context, model.Operation) model.OperationResult {
-	return model.OperationResult{Detail: "integration: signed resource is required", FinishedAt: time.Now().UTC()}
+	return model.OperationResult{Detail: "integration: declared resource is required", FinishedAt: time.Now().UTC()}
 }
 
 func (a *Adapter) ExecuteResource(ctx context.Context, item model.Resource, op model.Operation) model.OperationResult {
@@ -568,7 +568,7 @@ func (a *Adapter) validateMutation(d declaration, op model.Operation, owned mode
 				return err
 			}
 			if field.DesiredDigest != desiredDigest {
-				return errors.New("integration: operation desired value does not match signed declaration")
+				return errors.New("integration: operation desired value does not match release-bound declaration")
 			}
 			stored, hasStored := owned.Paths[key]
 			if prune {
@@ -1404,15 +1404,15 @@ func validatePriorKeys(d declaration, values map[string]json.RawMessage) error {
 		}
 		relative, pointer := key[:split], key[split+1:]
 		if _, ok := d.fields[pointer]; !ok {
-			return fmt.Errorf("integration: prior field %q is outside signed declaration", pointer)
+			return fmt.Errorf("integration: prior field %q is outside declared scope", pointer)
 		}
 		if d.path != "" && relative != filepath.ToSlash(filepath.Clean(d.path)) {
-			return errors.New("integration: prior path is outside signed declaration")
+			return errors.New("integration: prior path is outside declared scope")
 		}
 		if d.pathGlob != "" {
 			matched, err := filepath.Match(filepath.FromSlash(d.pathGlob), filepath.FromSlash(relative))
 			if err != nil || !matched {
-				return errors.New("integration: prior path is outside signed glob")
+				return errors.New("integration: prior path is outside declared glob")
 			}
 		}
 		if _, _, err := decodePrior(raw); err != nil {
@@ -1432,15 +1432,15 @@ func validateManagedKeys(d declaration, values map[string]string) error {
 		}
 		relative, pointer := key[:split], key[split+1:]
 		if _, ok := d.fields[pointer]; !ok {
-			return errors.New("integration: last-managed field is outside signed declaration")
+			return errors.New("integration: last-managed field is outside declared scope")
 		}
 		if d.path != "" && relative != filepath.ToSlash(filepath.Clean(d.path)) {
-			return errors.New("integration: last-managed path is outside signed declaration")
+			return errors.New("integration: last-managed path is outside declared scope")
 		}
 		if d.pathGlob != "" {
 			matched, err := filepath.Match(filepath.FromSlash(d.pathGlob), filepath.FromSlash(relative))
 			if err != nil || !matched {
-				return errors.New("integration: last-managed path is outside signed glob")
+				return errors.New("integration: last-managed path is outside declared glob")
 			}
 		}
 	}

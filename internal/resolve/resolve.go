@@ -197,7 +197,7 @@ func validateAttempt(id model.ResourceID, details attemptDetails) (model.Resourc
 		return model.Resource{}, &ErrNotBlocked{ID: id}
 	}
 	if operation.ID == "" || operation.ResourceID != item.ID || operation.Provider != item.Provider || operation.Package != item.Package {
-		return model.Resource{}, errors.New("resolve: prepared operation does not match signed resource")
+		return model.Resource{}, errors.New("resolve: prepared operation does not match declared resource")
 	}
 	found := false
 	for _, planned := range input.Plan.Operations {

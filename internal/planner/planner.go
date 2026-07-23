@@ -493,7 +493,7 @@ func validateManagedAuthorities(input Input, current map[model.ResourceID]model.
 		}
 		scope, ok := safeManagedScope(item)
 		if !ok {
-			return fmt.Errorf("managed-file resource %q has unsafe or missing signed scope", id)
+			return fmt.Errorf("managed-file resource %q has unsafe or missing declared scope", id)
 		}
 		scopes = append(scopes, scoped{id, scope})
 		managedIDs[id] = struct{}{}
@@ -509,7 +509,7 @@ func validateManagedAuthorities(input Input, current map[model.ResourceID]model.
 			}
 			scope, ok := safeManagedScope(item)
 			if !ok {
-				return fmt.Errorf("historical managed-file resource %q has unsafe or missing signed scope", id)
+				return fmt.Errorf("historical managed-file resource %q has unsafe or missing declared scope", id)
 			}
 			scopes = append(scopes, scoped{id, scope})
 			managedIDs[id] = struct{}{}
