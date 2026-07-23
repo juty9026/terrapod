@@ -78,3 +78,23 @@ exit 0
 
 None. The helper assumes the checked-out source workspace is writable, which is
 already required by this repository's independent Orca Workspace test setup.
+
+## Reviewer follow-up
+
+Moved cleanup registration to immediately after `os.MkdirTemp` succeeds and
+captured the original created path for removal. The fixture is now cleaned even
+if `filepath.Abs` or `filepath.EvalSymlinks` fails. Cleanup errors continue to be
+reported through the test.
+
+The requested follow-up verification passed:
+
+```text
+TMPDIR=/tmp mise exec go@1.26.0 -- go test ./cmd/tpod -run TestProductionPlannerComposesRealStateBoundAdapters -count=1
+ok github.com/juty9026/terrapod/cmd/tpod
+
+TMPDIR=/tmp mise exec go@1.26.0 -- go test ./internal/reconcile -run TestEngineRunsRealTransferPreflightWithoutPrivilege -count=1
+ok github.com/juty9026/terrapod/internal/reconcile
+
+git diff --check
+exit 0
+```

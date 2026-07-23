@@ -12,6 +12,12 @@ func WorkspaceTempDir(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	createdDir := dir
+	t.Cleanup(func() {
+		if err := os.RemoveAll(createdDir); err != nil {
+			t.Errorf("remove workspace temp dir: %v", err)
+		}
+	})
 	dir, err = filepath.Abs(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -20,11 +26,6 @@ func WorkspaceTempDir(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		if err := os.RemoveAll(dir); err != nil {
-			t.Errorf("remove workspace temp dir: %v", err)
-		}
-	})
 	return dir
 }
 
