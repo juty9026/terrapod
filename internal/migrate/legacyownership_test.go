@@ -158,7 +158,7 @@ func TestPlanLegacyOwnershipAdoptsTransfersPrunesAndDoesNotInfer(t *testing.T) {
 		t.Fatalf("old optional file was not pruned: %#v", result.Plan.Operations)
 	}
 	if _, ok := result.Receipts["outside.baseline"]; ok {
-		t.Fatal("artifact outside signed baseline was inferred")
+		t.Fatal("artifact outside release-bound baseline was inferred")
 	}
 	if !result.Receipts["integration.old"].PriorUnknown {
 		t.Fatal("unknown prior integration was not recorded")

@@ -119,6 +119,35 @@ func TestParseManifestRejectsInvalidManifest(t *testing.T) {
 	}
 }
 
+func TestParseManifestRequiresExactCanonicalAssetNames(t *testing.T) {
+	manifest := stableManifest(t)
+	want := []string{
+		"tpod-darwin-amd64",
+		"tpod-darwin-arm64",
+		"tpod-linux-amd64",
+		"tpod-linux-arm64",
+		"terrapod-source.tar.gz",
+		"resources.json",
+	}
+	for index, asset := range manifest.Assets {
+		if asset.Name != want[index] {
+			t.Fatalf("asset[%d].Name=%q, want %q", index, asset.Name, want[index])
+		}
+	}
+
+	for index := range manifest.Assets {
+		t.Run(want[index], func(t *testing.T) {
+			renamed := manifest
+			renamed.Assets = append([]Asset(nil), manifest.Assets...)
+			renamed.Assets[index].Name = "renamed-" + want[index]
+			if _, err := ParseManifest(encodeManifest(t, renamed)); err == nil ||
+				!strings.Contains(err.Error(), "canonical") {
+				t.Fatalf("err=%v, want canonical asset name rejection", err)
+			}
+		})
+	}
+}
+
 func TestParseManifestRejectsUnknownDuplicateAndTrailingJSON(t *testing.T) {
 	tests := []struct{ name, data string }{
 		{name: "unknown", data: `{"version":"1.2.3","unknown":true}`},

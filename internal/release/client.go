@@ -94,18 +94,18 @@ func (c Client) LatestStable(ctx context.Context) (VerifiedRelease, error) {
 	if err != nil {
 		return VerifiedRelease{}, err
 	}
+	if err := c.validateGitHubReleaseAssets(endpoint, assets); err != nil {
+		return VerifiedRelease{}, err
+	}
 	manifestMeta, ok := assets["release.json"]
 	if !ok {
 		return VerifiedRelease{}, errors.New("latest release has no release.json")
-	}
-	if err := c.requireAllowedHost(endpoint, manifestMeta.URL); err != nil {
-		return VerifiedRelease{}, err
 	}
 	manifestData, err := getBounded(ctx, client, manifestMeta.URL, MaxManifestSize)
 	if err != nil {
 		return VerifiedRelease{}, fmt.Errorf("fetch release manifest: %w", err)
 	}
-	if manifestMeta.Size > 0 && int64(len(manifestData)) != manifestMeta.Size {
+	if int64(len(manifestData)) != manifestMeta.Size {
 		return VerifiedRelease{}, errors.New("release manifest size differs from GitHub metadata")
 	}
 	manifest, err := ParseManifest(manifestData)
@@ -326,6 +326,40 @@ func (c Client) requireAllowedHost(endpoint, raw string) error {
 		return fmt.Errorf("release asset host %q is not allowed", target.Hostname())
 	}
 	return nil
+}
+
+func (c Client) validateGitHubReleaseAssets(endpoint string, assets map[string]githubAsset) error {
+	if len(assets) != 8 {
+		return fmt.Errorf("GitHub release must contain exactly eight assets, got %d", len(assets))
+	}
+	for name, asset := range assets {
+		if !canonicalGitHubReleaseAsset(name) {
+			return fmt.Errorf("GitHub release has non-canonical asset %q", name)
+		}
+		if asset.Size <= 0 {
+			return fmt.Errorf("GitHub asset %q size must be positive", name)
+		}
+		if err := c.requireAllowedHost(endpoint, asset.URL); err != nil {
+			return fmt.Errorf("asset %q: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func canonicalGitHubReleaseAsset(name string) bool {
+	switch name {
+	case "tpod-darwin-amd64",
+		"tpod-darwin-arm64",
+		"tpod-linux-amd64",
+		"tpod-linux-arm64",
+		"terrapod-source.tar.gz",
+		"resources.json",
+		"release.json",
+		"install.sh":
+		return true
+	default:
+		return false
+	}
 }
 
 func requireHTTPS(raw string) (*url.URL, error) {

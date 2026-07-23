@@ -25,6 +25,7 @@ func TestLatestStableRequiresManifestButNoSignature(t *testing.T) {
 			for _, asset := range manifest.Assets {
 				assets = append(assets, map[string]any{"name": asset.Name, "size": asset.Size, "browser_download_url": server.URL + "/" + asset.Name})
 			}
+			assets = append(assets, map[string]any{"name": "install.sh", "size": 1, "browser_download_url": server.URL + "/install.sh"})
 			_ = json.NewEncoder(w).Encode(map[string]any{"tag_name": "v1.2.3", "draft": false, "prerelease": false, "assets": assets})
 		case "/release.json":
 			_, _ = w.Write(data)
@@ -62,6 +63,7 @@ func TestClientLatestStableDownloadsVerifiedAssets(t *testing.T) {
 			for _, asset := range manifest.Assets {
 				assets = append(assets, map[string]any{"name": asset.Name, "size": asset.Size, "browser_download_url": server.URL + "/" + asset.Name})
 			}
+			assets = append(assets, map[string]any{"name": "install.sh", "size": 1, "browser_download_url": server.URL + "/install.sh"})
 			_ = json.NewEncoder(w).Encode(map[string]any{"tag_name": "v1.2.3", "draft": false, "prerelease": false, "assets": assets})
 		case "/release.json":
 			_, _ = w.Write(data)
@@ -76,7 +78,7 @@ func TestClientLatestStableDownloadsVerifiedAssets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Manifest.Version != "1.2.3" || len(got.assets) != 7 || len(got.Files) != 0 {
+	if got.Manifest.Version != "1.2.3" || len(got.assets) != 8 || len(got.Files) != 0 {
 		t.Fatalf("release=%+v", got)
 	}
 	asset, _ := got.Manifest.BinaryAsset("linux", "amd64")
@@ -95,6 +97,119 @@ func TestClientLatestStableDownloadsVerifiedAssets(t *testing.T) {
 			t.Fatalf("unselected asset %q downloaded", other.Name)
 		}
 	}
+}
+
+func TestLatestStableRequiresExactCanonicalGitHubAssets(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func([]map[string]any) []map[string]any
+		want   string
+	}{
+		{
+			name: "missing install.sh",
+			mutate: func(assets []map[string]any) []map[string]any {
+				return assets[:len(assets)-1]
+			},
+			want: "exactly eight",
+		},
+		{
+			name: "extra asset",
+			mutate: func(assets []map[string]any) []map[string]any {
+				return append(assets, map[string]any{
+					"name": "notes.txt", "size": 1,
+					"browser_download_url": assets[0]["browser_download_url"],
+				})
+			},
+			want: "exactly eight",
+		},
+		{
+			name: "zero-size release.json",
+			mutate: func(assets []map[string]any) []map[string]any {
+				assets[0]["size"] = 0
+				return assets
+			},
+			want: "size",
+		},
+		{
+			name: "zero-size install.sh",
+			mutate: func(assets []map[string]any) []map[string]any {
+				assets[len(assets)-1]["size"] = 0
+				return assets
+			},
+			want: "size",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := latestStableAssetError(t, tt.mutate)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err=%v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLatestStableRequiresAllowedHTTPSMetadataAssetURLs(t *testing.T) {
+	tests := []struct {
+		name       string
+		assetIndex int
+		rawURL     string
+		want       string
+	}{
+		{name: "release.json non-HTTPS", assetIndex: 0, rawURL: "http://example.com/release.json", want: "HTTPS"},
+		{name: "release.json disallowed host", assetIndex: 0, rawURL: "https://example.com/release.json", want: "not allowed"},
+		{name: "install.sh non-HTTPS", assetIndex: 7, rawURL: "http://example.com/install.sh", want: "HTTPS"},
+		{name: "install.sh disallowed host", assetIndex: 7, rawURL: "https://example.com/install.sh", want: "not allowed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := latestStableAssetError(t, func(assets []map[string]any) []map[string]any {
+				assets[tt.assetIndex]["browser_download_url"] = tt.rawURL
+				return assets
+			})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err=%v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func latestStableAssetError(t *testing.T, mutate func([]map[string]any) []map[string]any) error {
+	t.Helper()
+	manifest := stableManifest(t)
+	data := encodeManifest(t, manifest)
+	var server *httptest.Server
+	server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/latest":
+			assets := []map[string]any{
+				{"name": "release.json", "size": len(data), "browser_download_url": server.URL + "/release.json"},
+			}
+			for _, asset := range manifest.Assets {
+				assets = append(assets, map[string]any{
+					"name": asset.Name, "size": asset.Size,
+					"browser_download_url": server.URL + "/" + asset.Name,
+				})
+			}
+			assets = append(assets, map[string]any{
+				"name": "install.sh", "size": 1,
+				"browser_download_url": server.URL + "/install.sh",
+			})
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"tag_name": "v1.2.3", "draft": false, "prerelease": false,
+				"assets": mutate(assets),
+			})
+		case "/release.json":
+			_, _ = w.Write(data)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := Client{HTTP: server.Client(), Endpoint: server.URL + "/latest", CacheDir: realReleaseTempDir(t)}
+	_, err := client.LatestStable(context.Background())
+	return err
 }
 
 func TestNewLocalVerifiedReleaseBindsOnlyCanonicalLocalAssets(t *testing.T) {

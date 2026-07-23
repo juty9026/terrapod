@@ -21,13 +21,17 @@ mkdir -p "$stub_bin"
 cat >"$stub_bin/curl" <<'CURL'
 #!/bin/sh
 set -eu
-[ "$#" -eq 4 ] || exit 90
+[ "$#" -eq 8 ] || exit 90
 [ "$1" = "-fsSL" ] || exit 91
-[ "$2" = "https://github.com/juty9026/terrapod/releases/download/v1.0.0/install.sh" ] || exit 92
-[ "$3" = "-o" ] || exit 93
-printf '%s\n' "$2" >"$TERRAPOD_TEST_CURL_LOG"
+[ "$2" = "--proto" ] || exit 92
+[ "$3" = "=https" ] || exit 93
+[ "$4" = "--proto-redir" ] || exit 94
+[ "$5" = "=https" ] || exit 95
+[ "$6" = "https://github.com/juty9026/terrapod/releases/download/v1.0.0/install.sh" ] || exit 96
+[ "$7" = "-o" ] || exit 97
+printf '%s\n' "$6" >"$TERRAPOD_TEST_CURL_LOG"
 [ "${TERRAPOD_TEST_RELEASE_AVAILABLE:-1}" = 1 ] || exit 22
-cp "$TERRAPOD_TEST_INSTALLER_SOURCE" "$4"
+cp "$TERRAPOD_TEST_INSTALLER_SOURCE" "$8"
 CURL
 chmod +x "$stub_bin/curl"
 

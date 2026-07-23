@@ -174,15 +174,24 @@ func validateManifest(manifest Manifest) error {
 			if seen {
 				return fmt.Errorf("duplicate binary platform %s", platform)
 			}
+			if want := "tpod-" + asset.OS + "-" + asset.Arch; asset.Name != want {
+				return fmt.Errorf("binary platform %s must use canonical asset name %q", platform, want)
+			}
 			expectedPlatforms[platform] = true
 		case "source":
 			if asset.OS != "" || asset.Arch != "" {
 				return fmt.Errorf("source asset %q must not declare a platform", asset.Name)
 			}
+			if asset.Name != "terrapod-source.tar.gz" {
+				return errors.New(`source asset must use canonical asset name "terrapod-source.tar.gz"`)
+			}
 			sourceCount++
 		case "catalog":
 			if asset.OS != "" || asset.Arch != "" {
 				return fmt.Errorf("catalog asset %q must not declare a platform", asset.Name)
+			}
+			if asset.Name != "resources.json" {
+				return errors.New(`catalog asset must use canonical asset name "resources.json"`)
 			}
 			catalogCount++
 		default:

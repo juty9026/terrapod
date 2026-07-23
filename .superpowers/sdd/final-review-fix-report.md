@@ -1,57 +1,114 @@
-# Final Review Fix Report
+# Final Whole-Branch Review Fix Report
 
 ## Status
 
-Complete. All three final-branch-review findings are fixed with regression coverage.
+Complete. The Important exact-eight GitHub Release boundary and both Minor findings are implemented with focused regression coverage.
 
-## Finding 1: routine Homebrew shellenv recovery
+## Implementation
 
-- The declared-state Homebrew bootstrap now captures both `brew shellenv` command failure and shell evaluation failure explicitly.
-- Either failure writes `homebrew-core` with `Fix Homebrew shellenv, then rerun tpod apply.` and exits successfully after the marker is recorded.
-- Marker write failure remains a hard failure, and no bundle runs after an invalid shell environment.
-- Core/platform/desktop retry paths also capture evaluation failure explicitly.
+- `Manifest` validation now binds every platform/kind to the exact canonical six filenames.
+- `Client.LatestStable` now requires exactly the canonical eight GitHub Release assets.
+- GitHub metadata size must be positive for all eight assets.
+- Every asset URL, including `release.json` and `install.sh`, must use HTTPS and an allowed host.
+- `release.json` bytes must exactly match its positive GitHub metadata size.
+- The legacy bridge curl invocation pins HTTPS for the initial request and every redirect with `--proto '=https' --proto-redir '=https'`.
+- Active migration test wording now says `release-bound`; historical ADRs and negative signing assertions were not changed.
+- Existing strict JSON/manifest validation, tag/version binding, response limits, artifact size/checksum binding, pinned `v1.0.0`, temp-file protection, retry/restore behavior, recursion guard, argument forwarding, and migration retry safety remain intact.
 
-## Finding 2: Darwin hardware-aware Homebrew prefix
+## Changed files
 
-- Added a shared declared-state prefix helper that detects Rosetta with `sysctl -in sysctl.proc_translated` and maps translated `x86_64` to Apple Silicon hardware.
-- Homebrew bootstrap/retries, mise install/retry, Optional AI, desktop retry, and shell integrations consume the shared decision.
-- `install.sh`, Terrapod status/doctor, and `.zshenv` apply the same hardware decision at their standalone boundaries.
-- Apple Silicon always selects `/opt/homebrew`; `/usr/local` is used only for non-translated Intel Darwin.
-- A valid standard `/opt/homebrew` installation is used by absolute path even when a legacy Intel brew shadows PATH.
-- Installer and doctor Rosetta simulations both resolve the Apple Silicon prefix.
+- `internal/release/manifest.go`
+- `internal/release/manifest_test.go`
+- `internal/release/client.go`
+- `internal/release/client_test.go`
+- `dot_local/bin/executable_terrapod.tmpl`
+- `tests/legacy_update_transition_test.sh`
+- `tests/terrapod_manager_migration_test.sh`
+- `internal/migrate/legacyownership_test.go`
 
-## Finding 3: duplicate status warnings
+## RED evidence
 
-- `status_key_tool_warnings` now checks only `zsh` plus profile package managers (`brew`, and `apt` on VPS).
-- Homebrew-owned `chezmoi`, `git`, `mise`, `nvim`, and `zellij` are reported exclusively by the mandatory Homebrew ownership registry.
+Command:
 
-## RED / GREEN evidence
+```sh
+mise exec go@1.26.0 -- go test ./internal/release -count=1 -run 'TestParseManifestRequiresExactCanonicalAssetNames|TestLatestStableRequiresExactCanonicalGitHubAssets|TestLatestStableRequiresAllowedHTTPSMetadataAssetURLs' -v
+```
 
-- RED: bootstrap shellenv command failure did not create `homebrew-core`.
-- RED: Rosetta doctor mapping returned `/usr/local` instead of `/opt/homebrew`.
-- RED: Rosetta installer mapping did not select `/opt/homebrew`.
-- RED: status emitted the legacy `nvim, zellij` key-tool warning.
-- RED: valid Apple Silicon Homebrew was rejected when an Intel brew shadowed PATH.
-- GREEN: focused `chezmoiignore`, `terrapod_command`, and `terrapod_installer` suites pass with all new assertions.
+Relevant output (exit 1):
 
-## Full verification
+```text
+missing_install.sh: err=<nil>, want "exactly eight"
+extra_asset: err=<nil>, want "exactly eight"
+zero-size_release.json: err=<nil>, want "size"
+zero-size_install.sh: err=<nil>, want "size"
+install.sh_disallowed_host: err=<nil>, want "not allowed"
+all six canonical manifest filename subtests: err=<nil>, want canonical asset name rejection
+FAIL github.com/juty9026/terrapod/internal/release
+```
 
-- Static and rendered POSIX shell syntax: pass.
-- Rendered Darwin `.zshenv` zsh syntax: pass.
-- Full repository suite, fresh after the final change: **14 sh + 1 zsh, all pass**.
-- Forbidden legacy installer/destructive-operation audit: no new forbidden installation or destructive apply behavior.
+Command:
 
-## Docker smoke
+```sh
+sh tests/legacy_update_transition_test.sh
+```
 
-- `linux/amd64`: pass; 20 formulae installed, all 20 commands resolve below `/home/linuxbrew/.linuxbrew`, runtime-only mise config verified.
-- `linux/arm64`: pass; 20 formulae installed, all 20 commands resolve below `/home/linuxbrew/.linuxbrew`, runtime-only mise config verified.
+Relevant output (exit 1):
 
-## Commit
+```text
+terrapod transition: v1.0.0 is not available; retry this command after the release is published
+not ok - second legacy invocation migrates and forwards to the manager
+```
 
-- `feat: harden Homebrew recovery and Rosetta prefixes` (the commit containing this report; resolve with `git rev-parse HEAD`).
+An earlier combined formatting/test attempt stopped before tests because the bare `gofmt` shim had no selected Go version. It was corrected to `mise exec go@1.26.0 -- gofmt`; this environment error is not counted as RED.
 
-## Self-review / concerns
+## GREEN evidence
 
-- Independent read-only review found no Critical, Important, or Minor issues and assessed the change Ready.
-- The shared helper centralizes managed-script prefix selection; installer and Terrapod retain small equivalent decisions because each must run independently of the managed library.
-- No known remaining concerns.
+Focused boundary command:
+
+```sh
+mise exec go@1.26.0 -- go test ./internal/release -count=1 -run 'TestParseManifestRequiresExactCanonicalAssetNames|TestLatestStableRequiresExactCanonicalGitHubAssets|TestLatestStableRequiresAllowedHTTPSMetadataAssetURLs' -v
+```
+
+Output (exit 0):
+
+```text
+--- PASS: TestLatestStableRequiresExactCanonicalGitHubAssets
+--- PASS: TestLatestStableRequiresAllowedHTTPSMetadataAssetURLs
+--- PASS: TestParseManifestRequiresExactCanonicalAssetNames
+PASS
+ok github.com/juty9026/terrapod/internal/release
+```
+
+Required focused verification:
+
+```sh
+mise exec go@1.26.0 -- go test ./internal/release -count=1
+# ok github.com/juty9026/terrapod/internal/release 3.902s
+
+sh tests/legacy_update_transition_test.sh
+# ok - guided legacy update transition
+
+mise exec go@1.26.0 -- go test ./internal/migrate -count=1 -run 'TestLoadLegacyBaselineValidatesCompleteCatalog|TestPlanLegacyOwnership' -v
+# five selected tests PASS; ok github.com/juty9026/terrapod/internal/migrate
+
+sh tests/terrapod_manager_migration_test.sh
+# ok - Terrapod manager migration contract
+
+git diff --check
+# exit 0, no output
+```
+
+No migration, installer, or `chezmoi apply` was run against `/Users/minu` or a real home. The legacy and migration shell tests use their existing temporary HOME/fixture isolation.
+
+## Self-review
+
+- Exact count plus canonical-name membership and duplicate rejection proves the GitHub asset set is exactly the required eight names.
+- Manifest validation binds names to their corresponding binary platform/source/catalog semantics, not only to a six-name set.
+- All eight positive sizes and allowed HTTPS URLs are checked before downloading the manifest.
+- Existing manifest artifact size checks, tag/version checks, limits, redirect allowlist, strict parsing, and checksum validation remain unchanged.
+- The curl contract assertion verifies the pinned URL and both protocol restrictions while preserving output path and test behavior.
+- Diff is limited to the eight requested files; no signing key, signature flow, configurable host, or checksum service was introduced.
+
+## Concerns
+
+No known concerns. The controller will run the full branch suite separately after review, as requested.

@@ -47,7 +47,7 @@ restore_legacy_pair() {
 installer="$work/install.sh"
 curl_bin="$(command -v curl 2>/dev/null || true)"
 [ -n "$curl_bin" ] || fatal "curl is required"
-"$curl_bin" -fsSL "$installer_url" -o "$installer" ||
+"$curl_bin" -fsSL --proto '=https' --proto-redir '=https' "$installer_url" -o "$installer" ||
   fatal "v1.0.0 is not available; retry this command after the release is published"
 chmod 0700 "$installer" || fatal "failed to protect the downloaded installer"
 
