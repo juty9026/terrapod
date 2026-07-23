@@ -106,8 +106,21 @@ tpod update
 terrapod status
 ```
 
-`terrapod update` refreshes the Terrapod Source Repository through `chezmoi update --exclude scripts`.
-It does not run Homebrew, APT, or mise upgrades.
+`tpod update` fetches the latest stable signed Terrapod release, verifies its
+manifest and every release asset, prints the complete plan, and then atomically
+activates the new Management Core before reconciling Terrapod-owned resources.
+It does not upgrade or remove packages outside Terrapod's ownership state.
+
+Stable GitHub Releases contain four static `tpod` binaries for macOS and Linux
+on `amd64` and `arm64`, the immutable source archive, the signed resource
+catalog, `release.json`, `release.json.sig`, and a versioned `install.sh`.
+Release manifests are signed with Ed25519; private signing keys are never
+included in source archives or release assets.
+
+If the stable launcher reports that the active Management Core is missing or
+broken, run the exact versioned `install.sh --repair` command printed by the
+launcher. Repair verifies the same signed release inputs and restores only the
+Management Core; it does not apply resources or rewrite machine configuration.
 
 Direct chezmoi use remains an advanced escape hatch.
 
