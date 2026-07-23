@@ -3,11 +3,19 @@ set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
+run_go() {
+  if command -v mise >/dev/null 2>&1; then
+    mise exec go@1.26.0 -- go "$@"
+  else
+    command go "$@"
+  fi
+}
+
 cd "$repo_root"
-mise exec go@1.26.0 -- go test ./internal/cli \
+run_go test ./internal/cli \
   -run 'TestManagerActivationHasNoChezmoiMutationScripts|TestManagerCatalogOwnsEveryRecordedLegacyMutation|TestComposeRegistryRegistersEveryPlan02And03Adapter' \
   -count=1
-mise exec go@1.26.0 -- go test ./cmd/tpod \
+run_go test ./cmd/tpod \
   -run TestBuiltBinaryDispatchesThroughRealConstrainedChezmoiClient \
   -count=1
 
