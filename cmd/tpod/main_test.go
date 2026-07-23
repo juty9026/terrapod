@@ -5,14 +5,12 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -54,25 +52,6 @@ func TestProductionActiveCatalogRequiresPublishedReleaseVersion(t *testing.T) {
 	}
 }
 
-func TestCompiledReleaseRootsRequireCanonicalCompleteLdflags(t *testing.T) {
-	oldID, oldKey := releaseRootKeyID, releaseRootPublicKey
-	t.Cleanup(func() { releaseRootKeyID, releaseRootPublicKey = oldID, oldKey })
-	releaseRootKeyID, releaseRootPublicKey = "", ""
-	if _, err := compiledReleaseRoots(); err == nil || !strings.Contains(err.Error(), "not embedded") {
-		t.Fatalf("empty roots error=%v", err)
-	}
-	releaseRootKeyID, releaseRootPublicKey = "root", "%%"
-	if _, err := compiledReleaseRoots(); err == nil {
-		t.Fatal("invalid base64 accepted")
-	}
-	key := make([]byte, ed25519.PublicKeySize)
-	releaseRootPublicKey = base64.StdEncoding.EncodeToString(key)
-	roots, err := compiledReleaseRoots()
-	if err != nil || len(roots["root"]) != ed25519.PublicKeySize {
-		t.Fatalf("roots=%v err=%v", roots, err)
-	}
-}
-
 func TestRepairReleaseEndpointBindsStableVersionToTag(t *testing.T) {
 	oldEndpoint := releaseLatestEndpoint
 	t.Cleanup(func() { releaseLatestEndpoint = oldEndpoint })
@@ -92,16 +71,11 @@ func TestRepairReleaseEndpointBindsStableVersionToTag(t *testing.T) {
 }
 
 func TestRepairLatestReleaseRejectsDowngradeBeforeMutation(t *testing.T) {
-	public, private, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 	digest := strings.Repeat("a", 64)
 	manifest := release.Manifest{
 		Version:       "1.0.0",
 		CatalogSchema: 1,
 		StateSchema:   1,
-		TrustedKeys:   []release.TrustedKey{},
 		Assets: []release.Asset{
 			{Kind: "binary", OS: "darwin", Arch: "amd64", Name: "tpod-darwin-amd64", Size: 1, SHA256: digest},
 			{Kind: "binary", OS: "darwin", Arch: "arm64", Name: "tpod-darwin-arm64", Size: 1, SHA256: digest},
@@ -115,19 +89,7 @@ func TestRepairLatestReleaseRejectsDowngradeBeforeMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	envelopeData, err := json.Marshal(struct {
-		KeyID     string `json:"keyId"`
-		Algorithm string `json:"algorithm"`
-		Signature string `json:"signature"`
-	}{
-		KeyID: "root", Algorithm: "ed25519",
-		Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(private, manifestData)),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	verifier := release.Verifier{CompiledKeys: map[string]ed25519.PublicKey{"root": public}}
-	verified, err := release.NewLocalVerifiedRelease(manifestData, envelopeData, nil, verifier)
+	verified, err := release.NewLocalVerifiedRelease(manifestData, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +106,7 @@ func TestRepairLatestReleaseRejectsDowngradeBeforeMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	called := false
-	err = repairLatestRelease(context.Background(), layout, expectedDigest, verifier, func(context.Context) (release.VerifiedRelease, error) {
+	err = repairLatestRelease(context.Background(), layout, expectedDigest, func(context.Context) (release.VerifiedRelease, error) {
 		called = true
 		return verified, nil
 	}, false)
@@ -156,17 +118,13 @@ func TestRepairLatestReleaseRejectsDowngradeBeforeMutation(t *testing.T) {
 	}
 }
 
-func TestBuiltRepairBinaryUsesSignedVersionEndpoint(t *testing.T) {
+func TestBuiltRepairBinaryUsesStableVersionEndpoint(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("repair intentionally rejects root")
 	}
-	public, private, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 	assets := make(map[string][]byte)
 	var assetsMu sync.RWMutex
-	var manifestData, signatureData []byte
+	var manifestData []byte
 	var server *httptest.Server
 	var certificatePEM []byte
 	server, certificatePEM = newRepairTLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
@@ -176,7 +134,7 @@ func TestBuiltRepairBinaryUsesSignedVersionEndpoint(t *testing.T) {
 				Size int    `json:"size"`
 				URL  string `json:"browser_download_url"`
 			}
-			names := []string{"release.json", "release.json.sig", "tpod-darwin-amd64", "tpod-darwin-arm64", "tpod-linux-amd64", "tpod-linux-arm64", "terrapod-source.tar.gz", "resources.json"}
+			names := []string{"release.json", "tpod-darwin-amd64", "tpod-darwin-arm64", "tpod-linux-amd64", "tpod-linux-arm64", "terrapod-source.tar.gz", "resources.json"}
 			items := make([]metadataAsset, 0, len(names))
 			assetsMu.RLock()
 			for _, name := range names {
@@ -220,8 +178,7 @@ func TestBuiltRepairBinaryUsesSignedVersionEndpoint(t *testing.T) {
 	if err := os.WriteFile(certificate, certificatePEM, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	publicKey := base64.StdEncoding.EncodeToString(public)
-	embeddedLdflags := "-X main.releaseLatestEndpoint=" + server.URL + "/latest -X main.releaseRootKeyID=test-root -X main.releaseRootPublicKey=" + publicKey
+	embeddedLdflags := "-X main.releaseLatestEndpoint=" + server.URL + "/latest"
 	if runtime.GOOS == "darwin" {
 		normalBinary := filepath.Join(root, "tpod-normal")
 		build := exec.Command("go", "build", "-ldflags", embeddedLdflags, "-o", normalBinary, ".")
@@ -266,7 +223,6 @@ func TestBuiltRepairBinaryUsesSignedVersionEndpoint(t *testing.T) {
 		Version:       "1.2.3",
 		CatalogSchema: 1,
 		StateSchema:   1,
-		TrustedKeys:   []release.TrustedKey{},
 		Assets: []release.Asset{
 			repairAsset("binary", "darwin", "amd64", "tpod-darwin-amd64", assets["tpod-darwin-amd64"]),
 			repairAsset("binary", "darwin", "arm64", "tpod-darwin-arm64", assets["tpod-darwin-arm64"]),
@@ -280,20 +236,8 @@ func TestBuiltRepairBinaryUsesSignedVersionEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signatureData, err = json.Marshal(struct {
-		KeyID     string `json:"keyId"`
-		Algorithm string `json:"algorithm"`
-		Signature string `json:"signature"`
-	}{
-		KeyID: "test-root", Algorithm: "ed25519",
-		Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(private, manifestData)),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	assetsMu.Lock()
 	assets["release.json"] = manifestData
-	assets["release.json.sig"] = signatureData
 	assetsMu.Unlock()
 	manifestDigest := sha256.Sum256(manifestData)
 

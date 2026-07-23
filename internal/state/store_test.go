@@ -5,14 +5,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/juty9026/terrapod/internal/model"
-	"github.com/juty9026/terrapod/internal/release"
 )
 
 func TestOpenCreatesEmptySnapshot(t *testing.T) {
@@ -93,7 +91,7 @@ func TestPrivateJSONReadRejectsPathSwapAroundOpen(t *testing.T) {
 }
 
 func TestPersistenceReadersRejectNonPrivateMode(t *testing.T) {
-	for _, name := range []string{"snapshot", "journal", "update", "trust"} {
+	for _, name := range []string{"snapshot", "journal", "update"} {
 		t.Run(name, func(t *testing.T) {
 			store, err := Open(t.TempDir())
 			if err != nil {
@@ -103,18 +101,14 @@ func TestPersistenceReadersRejectNonPrivateMode(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			record := UpdateRecord{JournalID: journal.ID, PlanID: "plan", Version: "1.2.3", CatalogDigest: strings.Repeat("a", 64), ReleaseDigest: strings.Repeat("b", 64), TrustedKeys: map[string]string{}, TrustProvenance: map[string]string{}, TrustProofDigest: strings.Repeat("d", 64)}
+			record := UpdateRecord{JournalID: journal.ID, PlanID: "plan", Version: "1.2.3", CatalogDigest: strings.Repeat("a", 64), ReleaseDigest: strings.Repeat("b", 64)}
 			if err := store.PutUpdate(record); err != nil {
-				t.Fatal(err)
-			}
-			if err := store.PutTrustProofs([]release.TrustProof{{Manifest: []byte("manifest"), Signature: []byte("signature")}}); err != nil {
 				t.Fatal(err)
 			}
 			path := map[string]string{
 				"snapshot": store.snapshotPath(),
 				"journal":  store.journalPath(journal.ID),
 				"update":   filepath.Join(store.dir, updateDirname, journal.ID+".json"),
-				"trust":    filepath.Join(store.dir, trustedKeysFilename),
 			}[name]
 			if err := os.Chmod(path, 0o640); err != nil {
 				t.Fatal(err)
@@ -127,8 +121,6 @@ func TestPersistenceReadersRejectNonPrivateMode(t *testing.T) {
 				_, readErr = store.Journal(journal.ID)
 			case "update":
 				_, readErr = store.Update(journal.ID)
-			case "trust":
-				_, readErr = store.TrustProofs()
 			}
 			if readErr == nil {
 				t.Fatalf("%s with mode 0640 was accepted", name)
@@ -570,7 +562,7 @@ func TestUpdateRecordIsBoundToActiveJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record := UpdateRecord{JournalID: journal.ID, PlanID: "plan", Version: "1.2.3", CatalogDigest: strings.Repeat("a", 64), ReleaseDigest: strings.Repeat("b", 64), TrustedKeys: map[string]string{"next": strings.Repeat("0", 64)}, TrustProvenance: map[string]string{"next": strings.Repeat("c", 64)}, TrustProofDigest: strings.Repeat("d", 64)}
+	record := UpdateRecord{JournalID: journal.ID, PlanID: "plan", Version: "1.2.3", CatalogDigest: strings.Repeat("a", 64), ReleaseDigest: strings.Repeat("b", 64)}
 	if err := store.PutUpdate(record); err != nil {
 		t.Fatal(err)
 	}
@@ -584,40 +576,6 @@ func TestUpdateRecordIsBoundToActiveJournal(t *testing.T) {
 	record.PlanID = "other"
 	if err := store.PutUpdate(record); err == nil {
 		t.Fatal("mismatched update record accepted")
-	}
-}
-
-func TestPersistedTrustStoresOnlyOrderedProofsPrivately(t *testing.T) {
-	store, err := Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	proofs := []release.TrustProof{{Manifest: []byte("manifest-one"), Signature: []byte("signature-one")}, {Manifest: []byte("manifest-two"), Signature: []byte("signature-two")}}
-	if err := store.PutTrustProofs(proofs); err != nil {
-		t.Fatal(err)
-	}
-	got, err := store.TrustProofs()
-	if err != nil || !reflect.DeepEqual(got, proofs) {
-		t.Fatalf("TrustProofs=%v, %v", got, err)
-	}
-	path := filepath.Join(store.dir, trustedKeysFilename)
-	var raw map[string]json.RawMessage
-	contents, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(contents, &raw); err != nil {
-		t.Fatal(err)
-	}
-	if len(raw) != 1 || raw["proofs"] == nil || raw["keys"] != nil || raw["provenance"] != nil {
-		t.Fatalf("persisted trust schema=%s", contents)
-	}
-	assertMode(t, path, 0o600)
-	if err := os.Chmod(path, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.TrustProofs(); err == nil {
-		t.Fatal("world-readable trust proofs accepted")
 	}
 }
 

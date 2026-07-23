@@ -23,7 +23,6 @@ type Platform struct{ OS, Arch string }
 type Staged struct{ Version, Path string }
 type Stager struct {
 	ReleaseDir, ActiveRelease  string
-	Verifier                   Verifier
 	ExpectedPlatform           Platform
 	afterSourceCopy            func()
 	beforeCommitValidation     func(string)
@@ -88,7 +87,7 @@ func (s Stager) Stage(ctx context.Context, release VerifiedRelease, platform Pla
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return Staged{}, errors.New("existing release is not a real directory")
 		}
-		record, err := s.validateInstalledRelease(destination, manifest.Version, release.manifestData, release.signatureData)
+		record, err := s.validateInstalledRelease(destination, manifest.Version, release.manifestData)
 		if err != nil {
 			return Staged{}, fmt.Errorf("existing release differs: %w", err)
 		}
@@ -135,9 +134,6 @@ func (s Stager) Stage(ctx context.Context, release VerifiedRelease, platform Pla
 	if err := writeReadOnlyFile(filepath.Join(staging, "release.json"), release.manifestData); err != nil {
 		return Staged{}, err
 	}
-	if err := writeReadOnlyFile(filepath.Join(staging, "release.json.sig"), release.signatureData); err != nil {
-		return Staged{}, err
-	}
 	if err := copyVerifiedFile(binaryPath, filepath.Join(staging, "bin", "tpod"), binaryAsset, 0o755); err != nil {
 		return Staged{}, err
 	}
@@ -167,7 +163,7 @@ func (s Stager) Stage(ctx context.Context, release VerifiedRelease, platform Pla
 	if err := syncTree(staging); err != nil {
 		return Staged{}, err
 	}
-	validated, err := s.validateInstalledRelease(staging, manifest.Version, release.manifestData, release.signatureData)
+	validated, err := s.validateInstalledRelease(staging, manifest.Version, release.manifestData)
 	if err != nil {
 		return Staged{}, fmt.Errorf("validate completed release: %w", err)
 	}
@@ -189,7 +185,7 @@ func (s Stager) Stage(ctx context.Context, release VerifiedRelease, platform Pla
 	return Staged{Version: manifest.Version, Path: destination}, nil
 }
 
-// RepairAndActivate commits a signed release and its stable launcher pair as
+// RepairAndActivate commits a validated release and its stable launcher pair as
 // one recoverable transaction.
 func (s Stager) RepairAndActivate(ctx context.Context, release VerifiedRelease, platform Platform, launcherTargets [2]string) (Staged, error) {
 	manifest, err := s.verifyRelease(release)
@@ -213,7 +209,7 @@ func (s Stager) RepairAndActivate(ctx context.Context, release VerifiedRelease, 
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return Staged{}, errors.New("existing release is not a real directory")
 		}
-		if _, err := s.validateInstalledRelease(destination, manifest.Version, release.manifestData, release.signatureData); err != nil {
+		if _, err := s.validateInstalledRelease(destination, manifest.Version, release.manifestData); err != nil {
 			releaseBackup, err = s.prepareRecoverySlot(manifest.Version)
 			if err != nil {
 				return Staged{}, err
@@ -236,7 +232,7 @@ func (s Stager) RepairAndActivate(ctx context.Context, release VerifiedRelease, 
 		}
 		return Staged{}, err
 	}
-	if _, err := s.validateInstalledRelease(staged.Path, manifest.Version, release.manifestData, release.signatureData); err != nil {
+	if _, err := s.validateInstalledRelease(staged.Path, manifest.Version, release.manifestData); err != nil {
 		return Staged{}, errors.Join(err, s.rollbackRepairRelease(destination, releaseBackup, releaseWasAbsent))
 	}
 	if err := s.installLaunchersAndActivate(staged, launcherTargets); err != nil {
@@ -353,17 +349,17 @@ func (s Stager) installLaunchersAndActivate(staged Staged, targets [2]string) er
 	defer sourceRoot.Close()
 	source, err := sourceRoot.Open("source/scripts/tpod-launcher.sh")
 	if err != nil {
-		return errors.New("signed release does not contain the stable launcher")
+		return errors.New("release does not contain the stable launcher")
 	}
 	sourceInfo, err := source.Stat()
 	if err != nil || !sourceInfo.Mode().IsRegular() || sourceInfo.Size() <= 0 || sourceInfo.Size() > MaxManifestSize {
 		_ = source.Close()
-		return errors.New("signed release does not contain a bounded regular stable launcher")
+		return errors.New("release does not contain a bounded regular stable launcher")
 	}
 	launcherData, readErr := io.ReadAll(io.LimitReader(source, MaxManifestSize+1))
 	closeErr := source.Close()
 	if readErr != nil || closeErr != nil || int64(len(launcherData)) != sourceInfo.Size() {
-		return errors.New("failed to read signed stable launcher")
+		return errors.New("failed to read stable launcher")
 	}
 	temporaries := [2]string{}
 	for index := range targets {
@@ -627,7 +623,7 @@ func (s Stager) Activate(version string) error {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return errors.New("release target must be a real directory")
 	}
-	if _, err := s.validateInstalledRelease(destination, version, nil, nil); err != nil {
+	if _, err := s.validateInstalledRelease(destination, version, nil); err != nil {
 		return fmt.Errorf("validate release target: %w", err)
 	}
 	oldTarget := ""
@@ -761,7 +757,7 @@ func (s Stager) restoreActiveRelease(parent, oldTarget string, oldExists bool) e
 	return s.syncActiveDirectory(parent)
 }
 
-// LoadActive re-verifies the signed manifest and every staged artifact before
+// LoadActive re-validates the manifest and every staged artifact before
 // an update continuation trusts the active release.
 func (s Stager) LoadActive(version string) (Staged, VerifiedRelease, error) {
 	if !stableSemVerPattern.MatchString(version) {
@@ -791,20 +787,16 @@ func (s Stager) Load(version string) (Staged, VerifiedRelease, error) {
 	if err != nil {
 		return Staged{}, VerifiedRelease{}, err
 	}
-	signatureData, err := readImmutableFile(filepath.Join(expected, "release.json.sig"), MaxManifestSize)
+	record, err := s.validateInstalledRelease(expected, version, manifestData)
 	if err != nil {
 		return Staged{}, VerifiedRelease{}, err
 	}
-	record, err := s.validateInstalledRelease(expected, version, manifestData, signatureData)
-	if err != nil {
-		return Staged{}, VerifiedRelease{}, err
-	}
-	manifest, err := s.Verifier.VerifyManifest(manifestData, signatureData)
+	manifest, err := ParseManifest(manifestData)
 	if err != nil {
 		return Staged{}, VerifiedRelease{}, err
 	}
 	files := map[string]string{record.Binary.Name: filepath.Join(expected, "bin", "tpod"), record.Catalog.Name: filepath.Join(expected, "catalog", "resources.json"), record.Source.Name: filepath.Join(expected, ".artifacts", "source.tar.gz")}
-	verified := VerifiedRelease{Manifest: manifest, Files: files, manifestData: manifestData, signatureData: signatureData}
+	verified := VerifiedRelease{Manifest: manifest, Files: files, manifestData: manifestData}
 	if err := verified.sealManifest(); err != nil {
 		return Staged{}, VerifiedRelease{}, err
 	}
@@ -846,14 +838,14 @@ func (s Stager) verifyRelease(release VerifiedRelease) (Manifest, error) {
 	if err := release.verifySeal(); err != nil {
 		return Manifest{}, err
 	}
-	manifest, err := s.Verifier.VerifyManifest(release.manifestData, release.signatureData)
+	manifest, err := ParseManifest(release.manifestData)
 	if err != nil {
-		return Manifest{}, fmt.Errorf("re-verify release manifest: %w", err)
+		return Manifest{}, fmt.Errorf("re-validate release manifest: %w", err)
 	}
 	want, _ := json.Marshal(release.Manifest)
 	got, _ := json.Marshal(manifest)
 	if !bytes.Equal(got, want) {
-		return Manifest{}, errors.New("verified release differs from signed manifest")
+		return Manifest{}, errors.New("verified release differs from validated manifest")
 	}
 	return manifest, nil
 }
@@ -1054,7 +1046,7 @@ func writeRecord(name string, record stagedRecord) error {
 }
 func writeReadOnlyFile(name string, data []byte) error {
 	if len(data) == 0 || len(data) > MaxManifestSize {
-		return errors.New("signed release metadata size is invalid")
+		return errors.New("release metadata size is invalid")
 	}
 	file, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o400)
 	if err != nil {
@@ -1099,27 +1091,20 @@ func readImmutableFile(name string, limit int64) ([]byte, error) {
 	return data, nil
 }
 
-func (s Stager) validateInstalledRelease(root, version string, expectedManifest, expectedSignature []byte) (stagedRecord, error) {
+func (s Stager) validateInstalledRelease(root, version string, expectedManifest []byte) (stagedRecord, error) {
 	manifestData, err := readImmutableFile(filepath.Join(root, "release.json"), MaxManifestSize)
 	if err != nil {
 		return stagedRecord{}, err
 	}
-	signatureData, err := readImmutableFile(filepath.Join(root, "release.json.sig"), MaxManifestSize)
-	if err != nil {
-		return stagedRecord{}, err
-	}
 	if expectedManifest != nil && !bytes.Equal(manifestData, expectedManifest) {
-		return stagedRecord{}, errors.New("stored signed manifest differs")
+		return stagedRecord{}, errors.New("stored manifest differs")
 	}
-	if expectedSignature != nil && !bytes.Equal(signatureData, expectedSignature) {
-		return stagedRecord{}, errors.New("stored manifest signature differs")
-	}
-	manifest, err := s.Verifier.VerifyManifest(manifestData, signatureData)
+	manifest, err := ParseManifest(manifestData)
 	if err != nil {
 		return stagedRecord{}, err
 	}
 	if manifest.Version != version {
-		return stagedRecord{}, errors.New("signed manifest version differs from release path")
+		return stagedRecord{}, errors.New("manifest version differs from release path")
 	}
 	record, err := readRecord(filepath.Join(root, ".stage.json"))
 	if err != nil {
@@ -1142,9 +1127,9 @@ func (s Stager) validateInstalledRelease(root, version string, expectedManifest,
 		return stagedRecord{}, err
 	}
 	if record.Version != version || record.Binary != binaryAsset || record.Source != sourceAsset || record.Catalog != catalogAsset {
-		return stagedRecord{}, errors.New("release record differs from signed manifest")
+		return stagedRecord{}, errors.New("release record differs from manifest")
 	}
-	if err := validateExistingRelease(root, record, manifestData, signatureData); err != nil {
+	if err := validateExistingRelease(root, record, manifestData); err != nil {
 		return stagedRecord{}, err
 	}
 	if err := validateExecutable(filepath.Join(root, "bin", "tpod"), Platform{OS: record.OS, Arch: record.Arch}); err != nil {
@@ -1153,7 +1138,7 @@ func (s Stager) validateInstalledRelease(root, version string, expectedManifest,
 	return record, nil
 }
 
-func validateExistingRelease(root string, record stagedRecord, manifestData, signatureData []byte) error {
+func validateExistingRelease(root string, record stagedRecord, manifestData []byte) error {
 	for _, file := range record.SourceFiles {
 		if file.Size < 0 || !digestPattern.MatchString(file.SHA256) {
 			return errors.New("invalid source file record")
@@ -1169,7 +1154,7 @@ func validateExistingRelease(root string, record stagedRecord, manifestData, sig
 		return err
 	}
 	if !equalStagedFiles(extracted, record.SourceFiles) {
-		return errors.New("extracted source differs from signed archive")
+		return errors.New("extracted source differs from release archive")
 	}
 	expected := map[string]stagedFile{}
 	expectedDirs := map[string]bool{"bin": true, "source": true, "catalog": true, ".artifacts": true}
@@ -1182,7 +1167,7 @@ func validateExistingRelease(root string, record stagedRecord, manifestData, sig
 			expectedDirs[parent] = true
 		}
 	}
-	fixed := map[string]Asset{"bin/tpod": record.Binary, "catalog/resources.json": record.Catalog, ".artifacts/source.tar.gz": record.Source, "release.json": bytesAsset("release.json", manifestData), "release.json.sig": bytesAsset("release.json.sig", signatureData)}
+	fixed := map[string]Asset{"bin/tpod": record.Binary, "catalog/resources.json": record.Catalog, ".artifacts/source.tar.gz": record.Source, "release.json": bytesAsset("release.json", manifestData)}
 	seen := map[string]bool{}
 	err = filepath.WalkDir(root, func(name string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {

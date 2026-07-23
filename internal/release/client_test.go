@@ -2,7 +2,6 @@ package release
 
 import (
 	"context"
-	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -15,10 +14,35 @@ import (
 	"testing"
 )
 
+func TestLatestStableRequiresManifestButNoSignature(t *testing.T) {
+	manifest := stableManifest(t)
+	data := encodeManifest(t, manifest)
+	var server *httptest.Server
+	server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/latest":
+			assets := []map[string]any{{"name": "release.json", "size": len(data), "browser_download_url": server.URL + "/release.json"}}
+			for _, asset := range manifest.Assets {
+				assets = append(assets, map[string]any{"name": asset.Name, "size": asset.Size, "browser_download_url": server.URL + "/" + asset.Name})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"tag_name": "v1.2.3", "draft": false, "prerelease": false, "assets": assets})
+		case "/release.json":
+			_, _ = w.Write(data)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := Client{HTTP: server.Client(), Endpoint: server.URL + "/latest", CacheDir: realReleaseTempDir(t)}
+	if _, err := client.LatestStable(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestClientLatestStableDownloadsVerifiedAssets(t *testing.T) {
-	private := ed25519.NewKeyFromSeed(testSeed)
 	files := releaseFixtureFiles(t)
-	manifest := validManifest(t)
+	manifest := stableManifest(t)
 	for index := range manifest.Assets {
 		body := files[manifest.Assets[index].Name]
 		manifest.Assets[index].Size = int64(len(body))
@@ -26,7 +50,6 @@ func TestClientLatestStableDownloadsVerifiedAssets(t *testing.T) {
 		manifest.Assets[index].SHA256 = hex.EncodeToString(digest[:])
 	}
 	data := encodeManifest(t, manifest)
-	signature := signManifest(t, "root", private, data)
 	var server *httptest.Server
 	requests := map[string]int{}
 	server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -35,7 +58,6 @@ func TestClientLatestStableDownloadsVerifiedAssets(t *testing.T) {
 		case "/latest":
 			assets := []map[string]any{
 				{"name": "release.json", "size": len(data), "browser_download_url": server.URL + "/release.json"},
-				{"name": "release.json.sig", "size": len(signature), "browser_download_url": server.URL + "/release.json.sig"},
 			}
 			for _, asset := range manifest.Assets {
 				assets = append(assets, map[string]any{"name": asset.Name, "size": asset.Size, "browser_download_url": server.URL + "/" + asset.Name})
@@ -43,20 +65,18 @@ func TestClientLatestStableDownloadsVerifiedAssets(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"tag_name": "v1.2.3", "draft": false, "prerelease": false, "assets": assets})
 		case "/release.json":
 			_, _ = w.Write(data)
-		case "/release.json.sig":
-			_, _ = w.Write(signature)
 		default:
 			_, _ = w.Write(files[strings.TrimPrefix(r.URL.Path, "/")])
 		}
 	}))
 	defer server.Close()
 
-	client := Client{HTTP: server.Client(), Endpoint: server.URL + "/latest", CacheDir: realReleaseTempDir(t), Verifier: testVerifier(private.Public().(ed25519.PublicKey))}
+	client := Client{HTTP: server.Client(), Endpoint: server.URL + "/latest", CacheDir: realReleaseTempDir(t)}
 	got, err := client.LatestStable(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Manifest.Version != "1.2.3" || len(got.assets) != 8 || len(got.Files) != 0 {
+	if got.Manifest.Version != "1.2.3" || len(got.assets) != 7 || len(got.Files) != 0 {
 		t.Fatalf("release=%+v", got)
 	}
 	asset, _ := got.Manifest.BinaryAsset("linux", "amd64")
@@ -78,32 +98,28 @@ func TestClientLatestStableDownloadsVerifiedAssets(t *testing.T) {
 }
 
 func TestNewLocalVerifiedReleaseBindsOnlyCanonicalLocalAssets(t *testing.T) {
-	private := ed25519.NewKeyFromSeed(testSeed)
-	manifest := validManifest(t)
+	manifest := stableManifest(t)
 	data := encodeManifest(t, manifest)
-	signature := signManifest(t, "root", private, data)
-	verifier := testVerifier(private.Public().(ed25519.PublicKey))
 
-	got, err := NewLocalVerifiedRelease(data, signature, map[string]string{"tpod-linux-amd64": "/private/tpod"}, verifier)
+	got, err := NewLocalVerifiedRelease(data, map[string]string{"tpod-linux-amd64": "/private/tpod"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Files["tpod-linux-amd64"] != "/private/tpod" {
 		t.Fatalf("files=%v", got.Files)
 	}
-	if _, err := NewLocalVerifiedRelease(data, signature, map[string]string{"../tpod": "/private/tpod"}, verifier); err == nil {
+	if _, err := NewLocalVerifiedRelease(data, map[string]string{"../tpod": "/private/tpod"}); err == nil {
 		t.Fatal("unsafe local asset name accepted")
 	}
-	if _, err := NewLocalVerifiedRelease(data, signature, map[string]string{"tpod-linux-amd64": ""}, verifier); err == nil {
+	if _, err := NewLocalVerifiedRelease(data, map[string]string{"tpod-linux-amd64": ""}); err == nil {
 		t.Fatal("empty local asset path accepted")
 	}
-	if _, err := NewLocalVerifiedRelease(append(data, ' '), signature, nil, verifier); err == nil {
-		t.Fatal("modified manifest accepted")
+	if _, err := NewLocalVerifiedRelease(append(data, []byte("{}")...), nil); err == nil {
+		t.Fatal("trailing manifest accepted")
 	}
 }
 
 func TestClientRejectsUnsafeResponsesAndCleansTemps(t *testing.T) {
-	private := ed25519.NewKeyFromSeed(testSeed)
 	tests := []struct {
 		name    string
 		handler http.Handler
@@ -122,7 +138,7 @@ func TestClientRejectsUnsafeResponsesAndCleansTemps(t *testing.T) {
 			server := httptest.NewTLSServer(tt.handler)
 			defer server.Close()
 			cache := realReleaseTempDir(t)
-			_, err := (Client{HTTP: server.Client(), Endpoint: server.URL, CacheDir: cache, Verifier: testVerifier(private.Public().(ed25519.PublicKey))}).LatestStable(context.Background())
+			_, err := (Client{HTTP: server.Client(), Endpoint: server.URL, CacheDir: cache}).LatestStable(context.Background())
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("err=%v, want %q", err, tt.want)
 			}

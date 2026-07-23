@@ -21,18 +21,16 @@ type Client struct {
 	HTTP                 *http.Client
 	Endpoint             string
 	CacheDir             string
-	Verifier             Verifier
 	AllowedRedirectHosts []string
 }
 
 type VerifiedRelease struct {
-	Manifest      Manifest
-	Files         map[string]string
-	assets        map[string]githubAsset
-	client        *Client
-	seal          [sha256.Size]byte
-	manifestData  []byte
-	signatureData []byte
+	Manifest     Manifest
+	Files        map[string]string
+	assets       map[string]githubAsset
+	client       *Client
+	seal         [sha256.Size]byte
+	manifestData []byte
 }
 
 type githubRelease struct {
@@ -48,19 +46,17 @@ type githubAsset struct {
 	URL  string `json:"browser_download_url"`
 }
 
-// NewLocalVerifiedRelease verifies signed metadata and binds it to already
-// downloaded assets. Stager rechecks every declared size and checksum before
-// committing the release.
-func NewLocalVerifiedRelease(manifestData, signatureData []byte, files map[string]string, verifier Verifier) (VerifiedRelease, error) {
-	manifest, err := verifier.VerifyManifest(manifestData, signatureData)
+// NewLocalVerifiedRelease validates metadata and binds it to already downloaded
+// assets. Stager rechecks every declared size and checksum before committing.
+func NewLocalVerifiedRelease(manifestData []byte, files map[string]string) (VerifiedRelease, error) {
+	manifest, err := ParseManifest(manifestData)
 	if err != nil {
 		return VerifiedRelease{}, err
 	}
 	release := VerifiedRelease{
-		Manifest:      manifest,
-		Files:         make(map[string]string, len(files)),
-		manifestData:  append([]byte(nil), manifestData...),
-		signatureData: append([]byte(nil), signatureData...),
+		Manifest:     manifest,
+		Files:        make(map[string]string, len(files)),
+		manifestData: append([]byte(nil), manifestData...),
 	}
 	for name, path := range files {
 		if !assetNamePattern.MatchString(name) || path == "" {
@@ -102,14 +98,7 @@ func (c Client) LatestStable(ctx context.Context) (VerifiedRelease, error) {
 	if !ok {
 		return VerifiedRelease{}, errors.New("latest release has no release.json")
 	}
-	signatureMeta, ok := assets["release.json.sig"]
-	if !ok {
-		return VerifiedRelease{}, errors.New("latest release has no release.json.sig")
-	}
 	if err := c.requireAllowedHost(endpoint, manifestMeta.URL); err != nil {
-		return VerifiedRelease{}, err
-	}
-	if err := c.requireAllowedHost(endpoint, signatureMeta.URL); err != nil {
 		return VerifiedRelease{}, err
 	}
 	manifestData, err := getBounded(ctx, client, manifestMeta.URL, MaxManifestSize)
@@ -119,14 +108,7 @@ func (c Client) LatestStable(ctx context.Context) (VerifiedRelease, error) {
 	if manifestMeta.Size > 0 && int64(len(manifestData)) != manifestMeta.Size {
 		return VerifiedRelease{}, errors.New("release manifest size differs from GitHub metadata")
 	}
-	signature, err := getBounded(ctx, client, signatureMeta.URL, MaxManifestSize)
-	if err != nil {
-		return VerifiedRelease{}, fmt.Errorf("fetch release signature: %w", err)
-	}
-	if signatureMeta.Size > 0 && int64(len(signature)) != signatureMeta.Size {
-		return VerifiedRelease{}, errors.New("release signature size differs from GitHub metadata")
-	}
-	manifest, err := c.Verifier.VerifyManifest(manifestData, signature)
+	manifest, err := ParseManifest(manifestData)
 	if err != nil {
 		return VerifiedRelease{}, err
 	}
@@ -146,7 +128,7 @@ func (c Client) LatestStable(ctx context.Context) (VerifiedRelease, error) {
 		}
 	}
 	bound := c.withHTTP(client)
-	release := VerifiedRelease{Manifest: manifest, assets: assets, client: &bound, manifestData: append([]byte(nil), manifestData...), signatureData: append([]byte(nil), signature...)}
+	release := VerifiedRelease{Manifest: manifest, assets: assets, client: &bound, manifestData: append([]byte(nil), manifestData...)}
 	if err := release.sealManifest(); err != nil {
 		return VerifiedRelease{}, err
 	}
@@ -187,7 +169,6 @@ func (r *VerifiedRelease) sealManifest() error {
 	hash := sha256.New()
 	_, _ = hash.Write(data)
 	_, _ = hash.Write(r.manifestData)
-	_, _ = hash.Write(r.signatureData)
 	copy(r.seal[:], hash.Sum(nil))
 	return nil
 }
@@ -203,7 +184,6 @@ func (r VerifiedRelease) verifySeal() error {
 	hash := sha256.New()
 	_, _ = hash.Write(data)
 	_, _ = hash.Write(r.manifestData)
-	_, _ = hash.Write(r.signatureData)
 	var seal [sha256.Size]byte
 	copy(seal[:], hash.Sum(nil))
 	if seal != r.seal {

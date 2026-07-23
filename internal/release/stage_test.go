@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"crypto/ed25519"
 	"crypto/sha256"
 	"debug/elf"
 	"debug/macho"
@@ -148,6 +147,12 @@ func TestStagerStagesAndAtomicallyActivatesRelease(t *testing.T) {
 	if got.Version != "1.2.3" || got.Path != filepath.Join(s.ReleaseDir, "1.2.3") {
 		t.Fatalf("staged=%+v", got)
 	}
+	if _, err := os.Stat(filepath.Join(got.Path, "release.json")); err != nil {
+		t.Fatalf("release.json: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(got.Path, "release.json.sig")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("release.json.sig exists or cannot be inspected: %v", err)
+	}
 	if info, err := os.Stat(filepath.Join(got.Path, "bin", "tpod")); err != nil || info.Mode().Perm() != 0o755 {
 		t.Fatalf("binary mode=%v err=%v", info.Mode(), err)
 	}
@@ -202,7 +207,7 @@ func TestRepairAndActivateReplacesPartialSameVersionAndRestoresItOnFailure(t *te
 		t.Fatal(err)
 	}
 	if _, err := stager.RepairAndActivate(context.Background(), release, Platform{OS: "linux", Arch: "amd64"}, launchers); err == nil {
-		t.Fatal("repair accepted a corrupt signed asset")
+		t.Fatal("repair accepted a corrupt release asset")
 	}
 	if got, err := os.ReadFile(filepath.Join(partial, "bin", "tpod")); err != nil || string(got) != "broken" {
 		t.Fatalf("partial release was not restored: body=%q err=%v", got, err)
@@ -653,8 +658,7 @@ func TestStagerRejectsEveryInstalledReleaseTamperWithoutChangingCurrent(t *testi
 			flipInstalledByte(t, filepath.Join(root, "catalog", "resources.json"), 0o444)
 		}},
 		{"stage record", func(t *testing.T, root string) { flipInstalledByte(t, filepath.Join(root, ".stage.json"), 0o444) }},
-		{"signed manifest", func(t *testing.T, root string) { flipInstalledByte(t, filepath.Join(root, "release.json"), 0o444) }},
-		{"signature", func(t *testing.T, root string) { flipInstalledByte(t, filepath.Join(root, "release.json.sig"), 0o444) }},
+		{"manifest", func(t *testing.T, root string) { flipInstalledByte(t, filepath.Join(root, "release.json"), 0o444) }},
 		{"extracted source", func(t *testing.T, root string) { flipInstalledByte(t, filepath.Join(root, "source", "ok"), 0o444) }},
 		{"extra file", func(t *testing.T, root string) {
 			if err := os.Chmod(root, 0o755); err != nil {
@@ -869,7 +873,7 @@ func stagedFixture(t *testing.T, root string, platform Platform, archive []byte)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	m := validManifest(t)
+	m := stableManifest(t)
 	files := map[string]string{}
 	for i := range m.Assets {
 		var body []byte
@@ -923,8 +927,6 @@ func bindFixtureFile(t *testing.T, r *VerifiedRelease, name string) {
 	}
 }
 func testStager(stager Stager) Stager {
-	private := ed25519.NewKeyFromSeed(testSeed)
-	stager.Verifier = testVerifier(private.Public().(ed25519.PublicKey))
 	if stager.ExpectedPlatform.OS == "" {
 		stager.ExpectedPlatform = Platform{OS: "linux", Arch: "amd64"}
 	}
@@ -933,16 +935,13 @@ func testStager(stager Stager) Stager {
 func resignFixture(t *testing.T, release *VerifiedRelease) {
 	t.Helper()
 	release.Manifest.verified = false
-	private := ed25519.NewKeyFromSeed(testSeed)
 	data := encodeManifest(t, release.Manifest)
-	signature := signManifest(t, "root", private, data)
-	verified, err := testVerifier(private.Public().(ed25519.PublicKey)).VerifyManifest(data, signature)
+	verified, err := ParseManifest(data)
 	if err != nil {
 		t.Fatal(err)
 	}
 	release.Manifest = verified
 	release.manifestData = data
-	release.signatureData = signature
 	if err := release.sealManifest(); err != nil {
 		t.Fatal(err)
 	}

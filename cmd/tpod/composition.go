@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"net/http"
@@ -223,21 +222,13 @@ func noninteractivePrivilegeWithRunner(ctx context.Context, runner privilegeRunn
 	return nil
 }
 
-func configureSignedUpdate(deps *cli.Dependencies, layout paths.Layout, chezmoiClient chezmoi.Client, compiled map[string]ed25519.PublicKey) {
+func configureStableUpdate(deps *cli.Dependencies, layout paths.Layout, chezmoiClient chezmoi.Client) {
 	build := func(output bool) (updatepkg.Dependencies, error) {
 		store, err := state.Open(layout.StateDir)
 		if err != nil {
 			return updatepkg.Dependencies{}, err
 		}
-		proofs, err := store.TrustProofs()
-		if err != nil {
-			return updatepkg.Dependencies{}, err
-		}
-		if _, err := release.VerifyProofChain(compiled, proofs); err != nil {
-			return updatepkg.Dependencies{}, err
-		}
-		verifier := release.Verifier{CompiledKeys: compiled, PersistedProofs: proofs}
-		stager := release.Stager{ReleaseDir: layout.ReleaseDir, ActiveRelease: layout.ActiveRelease, Verifier: verifier, ExpectedPlatform: release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}}
+		stager := release.Stager{ReleaseDir: layout.ReleaseDir, ActiveRelease: layout.ActiveRelease, ExpectedPlatform: release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}}
 		configuredPlanner, err := productionPlanner(layout, store, chezmoiClient)
 		if err != nil {
 			return updatepkg.Dependencies{}, err
@@ -286,7 +277,7 @@ func configureSignedUpdate(deps *cli.Dependencies, layout paths.Layout, chezmoiC
 			return updatepkg.Inputs{Catalog: bound, Config: normalized, Historical: historical, Profile: profile}, nil
 		}
 		result := updatepkg.Dependencies{
-			Releases: release.Client{HTTP: &http.Client{Timeout: 30 * time.Second}, CacheDir: layout.ReleaseCacheDir, Verifier: verifier}, Stager: stager, Platform: release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}, Refreshers: refreshers,
+			Releases: release.Client{HTTP: &http.Client{Timeout: 30 * time.Second}, Endpoint: release.DefaultLatestReleaseEndpoint, CacheDir: layout.ReleaseCacheDir}, Stager: stager, Platform: release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}, Refreshers: refreshers,
 			Planner: configuredPlanner, Engine: &reconcile.Engine{Registry: registry, State: store, LockDir: layout.StateDir, Privilege: sudoPrivilege{}, EffectiveUID: os.Geteuid}, State: store, LockDir: layout.StateDir,
 			LoadStaged: load, CurrentVersion: stager.CurrentVersion,
 			VerifyActive: func(ctx context.Context, version string) (release.Staged, release.VerifiedRelease, updatepkg.Inputs, error) {
@@ -313,21 +304,7 @@ func configureSignedUpdate(deps *cli.Dependencies, layout paths.Layout, chezmoiC
 				}
 				return nil
 			}, WriteConfig: func(cfg model.Config) error { return config.WriteAtomic(layout.ConfigFile, cfg) },
-			BuildTrusted: func(value release.VerifiedRelease) (release.PersistedTrust, error) {
-				current, err := store.TrustProofs()
-				if err != nil {
-					return release.PersistedTrust{}, err
-				}
-				return release.BuildPersistedTrust(compiled, current, value)
-			}, ReleaseDigest: func(value release.VerifiedRelease) (string, error) { return value.Manifest.Digest() }, PersistTrusted: func(trust release.PersistedTrust) error {
-				return store.PutTrustProofs(trust.Proofs)
-			}, LoadTrusted: func() (release.PersistedTrust, error) {
-				current, err := store.TrustProofs()
-				if err != nil {
-					return release.PersistedTrust{}, err
-				}
-				return release.VerifyProofChain(compiled, current)
-			},
+			ReleaseDigest: func(value release.VerifiedRelease) (string, error) { return value.Manifest.Digest() },
 			Exec: func(path string, args, environment []string) error {
 				return syscall.Exec(path, append([]string{path}, args...), environment)
 			}, Environment: os.Environ(), HandoffToken: func() string { return os.Getenv("TPOD_UPDATE_LOCK_NONCE") },
@@ -390,18 +367,10 @@ func productionHistoricalCatalogs(store *state.Store, stager release.Stager, rel
 	return result, nil
 }
 
-func productionActiveCatalog(layout paths.Layout, compiled map[string]ed25519.PublicKey) (catalog.Verified, error) {
-	proofs, err := state.ReadTrustProofs(layout.StateDir)
-	if err != nil {
-		return catalog.Verified{}, err
-	}
-	if _, err := release.VerifyProofChain(compiled, proofs); err != nil {
-		return catalog.Verified{}, err
-	}
+func productionActiveCatalog(layout paths.Layout) (catalog.Verified, error) {
 	stager := release.Stager{
 		ReleaseDir:       layout.ReleaseDir,
 		ActiveRelease:    layout.ActiveRelease,
-		Verifier:         release.Verifier{CompiledKeys: compiled, PersistedProofs: proofs},
 		ExpectedPlatform: release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH},
 	}
 	version, err := stager.CurrentVersion()
@@ -436,7 +405,7 @@ func validateActiveCatalogRelease(bound catalog.Verified, version string) error 
 	return nil
 }
 
-func productionSelfCheck(layout paths.Layout, compiled map[string]ed25519.PublicKey, releaseDir, expectedDigest string) error {
+func productionSelfCheck(layout paths.Layout, releaseDir, expectedDigest string) error {
 	executable, err := os.Executable()
 	if err != nil {
 		return err
@@ -450,15 +419,7 @@ func productionSelfCheck(layout paths.Layout, compiled map[string]ed25519.Public
 	if err != nil || filepath.Clean(releaseDir) != derived {
 		return errors.New("self-check release directory differs from executable release root")
 	}
-	proofs, err := state.ReadTrustProofs(layout.StateDir)
-	if err != nil {
-		return fmt.Errorf("self-check trust proofs: %w", err)
-	}
-	if _, err := release.VerifyProofChain(compiled, proofs); err != nil {
-		return fmt.Errorf("self-check trust proof chain: %w", err)
-	}
-	verifier := release.Verifier{CompiledKeys: compiled, PersistedProofs: proofs}
-	stager := release.Stager{ReleaseDir: filepath.Dir(releaseDir), ActiveRelease: layout.ActiveRelease, Verifier: verifier, ExpectedPlatform: release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}}
+	stager := release.Stager{ReleaseDir: filepath.Dir(releaseDir), ActiveRelease: layout.ActiveRelease, ExpectedPlatform: release.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}}
 	staged, verified, err := stager.Load(filepath.Base(releaseDir))
 	if err != nil {
 		return fmt.Errorf("self-check release: %w", err)

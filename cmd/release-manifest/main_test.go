@@ -54,8 +54,8 @@ func TestRunWritesDeterministicManifest(t *testing.T) {
 	if manifest.Version != "1.2.3" || manifest.CatalogSchema != 1 || manifest.StateSchema != 1 {
 		t.Fatalf("unexpected manifest metadata: %+v", manifest)
 	}
-	if manifest.TrustedKeys == nil || len(manifest.TrustedKeys) != 0 {
-		t.Fatalf("trustedKeys must be an empty array: %#v", manifest.TrustedKeys)
+	if strings.Contains(output.String(), `"trustedKeys"`) {
+		t.Fatalf("manifest contains trustedKeys:\n%s", output.String())
 	}
 	wantPlatforms := []string{"darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64"}
 	for index, want := range wantPlatforms {

@@ -2,7 +2,6 @@
   "version": "1.0.0",
   "catalogSchema": 1,
   "stateSchema": 1,
-  "trustedKeys": [],
   "assets": [
     {
       "kind": "binary",

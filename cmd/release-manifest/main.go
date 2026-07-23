@@ -131,7 +131,6 @@ func run(args []string, output io.Writer) error {
 		Version:       *version,
 		CatalogSchema: *catalogSchema,
 		StateSchema:   *stateSchema,
-		TrustedKeys:   []release.TrustedKey{},
 		Assets:        manifestAssets,
 	}
 	encoder := json.NewEncoder(output)
