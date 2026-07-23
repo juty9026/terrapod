@@ -77,10 +77,97 @@ func TestVerifierAuthorizesOnlyAdditiveTrustedKeys(t *testing.T) {
 		t.Fatalf("trusted keys=%+v err=%v", got.TrustedKeys, err)
 	}
 
-	manifest.TrustedKeys = []TrustedKey{{ID: "root", PublicKey: base64.StdEncoding.EncodeToString(next.Public().(ed25519.PublicKey))}}
+	manifest.TrustedKeys = []TrustedKey{{ID: "root", PublicKey: base64.StdEncoding.EncodeToString(root.Public().(ed25519.PublicKey))}}
 	data = encodeManifest(t, manifest)
-	if _, err := testVerifier(root.Public().(ed25519.PublicKey)).VerifyManifest(data, signManifest(t, "root", root, data)); err == nil || !strings.Contains(err.Error(), "replace trusted key") {
-		t.Fatalf("key replacement err=%v", err)
+	if _, err := testVerifier(root.Public().(ed25519.PublicKey)).VerifyManifest(data, signManifest(t, "root", root, data)); err == nil || !strings.Contains(err.Error(), "already trusted") {
+		t.Fatalf("existing key addition err=%v", err)
+	}
+}
+
+func TestVerifierTrustAfterRetainsCompiledAndPersistedKeys(t *testing.T) {
+	root := ed25519.NewKeyFromSeed(testSeed)
+	persisted := ed25519.NewKeyFromSeed([]byte("abcdef0123456789abcdef0123456789"))
+	addition := ed25519.NewKeyFromSeed([]byte("fedcba9876543210fedcba9876543210"))
+	verifier := Verifier{
+		CompiledKeys:  map[string]ed25519.PublicKey{"root": root.Public().(ed25519.PublicKey)},
+		PersistedKeys: map[string]ed25519.PublicKey{"persisted": persisted.Public().(ed25519.PublicKey)},
+	}
+	manifest := validManifest(t)
+	manifest.TrustedKeys = []TrustedKey{{ID: "next", PublicKey: base64.StdEncoding.EncodeToString(addition.Public().(ed25519.PublicKey))}}
+	data := encodeManifest(t, manifest)
+	verified, err := verifier.VerifyManifest(data, signManifest(t, "persisted", persisted, data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	trust, err := verifier.TrustAfter(verified)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"root", "persisted", "next"} {
+		if _, ok := trust[id]; !ok {
+			t.Fatalf("TrustAfter omitted %q: %v", id, trust)
+		}
+	}
+	delete(trust, "root")
+	again, err := verifier.TrustAfter(verified)
+	if err != nil || again["root"] == nil {
+		t.Fatalf("TrustAfter exposed mutable trust state: keys=%v err=%v", again, err)
+	}
+	if _, err := verifier.TrustAfter(validManifest(t)); err == nil || !strings.Contains(err.Error(), "not verified") {
+		t.Fatalf("unverified manifest TrustAfter err=%v", err)
+	}
+}
+
+func TestVerifierRejectsAdditionForPersistedKeyID(t *testing.T) {
+	root := ed25519.NewKeyFromSeed(testSeed)
+	persisted := ed25519.NewKeyFromSeed([]byte("abcdef0123456789abcdef0123456789"))
+	verifier := Verifier{
+		CompiledKeys:  map[string]ed25519.PublicKey{"root": root.Public().(ed25519.PublicKey)},
+		PersistedKeys: map[string]ed25519.PublicKey{"persisted": persisted.Public().(ed25519.PublicKey)},
+	}
+	manifest := validManifest(t)
+	manifest.TrustedKeys = []TrustedKey{{ID: "persisted", PublicKey: base64.StdEncoding.EncodeToString(persisted.Public().(ed25519.PublicKey))}}
+	data := encodeManifest(t, manifest)
+	if _, err := verifier.VerifyManifest(data, signManifest(t, "root", root, data)); err == nil || !strings.Contains(err.Error(), "already trusted") {
+		t.Fatalf("persisted key addition err=%v", err)
+	}
+}
+
+func TestVerifierRequiresAndProtectsCompiledTrust(t *testing.T) {
+	root := ed25519.NewKeyFromSeed(testSeed)
+	other := ed25519.NewKeyFromSeed([]byte("abcdef0123456789abcdef0123456789"))
+	data := validManifestJSON(t)
+
+	withoutRoot := Verifier{PersistedKeys: map[string]ed25519.PublicKey{"persisted": root.Public().(ed25519.PublicKey)}}
+	if _, err := withoutRoot.VerifyManifest(data, signManifest(t, "persisted", root, data)); err == nil || !strings.Contains(err.Error(), "compiled trust root") {
+		t.Fatalf("missing compiled root err=%v", err)
+	}
+	conflict := Verifier{
+		CompiledKeys:  map[string]ed25519.PublicKey{"root": root.Public().(ed25519.PublicKey)},
+		PersistedKeys: map[string]ed25519.PublicKey{"root": other.Public().(ed25519.PublicKey)},
+	}
+	if _, err := conflict.VerifyManifest(data, signManifest(t, "root", root, data)); err == nil || !strings.Contains(err.Error(), "conflicting trusted key") {
+		t.Fatalf("compiled/persisted conflict err=%v", err)
+	}
+}
+
+func TestVerifierSchemaRangeCannotWidenCompiledCompatibility(t *testing.T) {
+	root := ed25519.NewKeyFromSeed(testSeed)
+	manifest := validManifest(t)
+	manifest.CatalogSchema = CompiledMaxCatalogSchema + 1
+	manifest.StateSchema = CompiledMaxStateSchema + 1
+	data := encodeManifest(t, manifest)
+	verifier := Verifier{
+		CompiledKeys: map[string]ed25519.PublicKey{"root": root.Public().(ed25519.PublicKey)},
+		MinCatalog:   0, MaxCatalog: CompiledMaxCatalogSchema + 1,
+		MinState: 0, MaxState: CompiledMaxStateSchema + 1,
+	}
+	if _, err := verifier.VerifyManifest(data, signManifest(t, "root", root, data)); err == nil || !strings.Contains(err.Error(), "catalog schema") {
+		t.Fatalf("widened schema range err=%v", err)
+	}
+	minimum, maximum, err := effectiveSchemaRange(2, 3, 1, 0, "test")
+	if err != nil || minimum != 2 || maximum != 3 {
+		t.Fatalf("lower requested minimum widened compiled range: %d..%d err=%v", minimum, maximum, err)
 	}
 }
 
@@ -141,7 +228,7 @@ func TestVerifierRejectsUnknownDuplicateAndTrailingJSON(t *testing.T) {
 }
 
 func testVerifier(root ed25519.PublicKey) Verifier {
-	return Verifier{Keys: map[string]ed25519.PublicKey{"root": root}, MinCatalog: 1, MaxCatalog: 1, MinState: 1, MaxState: 1}
+	return Verifier{CompiledKeys: map[string]ed25519.PublicKey{"root": root}, MinCatalog: 1, MaxCatalog: 1, MinState: 1, MaxState: 1}
 }
 
 func validManifestJSON(t *testing.T) []byte {

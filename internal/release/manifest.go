@@ -3,12 +3,14 @@ package release
 import (
 	"bytes"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"regexp"
+	"sort"
 )
 
 const (
@@ -48,10 +50,14 @@ type Manifest struct {
 	StateSchema   int          `json:"stateSchema"`
 	TrustedKeys   []TrustedKey `json:"trustedKeys"`
 	Assets        []Asset      `json:"assets"`
+	verified      bool
+	trustBefore   [sha256.Size]byte
+	trustAfter    map[string]ed25519.PublicKey
 }
 
 type Verifier struct {
-	Keys                                       map[string]ed25519.PublicKey
+	CompiledKeys                               map[string]ed25519.PublicKey
+	PersistedKeys                              map[string]ed25519.PublicKey
 	MinCatalog, MaxCatalog, MinState, MaxState int
 }
 
@@ -68,14 +74,16 @@ func (v Verifier) VerifyManifest(data, signature []byte) (Manifest, error) {
 	if len(signature) == 0 || len(signature) > MaxManifestSize {
 		return Manifest{}, fmt.Errorf("release signature size is outside 1..%d bytes", MaxManifestSize)
 	}
-	if len(v.Keys) == 0 {
-		return Manifest{}, errors.New("release verifier has no trusted keys")
-	}
-	v = v.withCompiledSchemaDefaults()
-	if err := validateSchemaRange(v.MinCatalog, v.MaxCatalog, "catalog"); err != nil {
+	effectiveTrust, err := v.effectiveTrust()
+	if err != nil {
 		return Manifest{}, err
 	}
-	if err := validateSchemaRange(v.MinState, v.MaxState, "state"); err != nil {
+	v.MinCatalog, v.MaxCatalog, err = effectiveSchemaRange(CompiledMinCatalogSchema, CompiledMaxCatalogSchema, v.MinCatalog, v.MaxCatalog, "catalog")
+	if err != nil {
+		return Manifest{}, err
+	}
+	v.MinState, v.MaxState, err = effectiveSchemaRange(CompiledMinStateSchema, CompiledMaxStateSchema, v.MinState, v.MaxState, "state")
+	if err != nil {
 		return Manifest{}, err
 	}
 
@@ -86,7 +94,7 @@ func (v Verifier) VerifyManifest(data, signature []byte) (Manifest, error) {
 	if envelope.Algorithm != "ed25519" {
 		return Manifest{}, fmt.Errorf("unsupported signature algorithm %q", envelope.Algorithm)
 	}
-	publicKey, ok := v.Keys[envelope.KeyID]
+	publicKey, ok := effectiveTrust[envelope.KeyID]
 	if !ok {
 		return Manifest{}, fmt.Errorf("unknown signature key ID %q", envelope.KeyID)
 	}
@@ -111,20 +119,31 @@ func (v Verifier) VerifyManifest(data, signature []byte) (Manifest, error) {
 	if err := decodeStrict(data, &manifest); err != nil {
 		return Manifest{}, fmt.Errorf("decode release manifest: %w", err)
 	}
-	if err := v.validate(manifest); err != nil {
+	if err := v.validate(manifest, effectiveTrust); err != nil {
 		return Manifest{}, fmt.Errorf("validate release manifest: %w", err)
+	}
+	manifest.verified = true
+	manifest.trustBefore = trustDigest(effectiveTrust)
+	manifest.trustAfter = cloneKeys(effectiveTrust)
+	for _, addition := range manifest.TrustedKeys {
+		decoded, _ := base64.StdEncoding.Strict().DecodeString(addition.PublicKey)
+		manifest.trustAfter[addition.ID] = ed25519.PublicKey(append([]byte(nil), decoded...))
 	}
 	return manifest, nil
 }
 
-func (v Verifier) withCompiledSchemaDefaults() Verifier {
-	if v.MinCatalog == 0 && v.MaxCatalog == 0 {
-		v.MinCatalog, v.MaxCatalog = CompiledMinCatalogSchema, CompiledMaxCatalogSchema
+func (v Verifier) TrustAfter(manifest Manifest) (map[string]ed25519.PublicKey, error) {
+	if !manifest.verified || manifest.trustAfter == nil {
+		return nil, errors.New("release manifest was not verified")
 	}
-	if v.MinState == 0 && v.MaxState == 0 {
-		v.MinState, v.MaxState = CompiledMinStateSchema, CompiledMaxStateSchema
+	effectiveTrust, err := v.effectiveTrust()
+	if err != nil {
+		return nil, err
 	}
-	return v
+	if trustDigest(effectiveTrust) != manifest.trustBefore {
+		return nil, errors.New("release manifest was verified by a different trust set")
+	}
+	return cloneKeys(manifest.trustAfter), nil
 }
 
 func (m Manifest) BinaryAsset(goos, goarch string) (Asset, error) {
@@ -162,7 +181,7 @@ func (m Manifest) singletonAsset(kind string) (Asset, error) {
 	return found, nil
 }
 
-func (v Verifier) validate(manifest Manifest) error {
+func (v Verifier) validate(manifest Manifest, effectiveTrust map[string]ed25519.PublicKey) error {
 	if !stableSemVerPattern.MatchString(manifest.Version) {
 		return fmt.Errorf("version %q is not stable SemVer", manifest.Version)
 	}
@@ -175,7 +194,7 @@ func (v Verifier) validate(manifest Manifest) error {
 	if manifest.TrustedKeys == nil {
 		return errors.New("trustedKeys is required")
 	}
-	if err := v.validateTrustedKeys(manifest.TrustedKeys); err != nil {
+	if err := validateTrustedKeyAdditions(manifest.TrustedKeys, effectiveTrust); err != nil {
 		return err
 	}
 
@@ -244,7 +263,7 @@ func (v Verifier) validate(manifest Manifest) error {
 	return nil
 }
 
-func (v Verifier) validateTrustedKeys(keys []TrustedKey) error {
+func validateTrustedKeyAdditions(keys []TrustedKey, effectiveTrust map[string]ed25519.PublicKey) error {
 	seen := make(map[string]struct{}, len(keys))
 	for _, key := range keys {
 		if !keyIDPattern.MatchString(key.ID) {
@@ -254,6 +273,9 @@ func (v Verifier) validateTrustedKeys(keys []TrustedKey) error {
 			return fmt.Errorf("duplicate trusted key ID %q", key.ID)
 		}
 		seen[key.ID] = struct{}{}
+		if _, exists := effectiveTrust[key.ID]; exists {
+			return fmt.Errorf("trusted key ID %q is already trusted", key.ID)
+		}
 		decoded, err := base64.StdEncoding.Strict().DecodeString(key.PublicKey)
 		if err != nil || base64.StdEncoding.EncodeToString(decoded) != key.PublicKey {
 			return fmt.Errorf("trusted key %q has invalid public key encoding", key.ID)
@@ -261,18 +283,86 @@ func (v Verifier) validateTrustedKeys(keys []TrustedKey) error {
 		if len(decoded) != ed25519.PublicKeySize {
 			return fmt.Errorf("trusted key %q has length %d, want %d", key.ID, len(decoded), ed25519.PublicKeySize)
 		}
-		if current, exists := v.Keys[key.ID]; exists && !bytes.Equal(current, decoded) {
-			return fmt.Errorf("manifest cannot replace trusted key %q", key.ID)
-		}
 	}
 	return nil
 }
 
-func validateSchemaRange(minimum, maximum int, name string) error {
-	if minimum <= 0 || maximum < minimum {
-		return fmt.Errorf("invalid %s schema range %d..%d", name, minimum, maximum)
+func (v Verifier) effectiveTrust() (map[string]ed25519.PublicKey, error) {
+	if len(v.CompiledKeys) == 0 {
+		return nil, errors.New("release verifier requires at least one compiled trust root")
+	}
+	trusted := make(map[string]ed25519.PublicKey, len(v.CompiledKeys)+len(v.PersistedKeys))
+	for id, key := range v.CompiledKeys {
+		if err := validateVerifierKey(id, key); err != nil {
+			return nil, fmt.Errorf("compiled trusted key: %w", err)
+		}
+		trusted[id] = append(ed25519.PublicKey(nil), key...)
+	}
+	for id, key := range v.PersistedKeys {
+		if err := validateVerifierKey(id, key); err != nil {
+			return nil, fmt.Errorf("persisted trusted key: %w", err)
+		}
+		if current, exists := trusted[id]; exists && !bytes.Equal(current, key) {
+			return nil, fmt.Errorf("conflicting trusted key material for ID %q", id)
+		}
+		trusted[id] = append(ed25519.PublicKey(nil), key...)
+	}
+	return trusted, nil
+}
+
+func validateVerifierKey(id string, key ed25519.PublicKey) error {
+	if !keyIDPattern.MatchString(id) {
+		return fmt.Errorf("invalid key ID %q", id)
+	}
+	if len(key) != ed25519.PublicKeySize {
+		return fmt.Errorf("key %q has length %d, want %d", id, len(key), ed25519.PublicKeySize)
 	}
 	return nil
+}
+
+func effectiveSchemaRange(compiledMin, compiledMax, requestedMin, requestedMax int, name string) (int, int, error) {
+	if compiledMin <= 0 || compiledMax < compiledMin {
+		return 0, 0, fmt.Errorf("invalid compiled %s schema range %d..%d", name, compiledMin, compiledMax)
+	}
+	if requestedMin < 0 || requestedMax < 0 || (requestedMin != 0 && requestedMax != 0 && requestedMax < requestedMin) {
+		return 0, 0, fmt.Errorf("invalid requested %s schema range %d..%d", name, requestedMin, requestedMax)
+	}
+	minimum, maximum := compiledMin, compiledMax
+	if requestedMin > minimum {
+		minimum = requestedMin
+	}
+	if requestedMax != 0 && requestedMax < maximum {
+		maximum = requestedMax
+	}
+	if maximum < minimum {
+		return 0, 0, fmt.Errorf("requested %s schema range has no compiled-compatible versions", name)
+	}
+	return minimum, maximum, nil
+}
+
+func trustDigest(keys map[string]ed25519.PublicKey) [sha256.Size]byte {
+	ids := make([]string, 0, len(keys))
+	for id := range keys {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	hash := sha256.New()
+	for _, id := range ids {
+		hash.Write([]byte(id))
+		hash.Write([]byte{0})
+		hash.Write(keys[id])
+	}
+	var digest [sha256.Size]byte
+	copy(digest[:], hash.Sum(nil))
+	return digest
+}
+
+func cloneKeys(keys map[string]ed25519.PublicKey) map[string]ed25519.PublicKey {
+	cloned := make(map[string]ed25519.PublicKey, len(keys))
+	for id, key := range keys {
+		cloned[id] = append(ed25519.PublicKey(nil), key...)
+	}
+	return cloned
 }
 
 func supportedPlatform(goos, goarch string) bool {
