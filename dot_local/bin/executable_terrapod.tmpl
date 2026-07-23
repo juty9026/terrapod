@@ -1,0 +1,33 @@
+{{- warnf "Terrapod manager transition is ready.\nRun `tpod update` once more to complete it automatically." -}}
+#!/bin/sh
+set -eu
+
+installer_url="https://github.com/juty9026/terrapod/releases/download/v1.0.0/install.sh"
+
+fatal() {
+  printf '%s\n' "terrapod transition: $*" >&2
+  exit 1
+}
+
+[ "${TPOD_LEGACY_TRANSITION_ACTIVE:-}" != "1" ] ||
+  fatal "migration did not replace the legacy transition bridge"
+[ -x /usr/bin/id ] || fatal "trusted /usr/bin/id is unavailable"
+[ "$(/usr/bin/id -u)" -ne 0 ] || fatal "refusing to run as root"
+
+work="$(mktemp -d "${TMPDIR:-/tmp}/terrapod-transition.XXXXXX")" ||
+  fatal "failed to create a temporary directory"
+trap 'rm -rf "$work"' EXIT HUP INT TERM
+umask 077
+installer="$work/install.sh"
+curl_bin="$(command -v curl 2>/dev/null || true)"
+[ -n "$curl_bin" ] || fatal "curl is required"
+"$curl_bin" -fsSL "$installer_url" -o "$installer" ||
+  fatal "v1.0.0 is not available; retry this command after the release is published"
+chmod 0700 "$installer" || fatal "failed to protect the downloaded installer"
+
+TPOD_LEGACY_TRANSITION_ACTIVE=1 sh "$installer" --migrate ||
+  fatal "manager migration did not complete; retry the same tpod command"
+
+launcher="$HOME/.local/bin/tpod"
+[ -x "$launcher" ] || fatal "migration did not install the tpod launcher"
+TPOD_LEGACY_TRANSITION_ACTIVE=1 exec "$launcher" "$@"

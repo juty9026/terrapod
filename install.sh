@@ -1574,6 +1574,7 @@ install_manager() {
       printf '%s\n' "Terrapod manager installation complete."
       ;;
     migrate)
+      # --migrate is an internal recovery primitive for the legacy transition bridge.
       repair_management_core --stage-only
       tpod_bin="$releases/$release_version/bin/tpod"
       [ -x "$tpod_bin" ] || fatal "staged Terrapod manager is unavailable: $tpod_bin"

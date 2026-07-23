@@ -10,6 +10,12 @@ docs/**
 .github/**
 tests/**
 
+{{ if hasKey . "terrapod" }}
+# The Go manager installs and owns its stable launcher pair.
+.local/bin/terrapod
+.local/bin/tpod
+{{ end }}
+
 # cmux settings are intentionally unmanaged; existing local settings are left untouched.
 .config/cmux
 .config/cmux/**

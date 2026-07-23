@@ -24,6 +24,8 @@ run_scenario() {
 
 grep -F 'migrate-current' "$repo_root/install.sh" >/dev/null ||
   fail "installer must expose explicit --migrate dispatch"
+grep -F 'internal recovery primitive' "$repo_root/install.sh" >/dev/null ||
+  fail "installer must document --migrate as an internal recovery primitive"
 grep -F 'command == "migrate-current"' "$repo_root/internal/cli/app.go" >/dev/null ||
   fail "manager must expose the hidden migration command"
 grep -F 'migration-current.json' "$repo_root/cmd/tpod/migration.go" >/dev/null ||
