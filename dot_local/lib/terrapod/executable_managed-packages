@@ -341,7 +341,7 @@ scan_vendor() {
   claude_target="$(readlink "$claude_path" 2>/dev/null || true)"
   case "$claude_target" in
     *"/.local/share/claude/"*|../share/claude/*)
-      printf '%s\n' "claude|user|official-uninstaller" >"$output_dir/vendor"
+      printf '%s\n' "claude|user|verified-native-payload" >"$output_dir/vendor"
       ;;
   esac
 }
@@ -507,8 +507,8 @@ plan_generic_alternates() {
         printf 'manual|%s|snap|%s|Snap removal is not an approved sudo action\n' "$package_id" "$identity"
         ;;
       vendor:user)
-        if [ "$package_id" = claude ] && [ "$extra" = official-uninstaller ]; then
-          printf '%s\n' "remove|claude|vendor|claude|claude uninstall"
+        if [ "$package_id" = claude ] && [ "$extra" = verified-native-payload ]; then
+          printf '%s\n' "remove|claude|vendor|claude|rm -f \"\$HOME/.local/bin/claude\" && rm -rf \"\$HOME/.local/share/claude\""
         else
           printf 'manual|%s|vendor|%s|official uninstaller or ownership signature is unresolved\n' "$package_id" "$identity"
         fi
