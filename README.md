@@ -87,6 +87,7 @@ Terrapod applies this repository's declared dotfiles state. It does not own the 
 
 - Broad Homebrew or APT upgrades
 - mise-managed tool and runtime upgrades
+- Protected OS prerequisites, system runtimes, shared installs, and package-manager state
 - Machine-local secrets
 - Untracked personal overrides
 
@@ -106,8 +107,9 @@ tpod update
 terrapod status
 ```
 
-`terrapod update` refreshes the Terrapod Source Repository through `chezmoi update --exclude scripts`.
-It does not run Homebrew, APT, or mise upgrades.
+`terrapod update` refreshes the Terrapod Source Repository and installed command
+through `chezmoi update --exclude scripts`, then hands off to the refreshed
+`~/.local/bin/tpod apply`. It does not run broad Homebrew, APT, or mise upgrades.
 
 Direct chezmoi use remains an advanced escape hatch.
 
@@ -116,11 +118,11 @@ terrapod chezmoi -- cd
 terrapod chezmoi -- status
 ```
 
-`tpod status` is a human-readable snapshot. It reports missing or shadowed
-mandatory Homebrew commands but still exits successfully. `tpod doctor` is the
-readiness gate: it exits non-zero when a mandatory command is missing, resolves
-outside the standard Homebrew prefix, or another enabled requirement or install
-warning remains unresolved.
+`tpod status` is a fast human-readable snapshot of canonical installation,
+primary executables, and pending migration state. `tpod doctor` performs a full
+read-only Managed Package scan and is the readiness gate: it exits non-zero when
+a canonical package is missing, a legacy executable is primary on the managed
+default PATH, or another enabled requirement or install warning remains unresolved.
 
 ## Platform Details
 
@@ -220,8 +222,12 @@ Stack on both profiles. APT owns only Ubuntu system and bootstrap prerequisites.
 mise owns only the Development Runtime Stack.
 
 `tpod apply` restores missing Homebrew packages with
-`HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade`; it never performs an
-automatic update, upgrade, or removal. Existing mise, APT, and vendor-installed payloads are not removed automatically.
+`HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade`; it never performs a
+version upgrade. After canonical installation, it deep-scans exact registry
+identities, renders safe legacy payload removals together, and asks once with
+`Proceed with removing these legacy package installations? [y/N]`. Declined,
+non-interactive, failed, protected, shared, and unresolved actions remain
+warnings and do not make apply fail.
 
 Use OS package managers directly only when intentionally updating OS-managed packages.
 
@@ -312,10 +318,17 @@ because desktop casks can affect shared applications outside one user's home dir
 
 Opting out of an optional stack excludes its files from chezmoi management; it does not remove files already present on a machine.
 
-Terrapod preserves existing mise-, APT-, and vendor-installed payloads. When a
-legacy command shadows a mandatory Homebrew command, `tpod status` reports the
-ownership warning and `tpod doctor` fails with manual cleanup guidance. Legacy
-AI CLI shadowing remains advisory. Terrapod does not remove legacy vendor-installed AI CLI binaries.
+Terrapod migrates only exact registry matches with verified safe ownership.
+Canonical mise runtime versions and project-local selections are preserved.
+APT requires manual-install state and a no-cascade simulation; protected
+prerequisites, shared/root-owned installs, nonstandard Homebrew prefixes, and
+unknown PATH copies remain manual actions. Homebrew Cask adoption is used for
+matching existing app artifacts; adoption failures stay manual and app bundles
+are never moved to Trash.
+
+Files in `~/.config/zsh/path.d` are explicit machine-local PATH overrides. They
+remain highest priority, are never removed by reconciliation, and are reported
+as advisory while Terrapod still installs the canonical package.
 
 `enableMacosAppGroupAiApps` is deprecated and is not treated as an alias for `enableMacosAppGroupDevelopmentApps`. Run `tpod setup` or `terrapod configure <Preset>` to migrate explicitly; Terrapod does not install Zed based on the old selection.
 

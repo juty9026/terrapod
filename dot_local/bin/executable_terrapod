@@ -14,6 +14,11 @@ esac
 command_dir="${command_path%/*}"
 command_dir="$(CDPATH= cd -- "$command_dir" 2>/dev/null && pwd || printf '%s\n' ".")"
 install_warnings_lib="${TERRAPOD_INSTALL_WARNINGS_LIB:-$command_dir/../lib/terrapod/install-warnings.sh}"
+managed_packages_helper="${TERRAPOD_MANAGED_PACKAGES_HELPER:-$command_dir/../lib/terrapod/managed-packages}"
+if [ ! -e "$managed_packages_helper" ] &&
+  [ -e "$command_dir/../lib/terrapod/executable_managed-packages" ]; then
+  managed_packages_helper="$command_dir/../lib/terrapod/executable_managed-packages"
+fi
 jetendard_font_helper="${TERRAPOD_JETENDARD_FONT_HELPER:-$command_dir/../lib/terrapod/jetendard-font}"
 jetendard_settings_helper="${TERRAPOD_JETENDARD_SETTINGS_HELPER:-$command_dir/../lib/terrapod/jetendard-settings}"
 TERRAPOD_INSTALL_WARNINGS_LOADED=
@@ -141,11 +146,11 @@ show_help() {
   printf '%s\n' "  setup                                 Run interactive Terrapod Setup."
   printf '%s\n' "  configure <$preset_args>"
   printf '%s\n' "                                        Expand a Preset into concrete chezmoi data values."
-  printf '%s\n' "  status                                Explain this machine's Terrapod profile, config, stack, and tool state."
-  printf '%s\n' "  doctor                                Validate Terrapod prerequisites and report actionable guidance."
+  printf '%s\n' "  status                                Show fast canonical package, primary executable, and pending state."
+  printf '%s\n' "  doctor                                Deep-scan Managed Packages and report actionable guidance."
   printf '%s\n' "  diff                                  Run chezmoi diff with Terrapod profile and stack context."
-  printf '%s\n' "  apply                                 Run preflight checks, chezmoi apply, and post-apply validation."
-  printf '%s\n' "  update                                Run chezmoi update with Terrapod profile and config context."
+  printf '%s\n' "  apply                                 Install declared state, reconcile package sources, and verify."
+  printf '%s\n' "  update                                Refresh source, then hand off to the refreshed tpod apply."
   printf '%s\n' "  chezmoi -- <args...>                  Run raw chezmoi for advanced maintenance."
   printf '\n'
   print_section "Examples:"
@@ -1327,6 +1332,9 @@ run_status() {
   print_section_value "Profile:" "$(profile_context_label)"
   show_config_context "$config_file"
   print_homebrew_cli_ownership_status
+  if [ -x "$managed_packages_helper" ]; then
+    "$managed_packages_helper" status "$config_file" "$profile"
+  fi
   print_section "Optional stacks:"
   print_optional_setting_status "Optional Editor Stack" "$(effective_editor_stack_enabled "$config_file")" "rich Neovim configuration"
   print_stack_status "Optional AI Tool Stack" "$(effective_ai_cli_tools_enabled "$config_file")" agy claude codex
@@ -1565,6 +1573,15 @@ run_apply() {
     printf '%s\n' "terrapod: chezmoi apply failed; fix the error above, then rerun 'tpod apply'." >&2
     return 1
   fi
+
+  if [ ! -x "$managed_packages_helper" ]; then
+    fatal "Managed Package reconciliation helper is missing: $managed_packages_helper"
+  fi
+  reconciliation_mode=non-interactive
+  if [ -t 0 ]; then
+    reconciliation_mode=interactive
+  fi
+  "$managed_packages_helper" reconcile "$config_file" "$(current_profile)" "$reconciliation_mode"
 
   validation_status=0
   run_post_apply_validation || validation_status="$?"
@@ -1843,6 +1860,16 @@ run_doctor() {
 
   doctor_check_install_warnings
 
+  if [ -x "$managed_packages_helper" ]; then
+    if ! "$managed_packages_helper" doctor "$config_file" "$profile"; then
+      doctor_failed=1
+      doctor_guidance "Run tpod apply to install canonical packages and reconcile legacy sources."
+    fi
+  else
+    doctor_warn "Managed Package diagnostics helper is missing"
+    doctor_guidance "Run tpod apply to restore the Terrapod command helpers."
+  fi
+
   if [ "$doctor_guidance_printed" -eq 0 ]; then
     print_styled "36" "Guidance:"
     printf ' '
@@ -1891,6 +1918,12 @@ run_update() {
   show_update_context
   run_update_preflight "$config_file"
   run_chezmoi_command update --exclude scripts
+
+  installed_tpod="$HOME/.local/bin/tpod"
+  if [ ! -x "$installed_tpod" ]; then
+    fatal "refreshed tpod command is missing: $installed_tpod"
+  fi
+  exec "$installed_tpod" apply
 }
 
 render_settings_data() {

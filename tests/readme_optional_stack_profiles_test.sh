@@ -199,8 +199,10 @@ assert_not_contains 'mise from the official mise APT repository' \
   "README removes mise APT ownership"
 assert_contains 'HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade' \
   "README documents restore-only apply semantics"
-assert_contains 'Existing mise, APT, and vendor-installed payloads are not removed automatically.' \
-  "README documents non-destructive migration"
+assert_contains 'Terrapod migrates only exact registry matches with verified safe ownership.' \
+  "README documents safe Managed Package migration"
+assert_contains 'Proceed with removing these legacy package installations? [y/N]' \
+  "README documents the default-No migration confirmation"
 assert_contains '## What Terrapod Leaves Alone' \
   "README documents product boundaries near the top"
 assert_contains '## Daily Commands' \
@@ -235,8 +237,10 @@ assert_contains 'separate from `enableDevelopmentWorkspace`' \
   "README documents macOS Desktop App Stack separation from enableDevelopmentWorkspace"
 assert_contains 'casks can affect shared applications' \
   "README documents why macOS Desktop App Stack remains separate"
-assert_contains '`terrapod update` refreshes the Terrapod Source Repository through `chezmoi update --exclude scripts`.' \
-  "README documents Terrapod update as source maintenance"
+assert_contains '`terrapod update` refreshes the Terrapod Source Repository and installed command' \
+  "README documents Terrapod update source refresh"
+assert_contains 'then hands off to the refreshed' \
+  "README documents refreshed tpod apply handoff"
 assert_contains 'Terrapod does not run broad Homebrew, APT, or mise upgrades.' \
   "README states Terrapod does not run broad package or tool upgrades"
 assert_contains 'Use OS package managers directly only when intentionally updating OS-managed packages.' \
@@ -251,8 +255,8 @@ assert_contains 'brew upgrade --cask claude-code codex antigravity-cli' \
   "README documents targeted AI CLI upgrades"
 assert_contains '`enableMacosAppGroupAiApps` is deprecated and is not treated as an alias' \
   "README documents explicit development-apps key migration"
-assert_contains 'Terrapod does not remove legacy vendor-installed AI CLI binaries.' \
-  "README documents non-destructive legacy AI CLI migration"
+assert_contains 'unknown PATH copies remain manual actions.' \
+  "README documents conservative unresolved legacy migration"
 
 assert_contains 'Minimal VPS' \
   "README includes a minimal VPS example"

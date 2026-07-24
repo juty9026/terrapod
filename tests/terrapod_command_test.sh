@@ -713,6 +713,83 @@ write_no_gum_path "$no_gum_path" sh
 terrapod="$repo_root/dot_local/bin/executable_terrapod"
 tpod_source="$repo_root/dot_local/bin/symlink_tpod"
 install_warnings_lib="$repo_root/dot_local/lib/terrapod/install-warnings.sh"
+managed_packages_helper="$repo_root/dot_local/lib/terrapod/executable_managed-packages"
+managed_package_inventory="$tmp_dir/managed-package-inventory"
+mkdir -p "$managed_package_inventory"
+for inventory_name in homebrew-cask aqua npm apt snap cargo pipx vendor apps; do
+  : >"$managed_package_inventory/$inventory_name"
+done
+cat >"$managed_package_inventory/homebrew-formula" <<'EOF'
+bat|user
+btop|user
+chezmoi|user
+dust|user
+duf|user
+fastfetch|user
+fd|user
+fzf|user
+gh|user
+git|user
+git-delta|user
+gum|user
+lazygit|user
+lsd|user
+mise|user
+neovim|user
+ripgrep|user
+starship|user
+zellij|user
+zoxide|user
+EOF
+cat >"$managed_package_inventory/mise" <<'EOF'
+bun|user|bun@test
+node|user|node@test
+python|user|python@test
+uv|user|uv@test
+EOF
+cat >"$managed_package_inventory/homebrew-cask" <<'EOF'
+antigravity-cli|user
+claude-code|user
+codex|user
+ghostty|user
+hammerspoon|user
+karabiner-elements|user
+scroll-reverser|user
+raycast|user
+1password-cli|user
+istat-menus|user
+zed|user
+stablyai/orca/orca|user
+EOF
+cat >"$managed_package_inventory/path" <<'EOF'
+bat|/opt/homebrew/bin/bat|canonical
+btop|/opt/homebrew/bin/btop|canonical
+chezmoi|/opt/homebrew/bin/chezmoi|canonical
+dust|/opt/homebrew/bin/dust|canonical
+duf|/opt/homebrew/bin/duf|canonical
+fastfetch|/opt/homebrew/bin/fastfetch|canonical
+fd|/opt/homebrew/bin/fd|canonical
+fzf|/opt/homebrew/bin/fzf|canonical
+gh|/opt/homebrew/bin/gh|canonical
+git|/opt/homebrew/bin/git|canonical
+delta|/opt/homebrew/bin/delta|canonical
+gum|/opt/homebrew/bin/gum|canonical
+lazygit|/opt/homebrew/bin/lazygit|canonical
+lsd|/opt/homebrew/bin/lsd|canonical
+mise|/opt/homebrew/bin/mise|canonical
+neovim|/opt/homebrew/bin/nvim|canonical
+ripgrep|/opt/homebrew/bin/rg|canonical
+starship|/opt/homebrew/bin/starship|canonical
+zellij|/opt/homebrew/bin/zellij|canonical
+zoxide|/opt/homebrew/bin/zoxide|canonical
+bun|$HOME/.local/share/mise/shims/bun|canonical
+node|$HOME/.local/share/mise/shims/node|canonical
+python|$HOME/.local/share/mise/shims/python3|canonical
+uv|$HOME/.local/share/mise/shims/uv|canonical
+EOF
+TERRAPOD_MANAGED_PACKAGES_HELPER="$managed_packages_helper"
+TERRAPOD_MANAGED_PACKAGE_INVENTORY_DIR="$managed_package_inventory"
+export TERRAPOD_MANAGED_PACKAGES_HELPER TERRAPOD_MANAGED_PACKAGE_INVENTORY_DIR
 export TERRAPOD_JETENDARD_FONT_HELPER="$repo_root/dot_local/lib/terrapod/executable_jetendard-font"
 export TERRAPOD_JETENDARD_SETTINGS_HELPER="$repo_root/dot_local/lib/terrapod/executable_jetendard-settings"
 
@@ -801,6 +878,11 @@ assert_line \
   ".local/lib/terrapod/install-warnings.sh" \
   "chezmoi manages the shared install warning marker library"
 
+assert_line \
+  "$managed_targets" \
+  ".local/lib/terrapod/managed-packages" \
+  "chezmoi manages the Managed Package reconciliation helper"
+
 terrapod_target="$(
   chezmoi \
     --source "$repo_root" \
@@ -864,6 +946,9 @@ pass "shared install warning marker library source exists"
 sh -n "$install_warnings_lib" || fail "shared install warning marker library is valid POSIX shell"
 pass "shared install warning marker library is valid POSIX shell"
 
+sh -n "$managed_packages_helper" || fail "Managed Package reconciliation helper is valid POSIX shell"
+pass "Managed Package reconciliation helper is valid POSIX shell"
+
 sh -n "$terrapod" || fail "Terrapod command is valid POSIX shell"
 pass "Terrapod command is valid POSIX shell"
 
@@ -895,7 +980,7 @@ pass "install warning markers honor XDG_STATE_HOME"
 marker_categories="$(
   sh -c '. "$1"; terrapod_install_warning_categories' sh "$install_warnings_lib"
 )"
-expected_marker_categories="$(printf '%s\n' homebrew-core homebrew-desktop-apps ubuntu-bootstrap shell-integrations mise-tools optional-ai-cli-tools jetendard-font jetendard-settings)"
+expected_marker_categories="$(printf '%s\n' homebrew-core homebrew-desktop-apps ubuntu-bootstrap shell-integrations mise-tools optional-ai-cli-tools managed-package-migration jetendard-font jetendard-settings)"
 
 if [ "$marker_categories" != "$expected_marker_categories" ]; then
   printf '%s\n' "expected marker categories:" >&2
@@ -2539,6 +2624,11 @@ update_home="$tmp_dir/update-home"
 update_xdg="$tmp_dir/update-xdg"
 update_config="$update_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$update_home" "$(dirname "$update_config")"
+update_handoff_file="$tmp_dir/update-handoff.args"
+mkdir -p "$update_home/.local/bin"
+write_stub "$update_home/.local/bin/tpod" \
+  'printf "%s\n" "$*" >"'"$update_handoff_file"'"' \
+  'exit 0'
 
 cat >"$update_config" <<'TOML'
 [data]
@@ -2568,6 +2658,8 @@ assert_call_args \
   "$CHEZMOI_CALL_FILE" \
   "Terrapod update delegates source update semantics to chezmoi update" \
   update --exclude scripts
+
+assert_line "$(cat "$update_handoff_file")" "apply" "Terrapod update hands off to refreshed installed tpod apply"
 
 assert_contains \
   "$update_output" \
