@@ -14,10 +14,10 @@ esac
 command_dir="${command_path%/*}"
 command_dir="$(CDPATH= cd -- "$command_dir" 2>/dev/null && pwd || printf '%s\n' ".")"
 install_warnings_lib="${TERRAPOD_INSTALL_WARNINGS_LIB:-$command_dir/../lib/terrapod/install-warnings.sh}"
-managed_packages_helper="${TERRAPOD_MANAGED_PACKAGES_HELPER:-$command_dir/../lib/terrapod/managed-packages}"
-if [ ! -e "$managed_packages_helper" ] &&
-  [ -e "$command_dir/../lib/terrapod/executable_managed-packages" ]; then
-  managed_packages_helper="$command_dir/../lib/terrapod/executable_managed-packages"
+executable_selection_helper="${TERRAPOD_EXECUTABLE_SELECTION_HELPER:-$command_dir/../lib/terrapod/executable-selection}"
+if [ ! -e "$executable_selection_helper" ] &&
+  [ -e "$command_dir/../lib/terrapod/executable_executable-selection" ]; then
+  executable_selection_helper="$command_dir/../lib/terrapod/executable_executable-selection"
 fi
 jetendard_font_helper="${TERRAPOD_JETENDARD_FONT_HELPER:-$command_dir/../lib/terrapod/jetendard-font}"
 jetendard_settings_helper="${TERRAPOD_JETENDARD_SETTINGS_HELPER:-$command_dir/../lib/terrapod/jetendard-settings}"
@@ -146,10 +146,10 @@ show_help() {
   printf '%s\n' "  setup                                 Run interactive Terrapod Setup."
   printf '%s\n' "  configure <$preset_args>"
   printf '%s\n' "                                        Expand a Preset into concrete chezmoi data values."
-  printf '%s\n' "  status                                Show fast canonical package, primary executable, and pending state."
-  printf '%s\n' "  doctor                                Deep-scan Managed Packages and report actionable guidance."
+  printf '%s\n' "  status                                Show profile, stack, package, and executable selection state."
+  printf '%s\n' "  doctor                                Validate Terrapod readiness and report actionable guidance."
   printf '%s\n' "  diff                                  Run chezmoi diff with Terrapod profile and stack context."
-  printf '%s\n' "  apply                                 Install declared state, reconcile package sources, and verify."
+  printf '%s\n' "  apply                                 Install declared state and report executable selection advisories."
   printf '%s\n' "  update                                Refresh source, then hand off to the refreshed tpod apply."
   printf '%s\n' "  chezmoi -- <args...>                  Run raw chezmoi for advanced maintenance."
   printf '\n'
@@ -919,6 +919,24 @@ effective_ai_cli_tools_enabled() {
   fi
 }
 
+run_executable_selection() {
+  mode="$1"
+  config_file="$2"
+  profile="$3"
+
+  if [ ! -x "$executable_selection_helper" ]; then
+    return 1
+  fi
+
+  canonical_homebrew_prefix="$(standard_homebrew_prefix "$profile" 2>/dev/null || true)"
+  TERRAPOD_STANDARD_HOMEBREW_PREFIX="$canonical_homebrew_prefix" \
+    "$executable_selection_helper" \
+    "$mode" \
+    "$profile" \
+    "$(effective_ai_cli_tools_enabled "$config_file")" \
+    "$(config_data_bool "$config_file" enableMacosAppGroupLauncher)"
+}
+
 join_tools() {
   joined=
   for tool do
@@ -1007,79 +1025,12 @@ if [ "${TERRAPOD_PRINT_STANDARD_HOMEBREW_PREFIX:-}" = "1" ]; then
   exit 1
 fi
 
-path_is_under_prefix() {
-  path="$1"
-  prefix="$2"
-  case "$path" in
-    "$prefix"/*)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-homebrew_cli_ownership_problems() {
-  prefix="$(standard_homebrew_prefix "$(current_profile)" || true)"
-  if [ -z "$prefix" ]; then
-    printf '%s\n' "brew: unsupported-prefix"
-    return
-  fi
-
-  tab="$(printf '\t')"
-  managed_homebrew_cli_records | while IFS="$tab" read -r formula command; do
-    command_path="$(command -v "$command" 2>/dev/null || true)"
-    if [ -z "$command_path" ]; then
-      printf '%s: missing\n' "$command"
-    elif ! path_is_under_prefix "$command_path" "$prefix"; then
-      printf '%s: %s\n' "$command" "$command_path"
-    fi
-  done
-}
-
 homebrew_prefix() {
   if ! command -v brew >/dev/null 2>&1; then
     return 1
   fi
 
   brew --prefix 2>/dev/null
-}
-
-homebrew_prefix_is_available() {
-  prefix="$(homebrew_prefix 2>/dev/null || true)"
-  [ -n "$prefix" ]
-}
-
-shadowed_ai_cli_tools() {
-  brew_prefix="$(homebrew_prefix 2>/dev/null || true)"
-  shadowed=
-
-  if [ -z "$brew_prefix" ]; then
-    printf '\n'
-    return
-  fi
-
-  for tool in agy claude codex; do
-    command_path="$(command -v "$tool" 2>/dev/null || true)"
-    if [ -z "$command_path" ]; then
-      continue
-    fi
-
-    case "$command_path" in
-      "$brew_prefix"/*)
-        ;;
-      *)
-        if [ -n "$shadowed" ]; then
-          shadowed="$shadowed, $tool"
-        else
-          shadowed="$tool"
-        fi
-        ;;
-    esac
-  done
-
-  printf '%s\n' "$shadowed"
 }
 
 print_stack_status() {
@@ -1251,25 +1202,6 @@ print_status_warnings() {
     printed=1
   fi
 
-  if is_enabled "$(effective_ai_cli_tools_enabled "$config_file")"; then
-    missing="$(missing_tools agy claude codex)"
-    if [ -n "$missing" ]; then
-      print_warning_line "Optional AI Tool Stack is enabled but missing tools: $missing"
-      printed=1
-    fi
-
-    if command -v brew >/dev/null 2>&1 && ! homebrew_prefix_is_available; then
-      print_warning_line "Optional AI Tool Stack cannot verify Homebrew command ownership because 'brew --prefix' failed"
-      printed=1
-    fi
-
-    shadowed="$(shadowed_ai_cli_tools)"
-    if [ -n "$shadowed" ]; then
-      print_warning_line "Optional AI Tool Stack has non-Homebrew commands shadowing managed casks: $shadowed"
-      printed=1
-    fi
-  fi
-
   if [ "$printed" -eq 0 ]; then
     printf '%s: ' "Warnings"
     print_state_word "none"
@@ -1305,21 +1237,6 @@ print_install_warning_status() {
   fi
 }
 
-print_homebrew_cli_ownership_status() {
-  printf '%s\n' "Core Shell Stack source: Homebrew"
-  problems="$(homebrew_cli_ownership_problems)"
-
-  if [ -z "$problems" ]; then
-    printf '%s\n' "Homebrew CLI ownership: ready"
-    return
-  fi
-
-  printf '%s\n' "Homebrew CLI ownership: warning"
-  printf '%s\n' "$problems" | while IFS= read -r problem; do
-    printf '  %s\n' "$problem"
-  done
-}
-
 run_status() {
   if [ "$#" -ne 0 ]; then
     fail_usage "status accepts no arguments"
@@ -1331,9 +1248,9 @@ run_status() {
   print_title "Terrapod status"
   print_section_value "Profile:" "$(profile_context_label)"
   show_config_context "$config_file"
-  print_homebrew_cli_ownership_status
-  if [ -x "$managed_packages_helper" ]; then
-    "$managed_packages_helper" status "$config_file" "$profile"
+  printf '%s\n' "Core Shell Stack source: Homebrew"
+  if ! run_executable_selection status "$config_file" "$profile"; then
+    print_warning_line "executable selection helper is missing"
   fi
   print_section "Optional stacks:"
   print_optional_setting_status "Optional Editor Stack" "$(effective_editor_stack_enabled "$config_file")" "rich Neovim configuration"
@@ -1574,14 +1491,9 @@ run_apply() {
     return 1
   fi
 
-  if [ ! -x "$managed_packages_helper" ]; then
-    fatal "Managed Package reconciliation helper is missing: $managed_packages_helper"
+  if ! run_executable_selection apply "$config_file" "$(current_profile)"; then
+    print_warning_line "executable selection helper is missing"
   fi
-  reconciliation_mode=non-interactive
-  if [ -t 0 ]; then
-    reconciliation_mode=interactive
-  fi
-  "$managed_packages_helper" reconcile "$config_file" "$(current_profile)" "$reconciliation_mode"
 
   validation_status=0
   run_post_apply_validation || validation_status="$?"
@@ -1640,43 +1552,14 @@ doctor_check_homebrew_prefix() {
 
   actual_prefix="$(homebrew_prefix 2>/dev/null || true)"
   if [ -z "$actual_prefix" ]; then
-    doctor_warn "Homebrew prefix cannot be resolved"
-    doctor_guidance "Repair Homebrew until 'brew --prefix' succeeds, open a new shell, and rerun tpod apply."
+    doctor_advisory "Homebrew prefix cannot be resolved"
+    doctor_guidance "Review Homebrew configuration and PATH manually, then rerun tpod doctor."
   elif [ "$actual_prefix" != "$expected_prefix" ]; then
-    doctor_warn "Homebrew prefix is $actual_prefix; expected $expected_prefix"
-    doctor_guidance "Repair the Homebrew installation at $expected_prefix, open a new shell, and rerun tpod apply."
+    doctor_advisory "Homebrew prefix is $actual_prefix; expected $expected_prefix"
+    doctor_guidance "Terrapod uses the standard prefix as its canonical path; adjust Homebrew or PATH manually if needed."
   else
     doctor_ok "Homebrew prefix is standard: $expected_prefix"
   fi
-}
-
-doctor_check_homebrew_cli_ownership() {
-  problems="$(homebrew_cli_ownership_problems)"
-  if [ -z "$problems" ]; then
-    doctor_ok "Mandatory Homebrew CLI ownership is ready"
-    return
-  fi
-
-  while IFS= read -r problem; do
-    command_name="${problem%%:*}"
-    command_path="${problem#*: }"
-    case "$command_path" in
-      missing)
-        doctor_warn "mandatory Homebrew CLI is missing: $command_name"
-        doctor_guidance "Run tpod apply to restore '$command_name' through Homebrew."
-        ;;
-      unsupported-prefix)
-        doctor_warn "mandatory Homebrew CLI ownership cannot resolve a standard prefix"
-        doctor_guidance "Use a supported profile and architecture, then rerun tpod doctor."
-        ;;
-      *)
-        doctor_warn "mandatory Homebrew CLI is shadowed: $command_name"
-        doctor_guidance "Remove or move $command_path, open a new shell, and rerun tpod apply."
-        ;;
-    esac
-  done <<EOF
-$problems
-EOF
 }
 
 doctor_check_jetendard_component() {
@@ -1688,26 +1571,6 @@ doctor_check_jetendard_component() {
   else
     doctor_warn "$label: $detail"
     doctor_guidance "Run 'tpod apply' to restore Jetendard. Quit Orca first when an Orca profile is out of sync."
-  fi
-}
-
-doctor_check_optional_stack() {
-  label="$1"
-  enabled="$2"
-  guidance="$3"
-  shift 3
-
-  if ! is_enabled "$enabled"; then
-    doctor_ok "$label is disabled"
-    return
-  fi
-
-  missing="$(missing_tools "$@")"
-  if [ -n "$missing" ]; then
-    doctor_warn "$label is enabled but missing tools: $missing"
-    doctor_guidance "$guidance"
-  else
-    doctor_ok "$label is enabled and tools are available: $(join_tools "$@")"
   fi
 }
 
@@ -1820,7 +1683,6 @@ run_doctor() {
     macos-terminal)
       doctor_check_command brew
       doctor_check_homebrew_prefix
-      doctor_check_homebrew_cli_ownership
       doctor_check_jetendard_component "Jetendard font files" "$jetendard_font_helper" check
       doctor_check_jetendard_component "Ghostty font setting" "$jetendard_settings_helper" check-ghostty
       doctor_check_jetendard_component "Zed font settings" "$jetendard_settings_helper" check-zed
@@ -1830,7 +1692,6 @@ run_doctor() {
       doctor_check_command apt
       doctor_check_command brew
       doctor_check_homebrew_prefix
-      doctor_check_homebrew_cli_ownership
       ;;
   esac
 
@@ -1839,19 +1700,10 @@ run_doctor() {
     "$(effective_editor_stack_enabled "$config_file")" \
     "rich Neovim configuration"
 
-  doctor_check_optional_stack \
+  doctor_check_optional_setting \
     "Optional AI Tool Stack" \
     "$(effective_ai_cli_tools_enabled "$config_file")" \
-    "Run tpod chezmoi -- apply after enabling Optional AI Tool Stack, or install/apply the configured tools before relying on them." \
-    agy claude codex
-
-  if is_enabled "$(effective_ai_cli_tools_enabled "$config_file")"; then
-    shadowed="$(shadowed_ai_cli_tools)"
-    if [ -n "$shadowed" ]; then
-      doctor_advisory "Optional AI Tool Stack has non-Homebrew commands shadowing managed casks: $shadowed"
-      doctor_guidance "Remove each legacy command with its original installer method, open a new shell, and rerun tpod apply."
-    fi
-  fi
+    "Antigravity CLI, Claude Code, and Codex"
 
   doctor_check_optional_setting \
     "Optional Development Workspace" \
@@ -1860,13 +1712,21 @@ run_doctor() {
 
   doctor_check_install_warnings
 
-  if [ -x "$managed_packages_helper" ]; then
-    if ! "$managed_packages_helper" doctor "$config_file" "$profile"; then
+  if [ -x "$executable_selection_helper" ]; then
+    executable_selection_status=0
+    executable_selection_output="$(
+      run_executable_selection doctor "$config_file" "$profile"
+    )" || executable_selection_status="$?"
+    printf '%s\n' "$executable_selection_output"
+    case "$executable_selection_output" in
+      *"advisory -"*) doctor_guidance_printed=1 ;;
+    esac
+    if [ "$executable_selection_status" -ne 0 ]; then
       doctor_failed=1
-      doctor_guidance "Run tpod apply to install canonical packages and reconcile legacy sources."
+      doctor_guidance "Run tpod apply to install missing canonical packages, then rerun tpod doctor."
     fi
   else
-    doctor_warn "Managed Package diagnostics helper is missing"
+    doctor_warn "Executable selection helper is missing"
     doctor_guidance "Run tpod apply to restore the Terrapod command helpers."
   fi
 

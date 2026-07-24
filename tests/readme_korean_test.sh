@@ -153,10 +153,12 @@ assert_not_contains "$korean_readme" '공식 mise APT repository' \
   "README.ko.md removes mise APT ownership"
 assert_contains "$korean_readme" 'HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade' \
   "README.ko.md documents restore-only apply semantics"
-assert_contains "$korean_readme" 'exact registry match와 안전한 ownership이 검증된 payload만 migrate합니다.' \
-  "README.ko.md documents safe Managed Package migration"
-assert_contains "$korean_readme" 'Proceed with removing these legacy package installations? [y/N]' \
-  "README.ko.md documents the default-No migration confirmation"
+assert_contains "$korean_readme" '기존 mise, APT, vendor-installed 및 기타 alternate payload를 자동으로 제거하지 않습니다.' \
+  "README.ko.md documents non-destructive package source handling"
+assert_contains "$korean_readme" '선택된 executable의 installer provenance를 추론하거나 uninstall command를 제안하지 않습니다.' \
+  "README.ko.md documents provenance-neutral executable guidance"
+assert_not_contains "$korean_readme" 'Proceed with removing these legacy package installations? [y/N]' \
+  "README.ko.md removes the package migration confirmation"
 assert_contains "$korean_readme" '`development-apps`: Zed와 Orca ADE(`stablyai/orca/orca`).' \
   "README.ko.md documents Zed and Orca ADE in the development-apps inventory"
 assert_contains "$korean_readme" '| `enableMacosAppGroupDevelopmentApps` | `false` | development-apps macOS App Group인 Zed와 Orca ADE(`stablyai/orca/orca`)를 설치합니다. |' \

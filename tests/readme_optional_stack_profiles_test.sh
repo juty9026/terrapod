@@ -199,10 +199,12 @@ assert_not_contains 'mise from the official mise APT repository' \
   "README removes mise APT ownership"
 assert_contains 'HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade' \
   "README documents restore-only apply semantics"
-assert_contains 'Terrapod migrates only exact registry matches with verified safe ownership.' \
-  "README documents safe Managed Package migration"
-assert_contains 'Proceed with removing these legacy package installations? [y/N]' \
-  "README documents the default-No migration confirmation"
+assert_contains 'Existing mise, APT, vendor-installed, and other alternate payloads are not' \
+  "README documents non-destructive package source handling"
+assert_contains 'Terrapod does not infer the installer provenance of the selected' \
+  "README documents provenance-neutral executable guidance"
+assert_not_contains 'Proceed with removing these legacy package installations? [y/N]' \
+  "README removes the package migration confirmation"
 assert_contains '## What Terrapod Leaves Alone' \
   "README documents product boundaries near the top"
 assert_contains '## Daily Commands' \
@@ -255,8 +257,8 @@ assert_contains 'brew upgrade --cask claude-code codex antigravity-cli' \
   "README documents targeted AI CLI upgrades"
 assert_contains '`enableMacosAppGroupAiApps` is deprecated and is not treated as an alias' \
   "README documents explicit development-apps key migration"
-assert_contains 'unknown PATH copies remain manual actions.' \
-  "README documents conservative unresolved legacy migration"
+assert_contains 'If another executable is selected first, Terrapod' \
+  "README documents primary executable advisories"
 
 assert_contains 'Minimal VPS' \
   "README includes a minimal VPS example"

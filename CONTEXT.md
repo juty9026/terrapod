@@ -52,10 +52,6 @@ _Avoid_: mise CLI provider, aqua provider, platform-specific CLI source
 mise, which installs and selects Bun, Node.js, Python, and uv independently from Homebrew-managed user-facing CLI tools.
 _Avoid_: Modern CLI Provider, Homebrew runtime manager, aqua tool provider
 
-**Managed Package**:
-Any package declaration active in the current effective Terrapod configuration and governed by the explicit ownership registry.
-_Avoid_: every installed package, fuzzy package match, unmanaged system dependency
-
 **macOS Desktop App Stack**:
 The opt-in macOS cask set for GUI apps, system-style desktop apps, and cask-delivered desktop support tools.
 _Avoid_: Homebrew bootstrap, shared CLI formula, Core Shell Stack
@@ -193,9 +189,9 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - The **Development Runtime Manager** installs and selects Bun, Node.js, Python, and uv and does not own shared user-facing CLI tools.
 - **Optional AI Tool Stack** installer failures do not block first-run declared-state apply; missing optional AI tools are reported by `tpod status` and `tpod doctor`.
 - Homebrew bundle apply uses `HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade`; Terrapod apply restores missing declared packages without auto-updating or upgrading.
-- `tpod status` and `tpod doctor` compare resolved AI commands with the active Homebrew prefix and warn when legacy commands shadow managed casks.
+- `tpod apply`, `tpod status`, and `tpod doctor` compare active command-bearing declarations with canonical provider installation and executable paths.
 - When the **Optional AI Tool Stack** is disabled, `tpod apply` clears the optional AI CLI tools warning marker because those tools are no longer part of desired machine readiness.
-- Active effective package declarations are **Managed Packages**. After canonical installation, Terrapod may remove exact, verified, current-user-owned legacy payloads through migration-aware apply; unresolved, protected, shared, or unknown payloads remain manual actions.
+- Existing alternate-provider payloads remain user-managed and are never removed by Terrapod.
 - Enabling only the **Optional AI Tool Stack** does not imply the **Optional Editor Stack** or **Optional Development Workspace**.
 - Development-specific terminal layouts belong to the **Optional Development Workspace**, not the **Core Shell Stack**.
 - Enabling the **Optional Development Workspace** also enables the **Optional Editor Stack** and **Optional AI Tool Stack**.
@@ -205,21 +201,14 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Homebrew is the **Modern CLI Provider** on both supported profiles; APT prepares Ubuntu system/bootstrap state, and mise is the **Development Runtime Manager**.
 - **Terrapod** applies this repository's declared dotfiles state; it does not act as the package manager for OS packages or mise-managed tool upgrades.
 - **Terrapod** may install declared dependencies needed to reach the target state, but it does not run broad version upgrade commands such as `brew upgrade`, `apt upgrade`, or `mise upgrade`.
-- A **Managed Package** is any package declaration active in the current effective Terrapod configuration: the Core Shell Stack, Development Runtime Stack, enabled Optional AI Tool Stack, enabled macOS App Groups, and the Jetendard canonical exception.
-- The Managed Package ownership registry is the single source of truth for canonical provider/package, expected executable or app artifact, exact alternate identities, protected prerequisites, known vendor state, and verification rules.
-- `tpod apply`, `tpod update`, and `tpod doctor` perform a read-only deep scan of locally available provider inventories and PATH copies. `tpod status` performs only a fast canonical/primary and pending summary.
-- Managed Package matching is exact and registry-driven. Unknown identities and provenance are unresolved manual actions; Terrapod does not use fuzzy package-name matching.
-- Canonical install precedes migration. Reconciliation renders all safe removal candidates and exact actions together, asks once with a default-No confirmation, and verifies after attempted removals.
-- Non-interactive apply, refusal, partial failure, and unresolved candidates preserve apply success while recording `managed-package-migration`; later interactive apply or update rescans and asks again.
-- Managed Package reconciliation uses an XDG state lock and no permanent migration-completed flag.
-- Canonical mise runtime versions, additional mise versions, and project-local runtime selections are preserved.
-- APT removal requires exact registry identity, `apt-mark` manual state, non-prerequisite status, and a simulated transaction with no additional removals. APT is the only provider for which migration may use sudo.
-- Package managers, protected bootstrap prerequisites, OS system runtimes, system-required dependencies, shared/root-owned payloads, nonstandard Homebrew prefixes, and unknown PATH copies are not removed automatically.
-- Migration removes package payloads only. It does not remove config, data, cache, session state, use cask zap, run apt autoremove, repair permissions, or move app bundles to Trash.
-- Existing macOS app artifacts use Homebrew Cask `--adopt` behavior. Adoption failure remains an unresolved manual action.
-- Files under `~/.config/zsh/path.d` are explicit machine-local PATH overrides and remain highest priority. Terrapod installs the canonical package but reports the override as advisory without removing it.
-- `tpod doctor` fails when a canonical package is missing or a legacy executable is primary on the managed default PATH. A canonical primary with secondary duplicates, unknown secondary provenance, or a machine-local PATH override is advisory.
-- Raw `chezmoi apply` and `tpod chezmoi -- apply` intentionally bypass Managed Package reconciliation.
+- Active command-bearing declarations include the Core Shell Stack, Development Runtime Stack, enabled Optional AI Tool Stack, and executable-providing enabled macOS App Groups.
+- Terrapod checks only the declared canonical provider, expected executable path, and current primary executable. It does not scan secondary PATH copies or infer alternate installer provenance.
+- `tpod apply` and `tpod update` install declared state and then print executable selection advisories without removing alternate payloads.
+- `tpod status` remains informational. `tpod doctor` fails when a declared provider package or canonical executable is missing or when an enabled command is unavailable on PATH.
+- When the canonical executable exists but another file is primary, `tpod apply`, `tpod status`, and `tpod doctor` report actual and canonical paths as an advisory without changing exit status.
+- Exact path matches and different symlink paths that resolve to the same file both count as canonical selection.
+- Nonstandard Homebrew prefixes and files under `~/.config/zsh/path.d` remain user-managed and advisory-only.
+- Executable selection checks are read-only, do not persist pending state, and never suggest provider-specific uninstall commands.
 - After **Terrapod Setup** writes concrete settings, first-run declared-state apply should prioritize installing the **Terrapod** command surface and managed dotfiles so the machine reaches a recoverable state.
 - First-run completion separates **Terrapod** installation from machine profile readiness: installing the command surface and managed dotfiles can succeed while the **Core Shell Stack** or **Development Runtime Stack** remains incomplete.
 - Ubuntu package bootstrap failures can leave the **VPS Shell Profile** shell experience incomplete while **Terrapod** itself is installed; this is a machine profile readiness warning, not a first-run installer hard failure after **Terrapod Setup** succeeds.
@@ -233,7 +222,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Mandatory stack warning markers such as Homebrew core, Ubuntu bootstrap, shell integrations, and mise tools are cleared only by successful reruns because their desired state cannot be disabled by optional settings.
 - Optional stack or app-group warning marker content may be cleared or reduced when the corresponding desired optional setting is disabled.
 - Terrapod install warnings are updated by both first-run installation and routine `tpod apply` because routine apply is the recovery path for previously failed installer categories.
-- Terrapod install warning categories include stable filename slugs for Homebrew core bundle (`homebrew-core`), Homebrew desktop app bundle (`homebrew-desktop-apps`), Ubuntu bootstrap (`ubuntu-bootstrap`), shell integrations (`shell-integrations`), mise runtime tools (`mise-tools`), optional AI CLI tools (`optional-ai-cli-tools`), Managed Package migration (`managed-package-migration`), Jetendard fonts (`jetendard-font`), and Jetendard settings (`jetendard-settings`); best-effort UI nudges such as opening Karabiner do not need install warning markers.
+- Terrapod install warning categories include stable filename slugs for Homebrew core bundle (`homebrew-core`), Homebrew desktop app bundle (`homebrew-desktop-apps`), Ubuntu bootstrap (`ubuntu-bootstrap`), shell integrations (`shell-integrations`), mise runtime tools (`mise-tools`), optional AI CLI tools (`optional-ai-cli-tools`), Jetendard fonts (`jetendard-font`), and Jetendard settings (`jetendard-settings`); best-effort UI nudges such as opening Karabiner do not need install warning markers.
 - Terrapod install warning markers use shell-friendly key/value content with stable category, summary, guidance, and `updated_at` fields instead of free-form logs or captured stack traces.
 - Terrapod install warning marker values stay single-line so shell parsing remains predictable; longer human-readable explanations belong in `tpod doctor` output.
 - Terrapod install warning marker `updated_at` values use UTC ISO 8601 timestamps such as `2026-06-02T03:12:45Z`.
@@ -283,7 +272,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - External package manager, runtime manager, shell integration, desktop app, and vendor tool installer failures during first-run declared-state apply should warn without blocking **Terrapod** command installation when the managed dotfiles can still be written.
 - `tpod status` and `tpod doctor` own recovery visibility for missing tools after non-blocking first-run installer failures.
 - `tpod update` runs `chezmoi update --exclude scripts` to refresh source and the installed command, then hands off to the refreshed `~/.local/bin/tpod apply` process and returns its exit status.
-- README and command output distinguish migration-aware source refresh plus apply from broad Homebrew, APT, or mise upgrades.
+- README and command output distinguish source refresh plus install-only apply from broad Homebrew, APT, or mise upgrades.
 - README and command output describe `tpod diff` and `tpod apply` as declared-state operations delegated to chezmoi.
 - After successful first-run apply, the installer should surface `tpod help` so users discover the day-to-day short command immediately.
 - A clean first-run success does not need extra `tpod doctor` guidance beyond the installer's final `tpod help` output.
@@ -347,7 +336,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Routine command visual treatment applies to `tpod help`, `tpod status`, `tpod doctor`, `tpod diff`, `tpod apply`, and `tpod update`, without emoji or a separate plain-mode environment variable.
 - Routine command color is enabled only for compatible terminal output and disabled for non-TTY output, `TERM=dumb`, or `NO_COLOR`.
 - Routine command color uses cyan or bold for titles and sections, green for successful or enabled states, yellow for warnings and missing/unsupported states, red for failed states, and neutral styling for paths, commands, and values.
-- `tpod apply` stays focused on declared-state installation, Managed Package migration planning, one confirmation, safe removal, and verification; detailed provider inventory is not retained in output or state.
+- `tpod apply` stays focused on declared-state installation, post-apply validation, install warning visibility, and read-only executable selection advisories.
 - The first-run **Terrapod** installer uses a gum-backed terminal presentation for initial setup prompts such as **Preset** selection.
 - The gum-backed first-run installer presentation is a required interactive path; non-TTY, dumb terminal, scripted, and missing-gum environments fail with guidance until non-interactive setup options are designed.
 - Rich **Terrapod Setup** presentation may use setup-only emoji, color, spacing, and aligned prompt layout when it improves first-run review clarity.

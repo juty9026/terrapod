@@ -10,14 +10,13 @@ terrapod_install_warning_categories() {
     shell-integrations \
     mise-tools \
     optional-ai-cli-tools \
-    managed-package-migration \
     jetendard-font \
     jetendard-settings
 }
 
 terrapod_install_warning_is_category() {
   case "$1" in
-    homebrew-core|homebrew-desktop-apps|ubuntu-bootstrap|shell-integrations|mise-tools|optional-ai-cli-tools|managed-package-migration|jetendard-font|jetendard-settings)
+    homebrew-core|homebrew-desktop-apps|ubuntu-bootstrap|shell-integrations|mise-tools|optional-ai-cli-tools|jetendard-font|jetendard-settings)
       return 0
       ;;
     *)
