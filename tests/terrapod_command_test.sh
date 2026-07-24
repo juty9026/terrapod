@@ -524,6 +524,9 @@ write_brew_bundle_stub() {
     '    if [ "${MACOS_BREW_FAIL_BULK:-}" = "1" ] && [ -n "$bundle_file" ] && grep -Fx "tap \"homebrew/cask\"" "$bundle_file" >/dev/null 2>&1; then' \
     '      exit 42' \
     '    fi' \
+    '    if [ -n "${MACOS_BREW_INSTALLED_FILE:-}" ]; then' \
+    '      : >"$MACOS_BREW_INSTALLED_FILE"' \
+    '    fi' \
     '    exit 0' \
     '    ;;' \
     '  *) exit 64 ;;' \
@@ -558,18 +561,8 @@ copy_desktop_apply_source_fixture() {
   sed \
     -e "s#/opt/homebrew/bin/brew#$fixture_brew_bin#g" \
     -e "s#/usr/local/bin/brew#$fixture_brew_bin#g" \
-    "$repo_root/.chezmoiscripts/run_before_11-retry-homebrew-core.sh.tmpl" \
-    >"$source_dir/.chezmoiscripts/run_before_11-retry-homebrew-core.sh.tmpl"
-  sed \
-    -e "s#/opt/homebrew/bin/brew#$fixture_brew_bin#g" \
-    -e "s#/usr/local/bin/brew#$fixture_brew_bin#g" \
-    "$repo_root/.chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl" \
-    >"$source_dir/.chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl"
-  sed \
-    -e "s#/opt/homebrew/bin/brew#$fixture_brew_bin#g" \
-    -e "s#/usr/local/bin/brew#$fixture_brew_bin#g" \
-    "$repo_root/.chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl" \
-    >"$source_dir/.chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl"
+    "$repo_root/.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl" \
+    >"$source_dir/.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl"
   cp "$terrapod" "$source_dir/dot_local/bin/executable_terrapod"
   cp "$tpod_source" "$source_dir/dot_local/bin/symlink_tpod"
   cp "$repo_root/dot_local/lib/terrapod/homebrew-core-bundle.sh" "$source_dir/dot_local/lib/terrapod/homebrew-core-bundle.sh"
@@ -1129,7 +1122,7 @@ fake_ai_cli_installer="$tmp_dir/fake-ai-cli-installer.sh"
 chezmoi execute-template \
   --source "$repo_root" \
   --override-data '{"chezmoi":{"os":"linux","sourceDir":"/missing-terrapod-source"},"enableAiCliTools":true}' \
-  --file "$repo_root/.chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
+  --file "$repo_root/.chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl" \
   | sed "s#/home/linuxbrew/.linuxbrew/bin/brew#$fake_warning_bin/brew#g" \
   >"$fake_ai_cli_installer"
 
@@ -1155,7 +1148,7 @@ fake_ai_cli_failure_installer="$tmp_dir/fake-ai-cli-failure-installer.sh"
 chezmoi execute-template \
   --source "$repo_root" \
   --override-data '{"chezmoi":{"os":"linux","sourceDir":"/missing-terrapod-source"},"enableAiCliTools":true}' \
-  --file "$repo_root/.chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
+  --file "$repo_root/.chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl" \
   | sed "s#/home/linuxbrew/.linuxbrew/bin/brew#$fake_ai_cli_failure_home/.local/bin/brew#g" \
   >"$fake_ai_cli_failure_installer"
 
@@ -1190,7 +1183,7 @@ fake_ai_cli_write_failure_installer="$tmp_dir/fake-ai-cli-write-failure-installe
 chezmoi execute-template \
   --source "$repo_root" \
   --override-data "{\"chezmoi\":{\"os\":\"linux\",\"sourceDir\":\"$fake_ai_cli_warning_source\"},\"enableAiCliTools\":true}" \
-  --file "$repo_root/.chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
+  --file "$repo_root/.chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl" \
   | sed "s#/home/linuxbrew/.linuxbrew/bin/brew#$fake_ai_cli_write_failure_home/.local/bin/brew#g" \
   >"$fake_ai_cli_write_failure_installer"
 
@@ -3348,6 +3341,7 @@ core_apply_bin="$tmp_dir/core-apply-bin"
 core_apply_log="$tmp_dir/core-apply-brew.log"
 core_apply_config="$tmp_dir/core-apply.toml"
 core_apply_prefix="$tmp_dir/core-apply-prefix"
+core_apply_installed="$tmp_dir/core-apply-installed"
 mkdir -p "$core_apply_home" "$core_apply_bin" "$core_apply_prefix"
 chmod 555 "$core_apply_prefix"
 copy_desktop_apply_source_fixture "$core_apply_source" "$core_apply_bin/brew"
@@ -3371,7 +3365,7 @@ assert_contains "$core_apply_marker_text" "failed formulae: gum" "Terrapod apply
 assert_contains "$core_apply_marker_text" "Homebrew prefix is not writable: $core_apply_prefix" "Terrapod apply records shared-prefix permission guidance"
 assert_not_contains "$core_apply_marker_text" "chown" "Terrapod apply core guidance avoids broad ownership command guidance"
 
-if ! HOME="$core_apply_home" XDG_STATE_HOME="$core_apply_state" TERRAPOD_CHEZMOI_CONFIG="$core_apply_config" MACOS_BREW_LOG="$core_apply_log" PATH="$core_apply_bin:/usr/bin:/bin" \
+if ! HOME="$core_apply_home" XDG_STATE_HOME="$core_apply_state" TERRAPOD_CHEZMOI_CONFIG="$core_apply_config" MACOS_BREW_LOG="$core_apply_log" MACOS_BREW_INSTALLED_FILE="$core_apply_installed" PATH="$core_apply_bin:/usr/bin:/bin" \
   /bin/sh "$terrapod" apply >"$tmp_dir/core-apply-retry-success.out" 2>"$tmp_dir/core-apply-retry-success.err"; then
   printf '%s\n' "core apply retry success stdout:" >&2
   sed 's/^/  /' "$tmp_dir/core-apply-retry-success.out" >&2
@@ -3384,6 +3378,21 @@ if [ -e "$core_apply_marker" ]; then
   fail "Terrapod apply clears a core Homebrew marker after retry succeeds"
 fi
 pass "Terrapod apply clears a core Homebrew marker after retry succeeds"
+
+rm -f "$core_apply_installed"
+if ! HOME="$core_apply_home" XDG_STATE_HOME="$core_apply_state" TERRAPOD_CHEZMOI_CONFIG="$core_apply_config" MACOS_BREW_LOG="$core_apply_log" MACOS_BREW_INSTALLED_FILE="$core_apply_installed" PATH="$core_apply_bin:/usr/bin:/bin" \
+  /bin/sh "$terrapod" apply >"$tmp_dir/core-apply-restore-missing.out" 2>"$tmp_dir/core-apply-restore-missing.err"; then
+  printf '%s\n' "core apply restore missing stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/core-apply-restore-missing.out" >&2
+  printf '%s\n' "core apply restore missing stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/core-apply-restore-missing.err" >&2
+  fail "Terrapod apply succeeds while restoring a manually removed core Homebrew package"
+fi
+
+if [ ! -e "$core_apply_installed" ]; then
+  fail "Terrapod apply restores a manually removed core Homebrew package without a failure marker"
+fi
+pass "Terrapod apply restores a manually removed core Homebrew package without a failure marker"
 
 HOME="$core_apply_home" XDG_STATE_HOME="$core_apply_state" sh -c \
   '. "$1"; terrapod_install_warning_write homebrew-core "Homebrew core install needs attention" "old apply core warning."' \
