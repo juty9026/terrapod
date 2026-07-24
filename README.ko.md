@@ -285,7 +285,6 @@ Optional stack profile과 macOS App Group setting은 기본적으로 disabled입
 | `enableMacosAppGroupLauncher` | `false` | launcher macOS App Group인 Raycast와 1Password CLI를 설치합니다. |
 | `enableMacosAppGroupMonitoring` | `false` | monitoring macOS App Group인 iStat Menus를 설치합니다. |
 | `enableMacosAppGroupDevelopmentApps` | `false` | development-apps macOS App Group인 Zed와 Orca ADE(`stablyai/orca/orca`)를 설치합니다. |
-| `gitAllowedSigners` | `[]` | workstation-specific SSH signing identity를 `~/.ssh/allowed_signers`에 추가합니다. |
 
 `enableDevelopmentWorkspace`가 `true`이면 `enableEditorStack`이나 `enableAiCliTools`가 false로 기록되어 있어도 Optional Editor Stack과 Optional AI Tool Stack이 함께 활성화됩니다.
 
@@ -345,18 +344,24 @@ enableAiCliTools = false
 enableDevelopmentWorkspace = true
 ```
 
-Git signing identity는 어느 profile과도 함께 설정할 수 있습니다.
+## Git Configuration
 
-```toml
-gitAllowedSigners = [
-  "name@company.com ssh-ed25519 AAAA_COMPANY_PUBLIC_KEY company",
-]
-```
-
-그 다음 dotfiles를 apply합니다.
+Terrapod은 공용 Git 설정을 `~/.config/git/config`에서 관리합니다.
+`~/.gitconfig`이 없으면 생성하고, 이후 content는 사용자가 관리합니다. 설치 후
+identity를 설정합니다.
 
 ```sh
-terrapod apply
+git config set --global user.name "Your Name"
+git config set --global user.email "you@example.com"
+```
+
+SSH commit signing은 optional입니다. 자신의 public key로 활성화하려면 다음과
+같이 설정합니다.
+
+```sh
+git config set --global gpg.format ssh
+git config set --global user.signingKey "ssh-ed25519 YOUR_PUBLIC_KEY"
+git config set --global commit.gpgSign true
 ```
 
 ## Repository Conventions

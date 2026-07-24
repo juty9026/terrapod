@@ -1269,15 +1269,15 @@ pass "existing update preserves config file mode"
 
 assert_no_terrapod_temp_files "$array_config" "successful array-table update cleans Terrapod temp files"
 
-signers_home="$tmp_dir/signers-home"
-signers_xdg="$tmp_dir/signers-xdg"
-signers_config="$signers_xdg/chezmoi/chezmoi.toml"
-mkdir -p "$signers_home" "$(dirname "$signers_config")"
+custom_array_home="$tmp_dir/custom-array-home"
+custom_array_xdg="$tmp_dir/custom-array-xdg"
+custom_array_config="$custom_array_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$custom_array_home" "$(dirname "$custom_array_config")"
 
-cat >"$signers_config" <<'TOML'
+cat >"$custom_array_config" <<'TOML'
 [data]
-gitAllowedSigners = [
-  "name@company.com ssh-ed25519 AAAA_COMPANY_PUBLIC_KEY company",
+customValues = [
+  "preserve-me",
 ]
 enableEditorStack = false
 enableAiCliTools = false
@@ -1286,18 +1286,18 @@ enableAiCliTools = false
 branch = "main"
 TOML
 
-run_terrapod_configure development "y" "$signers_home" "$signers_xdg"
+run_terrapod_configure development "y" "$custom_array_home" "$custom_array_xdg"
 
-assert_contains "$signers_config" "gitAllowedSigners = [" "documented signer array update preserves array header"
-assert_contains "$signers_config" "name@company.com ssh-ed25519 AAAA_COMPANY_PUBLIC_KEY company" "documented signer array update preserves signer value"
-assert_data_key_once_with_value "$signers_config" "enableEditorStack" "true" "documented signer array update writes Editor Stack in data"
-assert_data_key_once_with_value "$signers_config" "enableAiCliTools" "true" "documented signer array update writes AI Tool Stack in data"
-assert_data_key_once_with_value "$signers_config" "enableDevelopmentWorkspace" "true" "documented signer array update writes Development Workspace in data"
-assert_data_key_once_with_value "$signers_config" "enableMacosAppGroupTerminalApps" "false" "documented signer array update writes terminal-apps App Group in data"
-assert_data_key_once_with_value "$signers_config" "enableMacosAppGroupAutomation" "false" "documented signer array update writes automation App Group in data"
-assert_data_key_once_with_value "$signers_config" "enableMacosAppGroupLauncher" "false" "documented signer array update writes launcher App Group in data"
-assert_data_key_once_with_value "$signers_config" "enableMacosAppGroupMonitoring" "false" "documented signer array update writes monitoring App Group in data"
-assert_contains "$signers_config" "branch = \"main\"" "documented signer array update preserves later sections"
+assert_contains "$custom_array_config" "customValues = [" "custom array update preserves array header"
+assert_contains "$custom_array_config" "preserve-me" "custom array update preserves array value"
+assert_data_key_once_with_value "$custom_array_config" "enableEditorStack" "true" "custom array update writes Editor Stack in data"
+assert_data_key_once_with_value "$custom_array_config" "enableAiCliTools" "true" "custom array update writes AI Tool Stack in data"
+assert_data_key_once_with_value "$custom_array_config" "enableDevelopmentWorkspace" "true" "custom array update writes Development Workspace in data"
+assert_data_key_once_with_value "$custom_array_config" "enableMacosAppGroupTerminalApps" "false" "custom array update writes terminal-apps App Group in data"
+assert_data_key_once_with_value "$custom_array_config" "enableMacosAppGroupAutomation" "false" "custom array update writes automation App Group in data"
+assert_data_key_once_with_value "$custom_array_config" "enableMacosAppGroupLauncher" "false" "custom array update writes launcher App Group in data"
+assert_data_key_once_with_value "$custom_array_config" "enableMacosAppGroupMonitoring" "false" "custom array update writes monitoring App Group in data"
+assert_contains "$custom_array_config" "branch = \"main\"" "custom array update preserves later sections"
 
 multiline_array_home="$tmp_dir/multiline-array-home"
 multiline_array_xdg="$tmp_dir/multiline-array-xdg"

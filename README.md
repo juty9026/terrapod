@@ -303,7 +303,6 @@ Optional stack profiles and macOS App Group settings are disabled by default.
 | `enableMacosAppGroupLauncher` | `false` | Installs the launcher macOS App Group: Raycast and 1Password CLI. |
 | `enableMacosAppGroupMonitoring` | `false` | Installs the monitoring macOS App Group: iStat Menus. |
 | `enableMacosAppGroupDevelopmentApps` | `false` | Installs the development-apps macOS App Group: Zed and Orca ADE (`stablyai/orca/orca`). |
-| `gitAllowedSigners` | `[]` | Adds workstation-specific SSH signing identities to `~/.ssh/allowed_signers`. |
 
 When `enableDevelopmentWorkspace` is `true`, it enables both the Optional Editor Stack and Optional AI Tool Stack
 even when `enableEditorStack` or `enableAiCliTools` are recorded as false.
@@ -366,18 +365,23 @@ enableAiCliTools = false
 enableDevelopmentWorkspace = true
 ```
 
-Git signing identities can be configured alongside any profile.
+## Git Configuration
 
-```toml
-gitAllowedSigners = [
-  "name@company.com ssh-ed25519 AAAA_COMPANY_PUBLIC_KEY company",
-]
-```
-
-Then apply the dotfiles.
+Terrapod manages shared Git settings in `~/.config/git/config`. It creates
+`~/.gitconfig` when missing, then leaves its contents user-managed. Configure
+your identity after installation.
 
 ```sh
-terrapod apply
+git config set --global user.name "Your Name"
+git config set --global user.email "you@example.com"
+```
+
+SSH commit signing is optional. To enable it with your own public key:
+
+```sh
+git config set --global gpg.format ssh
+git config set --global user.signingKey "ssh-ed25519 YOUR_PUBLIC_KEY"
+git config set --global commit.gpgSign true
 ```
 
 ## Repository Conventions
