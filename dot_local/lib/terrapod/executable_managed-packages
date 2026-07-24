@@ -1,0 +1,968 @@
+#!/bin/sh
+set -eu
+
+command_path="$0"
+command_dir="${command_path%/*}"
+command_dir="$(CDPATH='' cd -- "$command_dir" 2>/dev/null && pwd)"
+warnings_lib="${TERRAPOD_INSTALL_WARNINGS_LIB:-$command_dir/install-warnings.sh}"
+
+if [ -f "$warnings_lib" ]; then
+  # shellcheck disable=SC1090
+  . "$warnings_lib"
+fi
+
+config_bool() {
+  config_file="$1"
+  key="$2"
+
+  [ -f "$config_file" ] || {
+    printf '%s\n' false
+    return
+  }
+
+  awk -F= -v wanted="$key" '
+    $1 ~ "^[[:space:]]*" wanted "[[:space:]]*$" {
+      value = $2
+      gsub(/[[:space:]]/, "", value)
+      print (value == "true" ? "true" : "false")
+      found = 1
+      exit
+    }
+    END {
+      if (!found) print "false"
+    }
+  ' "$config_file"
+}
+
+registry_metadata() {
+  awk -F'|' 'BEGIN { OFS = "|" }
+    {
+      protected = "none"
+      vendor = "none"
+      verification = $5 == "app" ? "homebrew-cask-ownership" : "canonical-provider-and-primary"
+      if ($1 == "git") protected = "terrapod-apt-prerequisite"
+      if ($1 == "mise") protected = "package-manager"
+      if ($2 == "optional-ai") vendor = "known-vendor-installer"
+      if ($2 == "macos-app") vendor = "known-app-bundle"
+      if ($1 == "jetendard") {
+        vendor = "verified-owned-file-manifest"
+        verification = "jetendard-manifest"
+      }
+      print $0, protected, vendor, verification
+    }
+  '
+}
+
+registry_core() {
+  printf '%s\n' \
+    "bat|core|homebrew|bat|executable|bat|mise:bat,apt:bat" \
+    "btop|core|homebrew|btop|executable|btop|mise:btop,apt:btop,snap:btop" \
+    "chezmoi|core|homebrew|chezmoi|executable|chezmoi|mise:chezmoi,snap:chezmoi" \
+    "dust|core|homebrew|dust|executable|dust|mise:dust,cargo:du-dust" \
+    "duf|core|homebrew|duf|executable|duf|mise:duf,snap:duf" \
+    "fastfetch|core|homebrew|fastfetch|executable|fastfetch|mise:fastfetch,apt:fastfetch" \
+    "fd|core|homebrew|fd|executable|fd|mise:fd,apt:fd-find" \
+    "fzf|core|homebrew|fzf|executable|fzf|mise:fzf,apt:fzf" \
+    "gh|core|homebrew|gh|executable|gh|mise:gh,apt:gh,snap:gh" \
+    "git|core|homebrew|git|executable|git|apt:git" \
+    "delta|core|homebrew|git-delta|executable|delta|mise:git-delta,apt:git-delta,cargo:git-delta" \
+    "gum|core|homebrew|gum|executable|gum|mise:gum,apt:gum" \
+    "lazygit|core|homebrew|lazygit|executable|lazygit|mise:lazygit,apt:lazygit" \
+    "lsd|core|homebrew|lsd|executable|lsd|mise:lsd,apt:lsd,cargo:lsd" \
+    "mise|core|homebrew|mise|executable|mise|apt:mise" \
+    "neovim|core|homebrew|neovim|executable|nvim|mise:neovim,apt:neovim,snap:nvim" \
+    "ripgrep|core|homebrew|ripgrep|executable|rg|mise:ripgrep,apt:ripgrep,snap:ripgrep,cargo:ripgrep" \
+    "starship|core|homebrew|starship|executable|starship|mise:starship,apt:starship,snap:starship" \
+    "zellij|core|homebrew|zellij|executable|zellij|mise:zellij,cargo:zellij" \
+    "zoxide|core|homebrew|zoxide|executable|zoxide|mise:zoxide,apt:zoxide,cargo:zoxide" |
+    registry_metadata
+}
+
+registry_runtimes() {
+  printf '%s\n' \
+    "bun|runtime|mise|bun|executable|bun|homebrew:bun,npm:bun" \
+    "node|runtime|mise|node@24|executable|node|homebrew:node,homebrew:node@24,apt:nodejs,snap:node" \
+    "python|runtime|mise|python@3.13|executable|python3|homebrew:python@3.13,apt:python3.13" \
+    "uv|runtime|mise|uv|executable|uv|homebrew:uv,apt:uv,pipx:uv" |
+    registry_metadata
+}
+
+registry_optional_ai() {
+  printf '%s\n' \
+    "antigravity|optional-ai|homebrew-cask|antigravity-cli|executable|agy|vendor:antigravity" \
+    "claude|optional-ai|homebrew-cask|claude-code|executable|claude|npm:@anthropic-ai/claude-code,vendor:claude" \
+    "codex|optional-ai|homebrew-cask|codex|executable|codex|npm:@openai/codex,vendor:codex" |
+    registry_metadata
+}
+
+registry_jetendard() {
+  printf '%s\n' "jetendard|font|vendor|kuskhan/jetendard|font|Jetendard|homebrew-cask:font-jetendard" |
+    registry_metadata
+}
+
+registry_macos_apps() {
+  config_file="$1"
+
+  if [ "$(config_bool "$config_file" enableMacosAppGroupTerminalApps)" = true ]; then
+    printf '%s\n' "ghostty|macos-app|homebrew-cask|ghostty|app|Ghostty.app|app:Ghostty.app" |
+      registry_metadata
+  fi
+  if [ "$(config_bool "$config_file" enableMacosAppGroupAutomation)" = true ]; then
+    printf '%s\n' \
+      "hammerspoon|macos-app|homebrew-cask|hammerspoon|app|Hammerspoon.app|app:Hammerspoon.app" \
+      "karabiner-elements|macos-app|homebrew-cask|karabiner-elements|app|Karabiner-Elements.app|app:Karabiner-Elements.app" \
+      "scroll-reverser|macos-app|homebrew-cask|scroll-reverser|app|Scroll Reverser.app|app:Scroll Reverser.app" |
+      registry_metadata
+  fi
+  if [ "$(config_bool "$config_file" enableMacosAppGroupLauncher)" = true ]; then
+    printf '%s\n' \
+      "raycast|macos-app|homebrew-cask|raycast|app|Raycast.app|app:Raycast.app" \
+      "1password-cli|macos-app|homebrew-cask|1password-cli|executable|op|app:1Password.app" |
+      registry_metadata
+  fi
+  if [ "$(config_bool "$config_file" enableMacosAppGroupMonitoring)" = true ]; then
+    printf '%s\n' "istat-menus|macos-app|homebrew-cask|istat-menus|app|iStat Menus.app|app:iStat Menus.app" |
+      registry_metadata
+  fi
+  if [ "$(config_bool "$config_file" enableMacosAppGroupDevelopmentApps)" = true ]; then
+    printf '%s\n' \
+      "zed|macos-app|homebrew-cask|zed|app|Zed.app|app:Zed.app" \
+      "orca|macos-app|homebrew-cask|stablyai/orca/orca|app|Orca.app|app:Orca.app" |
+      registry_metadata
+  fi
+}
+
+active_registry() {
+  config_file="$1"
+  profile="$2"
+
+  registry_core
+  registry_runtimes
+
+  if [ "$(config_bool "$config_file" enableAiCliTools)" = true ] ||
+    [ "$(config_bool "$config_file" enableDevelopmentWorkspace)" = true ]; then
+    registry_optional_ai
+  fi
+
+  if [ "$profile" = macos-terminal ]; then
+    registry_jetendard
+    registry_macos_apps "$config_file"
+  fi
+}
+
+registry_record() {
+  registry="$1"
+  wanted="$2"
+  printf '%s\n' "$registry" | awk -F'|' -v wanted="$wanted" '$1 == wanted { print; exit }'
+}
+
+inventory_file() {
+  provider="$1"
+  inventory_dir="${TERRAPOD_MANAGED_PACKAGE_INVENTORY_DIR:-}"
+  [ -n "$inventory_dir" ] || return 1
+  printf '%s/%s\n' "$inventory_dir" "$provider"
+}
+
+inventory_has_identity() {
+  provider="$1"
+  identity="$2"
+  file="$(inventory_file "$provider")" || return 1
+  [ -f "$file" ] || return 1
+  awk -F'|' -v identity="$identity" '$1 == identity { found = 1 } END { exit found ? 0 : 1 }' "$file"
+}
+
+path_owner_state() {
+  path="$1"
+  owner_id=
+  if [ -e "$path" ]; then
+    owner_id="$(stat -f %u "$path" 2>/dev/null || stat -c %u "$path" 2>/dev/null || true)"
+  fi
+  if [ -n "$owner_id" ] && [ "$owner_id" = "$(id -u)" ]; then
+    printf '%s\n' user
+    return
+  fi
+  case "$path" in
+    "$HOME"/*)
+      printf '%s\n' user
+      ;;
+    *)
+      printf '%s\n' shared
+      ;;
+  esac
+}
+
+standard_homebrew_prefix() {
+  profile="$1"
+  case "$profile" in
+    macos-terminal)
+      case "$(uname -m 2>/dev/null || true)" in
+        arm64|aarch64) printf '%s\n' /opt/homebrew ;;
+        x86_64) printf '%s\n' /usr/local ;;
+      esac
+      ;;
+    vps-shell)
+      printf '%s\n' /home/linuxbrew/.linuxbrew
+      ;;
+  esac
+}
+
+registry_alternate_package_ids() {
+  registry="$1"
+  wanted_provider="$2"
+
+  printf '%s\n' "$registry" | awk -F'|' -v provider="$wanted_provider" '
+    {
+      count = split($7, alternates, ",")
+      for (i = 1; i <= count; i++) {
+        split(alternates[i], alternate, ":")
+        if (alternate[1] == provider) {
+          print $1 "|" alternate[2]
+        }
+      }
+    }
+  '
+}
+
+scan_homebrew() {
+  output_dir="$1"
+  profile="$2"
+  command -v brew >/dev/null 2>&1 || return 0
+
+  prefix="$(brew --prefix 2>/dev/null || true)"
+  prefix_ownership="$(path_owner_state "$prefix")"
+  expected_prefix="$(standard_homebrew_prefix "$profile")"
+  if [ "$prefix" = "$expected_prefix" ]; then
+    prefix_ownership="$prefix_ownership-standard"
+  else
+    prefix_ownership=nonstandard
+  fi
+  brew list --formula --full-name 2>/dev/null |
+    while IFS= read -r identity; do
+      [ -n "$identity" ] && printf '%s|%s|%s\n' "$identity" "$prefix_ownership" "$prefix"
+    done >"$output_dir/homebrew-formula"
+  brew list --cask --full-name 2>/dev/null |
+    while IFS= read -r identity; do
+      [ -n "$identity" ] && printf '%s|%s|%s\n' "$identity" "$prefix_ownership" "$prefix"
+    done >"$output_dir/homebrew-cask"
+}
+
+scan_mise() {
+  output_dir="$1"
+  command -v mise >/dev/null 2>&1 || return 0
+
+  mise ls --installed --no-header 2>/dev/null |
+    while IFS=' ' read -r tool version _; do
+      [ -n "$tool" ] && [ -n "$version" ] || continue
+      exact_identity="$tool@$version"
+      install_path="$(mise where "$exact_identity" 2>/dev/null || true)"
+      ownership=shared
+      if [ -n "$install_path" ]; then
+        ownership="$(path_owner_state "$install_path")"
+      fi
+      printf '%s|%s|%s\n' "$tool" "$ownership" "$exact_identity"
+    done >"$output_dir/mise"
+}
+
+scan_npm() {
+  output_dir="$1"
+  registry="$2"
+  command -v npm >/dev/null 2>&1 || return 0
+
+  npm_root="$(npm root -g 2>/dev/null || true)"
+  [ -n "$npm_root" ] || return 0
+  ownership="$(path_owner_state "$npm_root")"
+  registry_alternate_package_ids "$registry" npm |
+    while IFS='|' read -r package_id identity; do
+      [ -n "$identity" ] || continue
+      if [ -e "$npm_root/$identity" ]; then
+        printf '%s|%s\n' "$identity" "$ownership"
+      fi
+    done >"$output_dir/npm"
+}
+
+scan_apt() {
+  output_dir="$1"
+  registry="$2"
+  command -v dpkg-query >/dev/null 2>&1 || return 0
+  command -v apt-mark >/dev/null 2>&1 || return 0
+  command -v apt-get >/dev/null 2>&1 || return 0
+
+  manual_packages="$(apt-mark showmanual 2>/dev/null || true)"
+  registry_alternate_package_ids "$registry" apt |
+    while IFS='|' read -r package_id identity; do
+      [ -n "$identity" ] || continue
+      status="$(dpkg-query -W -f='${Status}' "$identity" 2>/dev/null || true)"
+      [ "$status" = "install ok installed" ] || continue
+
+      selection=automatic
+      if printf '%s\n' "$manual_packages" | grep -Fx "$identity" >/dev/null 2>&1; then
+        selection=manual
+      fi
+
+      simulation=cascade
+      simulated_removals="$(apt-get --simulate remove "$identity" 2>/dev/null | awk '$1 == "Remv" { print $2 }')"
+      if [ "$simulated_removals" = "$identity" ]; then
+        simulation=safe
+      fi
+      printf '%s|%s|%s\n' "$identity" "$selection" "$simulation"
+    done >"$output_dir/apt"
+}
+
+scan_simple_provider() {
+  output_dir="$1"
+  provider="$2"
+  command_name="$3"
+  shift 3
+  command -v "$command_name" >/dev/null 2>&1 || return 0
+
+  case "$provider" in
+    aqua)
+      "$command_name" list 2>/dev/null | awk 'NF { print $1 "|user" }' >"$output_dir/aqua"
+      ;;
+    snap)
+      "$command_name" list 2>/dev/null | awk 'NR > 1 && NF { print $1 "|shared" }' >"$output_dir/snap"
+      ;;
+    cargo)
+      "$command_name" install --list 2>/dev/null | awk '/^[^[:space:]].*:$/ { sub(/:.*/, "", $1); print $1 "|user" }' >"$output_dir/cargo"
+      ;;
+    pipx)
+      "$command_name" list --short 2>/dev/null | awk 'NF { print $1 "|user" }' >"$output_dir/pipx"
+      ;;
+  esac
+}
+
+scan_vendor() {
+  output_dir="$1"
+  registry="$2"
+  [ -n "$(registry_record "$registry" claude)" ] || return 0
+
+  claude_path="$HOME/.local/bin/claude"
+  [ -L "$claude_path" ] || return 0
+  claude_target="$(readlink "$claude_path" 2>/dev/null || true)"
+  case "$claude_target" in
+    *"/.local/share/claude/"*|../share/claude/*)
+      printf '%s\n' "claude|user|official-uninstaller" >"$output_dir/vendor"
+      ;;
+  esac
+}
+
+scan_path_copies() {
+  output_dir="$1"
+  registry="$2"
+
+  old_ifs="$IFS"
+  IFS=:
+  for path_dir in $PATH; do
+    [ -n "$path_dir" ] || path_dir=.
+    printf '%s\n' "$registry" | while IFS='|' read -r package_id _scope canonical_provider canonical_package artifact_type artifact _alternates; do
+      [ "$artifact_type" = executable ] || continue
+      candidate="$path_dir/$artifact"
+      [ -x "$candidate" ] || continue
+      provenance=unknown
+      case "$canonical_provider:$candidate" in
+        homebrew:/opt/homebrew/bin/*|homebrew:/home/linuxbrew/.linuxbrew/bin/*|mise:"$HOME"/.local/share/mise/shims/*)
+          provenance=canonical
+          ;;
+        *:"$HOME"/*)
+          provenance=user
+          ;;
+      esac
+      printf '%s|%s|%s\n' "$package_id" "$candidate" "$provenance"
+    done
+  done >"$output_dir/path"
+  IFS="$old_ifs"
+}
+
+scan_apps() {
+  output_dir="$1"
+  registry="$2"
+  [ "$(uname -s 2>/dev/null || true)" = Darwin ] || return 0
+
+  printf '%s\n' "$registry" | while IFS='|' read -r package_id _scope canonical_provider canonical_package artifact_type artifact _alternates; do
+    [ "$artifact_type" = app ] || continue
+    if [ -d "/Applications/$artifact" ]; then
+      ownership=unowned
+      if inventory_has_identity homebrew-cask "$canonical_package"; then
+        ownership=homebrew
+      fi
+      printf '%s|%s\n' "$artifact" "$ownership"
+    fi
+  done >"$output_dir/apps"
+}
+
+scan_to_dir() {
+  output_dir="$1"
+  config_file="$2"
+  profile="$3"
+  registry="$(active_registry "$config_file" "$profile")"
+
+  mkdir -p "$output_dir"
+  for name in homebrew-formula homebrew-cask mise aqua npm apt snap cargo pipx vendor path apps; do
+    : >"$output_dir/$name"
+  done
+
+  TERRAPOD_MANAGED_PACKAGE_INVENTORY_DIR="$output_dir"
+  export TERRAPOD_MANAGED_PACKAGE_INVENTORY_DIR
+  scan_homebrew "$output_dir" "$profile"
+  scan_mise "$output_dir"
+  scan_npm "$output_dir" "$registry"
+  scan_apt "$output_dir" "$registry"
+  scan_simple_provider "$output_dir" aqua aqua
+  scan_simple_provider "$output_dir" snap snap
+  scan_simple_provider "$output_dir" cargo cargo
+  scan_simple_provider "$output_dir" pipx pipx
+  scan_vendor "$output_dir" "$registry"
+  scan_path_copies "$output_dir" "$registry"
+  scan_apps "$output_dir" "$registry"
+}
+
+print_scan() {
+  config_file="$1"
+  profile="$2"
+  scan_dir="$(mktemp -d "${TMPDIR:-/tmp}/terrapod-managed-scan.XXXXXX")"
+  trap 'rm -rf "$scan_dir"' EXIT INT TERM
+  scan_to_dir "$scan_dir" "$config_file" "$profile"
+  for provider in homebrew-formula homebrew-cask mise aqua npm apt snap cargo pipx vendor path apps; do
+    while IFS= read -r record; do
+      [ -n "$record" ] && printf '%s|%s\n' "$provider" "$record"
+    done <"$scan_dir/$provider"
+  done
+  rm -rf "$scan_dir"
+  trap - EXIT INT TERM
+}
+
+plan_mise() {
+  registry="$1"
+  file="$(inventory_file mise)" || return 0
+  [ -f "$file" ] || return 0
+
+  while IFS='|' read -r identity ownership exact_identity; do
+    [ -n "$identity" ] || continue
+    record="$(registry_record "$registry" "$identity")"
+    [ -n "$record" ] || continue
+    canonical_provider="$(printf '%s\n' "$record" | cut -d'|' -f3)"
+    [ "$canonical_provider" != mise ] || continue
+    [ -n "$exact_identity" ] || exact_identity="$identity"
+    if [ "$ownership" = user ]; then
+      printf 'remove|%s|mise|%s|mise uninstall %s\n' "$identity" "$identity" "$exact_identity"
+    else
+      printf 'manual|%s|mise|%s|installation is not current-user-owned\n' "$identity" "$identity"
+    fi
+  done <"$file"
+}
+
+plan_npm() {
+  registry="$1"
+  file="$(inventory_file npm)" || return 0
+  [ -f "$file" ] || return 0
+
+  while IFS='|' read -r identity ownership; do
+    [ -n "$identity" ] || continue
+    package_id=
+    case "$identity" in
+      @openai/codex) package_id=codex ;;
+      @anthropic-ai/claude-code) package_id=claude ;;
+      @google/antigravity) package_id=antigravity ;;
+    esac
+    [ -n "$package_id" ] || continue
+    [ -n "$(registry_record "$registry" "$package_id")" ] || continue
+    if [ "$ownership" = user ]; then
+      printf 'remove|%s|npm|%s|npm uninstall -g %s\n' "$package_id" "$identity" "$identity"
+    else
+      printf 'manual|%s|npm|%s|installation is not current-user-owned\n' "$package_id" "$identity"
+    fi
+  done <"$file"
+}
+
+plan_generic_alternates() {
+  registry="$1"
+  provider="$2"
+  inventory_provider="$provider"
+  if [ "$provider" = homebrew ]; then
+    inventory_provider=homebrew-formula
+  fi
+  file="$(inventory_file "$inventory_provider")" || return 0
+  [ -f "$file" ] || return 0
+
+  mappings="$(registry_alternate_package_ids "$registry" "$provider")"
+  while IFS='|' read -r identity ownership extra; do
+    [ -n "$identity" ] || continue
+    package_id="$(printf '%s\n' "$mappings" | awk -F'|' -v identity="$identity" '$2 == identity { print $1; exit }')"
+    [ -n "$package_id" ] || continue
+
+    case "$provider:$ownership" in
+      homebrew:user-standard)
+        printf 'remove|%s|homebrew|%s|brew uninstall %s\n' "$package_id" "$identity" "$identity"
+        ;;
+      cargo:user)
+        printf 'remove|%s|cargo|%s|cargo uninstall %s\n' "$package_id" "$identity" "$identity"
+        ;;
+      pipx:user)
+        printf 'remove|%s|pipx|%s|pipx uninstall %s\n' "$package_id" "$identity" "$identity"
+        ;;
+      aqua:*)
+        printf 'manual|%s|aqua|%s|remove the exact aqua declaration manually\n' "$package_id" "$identity"
+        ;;
+      snap:*)
+        printf 'manual|%s|snap|%s|Snap removal is not an approved sudo action\n' "$package_id" "$identity"
+        ;;
+      vendor:user)
+        if [ "$package_id" = claude ] && [ "$extra" = official-uninstaller ]; then
+          printf '%s\n' "remove|claude|vendor|claude|claude uninstall"
+        else
+          printf 'manual|%s|vendor|%s|official uninstaller or ownership signature is unresolved\n' "$package_id" "$identity"
+        fi
+        ;;
+      vendor:*)
+        printf 'manual|%s|vendor|%s|official uninstaller or ownership signature is unresolved\n' "$package_id" "$identity"
+        ;;
+      homebrew:*)
+        printf 'manual|%s|homebrew|%s|installation is not in the standard current-user-owned Homebrew prefix\n' "$package_id" "$identity"
+        ;;
+      *)
+        printf 'manual|%s|%s|%s|installation is not in a standard current-user-owned location\n' "$package_id" "$provider" "$identity"
+        ;;
+    esac
+  done <"$file"
+}
+
+plan_apt() {
+  registry="$1"
+  file="$(inventory_file apt)" || return 0
+  [ -f "$file" ] || return 0
+
+  while IFS='|' read -r identity selection simulation; do
+    [ -n "$identity" ] || continue
+    package_id="$identity"
+    case "$identity" in
+      fd-find) package_id=fd ;;
+      git-delta) package_id="delta" ;;
+      nodejs) package_id=node ;;
+      python3.13) package_id=python ;;
+    esac
+    [ -n "$(registry_record "$registry" "$package_id")" ] || continue
+
+    case "$identity" in
+      git|build-essential|ca-certificates|curl|file|procps)
+        printf 'keep|%s|apt|%s|protected Terrapod prerequisite\n' "$package_id" "$identity"
+        continue
+        ;;
+    esac
+
+    if [ "$selection" != manual ]; then
+      printf 'manual|%s|apt|%s|APT package is not manually installed\n' "$package_id" "$identity"
+    elif [ "$simulation" != safe ]; then
+      printf 'manual|%s|apt|%s|APT simulation would remove additional packages\n' "$package_id" "$identity"
+    else
+      printf 'remove|%s|apt|%s|sudo apt-get remove -y %s\n' "$package_id" "$identity" "$identity"
+    fi
+  done <"$file"
+}
+
+plan_apps() {
+  registry="$1"
+  file="$(inventory_file apps)" || return 0
+  [ -f "$file" ] || return 0
+
+  while IFS='|' read -r artifact ownership; do
+    [ -n "$artifact" ] || continue
+    record="$(printf '%s\n' "$registry" | awk -F'|' -v artifact="$artifact" '$5 == "app" && $6 == artifact { print; exit }')"
+    [ -n "$record" ] || continue
+    package_id="$(printf '%s\n' "$record" | cut -d'|' -f1)"
+    cask="$(printf '%s\n' "$record" | cut -d'|' -f4)"
+    if [ "$ownership" = unowned ] && ! inventory_has_identity homebrew-cask "$cask"; then
+      printf 'manual|%s|homebrew-cask|%s|Homebrew cask adoption did not complete; run brew install --cask --adopt %s\n' "$package_id" "$cask" "$cask"
+    fi
+  done <"$file"
+}
+
+plan_paths() {
+  registry="$1"
+  file="$(inventory_file path)" || return 0
+  [ -f "$file" ] || return 0
+
+  while IFS='|' read -r package_id path provenance; do
+    [ -n "$package_id" ] || continue
+    [ -n "$(registry_record "$registry" "$package_id")" ] || continue
+    if [ "$provenance" = unknown ]; then
+      printf 'manual|%s|path|%s|provenance is unresolved\n' "$package_id" "$path"
+    fi
+  done <"$file"
+}
+
+plan_path_overrides() {
+  override_dir="${XDG_CONFIG_HOME:-$HOME/.config}/zsh/path.d"
+  [ -d "$override_dir" ] || return 0
+
+  for override_file in "$override_dir"/*; do
+    [ -f "$override_file" ] || continue
+    printf 'manual|machine-local-path-override|path.d|%s|machine-local PATH override remains highest priority\n' "$override_file"
+  done
+}
+
+render_plan() {
+  config_file="$1"
+  profile="$2"
+  registry="$(active_registry "$config_file" "$profile")"
+  generated_inventory=
+  if [ -z "${TERRAPOD_MANAGED_PACKAGE_INVENTORY_DIR:-}" ]; then
+    generated_inventory="$(mktemp -d "${TMPDIR:-/tmp}/terrapod-managed-inventory.XXXXXX")"
+    scan_to_dir "$generated_inventory" "$config_file" "$profile"
+  fi
+
+  plan_mise "$registry"
+  plan_npm "$registry"
+  plan_generic_alternates "$registry" homebrew
+  plan_generic_alternates "$registry" aqua
+  plan_generic_alternates "$registry" snap
+  plan_generic_alternates "$registry" cargo
+  plan_generic_alternates "$registry" pipx
+  plan_generic_alternates "$registry" vendor
+  plan_apt "$registry"
+  plan_apps "$registry"
+  plan_paths "$registry"
+  plan_path_overrides
+
+  if [ -n "$generated_inventory" ]; then
+    rm -rf "$generated_inventory"
+    unset TERRAPOD_MANAGED_PACKAGE_INVENTORY_DIR
+  fi
+}
+
+canonical_is_installed() {
+  canonical_provider="$1"
+  canonical_package="$2"
+  package_id="$3"
+  case "$canonical_provider" in
+    homebrew)
+      inventory_has_identity homebrew-formula "$canonical_package"
+      ;;
+    homebrew-cask)
+      inventory_has_identity homebrew-cask "$canonical_package"
+      ;;
+    mise)
+      inventory_has_identity mise "$package_id"
+      ;;
+    vendor)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+path_override_exists() {
+  override_dir="${XDG_CONFIG_HOME:-$HOME/.config}/zsh/path.d"
+  [ -d "$override_dir" ] || return 1
+  for override_file in "$override_dir"/*; do
+    [ -f "$override_file" ] && return 0
+  done
+  return 1
+}
+
+run_doctor() {
+  config_file="$1"
+  profile="$2"
+  generated_inventory=
+  if [ -z "${TERRAPOD_MANAGED_PACKAGE_INVENTORY_DIR:-}" ]; then
+    generated_inventory="$(mktemp -d "${TMPDIR:-/tmp}/terrapod-managed-doctor.XXXXXX")"
+    scan_to_dir "$generated_inventory" "$config_file" "$profile"
+  fi
+  registry="$(active_registry "$config_file" "$profile")"
+  failed=0
+
+  printf '%s\n' "$registry" | while IFS='|' read -r package_id _scope canonical_provider canonical_package artifact_type artifact _alternates; do
+    if ! canonical_is_installed "$canonical_provider" "$canonical_package" "$package_id"; then
+      printf 'failure|%s|canonical package is missing (%s:%s)\n' "$package_id" "$canonical_provider" "$canonical_package"
+      exit 9
+    fi
+  done || failed=1
+
+  path_file="$(inventory_file path || true)"
+  if [ -n "$path_file" ] && [ -f "$path_file" ]; then
+    printf '%s\n' "$registry" | while IFS='|' read -r package_id _scope canonical_provider canonical_package artifact_type artifact _alternates; do
+      [ "$artifact_type" = executable ] || continue
+      copies="$(awk -F'|' -v package_id="$package_id" '$1 == package_id { print }' "$path_file")"
+      [ -n "$copies" ] || continue
+      primary="$(printf '%s\n' "$copies" | sed -n '1p')"
+      primary_path="$(printf '%s\n' "$primary" | cut -d'|' -f2)"
+      primary_provenance="$(printf '%s\n' "$primary" | cut -d'|' -f3)"
+      if [ "$primary_provenance" != canonical ]; then
+        if path_override_exists; then
+          printf 'advisory|%s|machine-local path.d override selects %s\n' "$package_id" "$primary_path"
+        else
+          printf 'failure|%s|legacy executable is primary at %s\n' "$package_id" "$primary_path"
+          exit 9
+        fi
+      fi
+      printf '%s\n' "$copies" | sed -n '2,$p' | while IFS='|' read -r _secondary_id secondary_path _secondary_provenance; do
+        [ -n "$secondary_path" ] || continue
+        printf 'advisory|%s|secondary duplicate remains at %s\n' "$package_id" "$secondary_path"
+      done
+    done || failed=1
+  fi
+
+  if path_override_exists; then
+    override_dir="${XDG_CONFIG_HOME:-$HOME/.config}/zsh/path.d"
+    printf 'advisory|machine-local-path-override|%s remains highest priority\n' "$override_dir"
+  fi
+
+  if [ -n "$generated_inventory" ]; then
+    rm -rf "$generated_inventory"
+    unset TERRAPOD_MANAGED_PACKAGE_INVENTORY_DIR
+  fi
+  if [ "$failed" -ne 0 ]; then
+    return 1
+  fi
+  printf '%s\n' "Managed Package diagnostics: ready"
+}
+
+run_status() {
+  config_file="$1"
+  profile="$2"
+  generated_inventory=
+  if [ -z "${TERRAPOD_MANAGED_PACKAGE_INVENTORY_DIR:-}" ]; then
+    generated_inventory="$(mktemp -d "${TMPDIR:-/tmp}/terrapod-managed-status.XXXXXX")"
+    mkdir -p "$generated_inventory"
+    for name in homebrew-formula homebrew-cask mise path; do
+      : >"$generated_inventory/$name"
+    done
+    TERRAPOD_MANAGED_PACKAGE_INVENTORY_DIR="$generated_inventory"
+    export TERRAPOD_MANAGED_PACKAGE_INVENTORY_DIR
+    registry="$(active_registry "$config_file" "$profile")"
+    scan_homebrew "$generated_inventory" "$profile"
+    scan_mise "$generated_inventory"
+    printf '%s\n' "$registry" | while IFS='|' read -r package_id _scope canonical_provider canonical_package artifact_type artifact _alternates; do
+      [ "$artifact_type" = executable ] || continue
+      primary_path="$(command -v "$artifact" 2>/dev/null || true)"
+      [ -n "$primary_path" ] || continue
+      provenance=legacy
+      case "$canonical_provider:$primary_path" in
+        homebrew:/opt/homebrew/bin/*|homebrew:/home/linuxbrew/.linuxbrew/bin/*|homebrew-cask:/opt/homebrew/bin/*|homebrew-cask:/home/linuxbrew/.linuxbrew/bin/*|mise:"$HOME"/.local/share/mise/shims/*)
+          provenance=canonical
+          ;;
+      esac
+      printf '%s|%s|%s\n' "$package_id" "$primary_path" "$provenance"
+    done >"$generated_inventory/path"
+  fi
+
+  registry="$(active_registry "$config_file" "$profile")"
+  states="$(
+    printf '%s\n' "$registry" | while IFS='|' read -r package_id _scope canonical_provider canonical_package artifact_type artifact _alternates; do
+      if canonical_is_installed "$canonical_provider" "$canonical_package" "$package_id"; then
+        state=canonical
+      else
+        state=missing
+      fi
+      if [ "$artifact_type" = executable ]; then
+        path_file="$(inventory_file path || true)"
+        primary_provenance=
+        if [ -n "$path_file" ] && [ -f "$path_file" ]; then
+          primary_provenance="$(awk -F'|' -v package_id="$package_id" '$1 == package_id { print $3; exit }' "$path_file")"
+        fi
+        if [ -n "$primary_provenance" ] && [ "$primary_provenance" != canonical ]; then
+          state=shadowed
+        fi
+      fi
+      printf '%s\n' "$state"
+    done
+  )"
+  canonical_count="$(printf '%s\n' "$states" | awk '$0 == "canonical" { count++ } END { print count + 0 }')"
+  missing_count="$(printf '%s\n' "$states" | awk '$0 == "missing" { count++ } END { print count + 0 }')"
+  shadowed_count="$(printf '%s\n' "$states" | awk '$0 == "shadowed" { count++ } END { print count + 0 }')"
+  pending_count=0
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = 1 ] &&
+    terrapod_install_warning_existing_path managed-package-migration >/dev/null 2>&1; then
+    pending_count=1
+  fi
+
+  printf 'Managed Package status: canonical=%s missing=%s shadowed=%s pending=%s\n' \
+    "$canonical_count" "$missing_count" "$shadowed_count" "$pending_count"
+
+  if [ -n "$generated_inventory" ]; then
+    rm -rf "$generated_inventory"
+    unset TERRAPOD_MANAGED_PACKAGE_INVENTORY_DIR
+  fi
+}
+
+warning_write() {
+  summary="$1"
+  guidance="$2"
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = 1 ]; then
+    terrapod_install_warning_write managed-package-migration "$summary" "$guidance"
+  fi
+}
+
+warning_clear() {
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = 1 ]; then
+    terrapod_install_warning_clear managed-package-migration
+  fi
+}
+
+read_plan() {
+  plan_input="$1"
+  if [ -f "$plan_input" ]; then
+    cat "$plan_input"
+  else
+    printf '%s\n' "$plan_input"
+  fi
+}
+
+run_action() {
+  action="$1"
+  if [ -n "${TERRAPOD_MANAGED_PACKAGE_EXECUTOR:-}" ]; then
+    "$TERRAPOD_MANAGED_PACKAGE_EXECUTOR" "$action"
+  else
+    case "$action" in
+      "sudo apt-get remove -y "*)
+        apt_package="${action##* }"
+        simulated_removals="$(apt-get --simulate remove "$apt_package" 2>/dev/null | awk '$1 == "Remv" { print $2 }')"
+        if [ "$simulated_removals" != "$apt_package" ]; then
+          return 1
+        fi
+        ;;
+    esac
+    sh -c "$action"
+  fi
+}
+
+execute_plan() {
+  plan_input="$1"
+  mode="$2"
+  plan="$(read_plan "$plan_input")"
+  destructive="$(printf '%s\n' "$plan" | awk -F'|' '$1 == "remove" || $1 == "adopt" { print }')"
+  manual="$(printf '%s\n' "$plan" | awk -F'|' '$1 == "manual" { print }')"
+
+  if [ -z "$destructive" ]; then
+    if [ -n "$manual" ]; then
+      printf '%s\n' "$manual"
+      warning_write "Managed Package migration has unresolved manual actions" "Review the listed provider and PATH ownership guidance, then rerun tpod apply."
+    else
+      warning_clear
+    fi
+    return 0
+  fi
+
+  printf '%s\n' "Managed Package migration plan:"
+  printf '%s\n' "$destructive" | while IFS='|' read -r kind package_id provider identity action; do
+    printf '  - %s: %s from %s (%s)\n' "$kind" "$package_id" "$provider" "$action"
+  done
+
+  if [ "$mode" != interactive ]; then
+    printf '%s\n' "Managed Package migration pending: non-interactive apply does not remove packages."
+    warning_write "Managed Package migration is pending confirmation" "Run tpod apply in an interactive terminal and review the removal plan."
+    return 0
+  fi
+
+  printf '%s' "Proceed with removing these legacy package installations? [y/N] "
+  response=
+  IFS= read -r response || true
+  case "$response" in
+    y|Y|yes|YES|Yes)
+      ;;
+    *)
+      printf '\n%s\n' "Managed Package migration pending: removal was declined."
+      warning_write "Managed Package migration was declined" "Rerun tpod apply when you are ready to review the removal plan."
+      return 0
+      ;;
+  esac
+
+  failed_file="$(mktemp "${TMPDIR:-/tmp}/terrapod-managed-failed.XXXXXX")"
+  : >"$failed_file"
+  printf '%s\n' "$destructive" | while IFS='|' read -r kind package_id provider identity action; do
+    if run_action "$action"; then
+      if [ "$kind" = adopt ]; then
+        printf 'adopted: %s through %s\n' "$package_id" "$provider"
+      else
+        printf 'removed: %s from %s\n' "$package_id" "$provider"
+      fi
+    else
+      printf 'pending: %s from %s\n' "$package_id" "$provider"
+      printf '%s\n' "$package_id" >>"$failed_file"
+    fi
+  done
+
+  if [ -s "$failed_file" ] || [ -n "$manual" ]; then
+    warning_write "Managed Package migration has pending actions" "Review the failed or manual actions, then rerun tpod apply."
+  else
+    warning_clear
+  fi
+  rm -f "$failed_file"
+}
+
+state_root() {
+  if [ -n "${XDG_STATE_HOME:-}" ]; then
+    printf '%s\n' "$XDG_STATE_HOME/terrapod"
+  else
+    printf '%s\n' "$HOME/.local/state/terrapod"
+  fi
+}
+
+reconcile() {
+  config_file="$1"
+  profile="$2"
+  mode="$3"
+  lock_dir="$(state_root)/managed-package-migration.lock"
+  mkdir -p "${lock_dir%/*}"
+  if ! mkdir "$lock_dir" 2>/dev/null; then
+    printf '%s\n' "terrapod: managed package reconciliation is already running" >&2
+    return 1
+  fi
+  trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT INT TERM
+
+  plan="$(render_plan "$config_file" "$profile")"
+  if [ -z "$plan" ]; then
+    warning_clear
+    printf '%s\n' "Managed Package reconciliation: ready"
+  else
+    execute_plan "$plan" "$mode"
+    verification_plan="$(render_plan "$config_file" "$profile")"
+    if [ -z "$verification_plan" ]; then
+      warning_clear
+      printf '%s\n' "Managed Package verification: ready"
+    else
+      warning_write "Managed Package migration has pending actions" "Review the pending provider or manual actions, then rerun tpod apply."
+      printf '%s\n' "Managed Package verification: pending"
+    fi
+  fi
+
+  rmdir "$lock_dir"
+  trap - EXIT INT TERM
+}
+
+subcommand="${1:-}"
+case "$subcommand" in
+  registry)
+    [ "$#" -eq 3 ] || exit 64
+    active_registry "$2" "$3"
+    ;;
+  plan)
+    [ "$#" -eq 3 ] || exit 64
+    render_plan "$2" "$3"
+    ;;
+  scan)
+    [ "$#" -eq 3 ] || exit 64
+    print_scan "$2" "$3"
+    ;;
+  doctor)
+    [ "$#" -eq 3 ] || exit 64
+    run_doctor "$2" "$3"
+    ;;
+  status)
+    [ "$#" -eq 3 ] || exit 64
+    run_status "$2" "$3"
+    ;;
+  execute)
+    [ "$#" -eq 3 ] || exit 64
+    execute_plan "$2" "$3"
+    ;;
+  reconcile)
+    [ "$#" -eq 4 ] || exit 64
+    reconcile "$2" "$3" "$4"
+    ;;
+  *)
+    printf '%s\n' "usage: managed-packages {registry|scan|plan|execute|reconcile|doctor|status} ..." >&2
+    exit 64
+    ;;
+esac

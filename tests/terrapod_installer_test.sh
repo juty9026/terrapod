@@ -599,6 +599,9 @@ case "${1-}" in
     ;;
   configure)
     ;;
+  apply)
+    chezmoi apply
+    ;;
   help|--help|-h)
     if [ "${TPOD_HELP_STUB_STATUS:-0}" != "0" ]; then
       exit "$TPOD_HELP_STUB_STATUS"
@@ -759,6 +762,9 @@ case "${1-}" in
     printf '%s\n' "terrapod setup stdin lines:$setup_stdin_line_number" >>"$log_file"
     ;;
   configure)
+    ;;
+  apply)
+    chezmoi apply
     ;;
   help|--help|-h)
     if [ "${TPOD_HELP_STUB_STATUS:-0}" != "0" ]; then
@@ -1541,6 +1547,9 @@ assert_first_occurrence_before "$first_run_log_text" "terrapod args:setup" "chez
 assert_first_occurrence_before "$first_run_log_text" "brew args:install chezmoi gum" "chezmoi args:apply" "Homebrew bootstrap tools precede initial apply"
 assert_contains "$first_run_log_text" "chezmoi args:apply" "chezmoi apply runs after setup"
 assert_first_occurrence_before "$first_run_log_text" "terrapod path:$first_run_case/home/.local/bin/tpod" "chezmoi args:apply --force" "first-run validates recovery-core command surface before shell startup recovery apply"
+assert_contains "$first_run_log_text" "terrapod args:apply" "first-run hands declared-state apply to the installed tpod command"
+assert_first_occurrence_before "$first_run_log_text" "chezmoi args:apply --force" "terrapod args:apply" "first-run recovery core precedes installed tpod apply"
+assert_first_occurrence_before "$first_run_log_text" "terrapod args:apply" "tpod args:help" "first-run installed tpod apply precedes final help"
 assert_first_occurrence_before "$first_run_log_text" "chezmoi args:apply --force" "tpod args:help" "first-run applies recovery-core shell startup files before final help"
 assert_first_occurrence_before "$first_run_log_text" "chezmoi args:apply" "tpod args:help" "first-run installer shows tpod help after initial apply"
 assert_contains "$first_run_log_text" "tpod path:$first_run_case/home/.local/bin/tpod" "first-run installer invokes installed tpod from user local bin"
@@ -1624,7 +1633,7 @@ assert_failure "$installer_status" "unknown full apply failure remains hard"
 unknown_apply_failure_stdout="$(cat "$unknown_apply_failure_case/stdout")"
 unknown_apply_failure_stderr="$(cat "$unknown_apply_failure_case/stderr")"
 assert_contains "$unknown_apply_failure_stderr" "simulated template rendering failure" "unknown full apply failure preserves apply output"
-assert_contains "$unknown_apply_failure_stderr" "terrapod installer: chezmoi apply failed" "unknown full apply failure keeps hard failure guidance"
+assert_contains "$unknown_apply_failure_stderr" "terrapod installer: installed tpod apply failed" "unknown full apply failure keeps hard failure guidance"
 assert_not_contains "$unknown_apply_failure_stdout" "completed with warnings" "unknown full apply failure does not print warning completion"
 
 mixed_apply_failure_case="$(make_case_dir mixed-apply-failure)"

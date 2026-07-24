@@ -1026,7 +1026,12 @@ snapshot_install_warnings_from_source() {
   load_install_warnings_from_source "$source_dir" || return 0
 
   for category in $(terrapod_install_warning_categories); do
-    terrapod_install_warning_read "$category" >"$snapshot_dir/$category" 2>/dev/null || true
+    if terrapod_install_warning_read "$category" >"$snapshot_dir/$category" 2>/dev/null; then
+      marker_path="$(terrapod_install_warning_existing_path "$category" 2>/dev/null || true)"
+      if [ -n "$marker_path" ]; then
+        ln "$marker_path" "$snapshot_dir/$category.identity" 2>/dev/null || true
+      fi
+    fi
   done
 }
 
@@ -1040,7 +1045,13 @@ install_warning_markers_changed_since_snapshot() {
   for category in $(terrapod_install_warning_categories); do
     current_file="$snapshot_dir/current-$category"
     if terrapod_install_warning_read "$category" >"$current_file" 2>/dev/null; then
-      if [ ! -f "$snapshot_dir/$category" ] || ! cmp -s "$snapshot_dir/$category" "$current_file"; then
+      marker_path="$(terrapod_install_warning_existing_path "$category" 2>/dev/null || true)"
+      if [ ! -f "$snapshot_dir/$category" ] ||
+        ! cmp -s "$snapshot_dir/$category" "$current_file" ||
+        {
+          [ -f "$snapshot_dir/$category.identity" ] &&
+            [ ! "$snapshot_dir/$category.identity" -ef "$marker_path" ]
+        }; then
         changed=true
       fi
     fi
@@ -1227,17 +1238,19 @@ apply_recovery_core_shell_startup_files() {
 }
 
 run_initial_apply() {
-  chezmoi_bin="$1"
+  profile="$1"
   source_dir="$2"
+  local_bin_dir="$3"
+  tpod_bin="$local_bin_dir/tpod"
   marker_snapshot_dir="$(mktemp -d)" ||
     fatal "failed to create install-warning snapshot directory"
 
   snapshot_install_warnings_from_source "$source_dir" "$marker_snapshot_dir" ||
     fatal "failed to snapshot install warning markers"
 
-  if ! TERRAPOD_FIRST_RUN_APPLY=1 "$chezmoi_bin" apply; then
+  if ! TERRAPOD_PROFILE="$profile" TERRAPOD_FIRST_RUN_APPLY=1 "$tpod_bin" apply; then
     rm -rf "$marker_snapshot_dir"
-    fatal "chezmoi apply failed"
+    fatal "installed tpod apply failed"
   fi
 
   if install_warning_markers_changed_since_snapshot "$source_dir" "$marker_snapshot_dir"; then
@@ -1332,7 +1345,7 @@ main() {
   apply_recovery_core_command_surface "$profile" "$source_dir" "$local_bin_dir"
   apply_recovery_core_shell_startup_files "$profile" "$chezmoi_bin"
   initial_apply_status=0
-  run_initial_apply "$chezmoi_bin" "$source_dir" || initial_apply_status="$?"
+  run_initial_apply "$profile" "$source_dir" "$local_bin_dir" || initial_apply_status="$?"
   show_first_run_help "$profile" "$local_bin_dir"
   print_first_run_tpod_availability "$local_bin_dir"
 

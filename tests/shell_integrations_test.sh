@@ -18,6 +18,11 @@ pass() {
   printf '%s\n' "ok - $1"
 }
 
+file_inode() {
+  path="$1"
+  stat -f %i "$path" 2>/dev/null || stat -c %i "$path"
+}
+
 assert_contains() {
   haystack="$1"
   needle="$2"
@@ -366,6 +371,7 @@ fi
 pass "shell integrations keeps a warning marker when SCM Breeze installer fails"
 
 scm_marker_text="$(cat "$scm_shell_integrations_marker")"
+scm_marker_inode="$(file_inode "$scm_shell_integrations_marker")"
 assert_contains "$scm_marker_text" "SCM Breeze" "shell integrations marker mentions the failed SCM Breeze installer"
 
 : >"$SHELL_INTEGRATIONS_TEST_LOG"
@@ -381,8 +387,9 @@ fi
 pass "shell integrations keeps a warning marker when SCM Breeze installer fails on rerun"
 
 scm_replacement_marker_text="$(cat "$scm_shell_integrations_marker")"
+scm_replacement_marker_inode="$(file_inode "$scm_shell_integrations_marker")"
 assert_contains "$scm_replacement_marker_text" "SCM Breeze" "shell integrations replacement marker keeps the SCM Breeze failure"
-if [ "$scm_replacement_marker_text" = "$scm_marker_text" ]; then
+if [ "$scm_replacement_marker_inode" = "$scm_marker_inode" ]; then
   unset SHELL_INTEGRATIONS_SCM_INSTALL_STATUS
   fail "shell integrations should replace the SCM Breeze marker on failed rerun"
 fi
