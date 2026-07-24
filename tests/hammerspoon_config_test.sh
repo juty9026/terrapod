@@ -36,28 +36,28 @@ assert_not_contains() {
 }
 
 assert_contains \
-  '{ key = "1", label = "ChatGPT", bundleID = "com.openai.codex" }' \
-  "Hammerspoon launcher binds the unified ChatGPT app to 1 with the Codex-lineage bundle ID"
+  '{ key = "1", label = "Orca", bundleID = "com.stablyai.orca" }' \
+  "Hammerspoon launcher binds Orca to 1"
+
+assert_contains \
+  '{ key = "2", label = "Zed", bundleID = "dev.zed.Zed" }' \
+  "Hammerspoon launcher binds Zed to 2"
 
 assert_not_contains \
-  '{ key = "1", label = "Codex Desktop", bundleID = "com.openai.codex" }' \
-  "Hammerspoon launcher no longer presents the unified app as Codex Desktop"
+  'com.openai.codex' \
+  "Hammerspoon launcher no longer includes ChatGPT"
 
-assert_contains \
-  '{ key = "2", label = "Claude Desktop", bundleID = "com.anthropic.claudefordesktop" }' \
-  "Hammerspoon launcher binds Claude Desktop to 2"
+assert_not_contains \
+  'com.anthropic.claudefordesktop' \
+  "Hammerspoon launcher no longer includes Claude Desktop"
 
-assert_contains \
-  '{ key = "3", label = "Antigravity 2.0", bundleID = "com.google.antigravity" }' \
-  "Hammerspoon launcher binds Antigravity 2.0 to 3"
-
-assert_contains \
+assert_not_contains \
   '{ key = "4", label = "Orca", bundleID = "com.stablyai.orca" }' \
-  "Hammerspoon launcher binds Orca to 4"
+  "Hammerspoon launcher no longer binds Orca to 4"
 
-assert_contains \
-  '{ key = "i", label = "Antigravity IDE", bundleID = "com.google.antigravity-ide" }' \
-  "Hammerspoon launcher binds Antigravity IDE to i"
+assert_not_contains \
+  'com.google.antigravity' \
+  "Hammerspoon launcher no longer includes Antigravity desktop apps"
 
 assert_not_contains \
   'ChatGPT Atlas' \

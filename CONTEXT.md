@@ -303,7 +303,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - The development-apps **macOS App Group** declares `stablyai/orca/orca` with `trusted: true` so Homebrew trusts only the Orca cask, not the entire `stablyai/orca` tap.
 - Disabling the development-apps **macOS App Group** does not revoke an existing Orca cask trust entry; Terrapod leaves Homebrew trust removal to an explicit user action.
 - `enableMacosAppGroupAiApps` is deprecated and is not an alias for `enableMacosAppGroupDevelopmentApps`; users must run explicit setup or configure migration.
-- The Hammerspoon app launcher maps Codex Desktop to `1`, Claude Desktop to `2`, Antigravity 2.0 to `3`, Orca to `4`, and Antigravity IDE to `i`.
+- The Hammerspoon app launcher maps Orca to `1` and Zed to `2`.
 - Orca's bundled `orca` CLI remains an artifact of the development-apps **macOS App Group** and is not a member of the cross-profile **Optional AI Tool Stack**.
 - Removing ChatGPT Atlas from the Hammerspoon app launcher is part of the planned launcher change.
 - Individual macOS app toggles are excluded from the current **Terrapod** setup scope.
