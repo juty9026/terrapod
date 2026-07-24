@@ -1,0 +1,243 @@
+#!/bin/sh
+set -u
+
+mode="${1:-}"
+profile="${2:-}"
+ai_enabled="${3:-false}"
+launcher_enabled="${4:-false}"
+
+case "$mode" in
+  apply|status|doctor) ;;
+  *)
+    printf '%s\n' "usage: executable-selection {apply|status|doctor} <profile> <ai-enabled> <launcher-enabled>" >&2
+    exit 2
+    ;;
+esac
+
+standard_homebrew_prefix() {
+  if [ -n "${TERRAPOD_STANDARD_HOMEBREW_PREFIX:-}" ]; then
+    printf '%s\n' "$TERRAPOD_STANDARD_HOMEBREW_PREFIX"
+    return
+  fi
+
+  case "$profile:$(uname -m 2>/dev/null || true)" in
+    macos-terminal:arm64|macos-terminal:aarch64) printf '%s\n' /opt/homebrew ;;
+    macos-terminal:x86_64) printf '%s\n' /usr/local ;;
+    vps-shell:x86_64|vps-shell:aarch64) printf '%s\n' /home/linuxbrew/.linuxbrew ;;
+    *) return 1 ;;
+  esac
+}
+
+core_records() {
+  while IFS=' ' read -r package command; do
+    printf '%s|%s|%s\n' homebrew-formula "$package" "$command"
+  done <<'EOF'
+bat bat
+btop btop
+chezmoi chezmoi
+dust dust
+duf duf
+fastfetch fastfetch
+fd fd
+fzf fzf
+gh gh
+git git
+git-delta delta
+gum gum
+lazygit lazygit
+lsd lsd
+mise mise
+neovim nvim
+ripgrep rg
+starship starship
+zellij zellij
+zoxide zoxide
+EOF
+}
+
+runtime_records() {
+  printf '%s\n' \
+    "mise|bun|bun" \
+    "mise|node|node" \
+    "mise|python|python3" \
+    "mise|uv|uv"
+}
+
+optional_records() {
+  if [ "$ai_enabled" = true ]; then
+    printf '%s\n' \
+      "homebrew-cask|antigravity-cli|agy" \
+      "homebrew-cask|claude-code|claude" \
+      "homebrew-cask|codex|codex"
+  fi
+
+  if [ "$profile" = macos-terminal ] && [ "$launcher_enabled" = true ]; then
+    printf '%s\n' "homebrew-cask|1password-cli|op"
+  fi
+}
+
+active_records() {
+  core_records
+  runtime_records
+  optional_records
+}
+
+inventory_file() {
+  provider="$1"
+  inventory_dir="${TERRAPOD_EXECUTABLE_SELECTION_INVENTORY_DIR:-}"
+  [ -n "$inventory_dir" ] || return 1
+  printf '%s/%s\n' "$inventory_dir" "$provider"
+}
+
+inventory_contains() {
+  provider="$1"
+  package="$2"
+  file="$(inventory_file "$provider")" || return 1
+  [ -f "$file" ] || return 1
+  awk -v package="$package" '$0 == package { found = 1 } END { exit found ? 0 : 1 }' "$file"
+}
+
+homebrew_formulae=
+homebrew_casks=
+if [ -z "${TERRAPOD_EXECUTABLE_SELECTION_INVENTORY_DIR:-}" ] &&
+  command -v brew >/dev/null 2>&1; then
+  homebrew_formulae="$(brew list --formula --full-name 2>/dev/null || true)"
+  homebrew_casks="$(brew list --cask --full-name 2>/dev/null || true)"
+fi
+
+line_list_contains() {
+  list="$1"
+  wanted="$2"
+  printf '%s\n' "$list" | awk -v wanted="$wanted" '$0 == wanted { found = 1 } END { exit found ? 0 : 1 }'
+}
+
+provider_has_package() {
+  provider="$1"
+  package="$2"
+
+  if [ -n "${TERRAPOD_EXECUTABLE_SELECTION_INVENTORY_DIR:-}" ]; then
+    inventory_contains "$provider" "$package"
+    return
+  fi
+
+  case "$provider" in
+    homebrew-formula)
+      line_list_contains "$homebrew_formulae" "$package"
+      ;;
+    homebrew-cask)
+      line_list_contains "$homebrew_casks" "$package"
+      ;;
+    mise)
+      command -v mise >/dev/null 2>&1 &&
+        mise where "$package" >/dev/null 2>&1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+provider_label() {
+  case "$1" in
+    homebrew-formula) printf '%s\n' Homebrew ;;
+    homebrew-cask) printf '%s\n' "Homebrew Cask" ;;
+    mise) printf '%s\n' mise ;;
+  esac
+}
+
+expected_executable() {
+  provider="$1"
+  command="$2"
+
+  case "$provider" in
+    homebrew-formula|homebrew-cask)
+      prefix="$(standard_homebrew_prefix)" || return 1
+      printf '%s/bin/%s\n' "$prefix" "$command"
+      ;;
+    mise)
+      mise_shims_dir="${TERRAPOD_MISE_SHIMS_DIR:-${MISE_DATA_DIR:-$HOME/.local/share/mise}/shims}"
+      printf '%s/%s\n' "$mise_shims_dir" "$command"
+      ;;
+  esac
+}
+
+files_are_same() {
+  first="$1"
+  second="$2"
+  [ "$first" = "$second" ] || [ "$first" -ef "$second" ]
+}
+
+print_failure() {
+  message="$1"
+  case "$mode" in
+    doctor|status) printf '  failure - %s\n' "$message" ;;
+    apply) printf '  warning - %s\n' "$message" ;;
+  esac
+}
+
+print_advisory() {
+  package="$1"
+  actual="$2"
+  expected="$3"
+  printf '  advisory - %s resolves to %s\n' "$package" "$actual"
+  printf '             canonical: %s\n' "$expected"
+  printf '%s\n' "             Adjust PATH or remove the other installation manually, then rerun 'tpod doctor'."
+}
+
+failure_found=0
+issue_found=0
+records="$(active_records)"
+
+while IFS='|' read -r provider package command; do
+  [ -n "$provider" ] || continue
+  expected="$(expected_executable "$provider" "$command" 2>/dev/null || true)"
+
+  if ! provider_has_package "$provider" "$package"; then
+    print_failure "$package is not installed through $(provider_label "$provider")"
+    failure_found=1
+    issue_found=1
+    continue
+  fi
+
+  if [ -z "$expected" ] || [ ! -x "$expected" ]; then
+    print_failure "$package canonical executable is missing: ${expected:-unknown}"
+    failure_found=1
+    issue_found=1
+    continue
+  fi
+
+  actual="$(command -v "$command" 2>/dev/null || true)"
+  if [ -z "$actual" ]; then
+    print_failure "$package is unavailable on PATH (canonical: $expected)"
+    failure_found=1
+    issue_found=1
+    continue
+  fi
+
+  if ! files_are_same "$actual" "$expected"; then
+    print_advisory "$package" "$actual" "$expected"
+    issue_found=1
+  fi
+done <<EOF
+$records
+EOF
+
+case "$mode" in
+  apply)
+    exit 0
+    ;;
+  status)
+    if [ "$issue_found" -eq 0 ]; then
+      printf '%s\n' "Executable selection: ready"
+    else
+      printf '%s\n' "Executable selection: attention"
+    fi
+    exit 0
+    ;;
+  doctor)
+    if [ "$issue_found" -eq 0 ]; then
+      printf '%s\n' "Canonical executable selection: ready"
+    fi
+    [ "$failure_found" -eq 0 ]
+    ;;
+esac

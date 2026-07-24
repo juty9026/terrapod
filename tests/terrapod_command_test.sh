@@ -713,83 +713,19 @@ write_no_gum_path "$no_gum_path" sh
 terrapod="$repo_root/dot_local/bin/executable_terrapod"
 tpod_source="$repo_root/dot_local/bin/symlink_tpod"
 install_warnings_lib="$repo_root/dot_local/lib/terrapod/install-warnings.sh"
-managed_packages_helper="$repo_root/dot_local/lib/terrapod/executable_managed-packages"
-managed_package_inventory="$tmp_dir/managed-package-inventory"
-mkdir -p "$managed_package_inventory"
-for inventory_name in homebrew-cask aqua npm apt snap cargo pipx vendor apps; do
-  : >"$managed_package_inventory/$inventory_name"
-done
-cat >"$managed_package_inventory/homebrew-formula" <<'EOF'
-bat|user
-btop|user
-chezmoi|user
-dust|user
-duf|user
-fastfetch|user
-fd|user
-fzf|user
-gh|user
-git|user
-git-delta|user
-gum|user
-lazygit|user
-lsd|user
-mise|user
-neovim|user
-ripgrep|user
-starship|user
-zellij|user
-zoxide|user
-EOF
-cat >"$managed_package_inventory/mise" <<'EOF'
-bun|user|bun@test
-node|user|node@test
-python|user|python@test
-uv|user|uv@test
-EOF
-cat >"$managed_package_inventory/homebrew-cask" <<'EOF'
-antigravity-cli|user
-claude-code|user
-codex|user
-ghostty|user
-hammerspoon|user
-karabiner-elements|user
-scroll-reverser|user
-raycast|user
-1password-cli|user
-istat-menus|user
-zed|user
-stablyai/orca/orca|user
-EOF
-cat >"$managed_package_inventory/path" <<'EOF'
-bat|/opt/homebrew/bin/bat|canonical
-btop|/opt/homebrew/bin/btop|canonical
-chezmoi|/opt/homebrew/bin/chezmoi|canonical
-dust|/opt/homebrew/bin/dust|canonical
-duf|/opt/homebrew/bin/duf|canonical
-fastfetch|/opt/homebrew/bin/fastfetch|canonical
-fd|/opt/homebrew/bin/fd|canonical
-fzf|/opt/homebrew/bin/fzf|canonical
-gh|/opt/homebrew/bin/gh|canonical
-git|/opt/homebrew/bin/git|canonical
-delta|/opt/homebrew/bin/delta|canonical
-gum|/opt/homebrew/bin/gum|canonical
-lazygit|/opt/homebrew/bin/lazygit|canonical
-lsd|/opt/homebrew/bin/lsd|canonical
-mise|/opt/homebrew/bin/mise|canonical
-neovim|/opt/homebrew/bin/nvim|canonical
-ripgrep|/opt/homebrew/bin/rg|canonical
-starship|/opt/homebrew/bin/starship|canonical
-zellij|/opt/homebrew/bin/zellij|canonical
-zoxide|/opt/homebrew/bin/zoxide|canonical
-bun|$HOME/.local/share/mise/shims/bun|canonical
-node|$HOME/.local/share/mise/shims/node|canonical
-python|$HOME/.local/share/mise/shims/python3|canonical
-uv|$HOME/.local/share/mise/shims/uv|canonical
-EOF
-TERRAPOD_MANAGED_PACKAGES_HELPER="$managed_packages_helper"
-TERRAPOD_MANAGED_PACKAGE_INVENTORY_DIR="$managed_package_inventory"
-export TERRAPOD_MANAGED_PACKAGES_HELPER TERRAPOD_MANAGED_PACKAGE_INVENTORY_DIR
+executable_selection_helper="$repo_root/dot_local/lib/terrapod/executable_executable-selection"
+executable_selection_stub="$tmp_dir/bin/executable-selection"
+write_stub "$executable_selection_stub" \
+  'if [ -n "${TERRAPOD_EXECUTABLE_SELECTION_OUTPUT:-}" ]; then' \
+  '  printf "%s\n" "$TERRAPOD_EXECUTABLE_SELECTION_OUTPUT"' \
+  '  exit "${TERRAPOD_EXECUTABLE_SELECTION_STATUS:-0}"' \
+  'fi' \
+  'case "${1:-}" in' \
+  '  doctor) printf "%s\n" "Canonical executable selection: ready" ;;' \
+  '  status) printf "%s\n" "Executable selection: ready" ;;' \
+  'esac'
+TERRAPOD_EXECUTABLE_SELECTION_HELPER="$executable_selection_stub"
+export TERRAPOD_EXECUTABLE_SELECTION_HELPER
 export TERRAPOD_JETENDARD_FONT_HELPER="$repo_root/dot_local/lib/terrapod/executable_jetendard-font"
 export TERRAPOD_JETENDARD_SETTINGS_HELPER="$repo_root/dot_local/lib/terrapod/executable_jetendard-settings"
 
@@ -880,8 +816,8 @@ assert_line \
 
 assert_line \
   "$managed_targets" \
-  ".local/lib/terrapod/managed-packages" \
-  "chezmoi manages the Managed Package reconciliation helper"
+  ".local/lib/terrapod/executable-selection" \
+  "chezmoi manages the executable selection helper"
 
 terrapod_target="$(
   chezmoi \
@@ -946,8 +882,8 @@ pass "shared install warning marker library source exists"
 sh -n "$install_warnings_lib" || fail "shared install warning marker library is valid POSIX shell"
 pass "shared install warning marker library is valid POSIX shell"
 
-sh -n "$managed_packages_helper" || fail "Managed Package reconciliation helper is valid POSIX shell"
-pass "Managed Package reconciliation helper is valid POSIX shell"
+sh -n "$executable_selection_helper" || fail "executable selection helper is valid POSIX shell"
+pass "executable selection helper is valid POSIX shell"
 
 sh -n "$terrapod" || fail "Terrapod command is valid POSIX shell"
 pass "Terrapod command is valid POSIX shell"
@@ -980,7 +916,7 @@ pass "install warning markers honor XDG_STATE_HOME"
 marker_categories="$(
   sh -c '. "$1"; terrapod_install_warning_categories' sh "$install_warnings_lib"
 )"
-expected_marker_categories="$(printf '%s\n' homebrew-core homebrew-desktop-apps ubuntu-bootstrap shell-integrations mise-tools optional-ai-cli-tools managed-package-migration jetendard-font jetendard-settings)"
+expected_marker_categories="$(printf '%s\n' homebrew-core homebrew-desktop-apps ubuntu-bootstrap shell-integrations mise-tools optional-ai-cli-tools jetendard-font jetendard-settings)"
 
 if [ "$marker_categories" != "$expected_marker_categories" ]; then
   printf '%s\n' "expected marker categories:" >&2
@@ -2064,7 +2000,7 @@ set -e
 
 assert_status "$brew_owned_status_status" 0 "status succeeds when mandatory commands use Homebrew-owned symlinks"
 assert_contains "$brew_owned_status_output" "Core Shell Stack source: Homebrew" "status reports Homebrew as Modern CLI Provider"
-assert_contains "$brew_owned_status_output" "Homebrew CLI ownership: ready" "status accepts commands under the active prefix"
+assert_contains "$brew_owned_status_output" "Executable selection: ready" "status accepts canonical executable selection"
 
 mac_brew_owned_path="$(homebrew_owned_status_doctor_path mac-owned "$standard_brew_prefix" zsh agy claude codex)"
 write_stub "$mac_brew_owned_path/uname" \
@@ -2076,15 +2012,16 @@ mac_brew_owned_status_output="$(
   TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$status_config" PATH="$mac_brew_owned_path" \
     /bin/sh "$mac_homebrew_terrapod" status
 )"
-assert_contains "$mac_brew_owned_status_output" "Homebrew CLI ownership: ready" "macOS status accepts commands under the standard Homebrew prefix"
+assert_contains "$mac_brew_owned_status_output" "Executable selection: ready" "macOS status accepts canonical executable selection"
 
 missing_owned_path="$(homebrew_owned_status_doctor_path missing-owned "$standard_brew_prefix" zsh apt)"
 rm "$missing_owned_path/rg"
 missing_owned_status_output="$(
-  TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_ubuntu_config" \
+  TERRAPOD_EXECUTABLE_SELECTION_OUTPUT="  failure - ripgrep is unavailable on PATH" \
+    TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_ubuntu_config" \
     PATH="$missing_owned_path" /bin/sh "$vps_homebrew_terrapod" status
 )"
-assert_contains "$missing_owned_status_output" "rg: missing" "status reports a missing mandatory Homebrew command"
+assert_contains "$missing_owned_status_output" "failure - ripgrep is unavailable on PATH" "status reports an unavailable declared command"
 
 shadowed_home="$tmp_dir/shadowed-home"
 shadowed_bin="$shadowed_home/.local/bin"
@@ -2093,27 +2030,34 @@ write_stub "$shadowed_bin/chezmoi" 'exit 0'
 
 set +e
 shadowed_status_output="$(
-  TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_ubuntu_config" \
+  TERRAPOD_EXECUTABLE_SELECTION_OUTPUT="  advisory - chezmoi resolves to $shadowed_home/.local/bin/chezmoi
+             canonical: $standard_brew_prefix/bin/chezmoi
+             Adjust PATH or remove the other installation manually, then rerun 'tpod doctor'." \
+    TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_ubuntu_config" \
     PATH="$shadowed_bin:$brew_owned_path" /bin/sh "$vps_homebrew_terrapod" status
 )"
 shadowed_status_status=$?
 set -e
 
-assert_contains "$shadowed_status_output" "Homebrew CLI ownership: warning" "status reports mandatory command collisions"
-assert_contains "$shadowed_status_output" "chezmoi: $shadowed_home/.local/bin/chezmoi" "status prints the exact shadowing path"
+assert_contains "$shadowed_status_output" "advisory - chezmoi resolves to $shadowed_home/.local/bin/chezmoi" "status reports executable selection collisions"
+assert_contains "$shadowed_status_output" "canonical: $standard_brew_prefix/bin/chezmoi" "status prints the expected canonical path"
 assert_status "$shadowed_status_status" 0 "status remains informational for ownership collisions"
 
 set +e
 shadowed_doctor_output="$(
-  TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_ubuntu_config" \
+  TERRAPOD_EXECUTABLE_SELECTION_OUTPUT="  advisory - chezmoi resolves to $shadowed_home/.local/bin/chezmoi
+             canonical: $standard_brew_prefix/bin/chezmoi
+             Adjust PATH or remove the other installation manually, then rerun 'tpod doctor'." \
+    TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_ubuntu_config" \
     PATH="$shadowed_bin:$brew_owned_path" /bin/sh "$vps_homebrew_terrapod" doctor
 )"
 shadowed_doctor_status=$?
 set -e
 
-assert_failure "$shadowed_doctor_status" "doctor fails when a mandatory CLI is outside Homebrew"
-assert_contains "$shadowed_doctor_output" "warn - mandatory Homebrew CLI is shadowed: chezmoi" "doctor identifies the shadowed command"
-assert_contains "$shadowed_doctor_output" "Remove or move $shadowed_home/.local/bin/chezmoi" "doctor provides path-specific non-destructive guidance"
+assert_status "$shadowed_doctor_status" 0 "doctor keeps executable shadowing advisory-only"
+assert_contains "$shadowed_doctor_output" "advisory - chezmoi resolves to $shadowed_home/.local/bin/chezmoi" "doctor identifies the shadowed command"
+assert_contains "$shadowed_doctor_output" "Adjust PATH or remove the other installation manually" "doctor provides provenance-neutral guidance"
+assert_not_contains "$shadowed_doctor_output" "Guidance: none" "doctor does not contradict executable selection guidance"
 
 wrong_prefix_path="$(homebrew_owned_status_doctor_path wrong-prefix "$standard_brew_prefix" zsh apt)"
 write_stub "$wrong_prefix_path/brew" \
@@ -2126,8 +2070,8 @@ wrong_prefix_doctor_output="$(
 )"
 wrong_prefix_doctor_status=$?
 set -e
-assert_failure "$wrong_prefix_doctor_status" "doctor fails when brew reports a non-standard prefix"
-assert_contains "$wrong_prefix_doctor_output" "warn - Homebrew prefix is /wrong/homebrew; expected $standard_brew_prefix" "doctor reports the expected standard Homebrew prefix"
+assert_status "$wrong_prefix_doctor_status" 0 "doctor keeps a non-standard Homebrew prefix advisory-only"
+assert_contains "$wrong_prefix_doctor_output" "warn - Homebrew prefix is /wrong/homebrew; expected $standard_brew_prefix" "doctor reports the expected standard Homebrew prefix as an advisory"
 
 status_incomplete_vps_config="$tmp_dir/status-incomplete-vps.toml"
 cat >"$status_incomplete_vps_config" <<'TOML'
@@ -2213,7 +2157,9 @@ core_missing_status_path="$(status_doctor_path core-missing-status chezmoi git z
 write_linux_uname_stub "$core_missing_status_path/uname"
 
 core_missing_status_output="$(
-  TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_ubuntu_config" PATH="$core_missing_status_path" \
+  TERRAPOD_EXECUTABLE_SELECTION_OUTPUT="  failure - neovim is unavailable on PATH
+  failure - zellij is unavailable on PATH" \
+    TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_ubuntu_config" PATH="$core_missing_status_path" \
     /bin/sh "$terrapod" status
 )"
 
@@ -2221,9 +2167,9 @@ assert_contains "$core_missing_status_output" "Optional Editor Stack         : d
 assert_contains "$core_missing_status_output" "Optional Development Workspace: disabled" "Terrapod status keeps disabled Optional Development Workspace separate from missing core Zellij"
 assert_contains "$core_missing_status_output" "nvim                          : missing" "Terrapod status reports missing plain Neovim as a key tool"
 assert_contains "$core_missing_status_output" "zellij                        : missing" "Terrapod status reports missing Zellij as a key tool"
-assert_not_contains "$core_missing_status_output" "Warning: missing key tools: nvim, zellij" "Terrapod status leaves Homebrew-owned Neovim and Zellij warnings to the ownership registry"
-assert_contains "$core_missing_status_output" "nvim: missing" "Homebrew ownership registry reports missing Neovim"
-assert_contains "$core_missing_status_output" "zellij: missing" "Homebrew ownership registry reports missing Zellij"
+assert_not_contains "$core_missing_status_output" "Warning: missing key tools: nvim, zellij" "Terrapod status leaves declared command readiness to executable selection"
+assert_contains "$core_missing_status_output" "failure - neovim is unavailable on PATH" "executable selection reports missing Neovim"
+assert_contains "$core_missing_status_output" "failure - zellij is unavailable on PATH" "executable selection reports missing Zellij"
 
 status_missing_config="$tmp_dir/status-missing.toml"
 cat >"$status_missing_config" <<'TOML'
@@ -2246,7 +2192,7 @@ assert_contains "$missing_status_output" "Optional AI Tool Stack        : enable
 assert_contains "$missing_status_output" "Optional Development Workspace: enabled (development Zellij layouts)" "Terrapod status reports enabled Optional Development Workspace as layout state"
 assert_contains "$missing_status_output" "brew                          : missing" "enabled Ubuntu Optional AI Tool Stack requires Homebrew"
 assert_contains "$missing_status_output" "Warning: missing key tools: brew" "enabled Ubuntu Optional AI Tool Stack warns when Homebrew is missing"
-assert_contains "$missing_status_output" "Warning: Optional AI Tool Stack is enabled but missing tools: agy, claude, codex" "Terrapod status warns for enabled missing AI tools"
+assert_not_contains "$missing_status_output" "Warning: Optional AI Tool Stack is enabled but missing tools" "Terrapod status avoids duplicate enabled AI tool warnings"
 
 status_shadow_config="$tmp_dir/status-shadow.toml"
 cat >"$status_shadow_config" <<'TOML'
@@ -2274,11 +2220,14 @@ write_stub "$status_shadow_path/brew" \
 write_linux_uname_stub "$status_shadow_path/uname"
 
 status_shadow_output="$(
-  TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_shadow_config" PATH="$status_shadow_legacy:$status_shadow_path" \
+  TERRAPOD_EXECUTABLE_SELECTION_OUTPUT="  advisory - claude-code resolves to $status_shadow_legacy/claude
+             canonical: /home/linuxbrew/.linuxbrew/bin/claude
+             Adjust PATH or remove the other installation manually, then rerun 'tpod doctor'." \
+    TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_shadow_config" PATH="$status_shadow_legacy:$status_shadow_path" \
     /bin/sh "$terrapod" status
 )"
 
-assert_contains "$status_shadow_output" "Warning: Optional AI Tool Stack has non-Homebrew commands shadowing managed casks: claude" "Terrapod status reports legacy Claude shadowing the Homebrew cask"
+assert_contains "$status_shadow_output" "advisory - claude-code resolves to $status_shadow_legacy/claude" "Terrapod status reports legacy Claude shadowing the Homebrew cask"
 
 status_broken_prefix_path="$(status_doctor_path broken-prefix chezmoi git zsh mise nvim zellij apt brew agy claude codex)"
 write_stub "$status_broken_prefix_path/brew" \
@@ -2291,7 +2240,7 @@ status_broken_prefix_output="$(
     /bin/sh "$terrapod" status
 )"
 
-assert_contains "$status_broken_prefix_output" "Warning: Optional AI Tool Stack cannot verify Homebrew command ownership because 'brew --prefix' failed" "Terrapod status reports an unusable Homebrew prefix"
+assert_contains "$status_broken_prefix_output" "Executable selection: ready" "Terrapod status delegates canonical executable checks to the selection helper"
 
 status_workspace_bundle_config="$tmp_dir/status-workspace-bundle.toml"
 cat >"$status_workspace_bundle_config" <<'TOML'
@@ -2312,7 +2261,7 @@ workspace_bundle_status_output="$(
 assert_contains "$workspace_bundle_status_output" "Optional Editor Stack         : enabled (rich Neovim configuration)" "Terrapod status treats Optional Development Workspace as enabling Optional Editor Stack"
 assert_contains "$workspace_bundle_status_output" "Optional AI Tool Stack        : enabled (missing tools: agy, claude, codex)" "Terrapod status treats Optional Development Workspace as enabling Optional AI Tool Stack"
 assert_contains "$workspace_bundle_status_output" "Optional Development Workspace: enabled (development Zellij layouts)" "Terrapod status reports enabled Optional Development Workspace"
-assert_contains "$workspace_bundle_status_output" "Warning: Optional AI Tool Stack is enabled but missing tools: agy, claude, codex" "Terrapod status warns when workspace-enabled Optional AI Tool Stack tools are missing"
+assert_not_contains "$workspace_bundle_status_output" "Warning: Optional AI Tool Stack is enabled but missing tools" "Terrapod status avoids duplicate optional tool warnings outside executable selection"
 
 status_unsupported_os_release="$tmp_dir/status-unsupported-os-release"
 write_os_release "$status_unsupported_os_release" debian 12 "Debian GNU/Linux 12"
@@ -2354,7 +2303,7 @@ fi
 
 assert_contains "$doctor_ok_output" "Terrapod doctor" "Terrapod doctor prints a command heading"
 assert_contains "$doctor_ok_output" "ok - Profile is supported: VPS Shell Profile" "Terrapod doctor validates supported Ubuntu profile"
-assert_contains "$doctor_ok_output" "ok - Mandatory Homebrew CLI ownership is ready" "Terrapod doctor validates mandatory Homebrew CLI ownership"
+assert_contains "$doctor_ok_output" "Canonical executable selection: ready" "Terrapod doctor validates canonical executable selection"
 assert_contains "$doctor_ok_output" "ok - apt is available" "Terrapod doctor validates Ubuntu Bootstrap Package Manager availability"
 assert_contains "$doctor_ok_output" "ok - Optional Editor Stack is disabled" "Terrapod doctor treats disabled Optional Editor Stack as valid"
 assert_contains "$doctor_ok_output" "ok - Optional AI Tool Stack is disabled" "Terrapod doctor treats disabled Optional AI Tool Stack as valid"
@@ -2371,24 +2320,27 @@ mkdir -p "$doctor_ai_shadow_legacy"
 mv "$doctor_ai_shadow_path/claude" "$doctor_ai_shadow_legacy/claude"
 
 if ! doctor_shadow_output="$(
-  TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_shadow_config" PATH="$doctor_ai_shadow_legacy:$doctor_ai_shadow_path" \
+  TERRAPOD_EXECUTABLE_SELECTION_OUTPUT="  advisory - claude-code resolves to $doctor_ai_shadow_legacy/claude
+             canonical: $doctor_standard_brew_prefix/bin/claude
+             Adjust PATH or remove the other installation manually, then rerun 'tpod doctor'." \
+    TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_shadow_config" PATH="$doctor_ai_shadow_legacy:$doctor_ai_shadow_path" \
     /bin/sh "$doctor_terrapod" doctor
 )"; then
   fail "Terrapod doctor keeps legacy AI CLI shadowing as a non-fatal warning"
 fi
 
 assert_contains "$doctor_shadow_output" "ok - brew is available" "enabled Ubuntu Optional AI Tool Stack doctor requires Homebrew"
-assert_contains "$doctor_shadow_output" "warn - Optional AI Tool Stack has non-Homebrew commands shadowing managed casks: claude" "Terrapod doctor reports legacy Claude shadowing the Homebrew cask"
-assert_contains "$doctor_shadow_output" "Remove each legacy command with its original installer method, open a new shell, and rerun tpod apply." "Terrapod doctor gives non-destructive legacy cleanup guidance"
+assert_contains "$doctor_shadow_output" "advisory - claude-code resolves to $doctor_ai_shadow_legacy/claude" "Terrapod doctor reports legacy Claude shadowing the Homebrew cask"
+assert_contains "$doctor_shadow_output" "Adjust PATH or remove the other installation manually" "Terrapod doctor gives provenance-neutral cleanup guidance"
 
-if TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_shadow_config" PATH="$status_broken_prefix_path" \
+if ! TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_shadow_config" PATH="$status_broken_prefix_path" \
   /bin/sh "$doctor_terrapod" doctor >"$tmp_dir/doctor-broken-prefix.out" 2>"$tmp_dir/doctor-broken-prefix.err"; then
-  fail "Terrapod doctor fails when the enabled Optional AI Tool Stack cannot resolve the Homebrew prefix"
+  fail "Terrapod doctor keeps an unresolved Homebrew prefix advisory-only when package readiness passes"
 fi
 
 doctor_broken_prefix_output="$(cat "$tmp_dir/doctor-broken-prefix.out")"
 assert_contains "$doctor_broken_prefix_output" "warn - Homebrew prefix cannot be resolved" "Terrapod doctor reports an unusable Homebrew prefix"
-assert_contains "$doctor_broken_prefix_output" "Repair Homebrew until 'brew --prefix' succeeds, open a new shell, and rerun tpod apply." "Terrapod doctor gives Homebrew prefix recovery guidance"
+assert_contains "$doctor_broken_prefix_output" "Review Homebrew configuration and PATH manually, then rerun tpod doctor." "Terrapod doctor gives advisory Homebrew prefix guidance"
 
 tty_doctor_output="$(
   run_command_in_pty xterm unset env TERRAPOD_PROFILE= TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_ok_path" /bin/sh "$doctor_terrapod" doctor
@@ -2398,15 +2350,17 @@ assert_has_ansi_escape "$tty_doctor_output" "TTY Terrapod doctor uses ANSI visua
 doctor_missing_key_path="$(status_doctor_path doctor-missing-key git zsh mise nvim zellij apt)"
 write_linux_uname_stub "$doctor_missing_key_path/uname"
 
-if TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_missing_key_path" \
+if TERRAPOD_EXECUTABLE_SELECTION_OUTPUT="  failure - chezmoi is not installed through Homebrew" \
+  TERRAPOD_EXECUTABLE_SELECTION_STATUS=1 \
+  TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_missing_key_path" \
   /bin/sh "$doctor_terrapod" doctor >"$tmp_dir/doctor-missing-key.out" 2>"$tmp_dir/doctor-missing-key.err"; then
   fail "Terrapod doctor fails when a required key tool is missing"
 fi
 
 doctor_missing_key_output="$(cat "$tmp_dir/doctor-missing-key.out")"
 
-assert_contains "$doctor_missing_key_output" "warn - mandatory Homebrew CLI is missing: chezmoi" "Terrapod doctor warns when required chezmoi is missing"
-assert_contains "$doctor_missing_key_output" "Run tpod apply to restore 'chezmoi' through Homebrew." "Terrapod doctor gives actionable guidance for missing key tools"
+assert_contains "$doctor_missing_key_output" "failure - chezmoi is not installed through Homebrew" "Terrapod doctor warns when required chezmoi is missing"
+assert_contains "$doctor_missing_key_output" "Run tpod apply to install missing canonical packages" "Terrapod doctor gives actionable guidance for missing declared packages"
 
 if TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_incomplete_vps_config" PATH="$doctor_ok_path" \
   /bin/sh "$doctor_terrapod" doctor >"$tmp_dir/doctor-incomplete-config.out" 2>"$tmp_dir/doctor-incomplete-config.err"; then
@@ -2460,15 +2414,18 @@ assert_not_contains "$doctor_unreadable_output" "managed setup config is incompl
 doctor_missing_core_path="$(status_doctor_path doctor-missing-core chezmoi git zsh mise apt)"
 write_linux_uname_stub "$doctor_missing_core_path/uname"
 
-if TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_missing_core_path" \
+if TERRAPOD_EXECUTABLE_SELECTION_OUTPUT="  failure - neovim is unavailable on PATH
+  failure - zellij is unavailable on PATH" \
+  TERRAPOD_EXECUTABLE_SELECTION_STATUS=1 \
+  TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_missing_core_path" \
   /bin/sh "$doctor_terrapod" doctor >"$tmp_dir/doctor-missing-core.out" 2>"$tmp_dir/doctor-missing-core.err"; then
   fail "Terrapod doctor fails when Core Shell Stack Neovim or Zellij is missing"
 fi
 
 doctor_missing_core_output="$(cat "$tmp_dir/doctor-missing-core.out")"
 
-assert_contains "$doctor_missing_core_output" "warn - mandatory Homebrew CLI is missing: nvim" "Terrapod doctor warns when plain Neovim is missing even if Optional Editor Stack is disabled"
-assert_contains "$doctor_missing_core_output" "warn - mandatory Homebrew CLI is missing: zellij" "Terrapod doctor warns when Zellij is missing even if Optional Development Workspace is disabled"
+assert_contains "$doctor_missing_core_output" "failure - neovim is unavailable on PATH" "Terrapod doctor warns when plain Neovim is missing even if Optional Editor Stack is disabled"
+assert_contains "$doctor_missing_core_output" "failure - zellij is unavailable on PATH" "Terrapod doctor warns when Zellij is missing even if Optional Development Workspace is disabled"
 assert_contains "$doctor_missing_core_output" "ok - Optional Editor Stack is disabled" "Terrapod doctor keeps disabled Optional Editor Stack separate from missing core Neovim"
 assert_contains "$doctor_missing_core_output" "ok - Optional Development Workspace is disabled" "Terrapod doctor keeps disabled Optional Development Workspace separate from missing core Zellij"
 
@@ -2483,7 +2440,11 @@ TOML
 doctor_missing_path="$(status_doctor_path doctor-missing chezmoi git zsh mise nvim zellij apt)"
 write_linux_uname_stub "$doctor_missing_path/uname"
 
-if TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_missing_config" PATH="$doctor_missing_path" \
+if TERRAPOD_EXECUTABLE_SELECTION_OUTPUT="  failure - antigravity-cli is not installed through Homebrew Cask
+  failure - claude-code is not installed through Homebrew Cask
+  failure - codex is not installed through Homebrew Cask" \
+  TERRAPOD_EXECUTABLE_SELECTION_STATUS=1 \
+  TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_missing_config" PATH="$doctor_missing_path" \
   /bin/sh "$doctor_terrapod" doctor >"$tmp_dir/doctor-missing.out" 2>"$tmp_dir/doctor-missing.err"; then
   fail "Terrapod doctor fails when enabled optional stack tools are missing"
 fi
@@ -2491,9 +2452,9 @@ fi
 doctor_missing_output="$(cat "$tmp_dir/doctor-missing.out")"
 
 assert_contains "$doctor_missing_output" "ok - Optional Editor Stack is enabled (rich Neovim configuration)" "Terrapod doctor reports enabled Optional Editor Stack as rich config state"
-assert_contains "$doctor_missing_output" "warn - Optional AI Tool Stack is enabled but missing tools: agy, claude, codex" "Terrapod doctor warns about missing enabled AI tools"
+assert_contains "$doctor_missing_output" "failure - antigravity-cli is not installed through Homebrew Cask" "Terrapod doctor warns about missing enabled AI tools"
 assert_contains "$doctor_missing_output" "ok - Optional Development Workspace is enabled (development Zellij layouts)" "Terrapod doctor reports enabled Optional Development Workspace as layout state"
-assert_contains "$doctor_missing_output" "Run tpod chezmoi -- apply after enabling Optional AI Tool Stack, or install/apply the configured tools before relying on them." "Terrapod doctor gives actionable missing optional-stack guidance with tpod"
+assert_contains "$doctor_missing_output" "Run tpod apply to install missing canonical packages" "Terrapod doctor gives actionable missing optional-stack guidance with tpod"
 assert_not_contains "$doctor_missing_output" "Run terrapod chezmoi -- apply" "Terrapod doctor avoids old optional-stack guidance command"
 
 doctor_unsupported_os_release="$tmp_dir/doctor-unsupported-os-release"

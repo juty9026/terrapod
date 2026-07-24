@@ -118,11 +118,13 @@ terrapod chezmoi -- cd
 terrapod chezmoi -- status
 ```
 
-`tpod status` is a fast human-readable snapshot of canonical installation,
-primary executables, and pending migration state. `tpod doctor` performs a full
-read-only Managed Package scan and is the readiness gate: it exits non-zero when
-a canonical package is missing, a legacy executable is primary on the managed
-default PATH, or another enabled requirement or install warning remains unresolved.
+`tpod status` is a human-readable snapshot of declared package installation and
+primary executable selection. `tpod doctor` is the readiness gate: it exits
+non-zero when a declared provider package or canonical executable is missing,
+when an enabled command is unavailable on PATH, or when another enabled
+requirement or install warning remains unresolved. If another executable is
+selected first while the canonical executable exists, Terrapod reports the
+actual and canonical paths as an advisory without failing.
 
 ## Platform Details
 
@@ -223,11 +225,9 @@ mise owns only the Development Runtime Stack.
 
 `tpod apply` restores missing Homebrew packages with
 `HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade`; it never performs a
-version upgrade. After canonical installation, it deep-scans exact registry
-identities, renders safe legacy payload removals together, and asks once with
-`Proceed with removing these legacy package installations? [y/N]`. Declined,
-non-interactive, failed, protected, shared, and unresolved actions remain
-warnings and do not make apply fail.
+version upgrade or removes an alternate installation. After installation it
+checks active command-bearing declarations against their canonical executable
+paths and prints selection advisories when another executable is primary.
 
 Use OS package managers directly only when intentionally updating OS-managed packages.
 
@@ -318,17 +318,16 @@ because desktop casks can affect shared applications outside one user's home dir
 
 Opting out of an optional stack excludes its files from chezmoi management; it does not remove files already present on a machine.
 
-Terrapod migrates only exact registry matches with verified safe ownership.
-Canonical mise runtime versions and project-local selections are preserved.
-APT requires manual-install state and a no-cascade simulation; protected
-prerequisites, shared/root-owned installs, nonstandard Homebrew prefixes, and
-unknown PATH copies remain manual actions. Homebrew Cask adoption is used for
-matching existing app artifacts; adoption failures stay manual and app bundles
-are never moved to Trash.
+Existing mise, APT, vendor-installed, and other alternate payloads are not
+removed automatically. Terrapod checks only whether active declarations are
+installed through their canonical provider and which executable is selected
+first. Terrapod does not infer the installer provenance of the selected
+executable or suggest an uninstall command.
 
 Files in `~/.config/zsh/path.d` are explicit machine-local PATH overrides. They
-remain highest priority, are never removed by reconciliation, and are reported
-as advisory while Terrapod still installs the canonical package.
+remain highest priority. If another executable is selected first, Terrapod
+reports the actual and canonical paths as an advisory. Nonstandard Homebrew
+prefixes are also advisory; cleanup and PATH changes remain manual.
 
 `enableMacosAppGroupAiApps` is deprecated and is not treated as an alias for `enableMacosAppGroupDevelopmentApps`. Run `tpod setup` or `terrapod configure <Preset>` to migrate explicitly; Terrapod does not install Zed based on the old selection.
 
