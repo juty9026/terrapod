@@ -226,8 +226,7 @@ assert_managed_paths_exclude_prefix \
   "Ubuntu does not manage the rendered AI CLI tools Brewfile"
 
 for entry in \
-  .chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl \
-  .chezmoiscripts/run_before_11-retry-homebrew-core.sh.tmpl \
+  .chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl \
   dot_local/lib/terrapod/homebrew-core-bundle.sh
 do
   printf '%s\n' "$ubuntu_managed" | grep -Fx "$entry" >/dev/null ||
@@ -236,7 +235,6 @@ done
 pass "Ubuntu manages cross-profile Homebrew core state"
 
 macos_only_entries="
-.chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl
 .chezmoiscripts/run_before_02-retry-jetendard-font.sh.tmpl
 .chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl
 .chezmoiscripts/run_onchange_after_65-install-jetendard-font.sh.tmpl
@@ -266,17 +264,13 @@ automation_apps_brewfile="$(render_template "$macos_automation_apps_data" "Brewf
 launcher_apps_brewfile="$(render_template "$macos_launcher_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 monitoring_apps_brewfile="$(render_template "$macos_monitoring_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 development_apps_brewfile="$(render_template "$macos_development_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
-ubuntu_homebrew_bootstrap="$(render_template "$ubuntu_data" ".chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl")"
-macos_bootstrap="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl")"
-macos_terminal_apps_bootstrap="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl")"
-macos_terminal_launcher_apps_bootstrap="$(render_template "$macos_terminal_launcher_apps_data" ".chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl")"
-macos_development_apps_bootstrap="$(render_template "$macos_development_apps_data" ".chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl")"
-macos_development_workspace_bootstrap="$(render_template "$macos_development_workspace_data" ".chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl")"
-macos_core_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_11-retry-homebrew-core.sh.tmpl")"
-ubuntu_core_retry="$(render_template "$ubuntu_data" ".chezmoiscripts/run_before_11-retry-homebrew-core.sh.tmpl")"
-macos_desktop_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl")"
-macos_terminal_apps_desktop_retry="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl")"
-macos_mise_tools_installer="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_20-install-mise-tools.sh.tmpl")"
+ubuntu_homebrew_bootstrap="$(render_template "$ubuntu_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
+macos_bootstrap="$(render_template "$macos_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
+macos_terminal_apps_bootstrap="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
+macos_terminal_launcher_apps_bootstrap="$(render_template "$macos_terminal_launcher_apps_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
+macos_development_apps_bootstrap="$(render_template "$macos_development_apps_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
+macos_development_workspace_bootstrap="$(render_template "$macos_development_workspace_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
+macos_mise_tools_installer="$(render_template "$macos_data" ".chezmoiscripts/run_after_20-install-mise-tools.sh.tmpl")"
 macos_jetendard_installer="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_65-install-jetendard-font.sh.tmpl")"
 macos_jetendard_retry="$(render_template "$macos_data" ".chezmoiscripts/run_before_02-retry-jetendard-font.sh.tmpl")"
 macos_jetendard_settings="$(render_template "$macos_data" ".chezmoiscripts/run_after_70-apply-jetendard-settings.sh.tmpl")"
@@ -293,12 +287,10 @@ assert_contains_text \
 assert_contains_text "$ubuntu_homebrew_bootstrap" 'core_brewfile="' "Ubuntu renders the mandatory CLI bundle"
 assert_contains_text "$ubuntu_homebrew_bootstrap" 'HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade' "Ubuntu bundle apply disables automatic updates"
 assert_not_contains_text "$ubuntu_homebrew_bootstrap" 'linux:arm64' "Ubuntu Homebrew bootstrap rejects the arm64 identifier"
-assert_not_contains_text "$ubuntu_core_retry" 'linux:arm64' "Ubuntu Homebrew retry rejects the arm64 identifier"
-assert_contains_text "$ubuntu_core_retry" 'linux:x86_64|linux:aarch64)' "Ubuntu Homebrew retry accepts exactly the supported Linux architecture identifiers"
+assert_contains_text "$ubuntu_homebrew_bootstrap" 'linux:x86_64|linux:aarch64)' "Ubuntu Homebrew reconciliation accepts exactly the supported Linux architecture identifiers"
 
 for bundle_source in \
-  "$repo_root/.chezmoiscripts/run_onchange_before_10-bootstrap-homebrew.sh.tmpl" \
-  "$repo_root/.chezmoiscripts/run_before_13-retry-homebrew-desktop-apps.sh.tmpl" \
+  "$repo_root/.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl" \
   "$repo_root/dot_local/lib/terrapod/homebrew-core-bundle.sh"
 do
   unguarded_bundle_calls="$(grep 'brew bundle --no-upgrade' "$bundle_source" | grep -v 'HOMEBREW_NO_AUTO_UPDATE=1' || true)"
@@ -332,21 +324,6 @@ macos_bootstrap_script="$tmp_dir/macos-bootstrap-default.sh"
 printf '%s\n' "$macos_bootstrap" >"$macos_bootstrap_script"
 sh -n "$macos_bootstrap_script" || fail "macOS bootstrap default cleanup script should be valid sh"
 pass "macOS bootstrap default cleanup script is valid sh"
-
-macos_core_retry_script="$tmp_dir/macos-core-retry.sh"
-printf '%s\n' "$macos_core_retry" >"$macos_core_retry_script"
-sh -n "$macos_core_retry_script" || fail "macOS core retry script should be valid sh"
-pass "macOS core retry script is valid sh"
-
-macos_desktop_retry_script="$tmp_dir/macos-desktop-retry-default.sh"
-printf '%s\n' "$macos_desktop_retry" >"$macos_desktop_retry_script"
-sh -n "$macos_desktop_retry_script" || fail "macOS desktop retry default cleanup script should be valid sh"
-pass "macOS desktop retry default cleanup script is valid sh"
-
-macos_terminal_apps_desktop_retry_script="$tmp_dir/macos-terminal-desktop-retry.sh"
-printf '%s\n' "$macos_terminal_apps_desktop_retry" >"$macos_terminal_apps_desktop_retry_script"
-sh -n "$macos_terminal_apps_desktop_retry_script" || fail "macOS desktop retry App Group script should be valid sh"
-pass "macOS desktop retry App Group script is valid sh"
 
 macos_jetendard_installer_script="$tmp_dir/macos-jetendard-installer.sh"
 printf '%s\n' "$macos_jetendard_installer" >"$macos_jetendard_installer_script"
@@ -649,10 +626,6 @@ macos_bootstrap_with_stub="$tmp_dir/macos-bootstrap-default-with-stub.sh"
 replace_standard_brew_path "$macos_bootstrap_script" "$macos_bootstrap_with_stub" "$macos_brew_bin/brew"
 macos_bootstrap_script="$macos_bootstrap_with_stub"
 
-macos_core_retry_with_stub="$tmp_dir/macos-core-retry-with-stub.sh"
-replace_standard_brew_path "$macos_core_retry_script" "$macos_core_retry_with_stub" "$macos_brew_bin/brew"
-macos_core_retry_script="$macos_core_retry_with_stub"
-
 macos_marker_state="$tmp_dir/macos-marker-state"
 macos_marker_home="$tmp_dir/macos-marker-home"
 mkdir -p "$macos_marker_home"
@@ -895,14 +868,14 @@ HOME="$core_retry_success_home" XDG_STATE_HOME="$core_retry_success_state" sh -c
   sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
 
 if ! HOME="$core_retry_success_home" XDG_STATE_HOME="$core_retry_success_state" MACOS_BREW_LOG="$core_retry_success_log" PATH="$core_retry_success_bin:/usr/bin:/bin" \
-  sh "$macos_core_retry_script" >"$tmp_dir/core-retry-success.out" 2>"$tmp_dir/core-retry-success.err"; then
-  fail "successful core retry succeeds"
+  sh "$macos_bootstrap_script" >"$tmp_dir/core-retry-success.out" 2>"$tmp_dir/core-retry-success.err"; then
+  fail "successful core reconciliation succeeds"
 fi
 
 if [ -e "$core_retry_success_state/terrapod/install-warnings/homebrew-core" ]; then
-  fail "successful core retry clears homebrew-core marker"
+  fail "successful core reconciliation clears homebrew-core marker"
 fi
-pass "successful core retry clears homebrew-core marker"
+pass "successful core reconciliation clears homebrew-core marker"
 
 core_retry_failure_bin="$tmp_dir/core-retry-failure-bin"
 core_retry_failure_state="$tmp_dir/core-retry-failure-state"
@@ -915,15 +888,15 @@ HOME="$core_retry_failure_home" XDG_STATE_HOME="$core_retry_failure_state" sh -c
   sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
 
 if ! HOME="$core_retry_failure_home" XDG_STATE_HOME="$core_retry_failure_state" MACOS_BREW_LOG="$core_retry_failure_log" MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_FORMULAE="mise" PATH="$core_retry_failure_bin:/usr/bin:/bin" \
-  sh "$macos_core_retry_script" >"$tmp_dir/core-retry-failure.out" 2>"$tmp_dir/core-retry-failure.err"; then
-  fail "failed core retry records a replacement marker and exits successfully"
+  sh "$macos_bootstrap_script" >"$tmp_dir/core-retry-failure.out" 2>"$tmp_dir/core-retry-failure.err"; then
+  fail "failed core reconciliation records a replacement marker and exits successfully"
 fi
 
 core_retry_failure_marker_text="$(cat "$core_retry_failure_state/terrapod/install-warnings/homebrew-core")"
-assert_contains_text "$core_retry_failure_marker_text" "failed formulae: mise" "failed core retry replaces marker with current failed formula detail"
-assert_not_contains_text "$core_retry_failure_marker_text" "old core retry warning" "failed core retry replaces stale marker guidance"
+assert_contains_text "$core_retry_failure_marker_text" "failed formulae: mise" "failed core reconciliation replaces marker with current failed formula detail"
+assert_not_contains_text "$core_retry_failure_marker_text" "old core retry warning" "failed core reconciliation replaces stale marker guidance"
 
-assert_contains_text "$core_retry_failure_marker_text" "updated_at='" "failed core retry replacement marker keeps updated_at"
+assert_contains_text "$core_retry_failure_marker_text" "updated_at='" "failed core reconciliation replacement marker keeps updated_at"
 
 mise_missing_without_core_home="$tmp_dir/mise-missing-without-core-home"
 mise_missing_without_core_state="$tmp_dir/mise-missing-without-core-state"
@@ -1157,15 +1130,15 @@ write_stub "$desktop_retry_marker_failure_bin/brew" \
 
 desktop_retry_marker_failure_script="$tmp_dir/desktop-retry-marker-failure.sh"
 replace_standard_brew_path \
-  "$macos_terminal_apps_desktop_retry_script" \
+  "$terminal_launcher_bootstrap_script" \
   "$desktop_retry_marker_failure_script" \
   "$desktop_retry_marker_failure_bin/brew"
 
 if HOME="$desktop_retry_marker_failure_home" XDG_STATE_HOME="$desktop_retry_marker_failure_state" DESKTOP_RETRY_MARKER_FAILURE_DIR="$desktop_retry_marker_failure_dir" MACOS_BREW_LOG="$desktop_retry_marker_failure_log" PATH="$desktop_retry_marker_failure_bin:/usr/bin:/bin" \
   sh "$desktop_retry_marker_failure_script" >"$tmp_dir/desktop-retry-marker-failure.out" 2>"$tmp_dir/desktop-retry-marker-failure.err"; then
-  fail "macOS desktop retry failure blocks when the warning marker cannot be recorded"
+  fail "macOS desktop reconciliation failure blocks when the warning marker cannot be recorded"
 fi
-pass "macOS desktop retry failure blocks when the warning marker cannot be recorded"
+pass "macOS desktop reconciliation failure blocks when the warning marker cannot be recorded"
 
 bulk_only_bootstrap_script="$tmp_dir/macos-bulk-only-bootstrap.sh"
 printf '%s\n' "$macos_terminal_launcher_apps_bootstrap" | sed \
@@ -1437,13 +1410,13 @@ assert_managed_paths_exclude_prefix \
 
 assert_managed_paths_include_prefix \
   "$ubuntu_managed" \
-  ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
+  ".chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl" \
   "Ubuntu VPS includes Optional AI Tool Stack warning cleanup by default"
 
 assert_managed_paths_include_prefix \
   "$ubuntu_managed" \
-  ".chezmoiscripts/run_after_21-retry-mise-tools.sh.tmpl" \
-  "Ubuntu VPS includes marker-gated mise tool retry hook"
+  ".chezmoiscripts/run_after_20-install-mise-tools.sh.tmpl" \
+  "Ubuntu VPS includes always-run mise tool reconciliation"
 
 assert_managed_paths_include_prefix \
   "$ubuntu_managed" \
@@ -1457,8 +1430,8 @@ assert_managed_paths_exclude_prefix \
 
 assert_managed_paths_include_prefix \
   "$macos_managed" \
-  ".chezmoiscripts/run_after_21-retry-mise-tools.sh.tmpl" \
-  "macOS includes marker-gated mise tool retry hook"
+  ".chezmoiscripts/run_after_20-install-mise-tools.sh.tmpl" \
+  "macOS includes always-run mise tool reconciliation"
 
 assert_managed_paths_include_prefix \
   "$macos_managed" \
@@ -1503,12 +1476,12 @@ assert_managed_paths_include_prefix \
 
 assert_managed_paths_include_prefix \
   "$ai_cli_tools_managed" \
-  ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
+  ".chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl" \
   "enableAiCliTools includes Optional AI Tool Stack installer"
 
 assert_managed_paths_include_prefix \
   "$development_workspace_managed" \
-  ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl" \
+  ".chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl" \
   "enableDevelopmentWorkspace includes Optional AI Tool Stack installer"
 
 ubuntu_mise_config="$(render_template "$ubuntu_data" "dot_config/mise/config.toml.tmpl")"
@@ -1532,8 +1505,7 @@ for formula in neovim gh; do
 done
 pass "cross-profile Brewfile declares migrated Neovim and GitHub CLI"
 
-mise_tools_installer="$(render_template "$ubuntu_data" ".chezmoiscripts/run_onchange_after_20-install-mise-tools.sh.tmpl")"
-mise_tools_retry="$(render_template "$ubuntu_data" ".chezmoiscripts/run_after_21-retry-mise-tools.sh.tmpl")"
+mise_tools_installer="$(render_template "$ubuntu_data" ".chezmoiscripts/run_after_20-install-mise-tools.sh.tmpl")"
 
 assert_contains_text "$mise_tools_installer" 'mise_bin="$(standard_mise_path || true)"' "mise installer resolves mise from a standard Homebrew prefix"
 assert_contains_text "$mise_tools_installer" '"$mise_bin" install --yes -C "$HOME"' "Ubuntu runtime install invokes the resolved Homebrew mise"
@@ -1552,13 +1524,6 @@ printf '%s\n' "$mise_tools_installer" |
   >"$mise_tools_installer_script"
 sh -n "$mise_tools_installer_script" || fail "mise tool installer script should be valid sh"
 pass "mise tool installer script should be valid sh"
-
-mise_tools_retry_script="$tmp_dir/mise-tools-retry.sh"
-printf '%s\n' "$mise_tools_retry" |
-  sed "s#/home/linuxbrew/.linuxbrew/bin/mise#$tmp_dir/mise-tools-bin/mise#g" \
-  >"$mise_tools_retry_script"
-sh -n "$mise_tools_retry_script" || fail "mise tool retry script should be valid sh"
-pass "mise tool retry script should be valid sh"
 
 mise_tools_bin="$tmp_dir/mise-tools-bin"
 mise_tools_state="$tmp_dir/mise-tools-state"
@@ -1657,26 +1622,25 @@ HOME="$mise_tools_home" \
   MISE_TOOLS_LOG="$mise_tools_log" \
   TERRAPOD_MACHINE_ARCH=aarch64 \
   PATH="$mise_tools_bin:/usr/bin:/bin" \
-  sh "$mise_tools_retry_script"
+  sh "$mise_tools_installer_script"
 if [ -e "$mise_tools_marker" ]; then
-  fail "mise tool retry should clear stale mise-tools marker after a successful retry"
+  fail "mise tool reconciliation should clear stale mise-tools marker after a successful apply"
 fi
-pass "mise tool retry clears stale mise-tools marker after a successful retry"
+pass "mise tool reconciliation clears stale mise-tools marker after a successful apply"
 mise_tools_retry_log_text="$(cat "$mise_tools_log")"
-assert_contains_text "$mise_tools_retry_log_text" "mise args:install --yes -C $mise_tools_home" "mise tool retry attempts mise install when marker exists"
+assert_contains_text "$mise_tools_retry_log_text" "mise args:install --yes -C $mise_tools_home" "mise tool reconciliation attempts mise install when marker exists"
 
 : >"$mise_tools_log"
 HOME="$mise_tools_home" \
   XDG_STATE_HOME="$mise_tools_state" \
   MISE_TOOLS_LOG="$mise_tools_log" \
-  MISE_TOOLS_INSTALL_STATUS=17 \
   TERRAPOD_MACHINE_ARCH=aarch64 \
   PATH="$mise_tools_bin:/usr/bin:/bin" \
-  sh "$mise_tools_retry_script"
-if [ -s "$mise_tools_log" ]; then
-  fail "mise tool retry should be a no-op when no marker exists"
+  sh "$mise_tools_installer_script"
+if [ ! -s "$mise_tools_log" ]; then
+  fail "mise tool reconciliation should run when no marker exists"
 fi
-pass "mise tool retry is a no-op when no marker exists"
+pass "mise tool reconciliation runs when no marker exists"
 
 HOME="$mise_tools_home" XDG_STATE_HOME="$mise_tools_state" sh -c \
   '. "$1"; terrapod_install_warning_write mise-tools "mise tool install needs attention" "Previous mise warning."' \
@@ -1688,13 +1652,13 @@ HOME="$mise_tools_home" \
   TERRAPOD_MACHINE_ARCH=aarch64 \
   MISE_TOOLS_INSTALL_STATUS=17 \
   PATH="$mise_tools_bin:/usr/bin:/bin" \
-  sh "$mise_tools_retry_script"
+  sh "$mise_tools_installer_script"
 if [ ! -f "$mise_tools_marker" ]; then
-  fail "mise tool retry should keep a warning marker when retry still fails"
+  fail "mise tool reconciliation should keep a warning marker when apply still fails"
 fi
-pass "mise tool retry keeps a warning marker when retry still fails"
+pass "mise tool reconciliation keeps a warning marker when apply still fails"
 mise_tools_marker_text="$(cat "$mise_tools_marker")"
-assert_contains_text "$mise_tools_marker_text" "Failed step(s): mise install" "mise tool retry replacement marker records failed mise install step"
+assert_contains_text "$mise_tools_marker_text" "Failed step(s): mise install" "mise tool reconciliation replacement marker records failed mise install step"
 
 : >"$mise_tools_log"
 HOME="$mise_tools_home" \
@@ -1702,16 +1666,16 @@ HOME="$mise_tools_home" \
   MISE_TOOLS_LOG="$mise_tools_log" \
   TERRAPOD_MACHINE_ARCH=aarch64 \
   PATH="$mise_tools_bin:/usr/bin:/bin" \
-  sh "$mise_tools_retry_script"
+  sh "$mise_tools_installer_script"
 if [ -e "$mise_tools_marker" ]; then
-  fail "mise tool retry should clear warning marker after recovery"
+  fail "mise tool reconciliation should clear warning marker after recovery"
 fi
-pass "mise tool retry clears warning marker after recovery"
+pass "mise tool reconciliation clears warning marker after recovery"
 
-ai_cli_tools_installer="$(render_template "$ai_cli_tools_data" ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl")"
-macos_ai_cli_tools_installer="$(render_template "$macos_ai_cli_tools_data" ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl")"
-development_workspace_ai_installer="$(render_template "$development_workspace_data" ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl")"
-disabled_ai_cli_tools_cleanup="$(render_template "$ubuntu_data" ".chezmoiscripts/run_onchange_before_60-install-ai-cli-tools.sh.tmpl")"
+ai_cli_tools_installer="$(render_template "$ai_cli_tools_data" ".chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl")"
+macos_ai_cli_tools_installer="$(render_template "$macos_ai_cli_tools_data" ".chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl")"
+development_workspace_ai_installer="$(render_template "$development_workspace_data" ".chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl")"
+disabled_ai_cli_tools_cleanup="$(render_template "$ubuntu_data" ".chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl")"
 ai_cli_tools_brewfile="$(render_template "$ai_cli_tools_data" "Brewfile.ai-cli-tools.tmpl")"
 development_workspace_ai_brewfile="$(render_template "$development_workspace_data" "Brewfile.ai-cli-tools.tmpl")"
 disabled_ai_cli_tools_brewfile="$(render_template "$ubuntu_data" "Brewfile.ai-cli-tools.tmpl")"
