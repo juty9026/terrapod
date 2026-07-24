@@ -1,5 +1,0 @@
-{{- $extraAllowedSigners := default (list) (get . "gitAllowedSigners") -}}
-juty9026@gmail.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINz8oDp6v7P4IXYUzIsNuH3TvCogpPexpMYNB4JTxysJ github
-{{- range $extraAllowedSigners }}
-{{ . }}
-{{- end }}
