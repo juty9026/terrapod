@@ -19,6 +19,17 @@ pass() {
   printf '%s\n' "ok - $1"
 }
 
+first_statement="$(awk 'NR == 1 && /^#!/ { next } /^[[:space:]]*$/ { next } { print; exit }' "$helper")"
+[ "$first_statement" = "from __future__ import annotations" ] || fail "helper defers annotation evaluation so Python 3.9 can import it"
+pass "helper defers annotation evaluation so Python 3.9 can import it"
+
+if [ -x /usr/bin/python3 ]; then
+  /usr/bin/python3 "$helper" --help >/dev/null || fail "helper loads under the system interpreter"
+  pass "helper loads under the system interpreter"
+else
+  pass "system interpreter check is skipped when /usr/bin/python3 is absent"
+fi
+
 home_dir="$tmp_dir/home"
 zed_dir="$home_dir/.config/zed"
 profiles_dir="$home_dir/Library/Application Support/orca/profiles"
