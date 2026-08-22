@@ -802,9 +802,11 @@ components, Xcode, or a separate JDK.
   `tpod apply`, then populates the SDK through Android Studio on first launch.
 - `ANDROID_HOME` points at `$HOME/Library/Android/sdk`, a directory the SDK
   Manager creates rather than the cask.
-- Existing vendor-installed Maestro binaries under `~/.maestro/bin` are not
-  removed. The existing shadowing warning reports them when they resolve ahead
-  of the Homebrew copy.
+- The existing vendor-installed Maestro binary under `~/.maestro/bin` is left
+  in place, consistent with Terrapod's non-destructive apply contract. The
+  managed shell environment no longer adds that directory to PATH, so the
+  Homebrew copy is the one that resolves. Terrapod does not detect or report a
+  vendor copy that a user's own PATH additions place ahead of it.
 - Adding `enableMacosAppGroupMobileDev` changes managed setup config
   completeness, so already-configured machines are asked to rerun setup.
 ```

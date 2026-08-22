@@ -20,7 +20,7 @@ elif [[ -x /usr/local/bin/brew ]]; then
 fi
 {{ end -}}
 
-{{ if default false (get . "enableMacosAppGroupMobileDev") }}
+{{ if default false (get . "enableMacosAppGroupMobileDev") -}}
 # Android tooling from the mobile-dev macOS App Group.
 # The Android SDK Manager owns this directory; the cask does not create it.
 export ANDROID_HOME="$HOME/Library/Android/sdk"
@@ -41,7 +41,7 @@ if [[ -d "$android_studio_jbr" ]]; then
   export JAVA_HOME="$android_studio_jbr"
 fi
 unset android_studio_jbr
-{{ end }}
+{{ end -}}
 
 # Explicit machine-local overrides run last.
 if [[ -d "$HOME/.config/zsh/path.d" ]]; then

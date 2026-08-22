@@ -97,7 +97,8 @@ for key in \
   enableMacosAppGroupAutomation \
   enableMacosAppGroupLauncher \
   enableMacosAppGroupMonitoring \
-  enableMacosAppGroupDevelopmentApps
+  enableMacosAppGroupDevelopmentApps \
+  enableMacosAppGroupMobileDev
 do
   assert_contains "\`$key\`" "README documents $key option"
   if ! awk -F '|' -v key="\`$key\`" '$0 ~ key { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); if ($3 == "`false`") found=1 } END { exit found ? 0 : 1 }' "$readme"; then
