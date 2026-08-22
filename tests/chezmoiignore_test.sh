@@ -243,7 +243,7 @@ dot_local/lib/terrapod/executable_jetendard-settings
 dot_config/ghostty
 dot_config/private_karabiner
 dot_hammerspoon
-dot_zprofile
+dot_zprofile.tmpl
 "
 
 for entry in $macos_only_entries; do
@@ -967,6 +967,7 @@ assert_not_contains_text "$macos_brewfile" 'cask "codex"' "macOS default does no
 assert_not_contains_text "$macos_brewfile" 'cask "antigravity"' "macOS default does not render Antigravity 2.0"
 assert_not_contains_text "$macos_brewfile" 'cask "antigravity-ide"' "macOS default does not render Antigravity IDE"
 assert_not_contains_text "$macos_brewfile" 'cask "stablyai/orca/orca"' "macOS default does not render Orca"
+assert_not_contains_text "$macos_brewfile" 'cask "orbstack"' "macOS default does not render OrbStack"
 
 assert_contains_text "$terminal_apps_brewfile" 'cask "ghostty"' "terminal-apps group renders Ghostty"
 assert_not_contains_text "$terminal_apps_brewfile" 'cask "cmux"' "terminal-apps group does not render cmux"
@@ -983,6 +984,7 @@ assert_contains_text "$monitoring_apps_brewfile" 'cask "istat-menus"' "monitorin
 
 assert_contains_text "$development_apps_brewfile" 'cask "zed"' "development-apps group renders Zed"
 assert_contains_text "$development_apps_brewfile" 'cask "stablyai/orca/orca", trusted: true' "development-apps group trusts only Orca's fully-qualified vendor cask"
+assert_contains_text "$development_apps_brewfile" 'cask "orbstack"' "development-apps group renders OrbStack"
 for removed_cask in claude codex-app chatgpt antigravity antigravity-ide; do
   assert_not_contains_text "$development_apps_brewfile" "cask \"$removed_cask\"" "development-apps group excludes removed desktop cask: $removed_cask"
 done
@@ -991,11 +993,28 @@ development_apps_casks="$(
     awk '/^[[:space:]]*cask[[:space:]]+"/ { print }'
 )"
 expected_development_apps_casks='cask "zed"
-cask "stablyai/orca/orca", trusted: true'
+cask "stablyai/orca/orca", trusted: true
+cask "orbstack"'
 assert_text_equals \
   "$development_apps_casks" \
   "$expected_development_apps_casks" \
   "development-apps group renders exactly the expected casks"
+
+development_apps_zprofile="$(render_managed_file "$macos_development_apps_data" ".zprofile")"
+macos_default_zprofile="$(render_managed_file "$macos_data" ".zprofile")"
+
+assert_contains_text \
+  "$development_apps_zprofile" \
+  '. "$HOME/.orbstack/shell/init.zsh"' \
+  "development-apps group renders the OrbStack shell integration in .zprofile"
+assert_contains_text \
+  "$development_apps_zprofile" \
+  '[ -r "$HOME/.orbstack/shell/init.zsh" ]' \
+  "OrbStack shell integration is guarded by a readability check so a missing cask cannot break login shells"
+assert_not_contains_text \
+  "$macos_default_zprofile" \
+  '.orbstack/shell/init.zsh' \
+  "macOS default does not render the OrbStack shell integration"
 
 development_apps_bootstrap_script="$tmp_dir/macos-development-apps-bootstrap.sh"
 printf '%s\n' "$macos_development_apps_bootstrap" | sed \

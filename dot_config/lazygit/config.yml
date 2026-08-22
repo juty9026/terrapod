@@ -1,7 +1,7 @@
 git:
-  pagers:
-    - pager: delta --dark --paging=never
-    - pager: delta --dark --paging=never --side-by-side
+  diffRenderers:
+    - command: delta --dark --paging=never
+    - command: delta --dark --paging=never --side-by-side
 
 customCommands:
   - key: X

@@ -40,6 +40,18 @@ assert_contains() {
   pass "$message"
 }
 
+assert_not_contains() {
+  haystack="$1"
+  needle="$2"
+  message="$3"
+
+  if printf '%s\n' "$haystack" | grep -F "$needle" >/dev/null; then
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
 assert_no_arg() {
   call_file="$1"
   unexpected="$2"
@@ -132,6 +144,11 @@ rendered_config="$(
     cat "$tmp_dir/home/.config/lazygit/config.yml"
 )"
 
+assert_contains "$rendered_config" "diffRenderers:" "lazygit config declares diff renderers with the supported git.diffRenderers key"
+assert_contains "$rendered_config" "command: delta --dark --paging=never" "lazygit config renders diffs through delta"
+assert_contains "$rendered_config" "command: delta --dark --paging=never --side-by-side" "lazygit config offers a side-by-side delta renderer"
+assert_not_contains "$rendered_config" "pagers:" "lazygit config drops the removed git.pagers key"
+assert_not_contains "$rendered_config" "- pager:" "lazygit config drops the removed pager entry key"
 assert_contains "$rendered_config" "key: X" "lazygit config binds the PR merge command to X"
 assert_contains "$rendered_config" "context: localBranches" "lazygit config exposes the command in local branches"
 assert_contains "$rendered_config" "description: Merge GitHub PR..." "lazygit config exposes the PR merge command as a follow-up flow"

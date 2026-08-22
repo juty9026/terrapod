@@ -164,9 +164,11 @@ installs that rendered bundle:
 - `automation`: Hammerspoon, Karabiner-Elements, and Scroll Reverser.
 - `launcher`: Raycast and 1Password CLI.
 - `monitoring`: iStat Menus.
-- `development-apps`: Zed and Orca ADE (`stablyai/orca/orca`).
+- `development-apps`: Zed, Orca ADE (`stablyai/orca/orca`), and OrbStack.
 
 When installing Orca, Terrapod trusts only the fully-qualified `stablyai/orca/orca` cask, not the entire `stablyai/orca` tap.
+
+The development-apps group also sources the OrbStack shell integration from the managed `.zprofile` when OrbStack is installed. Login shells stay usable when the cask is missing.
 
 Machine-specific Homebrew packages should live outside the tracked `Brewfile`.
 
@@ -308,7 +310,7 @@ Optional stack profiles and macOS App Group settings are disabled by default.
 | `enableMacosAppGroupAutomation` | `false` | Installs the automation macOS App Group: Hammerspoon, Karabiner-Elements, and Scroll Reverser. |
 | `enableMacosAppGroupLauncher` | `false` | Installs the launcher macOS App Group: Raycast and 1Password CLI. |
 | `enableMacosAppGroupMonitoring` | `false` | Installs the monitoring macOS App Group: iStat Menus. |
-| `enableMacosAppGroupDevelopmentApps` | `false` | Installs the development-apps macOS App Group: Zed and Orca ADE (`stablyai/orca/orca`). |
+| `enableMacosAppGroupDevelopmentApps` | `false` | Installs the development-apps macOS App Group: Zed, Orca ADE (`stablyai/orca/orca`), and OrbStack. |
 
 When `enableDevelopmentWorkspace` is `true`, it enables both the Optional Editor Stack and Optional AI Tool Stack
 even when `enableEditorStack` or `enableAiCliTools` are recorded as false.
