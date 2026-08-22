@@ -162,8 +162,9 @@ ways:
   already activates mise, so the tail repeated it.
 - `$HOME/.maestro/bin` is dropped from PATH. Maestro now comes from Homebrew,
   whose prefix `.zshenv` already exports. Terrapod does not delete the existing
-  vendor-installed binary; the existing status and doctor warning for a command
-  resolving outside the active Homebrew prefix reports the shadowing instead.
+  vendor-installed binary; it is simply left off PATH so the Homebrew copy is
+  the one that resolves. Terrapod does not detect or report a vendor copy that
+  a user's own PATH additions place ahead of it.
 - Existence guards wrap the exports, matching the guard the OrbStack shell
   integration uses. A failed Android Studio install would otherwise leave
   `JAVA_HOME` pointing at a missing directory and break `java` entirely, and
