@@ -474,7 +474,7 @@ write_brew_bundle_stub() {
     '      printf "%s\n" "visible brew bundle output: $*"' \
     '    fi' \
     '    for formula in ${MACOS_BREW_FAIL_FORMULAE:-}; do' \
-    '      if [ -n "$bundle_file" ] && grep -Fx "brew \"$formula\"" "$bundle_file" >/dev/null 2>&1; then' \
+    '      if [ -n "$bundle_file" ] && grep -Eq "^brew \"$formula\"(,[[:space:]]|$)" "$bundle_file" 2>/dev/null; then' \
     '        exit 42' \
     '      fi' \
     '    done' \
@@ -482,7 +482,7 @@ write_brew_bundle_stub() {
     '      exit 42' \
     '    fi' \
     '    for cask in ${MACOS_BREW_FAIL_CASKS:-}; do' \
-    '      if [ -n "$bundle_file" ] && grep -Fx "cask \"$cask\"" "$bundle_file" >/dev/null 2>&1; then' \
+    '      if [ -n "$bundle_file" ] && grep -Eq "^cask \"$cask\"(,[[:space:]]|$)" "$bundle_file" 2>/dev/null; then' \
     '        exit 42' \
     '      fi' \
     '    done' \
@@ -1023,6 +1023,44 @@ printf '%s\n' "$macos_development_apps_bootstrap" | sed \
   >"$development_apps_bootstrap_script"
 sh -n "$development_apps_bootstrap_script" || fail "development-apps bootstrap script should be valid sh"
 pass "development-apps bootstrap script is valid sh"
+
+package_records_probe="$tmp_dir/package-records-probe.sh"
+package_records_brewfile="$tmp_dir/package-records-brewfile"
+cat >"$package_records_brewfile" <<'PROBE_BREWFILE'
+# development-apps macOS App Group
+cask "zed"
+cask "stablyai/orca/orca", trusted: true
+# mobile-dev macOS App Group
+cask "android-studio"
+brew "mobile-dev-inc/tap/maestro", trusted: true
+PROBE_BREWFILE
+
+sed -n '/^desktop_app_package_records()/,/^}/p' \
+  "$repo_root/.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl" \
+  >"$package_records_probe"
+printf '%s\n' 'desktop_app_package_records "$1"' >>"$package_records_probe"
+
+package_records_output="$(sh "$package_records_probe" "$package_records_brewfile")"
+
+expected_package_records="$(printf '%s\n' \
+  'development-apps	zed	cask "zed"' \
+  'development-apps	stablyai/orca/orca	cask "stablyai/orca/orca", trusted: true' \
+  'mobile-dev	android-studio	cask "android-studio"' \
+  'mobile-dev	mobile-dev-inc/tap/maestro	brew "mobile-dev-inc/tap/maestro", trusted: true')"
+
+assert_text_equals \
+  "$package_records_output" \
+  "$expected_package_records" \
+  "desktop app package records carry group, token, and the verbatim declaration for casks and tap formulae"
+
+assert_contains_text \
+  "$macos_development_apps_bootstrap" \
+  'read -r app_group token declaration' \
+  "per-package retry reads the declaration field alongside the group and token"
+assert_contains_text \
+  "$macos_development_apps_bootstrap" \
+  '>"$single_package_brewfile"' \
+  "per-package retry writes the recorded declaration so options such as trusted: true survive"
 
 development_apps_failure_bin="$tmp_dir/development-apps-failure-bin"
 development_apps_failure_state="$tmp_dir/development-apps-failure-state"

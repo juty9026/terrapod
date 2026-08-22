@@ -86,7 +86,7 @@ join_lines_with_commas() {
   ' "$1"
 }
 
-desktop_app_cask_records() {
+desktop_app_package_records() {
   brewfile="$1"
 
   awk '
@@ -97,12 +97,17 @@ desktop_app_cask_records() {
       next
     }
 
-    /^[[:space:]]*cask[[:space:]]+"/ {
-      cask = $0
-      sub(/^[[:space:]]*cask[[:space:]]+"/, "", cask)
-      sub(/".*$/, "", cask)
-      if (cask != "") {
-        printf "%s\t%s\n", group, cask
+    /^[[:space:]]*(cask|brew)[[:space:]]+"/ {
+      declaration = $0
+      sub(/^[[:space:]]+/, "", declaration)
+      sub(/[[:space:]]+$/, "", declaration)
+
+      token = declaration
+      sub(/^(cask|brew)[[:space:]]+"/, "", token)
+      sub(/".*$/, "", token)
+
+      if (token != "") {
+        printf "%s\t%s\t%s\n", group, token, declaration
       }
     }
   ' "$brewfile"
@@ -114,7 +119,7 @@ cleanup_desktop_app_bundle_temps() {
   [ -z "${records_file:-}" ] || rm -f "$records_file"
   [ -z "${failed_casks_file:-}" ] || rm -f "$failed_casks_file"
   [ -z "${failed_groups_file:-}" ] || rm -f "$failed_groups_file"
-  [ -z "${single_cask_brewfile:-}" ] || rm -f "$single_cask_brewfile"
+  [ -z "${single_package_brewfile:-}" ] || rm -f "$single_package_brewfile"
 }
 
 run_desktop_app_bundle() {
@@ -128,7 +133,7 @@ run_desktop_app_bundle() {
   records_file=
   failed_casks_file=
   failed_groups_file=
-  single_cask_brewfile=
+  single_package_brewfile=
 
   records_file="$(mktemp "${TMPDIR:-/tmp}/terrapod-macos-desktop-records.XXXXXX")" || return 1
   failed_casks_file="$(mktemp "${TMPDIR:-/tmp}/terrapod-macos-desktop-failed-casks.XXXXXX")" || {
@@ -140,7 +145,7 @@ run_desktop_app_bundle() {
     return 1
   }
 
-  if ! desktop_app_cask_records "$brewfile" >"$records_file"; then
+  if ! desktop_app_package_records "$brewfile" >"$records_file"; then
     cleanup_desktop_app_bundle_temps
     return 1
   fi
@@ -151,18 +156,18 @@ run_desktop_app_bundle() {
   fi
 
   tab="$(printf '\t')"
-  while IFS="$tab" read -r app_group cask; do
-    single_cask_brewfile="$(mktemp "${TMPDIR:-/tmp}/terrapod-macos-desktop-cask.XXXXXX")" || {
+  while IFS="$tab" read -r app_group token declaration; do
+    single_package_brewfile="$(mktemp "${TMPDIR:-/tmp}/terrapod-macos-desktop-package.XXXXXX")" || {
       cleanup_desktop_app_bundle_temps
       return 1
     }
-    if ! printf 'cask "%s"\n' "$cask" >"$single_cask_brewfile"; then
+    if ! printf '%s\n' "$declaration" >"$single_package_brewfile"; then
       cleanup_desktop_app_bundle_temps
       return 1
     fi
 
-    if ! HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="$single_cask_brewfile"; then
-      if ! printf '%s\n' "$cask" >>"$failed_casks_file"; then
+    if ! HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="$single_package_brewfile"; then
+      if ! printf '%s\n' "$token" >>"$failed_casks_file"; then
         cleanup_desktop_app_bundle_temps
         return 1
       fi
@@ -174,8 +179,8 @@ run_desktop_app_bundle() {
       fi
     fi
 
-    rm -f "$single_cask_brewfile"
-    single_cask_brewfile=
+    rm -f "$single_package_brewfile"
+    single_package_brewfile=
   done <"$records_file"
 
   if [ -s "$failed_casks_file" ]; then
