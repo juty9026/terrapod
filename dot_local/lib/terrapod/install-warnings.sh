@@ -154,6 +154,40 @@ terrapod_install_warning_clear() {
   rm -f "$legacy_marker_path"
 }
 
+terrapod_install_warning_known_names() {
+  for category in $(terrapod_install_warning_categories); do
+    printf '%s\n' "$category"
+
+    legacy_path="$(terrapod_install_warning_legacy_path "$category" 2>/dev/null)" || continue
+    printf '%s\n' "${legacy_path##*/}"
+  done
+}
+
+terrapod_install_warning_prune() {
+  marker_dir="$(terrapod_install_warning_dir)"
+  [ -d "$marker_dir" ] || return 0
+
+  known_names="$(terrapod_install_warning_known_names)"
+  prune_status=0
+
+  for marker_path in "$marker_dir"/*; do
+    [ -f "$marker_path" ] || continue
+
+    marker_name="${marker_path##*/}"
+    if printf '%s\n' "$known_names" | grep -Fx "$marker_name" >/dev/null; then
+      continue
+    fi
+
+    if rm -f "$marker_path"; then
+      printf '%s\n' "$marker_name"
+    else
+      prune_status=1
+    fi
+  done
+
+  return "$prune_status"
+}
+
 terrapod_install_warning_list() {
   for category in $(terrapod_install_warning_categories); do
     if terrapod_install_warning_existing_path "$category" >/dev/null; then

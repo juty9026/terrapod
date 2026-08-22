@@ -1098,6 +1098,103 @@ if [ ! -f "$legacy_marker_dir/optional-ai-cli-tools" ] || [ -e "$legacy_ai_cli_m
 fi
 pass "install warning marker write stores Optional AI CLI warnings only under the stable category slug"
 
+prune_marker_home="$tmp_dir/prune-marker-home"
+prune_marker_state="$tmp_dir/prune-marker-state"
+prune_marker_dir="$prune_marker_state/terrapod/install-warnings"
+mkdir -p "$prune_marker_home" "$prune_marker_dir/subdir"
+
+printf '%s\n' "category='managed-package-migration'" >"$prune_marker_dir/managed-package-migration"
+printf '%s\n' "category='homebrew-core'" >"$prune_marker_dir/homebrew-core"
+printf '%s\n' "category='optional-ai-cli-tools'" >"$prune_marker_dir/ai-cli-tools"
+printf '%s\n' "category='homebrew-core'" >"$prune_marker_dir/.homebrew-core.aB3xY9"
+
+prune_removed="$(
+  HOME="$prune_marker_home" XDG_STATE_HOME="$prune_marker_state" sh -c '. "$1"; terrapod_install_warning_prune' sh "$install_warnings_lib"
+)"
+
+if [ "$prune_removed" != "managed-package-migration" ]; then
+  printf '%s\n' "expected pruned names: managed-package-migration" >&2
+  printf '%s\n' "actual pruned names:" >&2
+  printf '%s\n' "$prune_removed" | sed 's/^/  /' >&2
+  fail "install warning marker prune removes and reports only unrecognized marker files"
+fi
+pass "install warning marker prune removes and reports only unrecognized marker files"
+
+if [ -e "$prune_marker_dir/managed-package-migration" ]; then
+  fail "install warning marker prune deletes retired category marker files"
+fi
+pass "install warning marker prune deletes retired category marker files"
+
+if [ ! -f "$prune_marker_dir/homebrew-core" ]; then
+  fail "install warning marker prune keeps current category marker files"
+fi
+pass "install warning marker prune keeps current category marker files"
+
+if [ ! -f "$prune_marker_dir/ai-cli-tools" ]; then
+  fail "install warning marker prune keeps legacy alias marker files"
+fi
+pass "install warning marker prune keeps legacy alias marker files"
+
+if [ ! -f "$prune_marker_dir/.homebrew-core.aB3xY9" ]; then
+  fail "install warning marker prune keeps in-flight mktemp staging files"
+fi
+pass "install warning marker prune keeps in-flight mktemp staging files"
+
+if [ ! -d "$prune_marker_dir/subdir" ]; then
+  fail "install warning marker prune keeps directories"
+fi
+pass "install warning marker prune keeps directories"
+
+prune_remaining_list="$(
+  HOME="$prune_marker_home" XDG_STATE_HOME="$prune_marker_state" sh -c '. "$1"; terrapod_install_warning_list' sh "$install_warnings_lib"
+)"
+expected_prune_remaining_list="$(printf '%s\n' homebrew-core optional-ai-cli-tools)"
+
+if [ "$prune_remaining_list" != "$expected_prune_remaining_list" ]; then
+  printf '%s\n' "expected remaining categories:" >&2
+  printf '%s\n' "$expected_prune_remaining_list" | sed 's/^/  /' >&2
+  printf '%s\n' "actual remaining categories:" >&2
+  printf '%s\n' "$prune_remaining_list" | sed 's/^/  /' >&2
+  fail "install warning marker prune leaves current and legacy categories readable"
+fi
+pass "install warning marker prune leaves current and legacy categories readable"
+
+prune_missing_state="$tmp_dir/prune-missing-state"
+if ! HOME="$prune_marker_home" XDG_STATE_HOME="$prune_missing_state" \
+  sh -c '. "$1"; terrapod_install_warning_prune' sh "$install_warnings_lib" >"$tmp_dir/prune-missing.out"; then
+  fail "install warning marker prune succeeds when the marker directory is missing"
+fi
+
+if [ -s "$tmp_dir/prune-missing.out" ]; then
+  fail "install warning marker prune prints nothing when the marker directory is missing"
+fi
+pass "install warning marker prune succeeds quietly when the marker directory is missing"
+
+if [ "$(id -u)" = 0 ]; then
+  pass "install warning marker prune reports removal failures (skipped as root)"
+else
+  prune_locked_state="$tmp_dir/prune-locked-state"
+  prune_locked_dir="$prune_locked_state/terrapod/install-warnings"
+  mkdir -p "$prune_locked_dir"
+  printf '%s\n' "category='managed-package-migration'" >"$prune_locked_dir/managed-package-migration"
+  chmod 555 "$prune_locked_dir"
+
+  prune_locked_status=0
+  HOME="$prune_marker_home" XDG_STATE_HOME="$prune_locked_state" \
+    sh -c '. "$1"; terrapod_install_warning_prune' sh "$install_warnings_lib" \
+    >"$tmp_dir/prune-locked.out" 2>/dev/null || prune_locked_status="$?"
+  chmod 755 "$prune_locked_dir"
+
+  if [ "$prune_locked_status" -eq 0 ]; then
+    fail "install warning marker prune returns non-zero when a removal fails"
+  fi
+
+  if [ -s "$tmp_dir/prune-locked.out" ]; then
+    fail "install warning marker prune does not report files it failed to remove"
+  fi
+  pass "install warning marker prune reports removal failures through its exit status"
+fi
+
 fake_warning_bin="$tmp_dir/fake-warning-bin"
 fake_warning_calls="$tmp_dir/fake-warning.calls"
 mkdir -p "$fake_warning_bin"
