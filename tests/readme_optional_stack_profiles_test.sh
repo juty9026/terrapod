@@ -141,6 +141,15 @@ assert_key_row_contains '`enableMacosAppGroupDevelopmentApps`' 'stablyai/orca/or
 assert_contains 'When installing Orca, Terrapod trusts only the fully-qualified `stablyai/orca/orca` cask, not the entire `stablyai/orca` tap.' \
   "README documents Orca's cask-specific trust boundary"
 
+assert_key_row_contains '`enableMacosAppGroupMobileDev`' 'mobile-dev' \
+  "README documents mobile-dev group on its option row"
+assert_key_row_contains '`enableMacosAppGroupMobileDev`' 'Android Studio' \
+  "README documents Android Studio on the mobile-dev option row"
+assert_key_row_contains '`enableMacosAppGroupMobileDev`' 'mobile-dev-inc/tap/maestro' \
+  "README documents Maestro's fully-qualified formula source"
+assert_contains 'Terrapod does not install Android SDK components or Xcode. Android Studio'"'"'s SDK Manager owns the SDK, and Xcode is distributed through the App Store.' \
+  "README documents the mobile development scope boundary"
+
 assert_contains 'The development-apps group also sources the OrbStack shell integration from the managed `.zprofile` when OrbStack is installed.' \
   "README documents where the OrbStack shell integration comes from"
 

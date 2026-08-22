@@ -53,7 +53,7 @@ mise, which installs and selects Bun, Node.js, Python, and uv independently from
 _Avoid_: Modern CLI Provider, Homebrew runtime manager, aqua tool provider
 
 **macOS Desktop App Stack**:
-The opt-in macOS cask set for GUI apps, system-style desktop apps, and cask-delivered desktop support tools.
+The opt-in macOS package set for GUI apps, system-style desktop apps, cask-delivered desktop support tools, and tap-delivered companion CLIs that ship with those apps.
 _Avoid_: Homebrew bootstrap, shared CLI formula, Core Shell Stack
 
 **macOS App Group**:
@@ -292,7 +292,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Enabling the **Optional Development Workspace** does not enable the **macOS Desktop App Stack**.
 - **macOS App Groups** are configured during **Terrapod** setup and remain within the **macOS Desktop App Stack** boundary.
 - When **macOS App Group** settings change, `tpod apply` keeps Homebrew desktop app warning marker content aligned with currently enabled groups; failures for disabled groups are removed from readiness warnings while enabled group failures remain.
-- The implemented **macOS App Groups** are terminal-apps, automation, launcher, monitoring, and development-apps.
+- The implemented **macOS App Groups** are terminal-apps, automation, launcher, monitoring, development-apps, and mobile-dev.
 - The terminal-apps **macOS App Group** contains Ghostty.
 - cmux is outside the declared **macOS Desktop App Stack**; existing cmux installs or settings may remain on a machine unmanaged and are not removed by **Terrapod**.
 - The automation **macOS App Group** contains Hammerspoon and Karabiner-Elements.
@@ -303,6 +303,12 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - The development-apps **macOS App Group** declares `stablyai/orca/orca` with `trusted: true` so Homebrew trusts only the Orca cask, not the entire `stablyai/orca` tap.
 - Disabling the development-apps **macOS App Group** does not revoke an existing Orca cask trust entry; Terrapod leaves Homebrew trust removal to an explicit user action.
 - The managed `.zprofile` sources the OrbStack shell integration only when the development-apps **macOS App Group** is enabled, and guards the source with a readability check so a missing OrbStack cask cannot break login shells.
+- The mobile-dev **macOS App Group** contains Android Studio and Maestro.
+- The mobile-dev **macOS App Group** declares `mobile-dev-inc/tap/maestro` with `trusted: true` so Homebrew trusts only the Maestro formula, not the entire `mobile-dev-inc/tap` tap.
+- The homebrew-cask `maestro` is a different product from the mobile-dev **macOS App Group**'s Maestro and is never declared.
+- The managed `.zshenv` exports `ANDROID_HOME`, `ANDROID_SDK_ROOT`, and `JAVA_HOME` only when the mobile-dev **macOS App Group** is enabled, and renders them before the machine-local override loop so explicit overrides still run last.
+- `JAVA_HOME` resolves to the runtime bundled with Android Studio, so **Terrapod** declares no separate JDK.
+- Android SDK components and Xcode remain outside **Terrapod** ownership; the Android SDK Manager owns the former and the App Store distributes the latter.
 - `enableMacosAppGroupAiApps` is deprecated and is not an alias for `enableMacosAppGroupDevelopmentApps`; users must run explicit setup or configure migration.
 - The Hammerspoon app launcher maps Orca to `1` and Zed to `2`.
 - Orca's bundled `orca` CLI remains an artifact of the development-apps **macOS App Group** and is not a member of the cross-profile **Optional AI Tool Stack**.

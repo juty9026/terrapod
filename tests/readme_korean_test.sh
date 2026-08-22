@@ -167,6 +167,12 @@ assert_contains "$korean_readme" 'development-apps group은 OrbStack이 설치�
   "README.ko.md documents where the OrbStack shell integration comes from"
 assert_contains "$korean_readme" 'Terrapod은 Orca를 설치할 때 fully-qualified `stablyai/orca/orca` cask만 trust하며, `stablyai/orca` tap 전체를 trust하지 않습니다.' \
   "README.ko.md documents Orca's cask-specific trust boundary"
+assert_contains "$korean_readme" '`mobile-dev`: Android Studio와 Maestro(`mobile-dev-inc/tap/maestro`).' \
+  "README.ko.md documents Android Studio and Maestro in the mobile-dev inventory"
+assert_contains "$korean_readme" '| `enableMacosAppGroupMobileDev` | `false` | mobile-dev macOS App Group인 Android Studio와 Maestro(`mobile-dev-inc/tap/maestro`)를 설치합니다. |' \
+  "README.ko.md documents the mobile-dev option row"
+assert_contains "$korean_readme" 'Terrapod은 Android SDK component와 Xcode를 설치하지 않습니다. SDK는 Android Studio의 SDK Manager가 소유하고, Xcode는 App Store로 배포됩니다.' \
+  "README.ko.md documents the mobile development scope boundary"
 assert_not_contains "$korean_readme" 'Terminal font cask' \
   "README.ko.md no longer documents terminal font casks"
 assert_contains "$korean_readme" '최신 안정 GitHub release에서 제공하는 Jetendard terminal font' \
