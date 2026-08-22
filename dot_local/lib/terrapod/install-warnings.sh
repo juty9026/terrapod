@@ -15,14 +15,15 @@ terrapod_install_warning_categories() {
 }
 
 terrapod_install_warning_is_category() {
-  case "$1" in
-    homebrew-core|homebrew-desktop-apps|ubuntu-bootstrap|shell-integrations|mise-tools|optional-ai-cli-tools|jetendard-font|jetendard-settings)
+  wanted_category="$1"
+
+  for known_category in $(terrapod_install_warning_categories); do
+    if [ "$known_category" = "$wanted_category" ]; then
       return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
+    fi
+  done
+
+  return 1
 }
 
 terrapod_install_warning_dir() {
@@ -174,7 +175,7 @@ terrapod_install_warning_prune() {
     [ -f "$marker_path" ] || continue
 
     marker_name="${marker_path##*/}"
-    if printf '%s\n' "$known_names" | grep -Fx "$marker_name" >/dev/null; then
+    if printf '%s\n' "$known_names" | grep -Fx -- "$marker_name" >/dev/null; then
       continue
     fi
 

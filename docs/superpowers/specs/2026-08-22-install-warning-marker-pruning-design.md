@@ -205,6 +205,8 @@ and chezmoi's own output:
 Terrapod apply
   Profile: ...
   Delegating declared-state apply to: chezmoi apply
+Preflight: chezmoi is available
+Preflight: config file is readable
 Removed retired install warning marker: managed-package-migration
 ```
 
