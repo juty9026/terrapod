@@ -151,7 +151,9 @@ terrapod_install_warning_prune() {
   for marker_path in "$marker_dir"/*; do
     [ -f "$marker_path" ] || continue
     name="${marker_path##*/}"
-    printf '%s\n' "$known" | grep -Fx "$name" >/dev/null && continue
+    if printf '%s\n' "$known" | grep -Fx "$name" >/dev/null; then
+      continue
+    fi
 
     if rm -f "$marker_path"; then
       printf '%s\n' "$name"
@@ -172,6 +174,12 @@ with no output.
 `known_names` runs inside a command substitution, so its `category` and
 `legacy_path` assignments stay in a subshell and do not leak into the caller,
 which matters in a POSIX shell library with no `local`.
+
+The recognized-name check is written as an `if` block rather than
+`grep … && continue`. `dot_local/bin/executable_terrapod` runs under `set -eu`,
+where an `A && B` list whose `A` fails is a failing statement and aborts the
+shell. Since `grep` failing is the ordinary case for a file being pruned, the
+`&&` form would kill `tpod apply` on the first orphan it found.
 
 ## Apply Integration
 
