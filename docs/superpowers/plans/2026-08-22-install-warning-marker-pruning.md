@@ -210,7 +210,7 @@ Three things that are easy to get wrong here:
 sh tests/terrapod_command_test.sh
 ```
 
-Expected: exit 0, with the eight new `ok -` lines present and the pre-existing 483 assertions still passing.
+Expected: exit 0, with the nine new `ok -` lines present and the pre-existing 483 assertions still passing.
 
 - [ ] **Step 5: Commit**
 
@@ -236,7 +236,7 @@ Wires the library function into the only apply entry point and gives it user-vis
 
 **Files:**
 - Modify: `dot_local/bin/executable_terrapod` — add a helper immediately before `run_apply()` (line 1498) and one call inside `run_apply()` after `run_apply_preflight "$config_file"`
-- Test: `tests/terrapod_command_test.sh` — two insertions described in Step 1
+- Test: `tests/terrapod_command_test.sh` — two insertions described in Step 1. **Line numbers below are pre-Task-1 and are approximate; locate every insertion point by its quoted text anchor.**
 
 **Interfaces:**
 - Consumes: `terrapod_install_warning_prune()` from Task 1 (no arguments; removed names on stdout one per line; exit 1 if any removal failed). Also the existing `print_warning_line "$message"` helper at line 122 and the existing `TERRAPOD_INSTALL_WARNINGS_LOADED` guard convention used by `print_remaining_install_warnings()` at line 1644.
@@ -517,7 +517,7 @@ After all three tasks:
 sh tests/terrapod_command_test.sh
 ```
 
-Expected: exit 0 with 497 `ok -` assertions — the 483 baseline plus eight from Task 1 and six from Task 2.
+Expected: exit 0 with 498 `ok -` assertions — the 483 baseline plus nine from Task 1 and six from Task 2.
 
 Manual check against the machine state that produced the issue, using a throwaway state directory so the real one is untouched:
 
