@@ -298,10 +298,11 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - The automation **macOS App Group** contains Hammerspoon and Karabiner-Elements.
 - The launcher **macOS App Group** contains Raycast and 1Password CLI.
 - The monitoring **macOS App Group** contains iStat Menus.
-- The development-apps **macOS App Group** contains Zed and Orca ADE.
+- The development-apps **macOS App Group** contains Zed, Orca ADE, and OrbStack.
 - The development-apps **macOS App Group** installs Homebrew casks `zed` and `stablyai/orca/orca`.
 - The development-apps **macOS App Group** declares `stablyai/orca/orca` with `trusted: true` so Homebrew trusts only the Orca cask, not the entire `stablyai/orca` tap.
 - Disabling the development-apps **macOS App Group** does not revoke an existing Orca cask trust entry; Terrapod leaves Homebrew trust removal to an explicit user action.
+- The managed `.zprofile` sources the OrbStack shell integration only when the development-apps **macOS App Group** is enabled, and guards the source with a readability check so a missing OrbStack cask cannot break login shells.
 - `enableMacosAppGroupAiApps` is deprecated and is not an alias for `enableMacosAppGroupDevelopmentApps`; users must run explicit setup or configure migration.
 - The Hammerspoon app launcher maps Orca to `1` and Zed to `2`.
 - Orca's bundled `orca` CLI remains an artifact of the development-apps **macOS App Group** and is not a member of the cross-profile **Optional AI Tool Stack**.

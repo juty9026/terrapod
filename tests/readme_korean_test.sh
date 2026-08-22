@@ -159,10 +159,12 @@ assert_contains "$korean_readme" '선택된 executable의 installer provenance�
   "README.ko.md documents provenance-neutral executable guidance"
 assert_not_contains "$korean_readme" 'Proceed with removing these legacy package installations? [y/N]' \
   "README.ko.md removes the package migration confirmation"
-assert_contains "$korean_readme" '`development-apps`: Zed와 Orca ADE(`stablyai/orca/orca`).' \
-  "README.ko.md documents Zed and Orca ADE in the development-apps inventory"
-assert_contains "$korean_readme" '| `enableMacosAppGroupDevelopmentApps` | `false` | development-apps macOS App Group인 Zed와 Orca ADE(`stablyai/orca/orca`)를 설치합니다. |' \
-  "README.ko.md documents Zed and Orca ADE on the development-apps option row"
+assert_contains "$korean_readme" '`development-apps`: Zed, Orca ADE(`stablyai/orca/orca`), OrbStack.' \
+  "README.ko.md documents Zed, Orca ADE, and OrbStack in the development-apps inventory"
+assert_contains "$korean_readme" '| `enableMacosAppGroupDevelopmentApps` | `false` | development-apps macOS App Group인 Zed, Orca ADE(`stablyai/orca/orca`), OrbStack을 설치합니다. |' \
+  "README.ko.md documents Zed, Orca ADE, and OrbStack on the development-apps option row"
+assert_contains "$korean_readme" 'development-apps group은 OrbStack이 설치되어 있으면 managed `.zprofile`에서 OrbStack shell integration을 source합니다.' \
+  "README.ko.md documents where the OrbStack shell integration comes from"
 assert_contains "$korean_readme" 'Terrapod은 Orca를 설치할 때 fully-qualified `stablyai/orca/orca` cask만 trust하며, `stablyai/orca` tap 전체를 trust하지 않습니다.' \
   "README.ko.md documents Orca's cask-specific trust boundary"
 assert_not_contains "$korean_readme" 'Terminal font cask' \

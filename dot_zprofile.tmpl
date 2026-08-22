@@ -1,0 +1,8 @@
+# Login-shell PATH is initialized by the managed .zshenv for both profiles.
+{{ if default false (get . "enableMacosAppGroupDevelopmentApps") }}
+# OrbStack ships its shell integration with the development-apps macOS App Group.
+# The readability guard keeps login shells working when the cask is missing.
+if [ -r "$HOME/.orbstack/shell/init.zsh" ]; then
+  . "$HOME/.orbstack/shell/init.zsh"
+fi
+{{- end }}

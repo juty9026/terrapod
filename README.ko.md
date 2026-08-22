@@ -156,9 +156,11 @@ macOS desktop application은 machine-local data key로 제어되는 opt-in App G
 - `automation`: Hammerspoon, Karabiner-Elements, Scroll Reverser.
 - `launcher`: Raycast와 1Password CLI.
 - `monitoring`: iStat Menus.
-- `development-apps`: Zed와 Orca ADE(`stablyai/orca/orca`).
+- `development-apps`: Zed, Orca ADE(`stablyai/orca/orca`), OrbStack.
 
 Terrapod은 Orca를 설치할 때 fully-qualified `stablyai/orca/orca` cask만 trust하며, `stablyai/orca` tap 전체를 trust하지 않습니다.
+
+development-apps group은 OrbStack이 설치되어 있으면 managed `.zprofile`에서 OrbStack shell integration을 source합니다. cask이 없어도 login shell은 정상 동작합니다.
 
 Machine-specific Homebrew package는 tracked `Brewfile` 밖에 둬야 합니다.
 
@@ -287,7 +289,7 @@ Optional stack profile과 macOS App Group setting은 기본적으로 disabled입
 | `enableMacosAppGroupAutomation` | `false` | automation macOS App Group인 Hammerspoon, Karabiner-Elements, Scroll Reverser를 설치합니다. |
 | `enableMacosAppGroupLauncher` | `false` | launcher macOS App Group인 Raycast와 1Password CLI를 설치합니다. |
 | `enableMacosAppGroupMonitoring` | `false` | monitoring macOS App Group인 iStat Menus를 설치합니다. |
-| `enableMacosAppGroupDevelopmentApps` | `false` | development-apps macOS App Group인 Zed와 Orca ADE(`stablyai/orca/orca`)를 설치합니다. |
+| `enableMacosAppGroupDevelopmentApps` | `false` | development-apps macOS App Group인 Zed, Orca ADE(`stablyai/orca/orca`), OrbStack을 설치합니다. |
 
 `enableDevelopmentWorkspace`가 `true`이면 `enableEditorStack`이나 `enableAiCliTools`가 false로 기록되어 있어도 Optional Editor Stack과 Optional AI Tool Stack이 함께 활성화됩니다.
 

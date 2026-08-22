@@ -132,12 +132,17 @@ assert_key_row_contains '`enableMacosAppGroupMonitoring`' 'iStat Menus' \
   "README documents iStat Menus on the monitoring option row"
 assert_key_row_contains '`enableMacosAppGroupDevelopmentApps`' 'development-apps' \
   "README documents development-apps group on its option row"
-assert_key_row_contains '`enableMacosAppGroupDevelopmentApps`' 'Zed and Orca ADE' \
+assert_key_row_contains '`enableMacosAppGroupDevelopmentApps`' 'Zed, Orca ADE' \
   "README documents Zed and Orca ADE on the development-apps option row"
+assert_key_row_contains '`enableMacosAppGroupDevelopmentApps`' 'OrbStack' \
+  "README documents OrbStack on the development-apps option row"
 assert_key_row_contains '`enableMacosAppGroupDevelopmentApps`' 'stablyai/orca/orca' \
   "README documents Orca's fully-qualified cask source"
 assert_contains 'When installing Orca, Terrapod trusts only the fully-qualified `stablyai/orca/orca` cask, not the entire `stablyai/orca` tap.' \
   "README documents Orca's cask-specific trust boundary"
+
+assert_contains 'The development-apps group also sources the OrbStack shell integration from the managed `.zprofile` when OrbStack is installed.' \
+  "README documents where the OrbStack shell integration comes from"
 
 assert_contains 'Optional stack profiles and macOS App Group settings are disabled by default.' \
   "README states optional stack profiles and App Groups are disabled by default"
