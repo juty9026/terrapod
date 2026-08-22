@@ -1026,6 +1026,28 @@ assert_not_contains_text "$macos_brewfile" 'cask "android-studio"' "macOS defaul
 assert_not_contains_text "$macos_brewfile" 'mobile-dev-inc/tap/maestro' "macOS default does not render Maestro"
 assert_not_contains_text "$development_apps_brewfile" 'cask "android-studio"' "development-apps group does not render Android Studio"
 
+mobile_dev_zshenv="$(render_managed_file "$macos_mobile_dev_data" ".zshenv")"
+macos_default_zshenv="$(render_managed_file "$macos_data" ".zshenv")"
+
+assert_contains_text "$mobile_dev_zshenv" 'export ANDROID_HOME="$HOME/Library/Android/sdk"' "mobile-dev group exports ANDROID_HOME"
+assert_contains_text "$mobile_dev_zshenv" 'export ANDROID_SDK_ROOT="$ANDROID_HOME"' "mobile-dev group exports ANDROID_SDK_ROOT"
+assert_contains_text "$mobile_dev_zshenv" 'export JAVA_HOME="$android_studio_jbr"' "mobile-dev group resolves JAVA_HOME to the Android Studio bundled runtime"
+assert_contains_text "$mobile_dev_zshenv" 'if [[ -d "$android_studio_jbr" ]]; then' "JAVA_HOME is guarded so a failed Android Studio install cannot break java"
+assert_contains_text "$mobile_dev_zshenv" 'if [[ -d "$ANDROID_HOME/platform-tools" ]]; then' "platform-tools joins PATH only when the SDK provides it"
+assert_not_contains_text "$mobile_dev_zshenv" '.maestro/bin' "Maestro resolves through the Homebrew prefix instead of its vendor install directory"
+assert_not_contains_text "$mobile_dev_zshenv" 'mise activate' "the Android environment does not repeat the mise activation the managed zshrc already runs"
+assert_not_contains_text "$macos_default_zshenv" 'ANDROID_HOME' "macOS default does not render the Android environment"
+
+mobile_dev_android_line="$(printf '%s\n' "$mobile_dev_zshenv" | grep -n 'export ANDROID_HOME' | head -1 | cut -d: -f1)"
+mobile_dev_override_line="$(printf '%s\n' "$mobile_dev_zshenv" | grep -n 'zsh/path.d' | head -1 | cut -d: -f1)"
+if [ -z "$mobile_dev_android_line" ] || [ -z "$mobile_dev_override_line" ]; then
+  fail "rendered .zshenv should contain both the Android environment and the machine-local override loop"
+fi
+if [ "$mobile_dev_android_line" -ge "$mobile_dev_override_line" ]; then
+  fail "the Android environment must render before the machine-local override loop so explicit overrides still run last"
+fi
+pass "the Android environment renders before the machine-local override loop"
+
 development_apps_zprofile="$(render_managed_file "$macos_development_apps_data" ".zprofile")"
 macos_default_zprofile="$(render_managed_file "$macos_data" ".zprofile")"
 

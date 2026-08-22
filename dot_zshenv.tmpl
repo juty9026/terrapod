@@ -20,6 +20,29 @@ elif [[ -x /usr/local/bin/brew ]]; then
 fi
 {{ end -}}
 
+{{ if default false (get . "enableMacosAppGroupMobileDev") }}
+# Android tooling from the mobile-dev macOS App Group.
+# The Android SDK Manager owns this directory; the cask does not create it.
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+
+# emulator is prepended first so platform-tools ends up ahead of it.
+if [[ -d "$ANDROID_HOME/emulator" ]]; then
+  path=("$ANDROID_HOME/emulator" $path)
+fi
+if [[ -d "$ANDROID_HOME/platform-tools" ]]; then
+  path=("$ANDROID_HOME/platform-tools" $path)
+fi
+
+# Java resolves to the runtime Android Studio bundles, so the command line and
+# the IDE always agree on a version.
+android_studio_jbr="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+if [[ -d "$android_studio_jbr" ]]; then
+  export JAVA_HOME="$android_studio_jbr"
+fi
+unset android_studio_jbr
+{{ end }}
+
 # Explicit machine-local overrides run last.
 if [[ -d "$HOME/.config/zsh/path.d" ]]; then
   for path_snippet in "$HOME"/.config/zsh/path.d/*.zsh(N); do
