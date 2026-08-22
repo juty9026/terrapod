@@ -595,6 +595,7 @@ enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = $launcher
 enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
+enableMacosAppGroupMobileDev = false
 EOF
 }
 
@@ -1413,7 +1414,7 @@ setup_responses="$tmp_dir/setup.responses"
 setup_gum_log="$tmp_dir/setup-gum.log"
 setup_config="$setup_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$setup_home"
-write_gum_responses "$setup_responses" development yes yes yes yes yes yes yes
+write_gum_responses "$setup_responses" development yes yes yes yes yes yes yes yes
 
 if ! run_terrapod_setup_command macos-terminal "$setup_responses" "$setup_home" "$setup_xdg" "$setup_output" "$setup_gum_log"; then
   sed 's/^/  /' "$setup_output" >&2
@@ -1445,6 +1446,8 @@ assert_contains "$setup_output_text" "  Installs Hammerspoon, Karabiner-Elements
 assert_contains "$setup_output_text" "development-apps" "gum setup leads development-apps App Group prompt with the group name"
 assert_contains "$setup_output_text" "  Installs Zed, Orca ADE, and OrbStack." "gum setup lists Zed, Orca ADE, and OrbStack in the development-apps App Group"
 assert_contains "$setup_output_text" "  Trusts only the fully-qualified stablyai/orca/orca cask, not the entire stablyai/orca tap." "gum setup discloses Orca's cask-specific trust boundary"
+assert_contains "$setup_output_text" "  Installs Android Studio and Maestro." "gum setup lists Android Studio and Maestro in the mobile-dev App Group"
+assert_contains "$setup_output_text" "  Sets ANDROID_HOME and JAVA_HOME for Android builds." "gum setup discloses that the mobile-dev App Group changes the shell environment"
 assert_contains "$setup_output_text" "enableEditorStack = true" "gum setup summary includes concrete Editor Stack setting"
 assert_contains "$setup_output_text" "enableMacosAppGroupMonitoring = true" "gum setup summary includes concrete macOS App Group setting"
 assert_contains "$setup_output_text" "enableMacosAppGroupDevelopmentApps = true" "gum setup summary includes concrete development-apps App Group setting"
@@ -1739,6 +1742,7 @@ enableMacosAppGroupAutomation = true
 enableMacosAppGroupLauncher = true
 enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = true
+enableMacosAppGroupMobileDev = true
 TOML
 
 macos_standard_brew_prefix="$tmp_dir/macos-standard-homebrew"
@@ -1864,6 +1868,7 @@ assert_contains "$macos_status_output" "automation                    : enabled 
 assert_contains "$macos_status_output" "launcher                      : enabled (Raycast and 1Password CLI)" "Terrapod status reports enabled launcher macOS App Group"
 assert_contains "$macos_status_output" "monitoring                    : disabled" "Terrapod status reports disabled monitoring macOS App Group"
 assert_contains "$macos_status_output" "development-apps              : enabled (Zed, Orca ADE, and OrbStack)" "Terrapod status lists Zed, Orca ADE, and OrbStack in the enabled development-apps App Group"
+assert_contains "$macos_status_output" "mobile-dev                    : enabled (Android Studio and Maestro)" "Terrapod status lists Android Studio and Maestro in the enabled mobile-dev App Group"
 assert_contains "$macos_status_output" "chezmoi                       : available" "Terrapod status reports chezmoi availability"
 assert_contains "$macos_status_output" "brew                          : available" "Terrapod status reports macOS Bootstrap Package Manager availability"
 assert_contains "$macos_status_output" "Warnings: none" "Terrapod status reports no warnings when enabled tools are present"
@@ -1923,6 +1928,7 @@ data.enableMacosAppGroupLauncher = false
 data.enableMacosAppGroupMonitoring = false
 data.enableMacosAppGroupTerminalApps = true
 data.enableMacosAppGroupDevelopmentApps = true
+data.enableMacosAppGroupMobileDev = true
 TOML
 
 dotted_status_path="$(status_doctor_path dotted chezmoi git zsh mise brew nvim agy claude codex zellij)"
@@ -1936,6 +1942,7 @@ assert_contains "$dotted_status_output" "Optional Editor Stack         : enabled
 assert_contains "$dotted_status_output" "Optional AI Tool Stack        : enabled (tools available: agy, claude, codex)" "Terrapod status reads root dotted data keys for effective AI stack state"
 assert_contains "$dotted_status_output" "terminal-apps                 : enabled (Ghostty)" "Terrapod status reads root dotted data keys for Ghostty-only macOS App Groups"
 assert_contains "$dotted_status_output" "development-apps              : enabled (Zed, Orca ADE, and OrbStack)" "Terrapod status reads root dotted data keys for Zed, Orca ADE, and OrbStack in development-apps"
+assert_contains "$dotted_status_output" "mobile-dev                    : enabled (Android Studio and Maestro)" "Terrapod status reads root dotted data keys for the mobile-dev App Group"
 assert_contains "$dotted_status_output" "Warnings: none" "Terrapod status has no warnings for root dotted data keys when tools are present"
 
 status_ubuntu_config="$tmp_dir/status-ubuntu.toml"
@@ -1951,6 +1958,7 @@ enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
+enableMacosAppGroupMobileDev = false
 TOML
 write_os_release "$status_ubuntu_os_release" ubuntu 24.04 "Ubuntu 24.04 LTS"
 
@@ -2129,6 +2137,7 @@ enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
+enableMacosAppGroupMobileDev = false
 TOML
 chmod 000 "$status_unreadable_config"
 
@@ -2199,6 +2208,7 @@ enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
+enableMacosAppGroupMobileDev = false
 TOML
 
 status_shadow_path="$(status_doctor_path shadow chezmoi git zsh mise nvim zellij apt brew agy claude codex)"
@@ -2280,6 +2290,7 @@ enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
+enableMacosAppGroupMobileDev = false
 TOML
 write_os_release "$doctor_os_release" ubuntu 24.04 "Ubuntu 24.04 LTS"
 
@@ -2388,6 +2399,7 @@ enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
+enableMacosAppGroupMobileDev = false
 TOML
 chmod 000 "$doctor_unreadable_config"
 
@@ -2595,6 +2607,7 @@ enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
+enableMacosAppGroupMobileDev = false
 TOML
 
 if ! HOME="$update_home" XDG_CONFIG_HOME="$update_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
@@ -2711,6 +2724,7 @@ enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
+enableMacosAppGroupMobileDev = false
 TOML
 
 rm -f "$CHEZMOI_CALL_FILE" "$CHEZMOI_INVOKED_FILE"
@@ -2808,6 +2822,7 @@ enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = true
 enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = true
+enableMacosAppGroupMobileDev = true
 TOML
 
 if ! HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
@@ -3073,7 +3088,7 @@ fi
 
 apply_inline_config="$tmp_dir/apply-inline-table.toml"
 cat >"$apply_inline_config" <<'TOML'
-data = { profile = "vps-shell", enableEditorStack = false, enableAiCliTools = false, enableDevelopmentWorkspace = false, enableMacosAppGroupTerminalApps = false, enableMacosAppGroupAutomation = false, enableMacosAppGroupLauncher = false, enableMacosAppGroupMonitoring = false, enableMacosAppGroupDevelopmentApps = false }
+data = { profile = "vps-shell", enableEditorStack = false, enableAiCliTools = false, enableDevelopmentWorkspace = false, enableMacosAppGroupTerminalApps = false, enableMacosAppGroupAutomation = false, enableMacosAppGroupLauncher = false, enableMacosAppGroupMonitoring = false, enableMacosAppGroupDevelopmentApps = false, enableMacosAppGroupMobileDev = false }
 TOML
 rm -f "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
 

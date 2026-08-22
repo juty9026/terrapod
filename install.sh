@@ -773,7 +773,8 @@ managed_setup_keys() {
     enableMacosAppGroupAutomation \
     enableMacosAppGroupLauncher \
     enableMacosAppGroupMonitoring \
-    enableMacosAppGroupDevelopmentApps
+    enableMacosAppGroupDevelopmentApps \
+    enableMacosAppGroupMobileDev
 }
 
 config_data_value() {

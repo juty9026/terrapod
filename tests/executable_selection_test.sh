@@ -245,6 +245,7 @@ enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
+enableMacosAppGroupMobileDev = false
 EOF
 cat >"$integration_bin/chezmoi" <<'EOF'
 #!/bin/sh
