@@ -295,7 +295,7 @@ Optional stack profile과 macOS App Group setting은 기본적으로 disabled입
 | `enableMacosAppGroupLauncher` | `false` | launcher macOS App Group인 Raycast와 1Password CLI를 설치합니다. |
 | `enableMacosAppGroupMonitoring` | `false` | monitoring macOS App Group인 iStat Menus를 설치합니다. |
 | `enableMacosAppGroupDevelopmentApps` | `false` | development-apps macOS App Group인 Zed, Orca ADE(`stablyai/orca/orca`), OrbStack을 설치합니다. |
-| `enableMacosAppGroupMobileDev` | `false` | mobile-dev macOS App Group인 Android Studio와 Maestro(`mobile-dev-inc/tap/maestro`)를 설치합니다. |
+| `enableMacosAppGroupMobileDev` | `false` | mobile-dev macOS App Group인 Android Studio와 Maestro(`mobile-dev-inc/tap/maestro`)를 설치합니다. `ANDROID_HOME`과 `JAVA_HOME`도 함께 설정합니다. |
 
 `enableDevelopmentWorkspace`가 `true`이면 `enableEditorStack`이나 `enableAiCliTools`가 false로 기록되어 있어도 Optional Editor Stack과 Optional AI Tool Stack이 함께 활성화됩니다.
 

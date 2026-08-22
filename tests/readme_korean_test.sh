@@ -169,7 +169,7 @@ assert_contains "$korean_readme" 'Terrapod은 Orca를 설치할 때 fully-qualif
   "README.ko.md documents Orca's cask-specific trust boundary"
 assert_contains "$korean_readme" '`mobile-dev`: Android Studio와 Maestro(`mobile-dev-inc/tap/maestro`).' \
   "README.ko.md documents Android Studio and Maestro in the mobile-dev inventory"
-assert_contains "$korean_readme" '| `enableMacosAppGroupMobileDev` | `false` | mobile-dev macOS App Group인 Android Studio와 Maestro(`mobile-dev-inc/tap/maestro`)를 설치합니다. |' \
+assert_contains "$korean_readme" '| `enableMacosAppGroupMobileDev` | `false` | mobile-dev macOS App Group인 Android Studio와 Maestro(`mobile-dev-inc/tap/maestro`)를 설치합니다. `ANDROID_HOME`과 `JAVA_HOME`도 함께 설정합니다. |' \
   "README.ko.md documents the mobile-dev option row"
 assert_contains "$korean_readme" 'Terrapod은 Android SDK component와 Xcode를 설치하지 않습니다. SDK는 Android Studio의 SDK Manager가 소유하고, Xcode는 App Store로 배포됩니다.' \
   "README.ko.md documents the mobile development scope boundary"
