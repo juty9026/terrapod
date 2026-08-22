@@ -217,7 +217,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Scripted readiness checks should run `tpod doctor` rather than interpreting first-run warning completion as full machine readiness.
 - Non-blocking first-run installer failures are recorded as Terrapod install warnings so first-run completion and `tpod doctor` can surface incomplete machine profile readiness without relying on brittle command-output parsing.
 - Terrapod install warnings are machine-local recovery state stored outside the **Terrapod Source Repository** and managed dotfiles, under the user's XDG state area such as `${XDG_STATE_HOME:-$HOME/.local/state}/terrapod/install-warnings/<category>`.
-- Terrapod install warnings are category-scoped markers that remain actionable until the same installer category completes successfully; interrupted or failed reruns must not hide the previous recovery signal.
+- Terrapod install warnings are category-scoped markers that, while their category exists, remain actionable until the same installer category completes successfully; interrupted or failed reruns must not hide the previous recovery signal.
 - A successful rerun of an installer category clears that category's warning marker, while a failed rerun replaces it with the current failure summary and guidance.
 - Mandatory stack warning markers such as Homebrew core, Ubuntu bootstrap, shell integrations, and mise tools are cleared only by successful reruns because their desired state cannot be disabled by optional settings.
 - Optional stack or app-group warning marker content may be cleared or reduced when the corresponding desired optional setting is disabled.
@@ -226,7 +226,10 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Terrapod install warning markers use shell-friendly key/value content with stable category, summary, guidance, and `updated_at` fields instead of free-form logs or captured stack traces.
 - Terrapod install warning marker values stay single-line so shell parsing remains predictable; longer human-readable explanations belong in `tpod doctor` output.
 - Terrapod install warning marker `updated_at` values use UTC ISO 8601 timestamps such as `2026-06-02T03:12:45Z`.
-- Terrapod install warning marker writes should be atomic at the category file level, and marker clears remove only the matching category file.
+- Terrapod install warning marker writes should be atomic at the category file level, and `terrapod_install_warning_clear()` removes only the matching category file.
+- The Terrapod install warning directory is Terrapod-owned; its only valid filenames are current categories, the legacy aliases Terrapod still reads, and in-flight staging files.
+- `tpod apply` removes install warning marker files whose names are not valid and prints one line per removal; `tpod status` and `tpod doctor` stay read-only.
+- Install warning marker prune failures print a warning and do not change the exit status of `tpod apply`.
 - Terrapod install warnings do not include a retained installer log; recovery guidance should direct users to rerun the relevant apply path for fresh command output.
 - Terrapod install warning marker path resolution, atomic write, timestamp creation, and clear behavior should be implemented through shared shell helper logic rather than duplicated independently in each installer script.
 - Source-side installer scripts and installed `tpod` commands should share the same Terrapod install warning marker contract even if the helper file placement is decided during implementation.
