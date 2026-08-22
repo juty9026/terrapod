@@ -11,6 +11,17 @@ trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 fail() { printf '%s\n' "not ok - $1" >&2; exit 1; }
 pass() { printf '%s\n' "ok - $1"; }
 
+first_statement="$(awk 'NR == 1 && /^#!/ { next } /^[[:space:]]*$/ { next } { print; exit }' "$helper")"
+[ "$first_statement" = "from __future__ import annotations" ] || fail "helper defers annotation evaluation so Python 3.9 can import it"
+pass "helper defers annotation evaluation so Python 3.9 can import it"
+
+if [ -x /usr/bin/python3 ]; then
+  /usr/bin/python3 "$helper" --help >/dev/null || fail "helper loads under the system interpreter"
+  pass "helper loads under the system interpreter"
+else
+  pass "system interpreter check is skipped when /usr/bin/python3 is absent"
+fi
+
 home_dir="$tmp_dir/home"
 state_dir="$tmp_dir/state"
 fixture_dir="$tmp_dir/fixture"
@@ -401,16 +412,15 @@ data = json.loads(manifest.read_text())
 data["files"].append("Jetendard-Legacy.ttf")
 manifest.write_text(json.dumps(data) + "\n")
 before = snapshot(home, state)
-real_unlink = module.os.unlink
+real_unlink = module.Path.unlink
 failed = False
-def fail_obsolete(path, *args, **kwargs):
+def fail_obsolete(self, *args, **kwargs):
     global failed
-    candidate = Path(path)
-    if candidate.name == "Jetendard-Legacy.ttf" and not failed:
+    if self.name == "Jetendard-Legacy.ttf" and not failed:
         failed = True
         raise OSError("injected obsolete cleanup failure")
-    return real_unlink(path, *args, **kwargs)
-module.os.unlink = fail_obsolete
+    return real_unlink(self, *args, **kwargs)
+module.Path.unlink = fail_obsolete
 try:
     module.install(home)
 except OSError as error:
@@ -418,7 +428,7 @@ except OSError as error:
 else:
     raise AssertionError("obsolete cleanup failure was not injected")
 finally:
-    module.os.unlink = real_unlink
+    module.Path.unlink = real_unlink
 assert_snapshot(home, state, before)
 assert not (state / "terrapod" / "jetendard" / "recovery").exists()
 module.install(home)
@@ -513,27 +523,27 @@ data = json.loads(manifest.read_text())
 data["files"].append("Jetendard-Legacy.ttf")
 manifest.write_text(json.dumps(data) + "\n")
 before = snapshot(home, state)
-real_unlink = module.os.unlink
+real_unlink = module.Path.unlink
 forward_failed = False
 restore_failed = False
-def fail_cleanup(path, *args, **kwargs):
+def fail_cleanup(self, *args, **kwargs):
     global forward_failed
-    if Path(path).name == "Jetendard-Legacy.ttf" and not forward_failed:
+    if self.name == "Jetendard-Legacy.ttf" and not forward_failed:
         forward_failed = True
         raise OSError("injected forward cleanup failure")
-    return real_unlink(path, *args, **kwargs)
+    return real_unlink(self, *args, **kwargs)
 def fail_manifest_restore(source, destination):
     global restore_failed
     if forward_failed and Path(destination) == manifest and not restore_failed:
         restore_failed = True
         raise OSError("injected manifest restore failure")
     return real_replace(source, destination)
-module.os.unlink = fail_cleanup
+module.Path.unlink = fail_cleanup
 module.os.replace = fail_manifest_restore
 try:
     result, stdout, stderr = cli_install(home)
 finally:
-    module.os.unlink = real_unlink
+    module.Path.unlink = real_unlink
     module.os.replace = real_replace
 assert result == 1 and not stdout
 assert stderr.count("\n") == 1
