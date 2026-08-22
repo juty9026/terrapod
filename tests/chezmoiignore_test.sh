@@ -202,6 +202,7 @@ macos_launcher_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTermina
 macos_terminal_launcher_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":true,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":true,"enableMacosAppGroupMonitoring":false,"enableMacosAppGroupDevelopmentApps":false}'
 macos_monitoring_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":false,"enableMacosAppGroupMonitoring":true}'
 macos_development_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":false,"enableMacosAppGroupMonitoring":false,"enableMacosAppGroupDevelopmentApps":true}'
+macos_mobile_dev_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":false,"enableMacosAppGroupAutomation":false,"enableMacosAppGroupLauncher":false,"enableMacosAppGroupMonitoring":false,"enableMacosAppGroupDevelopmentApps":false,"enableMacosAppGroupMobileDev":true}'
 macos_terminal_apps_managed_targets="$(managed_target_paths "$macos_terminal_apps_data")"
 macos_development_apps_managed="$(managed_source_paths "$macos_development_apps_data")"
 macos_ai_cli_tools_data='{"chezmoi":{"os":"darwin"},"enableEditorStack":false,"enableAiCliTools":true,"enableDevelopmentWorkspace":false}'
@@ -264,11 +265,13 @@ automation_apps_brewfile="$(render_template "$macos_automation_apps_data" "Brewf
 launcher_apps_brewfile="$(render_template "$macos_launcher_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 monitoring_apps_brewfile="$(render_template "$macos_monitoring_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 development_apps_brewfile="$(render_template "$macos_development_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
+mobile_dev_brewfile="$(render_template "$macos_mobile_dev_data" "Brewfile.macos-desktop-apps.tmpl")"
 ubuntu_homebrew_bootstrap="$(render_template "$ubuntu_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
 macos_bootstrap="$(render_template "$macos_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
 macos_terminal_apps_bootstrap="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
 macos_terminal_launcher_apps_bootstrap="$(render_template "$macos_terminal_launcher_apps_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
 macos_development_apps_bootstrap="$(render_template "$macos_development_apps_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
+macos_mobile_dev_bootstrap="$(render_template "$macos_mobile_dev_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
 macos_development_workspace_bootstrap="$(render_template "$macos_development_workspace_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
 macos_mise_tools_installer="$(render_template "$macos_data" ".chezmoiscripts/run_after_20-install-mise-tools.sh.tmpl")"
 macos_jetendard_installer="$(render_template "$macos_data" ".chezmoiscripts/run_onchange_after_65-install-jetendard-font.sh.tmpl")"
@@ -474,7 +477,7 @@ write_brew_bundle_stub() {
     '      printf "%s\n" "visible brew bundle output: $*"' \
     '    fi' \
     '    for formula in ${MACOS_BREW_FAIL_FORMULAE:-}; do' \
-    '      if [ -n "$bundle_file" ] && grep -Fx "brew \"$formula\"" "$bundle_file" >/dev/null 2>&1; then' \
+    '      if [ -n "$bundle_file" ] && grep -Eq "^brew \"$formula\"(,[[:space:]]|$)" "$bundle_file" 2>/dev/null; then' \
     '        exit 42' \
     '      fi' \
     '    done' \
@@ -482,7 +485,7 @@ write_brew_bundle_stub() {
     '      exit 42' \
     '    fi' \
     '    for cask in ${MACOS_BREW_FAIL_CASKS:-}; do' \
-    '      if [ -n "$bundle_file" ] && grep -Fx "cask \"$cask\"" "$bundle_file" >/dev/null 2>&1; then' \
+    '      if [ -n "$bundle_file" ] && grep -Eq "^cask \"$cask\"(,[[:space:]]|$)" "$bundle_file" 2>/dev/null; then' \
     '        exit 42' \
     '      fi' \
     '    done' \
@@ -1000,6 +1003,51 @@ assert_text_equals \
   "$expected_development_apps_casks" \
   "development-apps group renders exactly the expected casks"
 
+assert_contains_text "$mobile_dev_brewfile" 'cask "android-studio"' "mobile-dev group renders Android Studio"
+assert_contains_text "$mobile_dev_brewfile" 'brew "mobile-dev-inc/tap/maestro", trusted: true' "mobile-dev group trusts only the fully-qualified Maestro formula, not the entire mobile-dev-inc/tap tap"
+assert_not_contains_text "$mobile_dev_brewfile" 'cask "maestro"' "mobile-dev group does not render the unrelated homebrew-cask maestro"
+assert_not_contains_text "$mobile_dev_brewfile" 'tap "mobile-dev-inc/tap"' "mobile-dev group taps on demand through the fully-qualified token instead of trusting the whole tap"
+assert_not_contains_text "$mobile_dev_brewfile" 'android-platform-tools' "mobile-dev group leaves platform tools to the Android SDK"
+assert_not_contains_text "$mobile_dev_brewfile" 'cask "temurin"' "mobile-dev group resolves Java through the Android Studio bundled runtime instead of a declared JDK"
+assert_not_contains_text "$mobile_dev_brewfile" 'cask "zed"' "mobile-dev group does not render development-apps casks"
+
+mobile_dev_packages="$(
+  printf '%s\n' "$mobile_dev_brewfile" |
+    awk '/^[[:space:]]*(cask|brew)[[:space:]]+"/ { print }'
+)"
+expected_mobile_dev_packages='cask "android-studio"
+brew "mobile-dev-inc/tap/maestro", trusted: true'
+assert_text_equals \
+  "$mobile_dev_packages" \
+  "$expected_mobile_dev_packages" \
+  "mobile-dev group renders exactly the expected packages"
+
+assert_not_contains_text "$macos_brewfile" 'cask "android-studio"' "macOS default does not render Android Studio"
+assert_not_contains_text "$macos_brewfile" 'mobile-dev-inc/tap/maestro' "macOS default does not render Maestro"
+assert_not_contains_text "$development_apps_brewfile" 'cask "android-studio"' "development-apps group does not render Android Studio"
+
+mobile_dev_zshenv="$(render_managed_file "$macos_mobile_dev_data" ".zshenv")"
+macos_default_zshenv="$(render_managed_file "$macos_data" ".zshenv")"
+
+assert_contains_text "$mobile_dev_zshenv" 'export ANDROID_HOME="$HOME/Library/Android/sdk"' "mobile-dev group exports ANDROID_HOME"
+assert_contains_text "$mobile_dev_zshenv" 'export ANDROID_SDK_ROOT="$ANDROID_HOME"' "mobile-dev group exports ANDROID_SDK_ROOT"
+assert_contains_text "$mobile_dev_zshenv" 'export JAVA_HOME="$android_studio_jbr"' "mobile-dev group resolves JAVA_HOME to the Android Studio bundled runtime"
+assert_contains_text "$mobile_dev_zshenv" 'if [[ -d "$android_studio_jbr" ]]; then' "JAVA_HOME is guarded so a failed Android Studio install cannot break java"
+assert_contains_text "$mobile_dev_zshenv" 'if [[ -d "$ANDROID_HOME/platform-tools" ]]; then' "platform-tools joins PATH only when the SDK provides it"
+assert_not_contains_text "$mobile_dev_zshenv" '.maestro/bin' "Maestro resolves through the Homebrew prefix instead of its vendor install directory"
+assert_not_contains_text "$mobile_dev_zshenv" 'mise activate' "the Android environment does not repeat the mise activation the managed zshrc already runs"
+assert_not_contains_text "$macos_default_zshenv" 'ANDROID_HOME' "macOS default does not render the Android environment"
+
+mobile_dev_android_line="$(printf '%s\n' "$mobile_dev_zshenv" | grep -n 'export ANDROID_HOME' | head -1 | cut -d: -f1)"
+mobile_dev_override_line="$(printf '%s\n' "$mobile_dev_zshenv" | grep -n 'zsh/path.d' | head -1 | cut -d: -f1)"
+if [ -z "$mobile_dev_android_line" ] || [ -z "$mobile_dev_override_line" ]; then
+  fail "rendered .zshenv should contain both the Android environment and the machine-local override loop"
+fi
+if [ "$mobile_dev_android_line" -ge "$mobile_dev_override_line" ]; then
+  fail "the Android environment must render before the machine-local override loop so explicit overrides still run last"
+fi
+pass "the Android environment renders before the machine-local override loop"
+
 development_apps_zprofile="$(render_managed_file "$macos_development_apps_data" ".zprofile")"
 macos_default_zprofile="$(render_managed_file "$macos_data" ".zprofile")"
 
@@ -1024,6 +1072,44 @@ printf '%s\n' "$macos_development_apps_bootstrap" | sed \
 sh -n "$development_apps_bootstrap_script" || fail "development-apps bootstrap script should be valid sh"
 pass "development-apps bootstrap script is valid sh"
 
+package_records_probe="$tmp_dir/package-records-probe.sh"
+package_records_brewfile="$tmp_dir/package-records-brewfile"
+cat >"$package_records_brewfile" <<'PROBE_BREWFILE'
+# development-apps macOS App Group
+cask "zed"
+cask "stablyai/orca/orca", trusted: true
+# mobile-dev macOS App Group
+cask "android-studio"
+brew "mobile-dev-inc/tap/maestro", trusted: true
+PROBE_BREWFILE
+
+sed -n '/^desktop_app_package_records()/,/^}/p' \
+  "$repo_root/.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl" \
+  >"$package_records_probe"
+printf '%s\n' 'desktop_app_package_records "$1"' >>"$package_records_probe"
+
+package_records_output="$(sh "$package_records_probe" "$package_records_brewfile")"
+
+expected_package_records="$(printf '%s\n' \
+  'development-apps	zed	cask "zed"' \
+  'development-apps	stablyai/orca/orca	cask "stablyai/orca/orca", trusted: true' \
+  'mobile-dev	android-studio	cask "android-studio"' \
+  'mobile-dev	mobile-dev-inc/tap/maestro	brew "mobile-dev-inc/tap/maestro", trusted: true')"
+
+assert_text_equals \
+  "$package_records_output" \
+  "$expected_package_records" \
+  "desktop app package records carry group, token, and the verbatim declaration for casks and tap formulae"
+
+assert_contains_text \
+  "$macos_development_apps_bootstrap" \
+  'read -r app_group token declaration' \
+  "per-package retry reads the declaration field alongside the group and token"
+assert_contains_text \
+  "$macos_development_apps_bootstrap" \
+  '>"$single_package_brewfile"' \
+  "per-package retry writes the recorded declaration so options such as trusted: true survive"
+
 development_apps_failure_bin="$tmp_dir/development-apps-failure-bin"
 development_apps_failure_state="$tmp_dir/development-apps-failure-state"
 development_apps_failure_home="$tmp_dir/development-apps-failure-home"
@@ -1045,6 +1131,38 @@ pass "Orca desktop app bundle failure records a homebrew-desktop-apps marker"
 development_apps_failure_marker_text="$(cat "$development_apps_failure_marker")"
 assert_contains_text "$development_apps_failure_marker_text" "failed casks: stablyai/orca/orca" "Orca failure attribution preserves its fully-qualified cask source"
 assert_contains_text "$development_apps_failure_marker_text" "App Groups: development-apps" "Orca failure attribution identifies the development-apps group"
+
+mobile_dev_bootstrap_script="$tmp_dir/macos-mobile-dev-bootstrap.sh"
+printf '%s\n' "$macos_mobile_dev_bootstrap" | sed \
+  -e "s#/opt/homebrew/bin/brew#$tmp_dir/mobile-dev-failure-bin/brew#g" \
+  -e "s#/usr/local/bin/brew#$tmp_dir/mobile-dev-failure-bin/brew#g" \
+  >"$mobile_dev_bootstrap_script"
+sh -n "$mobile_dev_bootstrap_script" || fail "mobile-dev bootstrap script should be valid sh"
+pass "mobile-dev bootstrap script is valid sh"
+
+mobile_dev_failure_bin="$tmp_dir/mobile-dev-failure-bin"
+mobile_dev_failure_state="$tmp_dir/mobile-dev-failure-state"
+mobile_dev_failure_home="$tmp_dir/mobile-dev-failure-home"
+mobile_dev_failure_log="$tmp_dir/mobile-dev-failure-brew.log"
+mkdir -p "$mobile_dev_failure_bin" "$mobile_dev_failure_home"
+write_brew_bundle_stub "$mobile_dev_failure_bin/brew"
+
+if ! HOME="$mobile_dev_failure_home" XDG_STATE_HOME="$mobile_dev_failure_state" MACOS_BREW_LOG="$mobile_dev_failure_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_FORMULAE="mobile-dev-inc/tap/maestro" PATH="$mobile_dev_failure_bin:/usr/bin:/bin" \
+  sh "$mobile_dev_bootstrap_script" >"$tmp_dir/mobile-dev-failure.out" 2>"$tmp_dir/mobile-dev-failure.err"; then
+  fail "Maestro desktop app bundle failure does not block bootstrap script"
+fi
+
+mobile_dev_failure_marker="$mobile_dev_failure_state/terrapod/install-warnings/homebrew-desktop-apps"
+if [ ! -f "$mobile_dev_failure_marker" ]; then
+  fail "Maestro formula failure records a homebrew-desktop-apps marker"
+fi
+pass "Maestro formula failure records a homebrew-desktop-apps marker"
+
+mobile_dev_failure_marker_text="$(cat "$mobile_dev_failure_marker")"
+assert_contains_text "$mobile_dev_failure_marker_text" "mobile-dev-inc/tap/maestro" \
+  "a failed tap formula is named in the desktop app warning marker"
+assert_contains_text "$mobile_dev_failure_marker_text" "App Groups: mobile-dev" \
+  "a failed tap formula is attributed to its macOS App Group"
 
 terminal_launcher_bootstrap_script="$tmp_dir/macos-terminal-launcher-bootstrap.sh"
 printf '%s\n' "$macos_terminal_launcher_apps_bootstrap" | sed \

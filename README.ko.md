@@ -157,8 +157,13 @@ macOS desktop application은 machine-local data key로 제어되는 opt-in App G
 - `launcher`: Raycast와 1Password CLI.
 - `monitoring`: iStat Menus.
 - `development-apps`: Zed, Orca ADE(`stablyai/orca/orca`), OrbStack.
+- `mobile-dev`: Android Studio와 Maestro(`mobile-dev-inc/tap/maestro`).
 
 Terrapod은 Orca를 설치할 때 fully-qualified `stablyai/orca/orca` cask만 trust하며, `stablyai/orca` tap 전체를 trust하지 않습니다.
+
+Terrapod은 fully-qualified `mobile-dev-inc/tap/maestro` formula만 trust하며, `mobile-dev-inc/tap` tap 전체를 trust하지 않습니다. homebrew-cask의 `maestro`는 다른 제품이므로 설치하지 않습니다.
+
+Terrapod은 Android SDK component와 Xcode를 설치하지 않습니다. SDK는 Android Studio의 SDK Manager가 소유하고, Xcode는 App Store로 배포됩니다. `JAVA_HOME`은 별도로 선언한 JDK가 아니라 Android Studio가 번들한 runtime을 가리키므로, command line과 IDE가 항상 같은 Java version을 사용합니다.
 
 development-apps group은 OrbStack이 설치되어 있으면 managed `.zprofile`에서 OrbStack shell integration을 source합니다. cask이 없어도 login shell은 정상 동작합니다.
 
@@ -290,6 +295,7 @@ Optional stack profile과 macOS App Group setting은 기본적으로 disabled입
 | `enableMacosAppGroupLauncher` | `false` | launcher macOS App Group인 Raycast와 1Password CLI를 설치합니다. |
 | `enableMacosAppGroupMonitoring` | `false` | monitoring macOS App Group인 iStat Menus를 설치합니다. |
 | `enableMacosAppGroupDevelopmentApps` | `false` | development-apps macOS App Group인 Zed, Orca ADE(`stablyai/orca/orca`), OrbStack을 설치합니다. |
+| `enableMacosAppGroupMobileDev` | `false` | mobile-dev macOS App Group인 Android Studio와 Maestro(`mobile-dev-inc/tap/maestro`)를 설치합니다. `ANDROID_HOME`과 `JAVA_HOME`도 함께 설정합니다. |
 
 `enableDevelopmentWorkspace`가 `true`이면 `enableEditorStack`이나 `enableAiCliTools`가 false로 기록되어 있어도 Optional Editor Stack과 Optional AI Tool Stack이 함께 활성화됩니다.
 

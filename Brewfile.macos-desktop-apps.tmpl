@@ -24,3 +24,8 @@ cask "zed"
 cask "stablyai/orca/orca", trusted: true
 cask "orbstack"
 {{ end -}}
+{{ if default false (get . "enableMacosAppGroupMobileDev") -}}
+# mobile-dev macOS App Group
+cask "android-studio"
+brew "mobile-dev-inc/tap/maestro", trusted: true
+{{ end -}}

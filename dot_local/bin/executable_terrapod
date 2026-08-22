@@ -507,6 +507,9 @@ setup_option_title() {
     "development-apps macOS App Group")
       printf '%s\n' "development-apps"
       ;;
+    "mobile-dev macOS App Group")
+      printf '%s\n' "mobile-dev"
+      ;;
     *)
       return 1
       ;;
@@ -551,6 +554,12 @@ show_setup_option_block() {
     "development-apps macOS App Group")
       printf '%s\n' "  Installs Zed, Orca ADE, and OrbStack."
       printf '%s\n' "  Trusts only the fully-qualified stablyai/orca/orca cask, not the entire stablyai/orca tap."
+      ;;
+    "mobile-dev macOS App Group")
+      printf '%s\n' "  Installs Android Studio and Maestro."
+      printf '%s\n' "  Sets ANDROID_HOME and JAVA_HOME for Android builds."
+      printf '%s\n' "  Trusts only the fully-qualified mobile-dev-inc/tap/maestro formula, not the entire mobile-dev-inc/tap tap."
+      printf '%s\n' "  Android SDK components and Xcode stay outside Terrapod."
       ;;
   esac
   printf '%s\n' ""
@@ -623,12 +632,14 @@ prompt_for_setup_settings() {
     setup_enableMacosAppGroupLauncher="$(prompt_setup_bool "launcher macOS App Group" "$setup_enableMacosAppGroupLauncher")"
     setup_enableMacosAppGroupMonitoring="$(prompt_setup_bool "monitoring macOS App Group" "$setup_enableMacosAppGroupMonitoring")"
     setup_enableMacosAppGroupDevelopmentApps="$(prompt_setup_bool "development-apps macOS App Group" "$setup_enableMacosAppGroupDevelopmentApps")"
+    setup_enableMacosAppGroupMobileDev="$(prompt_setup_bool "mobile-dev macOS App Group" "$setup_enableMacosAppGroupMobileDev")"
   else
     setup_enableMacosAppGroupTerminalApps=false
     setup_enableMacosAppGroupAutomation=false
     setup_enableMacosAppGroupLauncher=false
     setup_enableMacosAppGroupMonitoring=false
     setup_enableMacosAppGroupDevelopmentApps=false
+    setup_enableMacosAppGroupMobileDev=false
     printf '%s\n' "macOS App Groups: not applicable for $(profile_context_label)" >&2
   fi
 
@@ -645,7 +656,8 @@ managed_setup_keys() {
     enableMacosAppGroupAutomation \
     enableMacosAppGroupLauncher \
     enableMacosAppGroupMonitoring \
-    enableMacosAppGroupDevelopmentApps
+    enableMacosAppGroupDevelopmentApps \
+    enableMacosAppGroupMobileDev
 }
 
 config_data_value() {
@@ -1097,6 +1109,11 @@ print_macos_app_group_status() {
   else
     print_indented_colon_state_line "development-apps" "disabled"
   fi
+  if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupMobileDev)"; then
+    print_indented_colon_state_line "mobile-dev" "enabled" "(Android Studio and Maestro)"
+  else
+    print_indented_colon_state_line "mobile-dev" "disabled"
+  fi
 }
 
 print_key_tool_status() {
@@ -1330,11 +1347,13 @@ show_stack_context() {
   launcher_state="$(config_bool_state_label "$config_file" enableMacosAppGroupLauncher)"
   monitoring_state="$(config_bool_state_label "$config_file" enableMacosAppGroupMonitoring)"
   development_apps_state="$(config_bool_state_label "$config_file" enableMacosAppGroupDevelopmentApps)"
+  mobile_dev_state="$(config_bool_state_label "$config_file" enableMacosAppGroupMobileDev)"
   print_named_state_line "terminal-apps" "$terminal_apps_state"
   print_named_state_line "automation" "$automation_state"
   print_named_state_line "launcher" "$launcher_state"
   print_named_state_line "monitoring" "$monitoring_state"
   print_named_state_line "development-apps" "$development_apps_state"
+  print_named_state_line "mobile-dev" "$mobile_dev_state"
 }
 
 render_chezmoi_command() {
@@ -1797,6 +1816,7 @@ enableMacosAppGroupAutomation = $6
 enableMacosAppGroupLauncher = $7
 enableMacosAppGroupMonitoring = $8
 enableMacosAppGroupDevelopmentApps = $9
+enableMacosAppGroupMobileDev = ${10}
 EOF
 }
 
@@ -1806,13 +1826,13 @@ render_preset_data() {
 
   case "$preset" in
     minimal)
-      render_settings_data "$profile" false false false false false false false false
+      render_settings_data "$profile" false false false false false false false false false
       ;;
     development)
-      render_settings_data "$profile" true true true false false false false false
+      render_settings_data "$profile" true true true false false false false false false
       ;;
     workstation)
-      render_settings_data "$profile" true true true true true true true true
+      render_settings_data "$profile" true true true true true true true true true
       ;;
     *)
       return 1
@@ -1833,6 +1853,7 @@ load_setup_defaults() {
       setup_enableMacosAppGroupLauncher=false
       setup_enableMacosAppGroupMonitoring=false
       setup_enableMacosAppGroupDevelopmentApps=false
+      setup_enableMacosAppGroupMobileDev=false
       ;;
     development)
       setup_enableEditorStack=true
@@ -1843,6 +1864,7 @@ load_setup_defaults() {
       setup_enableMacosAppGroupLauncher=false
       setup_enableMacosAppGroupMonitoring=false
       setup_enableMacosAppGroupDevelopmentApps=false
+      setup_enableMacosAppGroupMobileDev=false
       ;;
     workstation)
       setup_enableEditorStack=true
@@ -1853,6 +1875,7 @@ load_setup_defaults() {
       setup_enableMacosAppGroupLauncher=true
       setup_enableMacosAppGroupMonitoring=true
       setup_enableMacosAppGroupDevelopmentApps=true
+      setup_enableMacosAppGroupMobileDev=true
       ;;
     *)
       return 1
@@ -1872,7 +1895,8 @@ render_setup_data() {
     "$setup_enableMacosAppGroupAutomation" \
     "$setup_enableMacosAppGroupLauncher" \
     "$setup_enableMacosAppGroupMonitoring" \
-    "$setup_enableMacosAppGroupDevelopmentApps"
+    "$setup_enableMacosAppGroupDevelopmentApps" \
+    "$setup_enableMacosAppGroupMobileDev"
 }
 
 validate_preset() {
@@ -2235,6 +2259,7 @@ write_managed_settings() {
           name == "enableMacosAppGroupLauncher" ||
           name == "enableMacosAppGroupMonitoring" ||
           name == "enableMacosAppGroupDevelopmentApps" ||
+          name == "enableMacosAppGroupMobileDev" ||
           name == "enableMacosAppGroupAiApps" ||
           name == "enableMacosDesktopApps" ||
           name == "terrapodPreset"

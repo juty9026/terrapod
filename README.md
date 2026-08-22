@@ -165,8 +165,13 @@ installs that rendered bundle:
 - `launcher`: Raycast and 1Password CLI.
 - `monitoring`: iStat Menus.
 - `development-apps`: Zed, Orca ADE (`stablyai/orca/orca`), and OrbStack.
+- `mobile-dev`: Android Studio and Maestro (`mobile-dev-inc/tap/maestro`).
 
 When installing Orca, Terrapod trusts only the fully-qualified `stablyai/orca/orca` cask, not the entire `stablyai/orca` tap.
+
+Terrapod trusts only the fully-qualified `mobile-dev-inc/tap/maestro` formula, not the entire `mobile-dev-inc/tap` tap. The unrelated homebrew-cask `maestro` is a different product and is never installed.
+
+Terrapod does not install Android SDK components or Xcode. Android Studio's SDK Manager owns the SDK, and Xcode is distributed through the App Store. `JAVA_HOME` resolves to the runtime bundled with Android Studio rather than a separately declared JDK, so the command line and the IDE always agree on a Java version.
 
 The development-apps group also sources the OrbStack shell integration from the managed `.zprofile` when OrbStack is installed. Login shells stay usable when the cask is missing.
 
@@ -311,6 +316,7 @@ Optional stack profiles and macOS App Group settings are disabled by default.
 | `enableMacosAppGroupLauncher` | `false` | Installs the launcher macOS App Group: Raycast and 1Password CLI. |
 | `enableMacosAppGroupMonitoring` | `false` | Installs the monitoring macOS App Group: iStat Menus. |
 | `enableMacosAppGroupDevelopmentApps` | `false` | Installs the development-apps macOS App Group: Zed, Orca ADE (`stablyai/orca/orca`), and OrbStack. |
+| `enableMacosAppGroupMobileDev` | `false` | Installs the mobile-dev macOS App Group: Android Studio and Maestro (`mobile-dev-inc/tap/maestro`). It also sets `ANDROID_HOME` and `JAVA_HOME`. |
 
 When `enableDevelopmentWorkspace` is `true`, it enables both the Optional Editor Stack and Optional AI Tool Stack
 even when `enableEditorStack` or `enableAiCliTools` are recorded as false.

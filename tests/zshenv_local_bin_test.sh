@@ -180,3 +180,25 @@ assert_linuxbrew_shellenv_rendering \
   '{"chezmoi":{"os":"darwin"},"enableAiCliTools":true,"enableDevelopmentWorkspace":false}' \
   absent \
   "macOS keeps Linuxbrew shell setup out of zshenv"
+
+render_zshenv '{"chezmoi":{"os":"darwin"},"enableMacosAppGroupMobileDev":true}'
+rendered_macos_mobiledev_zshenv="$(cat "$tmp_dir/home/.zshenv")"
+
+assert_contains "$rendered_macos_mobiledev_zshenv" 'path=("$HOME/.local/bin" $path)' \
+  "mobile-dev App Group does not remove the \$HOME/.local/bin guard"
+assert_order "$rendered_macos_mobiledev_zshenv" 'path=("$HOME/.local/bin" $path)' '/opt/homebrew/bin/brew shellenv' \
+  "mobile-dev App Group does not displace \$HOME/.local/bin ahead of the Homebrew shellenv block"
+assert_order "$rendered_macos_mobiledev_zshenv" '/opt/homebrew/bin/brew shellenv' 'for path_snippet in "$HOME"/.config/zsh/path.d/*.zsh(N); do' \
+  "mobile-dev App Group does not displace the Homebrew shellenv block ahead of machine-local overrides"
+
+assert_contains "$rendered_macos_mobiledev_zshenv" 'export ANDROID_HOME="$HOME/Library/Android/sdk"' \
+  "mobile-dev App Group renders the Android SDK environment block"
+assert_order "$rendered_macos_mobiledev_zshenv" '/opt/homebrew/bin/brew shellenv' 'export ANDROID_HOME="$HOME/Library/Android/sdk"' \
+  "mobile-dev App Group's Android block renders after the Homebrew shellenv block so brew's prefix is already on PATH"
+assert_order "$rendered_macos_mobiledev_zshenv" 'android_studio_jbr="/Applications/Android Studio.app/Contents/jbr/Contents/Home"' 'for path_snippet in "$HOME"/.config/zsh/path.d/*.zsh(N); do' \
+  "mobile-dev App Group's Android block renders before the machine-local path.d override loop"
+
+if printf '%s\n' "$rendered_macos_zshenv" | grep -F 'export ANDROID_HOME="$HOME/Library/Android/sdk"' >/dev/null; then
+  fail "macOS zshenv omits the Android SDK block when the mobile-dev App Group is disabled"
+fi
+pass "macOS zshenv omits the Android SDK block when the mobile-dev App Group is disabled"
