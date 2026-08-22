@@ -3237,6 +3237,10 @@ HOME="$tmp_dir/apply-marker-home" XDG_STATE_HOME="$apply_marker_state" sh -c \
   '. "$1"; terrapod_install_warning_write mise-tools "mise tool install needs attention" "Run tpod apply after fixing mise tool installation output."' \
   sh "$install_warnings_lib"
 
+apply_marker_dir="$apply_marker_state/terrapod/install-warnings"
+printf '%s\n' "category='managed-package-migration'" >"$apply_marker_dir/managed-package-migration"
+printf '%s\n' "category='optional-ai-cli-tools'" >"$apply_marker_dir/ai-cli-tools"
+
 if ! HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" XDG_STATE_HOME="$apply_marker_state" PATH="$tmp_dir/bin:/usr/bin:/bin" \
   sh "$terrapod" apply >"$tmp_dir/apply.out" 2>"$tmp_dir/apply.err"; then
   printf '%s\n' "apply stdout:" >&2
@@ -3247,6 +3251,26 @@ if ! HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" XDG_STATE_HOME="$apply_marker
 fi
 
 apply_output="$(cat "$tmp_dir/apply.out")"
+
+assert_line \
+  "$apply_output" \
+  "Removed retired install warning marker: managed-package-migration" \
+  "Terrapod apply reports each retired install warning marker it removed"
+
+if [ -e "$apply_marker_dir/managed-package-migration" ]; then
+  fail "Terrapod apply removes retired install warning marker files"
+fi
+pass "Terrapod apply removes retired install warning marker files"
+
+if [ ! -f "$apply_marker_dir/mise-tools" ]; then
+  fail "Terrapod apply keeps current install warning marker files"
+fi
+pass "Terrapod apply keeps current install warning marker files"
+
+if [ ! -f "$apply_marker_dir/ai-cli-tools" ]; then
+  fail "Terrapod apply keeps legacy alias install warning marker files"
+fi
+pass "Terrapod apply keeps legacy alias install warning marker files"
 
 assert_call_args \
   "$CHEZMOI_APPLY_ARGS_FILE" \
@@ -3565,6 +3589,9 @@ write_stub "$tmp_dir/bin/chezmoi" \
   'exit 92'
 
 apply_failure_marker_state="$tmp_dir/apply-failure-marker-state"
+apply_failure_marker_dir="$apply_failure_marker_state/terrapod/install-warnings"
+mkdir -p "$apply_failure_marker_dir"
+printf '%s\n' "category='managed-package-migration'" >"$apply_failure_marker_dir/managed-package-migration"
 
 if HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" XDG_STATE_HOME="$apply_failure_marker_state" TERRAPOD_APPLY_FAILURE_MARKER_LIB="$install_warnings_lib" PATH="$tmp_dir/bin:/usr/bin:/bin" \
   sh "$terrapod" apply >"$tmp_dir/apply-failure.out" 2>"$tmp_dir/apply-failure.err"; then
@@ -3573,6 +3600,16 @@ fi
 
 apply_failure_output="$(cat "$tmp_dir/apply-failure.out")"
 apply_failure_error="$(cat "$tmp_dir/apply-failure.err")"
+
+if [ -e "$apply_failure_marker_dir/managed-package-migration" ]; then
+  fail "Terrapod apply prunes retired install warning markers even when delegated chezmoi apply fails"
+fi
+pass "Terrapod apply prunes retired install warning markers even when delegated chezmoi apply fails"
+
+assert_line \
+  "$apply_failure_output" \
+  "Removed retired install warning marker: managed-package-migration" \
+  "Terrapod apply reports pruned markers before delegating to chezmoi apply"
 
 assert_contains \
   "$apply_failure_error" \

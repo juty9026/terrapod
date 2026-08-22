@@ -1495,6 +1495,25 @@ show_apply_context() {
   printf '%s\n' "Delegating declared-state apply to: $(render_chezmoi_command apply)"
 }
 
+prune_retired_install_warnings() {
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
+    return
+  fi
+
+  prune_status=0
+  removed_markers="$(terrapod_install_warning_prune)" || prune_status=1
+
+  if [ -n "$removed_markers" ]; then
+    printf '%s\n' "$removed_markers" | while IFS= read -r removed_marker; do
+      printf 'Removed retired install warning marker: %s\n' "$removed_marker"
+    done
+  fi
+
+  if [ "$prune_status" -ne 0 ]; then
+    print_warning_line "could not remove some retired install warning markers"
+  fi
+}
+
 run_apply() {
   if [ "$#" -ne 0 ]; then
     fail_usage "apply accepts no arguments"
@@ -1503,6 +1522,7 @@ run_apply() {
   config_file="$(chezmoi_config_file)"
   show_apply_context "$config_file"
   run_apply_preflight "$config_file"
+  prune_retired_install_warnings
 
   if ! run_chezmoi_command apply; then
     print_remaining_install_warnings
