@@ -63,10 +63,17 @@ alias du="dust"
 alias vim="nvim"
 alias vi="nvim"
 alias lg="lazygit"
-alias c="clear"
 alias ..="cd .."
 alias ...="cd ../.."
 alias zj="zellij"
+
+function c() {
+  clear
+  if command -v fastfetch &>/dev/null; then
+    fastfetch
+  fi
+}
+
 function zja() {
   local session="${1:-${PWD:t}}"
   zellij attach "$session"
