@@ -1,0 +1,112 @@
+#!/usr/bin/env zsh
+
+set -u
+
+repo_root="${0:A:h:h}"
+tmp_dir="$(mktemp -d)"
+
+cleanup() {
+  rm -rf "$tmp_dir"
+}
+trap cleanup EXIT INT TERM
+
+fail() {
+  print -u2 -- "not ok - $1"
+  exit 1
+}
+
+pass() {
+  print -- "ok - $1"
+}
+
+assert_log_contains() {
+  local expected="$1"
+  local message="$2"
+
+  if ! command grep -F "$expected" "$CLEAR_TEST_LOG" >/dev/null 2>&1; then
+    fail "$message; expected log to contain '$expected'"
+  fi
+
+  pass "$message"
+}
+
+render_zshrc() {
+  local data="$1"
+
+  "$chezmoi_bin" \
+    --config "$tmp_dir/chezmoi.toml" \
+    --destination "$tmp_dir/home" \
+    --source "$repo_root" \
+    --override-data "$data" \
+    cat "$tmp_dir/home/.zshrc" \
+    >"$tmp_dir/home/.zshrc"
+}
+
+mkdir -p "$tmp_dir/bin" "$tmp_dir/clear-only-bin" "$tmp_dir/home"
+
+cat >"$tmp_dir/bin/clear" <<'STUB'
+#!/bin/sh
+printf '%s\n' "clear" >>"$CLEAR_TEST_LOG"
+STUB
+
+cat >"$tmp_dir/bin/fastfetch" <<'STUB'
+#!/bin/sh
+printf '%s\n' "fastfetch" >>"$CLEAR_TEST_LOG"
+STUB
+
+cp "$tmp_dir/bin/clear" "$tmp_dir/clear-only-bin/clear"
+
+chmod +x "$tmp_dir/bin/clear" "$tmp_dir/bin/fastfetch" "$tmp_dir/clear-only-bin/clear"
+
+chezmoi_bin="$(command -v chezmoi)" || fail "chezmoi is required to render templates"
+
+export HOME="$tmp_dir/home"
+export PATH="$tmp_dir/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export CLAUDECODE=1
+export CLEAR_TEST_LOG="$tmp_dir/clear.log"
+
+: >"$tmp_dir/chezmoi.toml"
+: >"$CLEAR_TEST_LOG"
+render_zshrc '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}}}'
+
+source "$tmp_dir/home/.zshrc"
+
+if alias c >/dev/null 2>&1; then
+  fail "c should no longer be a plain clear alias"
+fi
+
+pass "c is not a plain clear alias"
+
+if [[ "$(whence -w c)" != "c: function" ]]; then
+  fail "shell should expose the clear helper as a function"
+fi
+
+pass "shell exposes the clear helper as a function"
+
+: >"$CLEAR_TEST_LOG"
+c
+assert_log_contains "clear" "c clears the screen"
+assert_log_contains "fastfetch" "c prints system information after clearing"
+
+if [[ "$(command cat "$CLEAR_TEST_LOG")" != $'clear\nfastfetch' ]]; then
+  fail "c should clear the screen before printing system information"
+fi
+
+pass "c clears the screen before printing system information"
+
+old_path="$PATH"
+PATH="$tmp_dir/clear-only-bin:/usr/bin:/bin:/usr/sbin:/sbin"
+: >"$CLEAR_TEST_LOG"
+if ! c >"$tmp_dir/c-missing-fastfetch.out" 2>&1; then
+  PATH="$old_path"
+  fail "c should succeed when fastfetch is unavailable"
+fi
+PATH="$old_path"
+
+assert_log_contains "clear" "c still clears the screen without fastfetch"
+
+if command grep -F "fastfetch" "$CLEAR_TEST_LOG" >/dev/null 2>&1; then
+  fail "c should not run fastfetch when it is unavailable"
+fi
+
+pass "c skips system information when fastfetch is unavailable"
