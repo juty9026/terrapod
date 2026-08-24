@@ -42,7 +42,15 @@ render_zshrc() {
     >"$tmp_dir/home/.zshrc"
 }
 
-mkdir -p "$tmp_dir/bin" "$tmp_dir/clear-only-bin" "$tmp_dir/home"
+mkdir -p "$tmp_dir/bin" "$tmp_dir/clear-only-bin" "$tmp_dir/home" "$tmp_dir/home/.scm_breeze"
+
+cat >"$tmp_dir/home/.scm_breeze/scm_breeze.sh" <<'STUB'
+function git_index() {
+  print "git_index" >>"$CLEAR_TEST_LOG"
+}
+
+alias c=git_index
+STUB
 
 cat >"$tmp_dir/bin/clear" <<'STUB'
 #!/bin/sh
@@ -62,8 +70,9 @@ chezmoi_bin="$(command -v chezmoi)" || fail "chezmoi is required to render templ
 
 export HOME="$tmp_dir/home"
 export PATH="$tmp_dir/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-export CLAUDECODE=1
 export CLEAR_TEST_LOG="$tmp_dir/clear.log"
+# Empty rather than unset: .zshrc reads $CLAUDECODE and this test runs under set -u.
+export CLAUDECODE=""
 
 : >"$tmp_dir/chezmoi.toml"
 : >"$CLEAR_TEST_LOG"
@@ -110,3 +119,23 @@ if command grep -F "fastfetch" "$CLEAR_TEST_LOG" >/dev/null 2>&1; then
 fi
 
 pass "c skips system information when fastfetch is unavailable"
+
+if alias c >/dev/null 2>&1; then
+  fail "the SCM Breeze repo index alias should not shadow the clear helper"
+fi
+
+pass "the SCM Breeze repo index alias does not shadow the clear helper"
+
+: >"$CLEAR_TEST_LOG"
+c
+if command grep -F "git_index" "$CLEAR_TEST_LOG" >/dev/null 2>&1; then
+  fail "c should not fall through to the SCM Breeze repo index"
+fi
+
+pass "c does not fall through to the SCM Breeze repo index"
+
+if ! whence -w git_index >/dev/null 2>&1; then
+  fail "SCM Breeze should keep its repo index under its full command name"
+fi
+
+pass "SCM Breeze keeps its repo index under its full command name"
