@@ -259,6 +259,22 @@ done
 
 pass "Ubuntu VPS ignores macOS-only entries"
 
+linux_only_entries="
+dot_local/lib/terrapod/ubuntu-bootstrap.sh
+"
+
+for entry in $linux_only_entries; do
+  if printf '%s\n' "$macos_managed" | grep -Fx "$entry" >/dev/null; then
+    fail "macOS should not manage VPS-only entry: $entry"
+  fi
+
+  if ! printf '%s\n' "$ubuntu_managed" | grep -Fx "$entry" >/dev/null; then
+    fail "Ubuntu VPS should manage VPS-only entry: $entry"
+  fi
+done
+
+pass "macOS ignores VPS-only entries"
+
 macos_brewfile="$(render_template "$macos_data" "Brewfile.macos-desktop-apps.tmpl")"
 terminal_apps_brewfile="$(render_template "$macos_terminal_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 automation_apps_brewfile="$(render_template "$macos_automation_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
@@ -594,8 +610,11 @@ run_linux_homebrew_space_case() {
     PATH="$case_bin:/usr/bin:/bin" \
     sh "$case_script" >"$case_dir/stdout" 2>"$case_dir/stderr" || case_status=$?
 
-  if [ "$case_status" -eq 0 ]; then
-    fail "Ubuntu Homebrew $case_name space case reaches the intentionally failing installer download"
+  if [ "$case_status" -ne 0 ]; then
+    fail "Ubuntu Homebrew $case_name space case continues apply after the intentionally failing installer download"
+  fi
+  if [ ! -f "$case_state/terrapod/install-warnings/homebrew-core" ]; then
+    fail "Ubuntu Homebrew $case_name space case records a homebrew-core warning for the failed installer download"
   fi
   if ! grep -F 'raw.githubusercontent.com/Homebrew/install' "$case_log" >/dev/null; then
     fail "Ubuntu Homebrew $case_name space check continues to the installer download"
@@ -676,10 +695,11 @@ write_stub "$homebrew_installer_failure_bin/curl" \
   '  printf "%s\n" "echo simulated Homebrew installer failure >&2" "exit 42"' \
   'fi'
 
-if HOME="$homebrew_installer_failure_home" XDG_STATE_HOME="$homebrew_installer_failure_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_installer_failure_log" PATH="$homebrew_installer_failure_bin:/usr/bin:/bin" \
+if ! HOME="$homebrew_installer_failure_home" XDG_STATE_HOME="$homebrew_installer_failure_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_installer_failure_log" PATH="$homebrew_installer_failure_bin:/usr/bin:/bin" \
   sh "$homebrew_installer_failure_script" >"$tmp_dir/homebrew-installer-failure.out" 2>"$tmp_dir/homebrew-installer-failure.err"; then
-  fail "macOS bootstrap fails when the Homebrew installer command fails"
+  fail "macOS bootstrap should continue routine apply when the Homebrew installer command fails"
 fi
+pass "macOS bootstrap continues routine apply when the Homebrew installer command fails"
 
 homebrew_installer_failure_marker="$homebrew_installer_failure_state/terrapod/install-warnings/homebrew-core"
 if [ ! -f "$homebrew_installer_failure_marker" ]; then
@@ -696,11 +716,11 @@ homebrew_first_run_failure_home="$tmp_dir/homebrew-first-run-failure-home"
 homebrew_first_run_failure_log="$tmp_dir/homebrew-first-run-failure.log"
 mkdir -p "$homebrew_first_run_failure_home"
 
-if HOME="$homebrew_first_run_failure_home" XDG_STATE_HOME="$homebrew_first_run_failure_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_first_run_failure_log" PATH="$homebrew_installer_failure_bin:/usr/bin:/bin" \
+if ! HOME="$homebrew_first_run_failure_home" XDG_STATE_HOME="$homebrew_first_run_failure_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_first_run_failure_log" PATH="$homebrew_installer_failure_bin:/usr/bin:/bin" \
   TERRAPOD_FIRST_RUN_APPLY=1 sh "$homebrew_installer_failure_script" >"$tmp_dir/homebrew-first-run-failure.out" 2>"$tmp_dir/homebrew-first-run-failure.err"; then
-  fail "first-run macOS bootstrap hard-fails when the Homebrew installer command fails"
+  fail "first-run macOS bootstrap should continue when the Homebrew installer command fails"
 fi
-pass "first-run macOS bootstrap hard-fails when the Homebrew installer command fails"
+pass "first-run macOS bootstrap continues when the Homebrew installer command fails"
 
 homebrew_first_run_failure_marker="$homebrew_first_run_failure_state/terrapod/install-warnings/homebrew-core"
 if [ ! -f "$homebrew_first_run_failure_marker" ]; then
@@ -717,14 +737,14 @@ write_stub "$homebrew_first_run_download_bin/curl" \
   'printf "%s\n" "curl args:$*" >>"$HOMEBREW_INSTALLER_FAILURE_LOG"' \
   'exit 42'
 
-if HOME="$homebrew_first_run_download_home" XDG_STATE_HOME="$homebrew_first_run_download_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_first_run_download_log" PATH="$homebrew_first_run_download_bin:/usr/bin:/bin" \
+if ! HOME="$homebrew_first_run_download_home" XDG_STATE_HOME="$homebrew_first_run_download_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_first_run_download_log" PATH="$homebrew_first_run_download_bin:/usr/bin:/bin" \
   TERRAPOD_FIRST_RUN_APPLY=1 sh "$homebrew_installer_failure_script" >"$tmp_dir/homebrew-first-run-download.out" 2>"$tmp_dir/homebrew-first-run-download.err"; then
-  fail "first-run macOS bootstrap hard-fails when the Homebrew installer download fails"
+  fail "first-run macOS bootstrap should continue when the Homebrew installer download fails"
 fi
 if [ ! -f "$homebrew_first_run_download_state/terrapod/install-warnings/homebrew-core" ]; then
   fail "first-run macOS bootstrap records homebrew-core marker when the Homebrew installer download fails"
 fi
-pass "first-run macOS bootstrap hard-fails and records a marker when the Homebrew installer download fails"
+pass "first-run macOS bootstrap continues and records a marker when the Homebrew installer download fails"
 
 homebrew_first_run_not_found_bin="$tmp_dir/homebrew-first-run-not-found-bin"
 homebrew_first_run_not_found_state="$tmp_dir/homebrew-first-run-not-found-state"
@@ -740,14 +760,25 @@ write_stub "$homebrew_first_run_not_found_bin/curl" \
   'done' \
   'printf "%s\n" "exit 0" >"$output_file"'
 
-if HOME="$homebrew_first_run_not_found_home" XDG_STATE_HOME="$homebrew_first_run_not_found_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_first_run_not_found_log" PATH="$homebrew_first_run_not_found_bin:/usr/bin:/bin" \
+if ! HOME="$homebrew_first_run_not_found_home" XDG_STATE_HOME="$homebrew_first_run_not_found_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_first_run_not_found_log" PATH="$homebrew_first_run_not_found_bin:/usr/bin:/bin" \
   TERRAPOD_FIRST_RUN_APPLY=1 sh "$homebrew_installer_failure_script" >"$tmp_dir/homebrew-first-run-not-found.out" 2>"$tmp_dir/homebrew-first-run-not-found.err"; then
-  fail "first-run macOS bootstrap hard-fails when brew is not found after installation"
+  fail "first-run macOS bootstrap should continue when brew is not found after installation"
 fi
 if [ ! -f "$homebrew_first_run_not_found_state/terrapod/install-warnings/homebrew-core" ]; then
   fail "first-run macOS bootstrap records homebrew-core marker when brew is not found after installation"
 fi
-pass "first-run macOS bootstrap hard-fails and records a marker when brew is not found after installation"
+pass "first-run macOS bootstrap continues and records a marker when brew is not found after installation"
+
+homebrew_marker_write_failure_home="$tmp_dir/homebrew-marker-write-failure-home"
+homebrew_marker_write_failure_parent="$tmp_dir/homebrew-marker-write-failure-parent"
+homebrew_marker_write_failure_log="$tmp_dir/homebrew-marker-write-failure.log"
+mkdir -p "$homebrew_marker_write_failure_home"
+: >"$homebrew_marker_write_failure_parent"
+if HOME="$homebrew_marker_write_failure_home" XDG_STATE_HOME="$homebrew_marker_write_failure_parent/state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_marker_write_failure_log" PATH="$homebrew_installer_failure_bin:/usr/bin:/bin" \
+  sh "$homebrew_installer_failure_script" >"$tmp_dir/homebrew-marker-write-failure.out" 2>"$tmp_dir/homebrew-marker-write-failure.err"; then
+  fail "macOS bootstrap should fail when the homebrew-core marker cannot be written"
+fi
+pass "macOS bootstrap fails when the homebrew-core marker cannot be written"
 
 core_success_bin="$tmp_dir/core-success-bin"
 core_success_state="$tmp_dir/core-success-state"
@@ -1939,13 +1970,16 @@ HOME="$macos_ai_brew_home" XDG_STATE_HOME="$macos_ai_brew_state" \
   AI_UNAME_ARCH=arm64 AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$macos_ai_brew_log" \
   AI_BREW_FAIL=0 AI_BREW_SHELLENV_FAIL=1 PATH="$macos_ai_brew_bin:/usr/bin:/bin" \
   sh "$macos_ai_cli_tools_installer_script" >/dev/null 2>&1 || ai_cli_shellenv_failure_status=$?
-if [ "$ai_cli_shellenv_failure_status" -eq 0 ]; then
-  fail "Optional AI Tool Stack propagates a failing Homebrew shellenv"
+if [ "$ai_cli_shellenv_failure_status" -ne 0 ]; then
+  fail "Optional AI Tool Stack should continue apply when Homebrew shellenv fails"
+fi
+if [ ! -f "$macos_ai_brew_state/terrapod/install-warnings/optional-ai-cli-tools" ]; then
+  fail "Optional AI Tool Stack records an optional-ai-cli-tools warning when Homebrew shellenv fails"
 fi
 if grep -F "brew args:bundle" "$macos_ai_brew_log" >/dev/null; then
   fail "Optional AI Tool Stack stops before bundle when Homebrew shellenv fails"
 fi
-pass "Optional AI Tool Stack propagates a failing Homebrew shellenv before bundle"
+pass "Optional AI Tool Stack records a warning and stops before bundle when Homebrew shellenv fails"
 
 for vendor_url in \
   "https://antigravity.google/cli/install.sh" \
@@ -1992,14 +2026,14 @@ HOME="$ai_cli_failure_home" XDG_STATE_HOME="$ai_cli_failure_state" \
   AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$ai_cli_failure_log" AI_BREW_FAIL=1 \
   PATH="$macos_ai_brew_bin:/usr/bin:/bin" sh "$macos_ai_cli_tools_installer_script" >/dev/null 2>&1 ||
   ai_cli_failure_status=$?
-if [ "$ai_cli_failure_status" -eq 0 ]; then
-  fail "routine Optional AI Tool Stack bundle failure exits non-zero after recording a warning"
+if [ "$ai_cli_failure_status" -ne 0 ]; then
+  fail "routine Optional AI Tool Stack bundle failure should continue apply after recording a warning"
 fi
 ai_cli_failure_marker="$ai_cli_failure_state/terrapod/install-warnings/optional-ai-cli-tools"
 if [ ! -f "$ai_cli_failure_marker" ]; then
   fail "Optional AI Tool Stack bundle failure records optional-ai-cli-tools marker"
 fi
-pass "routine Optional AI Tool Stack bundle failure records a warning and exits non-zero"
+pass "routine Optional AI Tool Stack bundle failure records a warning and exits zero"
 
 HOME="$ai_cli_failure_home" XDG_STATE_HOME="$ai_cli_failure_state" \
   AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$ai_cli_failure_log" AI_BREW_FAIL=1 \
@@ -2007,6 +2041,21 @@ HOME="$ai_cli_failure_home" XDG_STATE_HOME="$ai_cli_failure_state" \
   sh "$macos_ai_cli_tools_installer_script" >/dev/null 2>&1 ||
   fail "first-run Optional AI Tool Stack bundle failure remains recoverable"
 pass "first-run Optional AI Tool Stack bundle failure records a warning and exits zero"
+
+ai_cli_marker_write_failure_home="$tmp_dir/ai-cli-marker-write-failure-home"
+ai_cli_marker_write_failure_parent="$tmp_dir/ai-cli-marker-write-failure-parent"
+ai_cli_marker_write_failure_log="$tmp_dir/ai-cli-marker-write-failure.log"
+mkdir -p "$ai_cli_marker_write_failure_home"
+: >"$ai_cli_marker_write_failure_parent"
+ai_cli_marker_write_failure_status=0
+HOME="$ai_cli_marker_write_failure_home" XDG_STATE_HOME="$ai_cli_marker_write_failure_parent/state" \
+  AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$ai_cli_marker_write_failure_log" AI_BREW_FAIL=1 \
+  PATH="$macos_ai_brew_bin:/usr/bin:/bin" sh "$macos_ai_cli_tools_installer_script" >/dev/null 2>&1 ||
+  ai_cli_marker_write_failure_status=$?
+if [ "$ai_cli_marker_write_failure_status" -eq 0 ]; then
+  fail "Optional AI Tool Stack should fail when the optional-ai-cli-tools marker cannot be written"
+fi
+pass "Optional AI Tool Stack fails when the optional-ai-cli-tools marker cannot be written"
 
 HOME="$ai_cli_failure_home" XDG_STATE_HOME="$ai_cli_failure_state" \
   AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$ai_cli_failure_log" AI_BREW_FAIL=0 \

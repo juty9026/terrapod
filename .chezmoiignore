@@ -26,6 +26,11 @@ tests/**
 .config/zellij/layouts/**
 {{ end }}
 
+{{ if ne .chezmoi.os "linux" }}
+# VPS Shell Profile entries are not part of the macOS Terminal Profile.
+.local/lib/terrapod/ubuntu-bootstrap.sh
+{{ end }}
+
 {{ if ne .chezmoi.os "darwin" }}
 # macOS Terminal Profile entries are not part of the VPS Shell Profile.
 .chezmoiscripts/13-retry-homebrew-desktop-apps.sh
