@@ -14,18 +14,26 @@ case "$mode" in
     ;;
 esac
 
+case "$0" in
+  */*) script_path="$0" ;;
+  *) script_path="$(command -v -- "$0" 2>/dev/null || printf '%s\n' "$0")" ;;
+esac
+script_dir="${script_path%/*}"
+script_dir="$(CDPATH= cd -- "$script_dir" 2>/dev/null && pwd || printf '%s\n' ".")"
+homebrew_prefix_lib="${TERRAPOD_HOMEBREW_PREFIX_LIB:-$script_dir/homebrew-prefix.sh}"
+if [ ! -f "$homebrew_prefix_lib" ]; then
+  printf '%s\n' "  failure - Homebrew prefix library is unavailable: $homebrew_prefix_lib" >&2
+  exit 1
+fi
+. "$homebrew_prefix_lib"
+
 standard_homebrew_prefix() {
   if [ -n "${TERRAPOD_STANDARD_HOMEBREW_PREFIX:-}" ]; then
     printf '%s\n' "$TERRAPOD_STANDARD_HOMEBREW_PREFIX"
     return
   fi
 
-  case "$profile:$(uname -m 2>/dev/null || true)" in
-    macos-terminal:arm64|macos-terminal:aarch64) printf '%s\n' /opt/homebrew ;;
-    macos-terminal:x86_64) printf '%s\n' /usr/local ;;
-    vps-shell:x86_64|vps-shell:aarch64) printf '%s\n' /home/linuxbrew/.linuxbrew ;;
-    *) return 1 ;;
-  esac
+  terrapod_standard_homebrew_prefix_for_profile "$profile"
 }
 
 core_records() {
