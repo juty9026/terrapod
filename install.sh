@@ -188,13 +188,21 @@ source_dir_exists() {
   [ -e "$1" ] || [ -L "$1" ]
 }
 
+# Checkouts made before the dot_zprofile -> dot_zprofile.tmpl rename still carry
+# the untemplated name, so accept either one when judging resumability.
+source_has_zprofile_template() {
+  source_dir="$1"
+
+  [ -e "$source_dir/dot_zprofile.tmpl" ] || [ -e "$source_dir/dot_zprofile" ]
+}
+
 source_has_recovery_core_files() {
   source_dir="$1"
 
   [ -x "$source_dir/dot_local/bin/executable_terrapod" ] &&
     [ -e "$source_dir/dot_local/bin/symlink_tpod" ] &&
     [ -e "$source_dir/dot_zshenv.tmpl" ] &&
-    [ -e "$source_dir/dot_zprofile" ] &&
+    source_has_zprofile_template "$source_dir" &&
     [ -e "$source_dir/dot_zshrc.tmpl" ]
 }
 

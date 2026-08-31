@@ -173,6 +173,24 @@ fi
 
 pass "install.sh is not managed into the home directory"
 
+# The resumability check in install.sh only protects reruns while the paths it
+# names still exist in the source tree. Renaming one of them silently disables
+# the check, so pin both sides here instead of relying on the fixtures.
+install_script_text="$(cat "$install_script")"
+for recovery_core_path in \
+  dot_local/bin/executable_terrapod \
+  dot_local/bin/symlink_tpod \
+  dot_zshenv.tmpl \
+  dot_zprofile.tmpl \
+  dot_zshrc.tmpl; do
+  if [ ! -e "$repo_root/$recovery_core_path" ]; then
+    fail "recovery-core file $recovery_core_path exists in the source tree"
+  fi
+
+  pass "recovery-core file $recovery_core_path exists in the source tree"
+  assert_contains "$install_script_text" "\$source_dir/$recovery_core_path" "install.sh resume check names $recovery_core_path"
+done
+
 assert_status() {
   actual="$1"
   expected="$2"
@@ -798,7 +816,7 @@ GITCONFIG
   cp "$repo_root/dot_local/lib/terrapod/install-warnings.sh" "$source_dir/dot_local/lib/terrapod/install-warnings.sh"
   : >"$source_dir/dot_local/bin/symlink_tpod"
   : >"$source_dir/dot_zshenv.tmpl"
-  : >"$source_dir/dot_zprofile"
+  : >"$source_dir/dot_zprofile.tmpl"
   : >"$source_dir/dot_zshrc.tmpl"
 }
 
@@ -2025,6 +2043,22 @@ missing_recovery_core_stderr="$(cat "$missing_recovery_core_case/stderr")"
 assert_contains "$missing_recovery_core_stderr" "not a resumable Terrapod Source Repository checkout" "near-miss source rejection explains missing resumable state"
 assert_no_stub_calls "$missing_recovery_core_log" "near-miss source guard runs before network or chezmoi commands"
 
+missing_zprofile_case="$(make_case_dir missing-zprofile-recovery-core)"
+write_uname_stub "$missing_zprofile_case" "Darwin"
+write_command_call_stubs "$missing_zprofile_case" "curl" "wget" "git" "chezmoi" "sh"
+write_terrapod_command_stub "$missing_zprofile_case/terrapod-template"
+write_terrapod_source_checkout "$missing_zprofile_case/xdg-data/chezmoi" "$missing_zprofile_case/terrapod-template"
+rm -f "$missing_zprofile_case/xdg-data/chezmoi/dot_zprofile.tmpl" "$missing_zprofile_case/xdg-data/chezmoi/dot_zprofile"
+missing_zprofile_log="$missing_zprofile_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$missing_zprofile_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$missing_zprofile_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "checkout without any zprofile recovery-core file is rejected"
+missing_zprofile_stderr="$(cat "$missing_zprofile_case/stderr")"
+assert_contains "$missing_zprofile_stderr" "not a resumable Terrapod Source Repository checkout" "missing zprofile rejection explains missing resumable state"
+assert_no_stub_calls "$missing_zprofile_log" "missing zprofile guard runs before network or chezmoi commands"
+
 terrapod_fork_case="$(make_case_dir terrapod-fork-source)"
 write_uname_stub "$terrapod_fork_case" "Darwin"
 write_command_call_stubs "$terrapod_fork_case" "curl" "wget" "git" "chezmoi" "sh"
@@ -2097,6 +2131,37 @@ assert_status "$installer_status" 0 "resumable Terrapod checkout accepts SSH ori
 ssh_origin_resume_log_text="$(cat "$ssh_origin_resume_log")"
 assert_not_contains "$ssh_origin_resume_log_text" "terrapod args:setup" "SSH origin resume reuses complete managed setup config"
 assert_contains "$ssh_origin_resume_log_text" "chezmoi args:apply" "SSH origin resume continues to apply"
+
+templated_zprofile_resume_case="$(make_case_dir templated-zprofile-resume)"
+prepare_resumable_macos_case "$templated_zprofile_resume_case"
+rm -f "$templated_zprofile_resume_case/xdg-data/chezmoi/dot_zprofile"
+write_complete_setup_config "$templated_zprofile_resume_case/xdg-config/chezmoi/chezmoi.toml"
+templated_zprofile_resume_log="$templated_zprofile_resume_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$templated_zprofile_resume_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$templated_zprofile_resume_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "checkout carrying only dot_zprofile.tmpl is resumable"
+templated_zprofile_resume_stderr="$(cat "$templated_zprofile_resume_case/stderr")"
+assert_not_contains "$templated_zprofile_resume_stderr" "not a resumable Terrapod Source Repository checkout" "templated zprofile checkout is not rejected as unresumable"
+templated_zprofile_resume_log_text="$(cat "$templated_zprofile_resume_log")"
+assert_contains "$templated_zprofile_resume_log_text" "chezmoi args:apply" "templated zprofile resume continues to apply"
+
+legacy_zprofile_resume_case="$(make_case_dir legacy-zprofile-resume)"
+prepare_resumable_macos_case "$legacy_zprofile_resume_case"
+rm -f "$legacy_zprofile_resume_case/xdg-data/chezmoi/dot_zprofile.tmpl"
+: >"$legacy_zprofile_resume_case/xdg-data/chezmoi/dot_zprofile"
+write_complete_setup_config "$legacy_zprofile_resume_case/xdg-config/chezmoi/chezmoi.toml"
+legacy_zprofile_resume_log="$legacy_zprofile_resume_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$legacy_zprofile_resume_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$legacy_zprofile_resume_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "checkout predating the zprofile template rename is resumable"
+legacy_zprofile_resume_stderr="$(cat "$legacy_zprofile_resume_case/stderr")"
+assert_not_contains "$legacy_zprofile_resume_stderr" "not a resumable Terrapod Source Repository checkout" "legacy zprofile checkout is not rejected as unresumable"
+legacy_zprofile_resume_log_text="$(cat "$legacy_zprofile_resume_log")"
+assert_contains "$legacy_zprofile_resume_log_text" "chezmoi args:apply" "legacy zprofile resume continues to apply"
 
 profile_mismatch_resume_case="$(make_case_dir profile-mismatch-config-resume)"
 prepare_resumable_macos_case "$profile_mismatch_resume_case"
