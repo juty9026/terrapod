@@ -51,6 +51,35 @@ if ! cmp -s "$tmp_dir/expected-record-formulae" "$tmp_dir/record-formulae"; then
 fi
 pass "doctor command ownership records stay synchronized with Brewfile"
 
+expected_ai_casks="$tmp_dir/expected-ai-casks"
+actual_ai_casks="$tmp_dir/actual-ai-casks"
+printf '%s\n' \
+  'cask "antigravity-cli"' \
+  'cask "claude-code"' \
+  'cask "codex"' >"$expected_ai_casks"
+
+chezmoi execute-template \
+  --source "$repo_root" \
+  --override-data '{"chezmoi":{"os":"darwin"},"enableAiCliTools":true}' \
+  --file "$repo_root/Brewfile.ai-cli-tools.tmpl" >"$actual_ai_casks"
+printf '\n' >>"$actual_ai_casks"
+if ! cmp -s "$expected_ai_casks" "$actual_ai_casks"; then
+  diff -u "$expected_ai_casks" "$actual_ai_casks" >&2 || true
+  fail "Optional AI Tool Stack declares exactly the three macOS casks"
+fi
+pass "Optional AI Tool Stack declares exactly the three macOS casks"
+
+linux_ai_casks="$tmp_dir/linux-ai-casks"
+chezmoi execute-template \
+  --source "$repo_root" \
+  --override-data '{"chezmoi":{"os":"linux"},"enableAiCliTools":true,"enableDevelopmentWorkspace":true}' \
+  --file "$repo_root/Brewfile.ai-cli-tools.tmpl" >"$linux_ai_casks"
+if [ -s "$linux_ai_casks" ]; then
+  cat "$linux_ai_casks" >&2
+  fail "Optional AI Tool Stack declares no packages on Linux"
+fi
+pass "Optional AI Tool Stack declares no packages on Linux"
+
 ubuntu_smoke_fixture="$repo_root/tests/fixtures/homebrew-ubuntu-24.04.Dockerfile"
 if ! grep -F 'args: ["force-bottle"]' "$ubuntu_smoke_fixture" >/dev/null ||
    ! grep -F 'brew bundle --no-upgrade --file=/tmp/Brewfile.bottles' "$ubuntu_smoke_fixture" >/dev/null; then

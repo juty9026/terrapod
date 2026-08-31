@@ -51,7 +51,7 @@ tpod update
 
 - Machine profiles for a macOS terminal workstation and an Ubuntu 24.04 VPS.
 - Presets that unfold into concrete machine-local settings.
-- Optional stacks for rich editor configuration, AI CLI tools, and development workspace surfaces.
+- Optional stacks for rich editor configuration, macOS-only AI CLI tools, and development workspace surfaces.
 - macOS App Groups for selected desktop tools.
 
 ## Choose a Preset
@@ -63,7 +63,7 @@ those settings before the initial apply.
 | Preset | Best for | Shape |
 | --- | --- | --- |
 | `minimal` | Small VPSs, clean shells, and recovery installs | Core shell and runtime baseline only |
-| `development` | Machines used for active coding | Optional Editor Stack, Optional AI Tool Stack, and Optional Development Workspace |
+| `development` | Machines used for active coding | Optional Editor Stack, Optional Development Workspace, and, on macOS, the Optional AI Tool Stack |
 | `workstation` | Personal macOS workstations | Development setup plus every macOS App Group |
 
 Setup writes the concrete machine-local settings after you confirm them. A
@@ -207,10 +207,14 @@ On Ubuntu, the initial apply runs setup scripts for the VPS shell profile:
 - Bun, Node.js 24, Python 3.13, and uv/uvx through mise
 - pnpm through Node.js Corepack
 - Login shell switch to zsh
-- Optional AI Tool Stack casks through Homebrew when that stack is enabled
 
 The VPS Shell Profile is headless: macOS App Groups and other GUI applications
 remain in the optional macOS Desktop App Stack and are never installed on Ubuntu.
+The Optional AI Tool Stack is also macOS-only, because Homebrew publishes
+Antigravity CLI, Claude Code, and Codex as casks and Homebrew on Linux does not
+install casks. Setup does not offer the stack on a VPS, the `development` Preset
+writes it disabled there, and `tpod status` and `tpod doctor` report it as not
+applicable.
 Only configure GitHub authentication on a VPS if write access is needed later.
 
 If the login shell could not be changed automatically, switch it after the first apply and reconnect.
@@ -226,8 +230,8 @@ result.
 
 ### Intentional Upgrades
 
-Homebrew owns shared user-facing CLI tools and the enabled Optional AI Tool
-Stack on both profiles. APT owns only Ubuntu system and bootstrap prerequisites.
+Homebrew owns shared user-facing CLI tools on both profiles and the enabled
+Optional AI Tool Stack on macOS. APT owns only Ubuntu system and bootstrap prerequisites.
 mise owns only the Development Runtime Stack.
 
 `tpod apply` restores missing Homebrew packages with
@@ -309,8 +313,8 @@ Optional stack profiles and macOS App Group settings are disabled by default.
 | --- | --- | --- |
 | `profile` | Detected by setup/configure | Records the active Terrapod machine profile. |
 | `enableEditorStack` | `false` | Enables the Optional Editor Stack, which manages the rich Neovim configuration. Plain Neovim remains in the Core Shell Stack either way. |
-| `enableAiCliTools` | `false` | Installs Antigravity CLI, Claude Code, and Codex through Homebrew casks `antigravity-cli`, `claude-code`, and `codex`. |
-| `enableDevelopmentWorkspace` | `false` | Enables the Optional Development Workspace preset, including the Optional Editor Stack, Optional AI Tool Stack, and development-specific Zellij workspace surfaces. |
+| `enableAiCliTools` | `false` | Installs Antigravity CLI, Claude Code, and Codex through Homebrew casks `antigravity-cli`, `claude-code`, and `codex`. macOS Terminal Profile only; ignored on the VPS Shell Profile. |
+| `enableDevelopmentWorkspace` | `false` | Enables the Optional Development Workspace preset, including the Optional Editor Stack, the Optional AI Tool Stack where it applies, and development-specific Zellij workspace surfaces. |
 | `enableMacosAppGroupTerminalApps` | `false` | Installs the terminal-apps macOS App Group: Ghostty. |
 | `enableMacosAppGroupAutomation` | `false` | Installs the automation macOS App Group: Hammerspoon, Karabiner-Elements, and Scroll Reverser. |
 | `enableMacosAppGroupLauncher` | `false` | Installs the launcher macOS App Group: Raycast and 1Password CLI. |
@@ -319,7 +323,8 @@ Optional stack profiles and macOS App Group settings are disabled by default.
 | `enableMacosAppGroupMobileDev` | `false` | Installs the mobile-dev macOS App Group: Android Studio and Maestro (`mobile-dev-inc/tap/maestro`). It also sets `ANDROID_HOME` and `JAVA_HOME`. |
 
 When `enableDevelopmentWorkspace` is `true`, it enables both the Optional Editor Stack and Optional AI Tool Stack
-even when `enableEditorStack` or `enableAiCliTools` are recorded as false.
+even when `enableEditorStack` or `enableAiCliTools` are recorded as false. On the VPS Shell Profile the Optional
+AI Tool Stack stays out of that bundle, because it is a macOS-only stack.
 
 macOS Desktop App Stack installation remains separate from `enableDevelopmentWorkspace`
 because desktop casks can affect shared applications outside one user's home directory.
@@ -371,7 +376,7 @@ Editor-only machine:
 enableEditorStack = true
 ```
 
-AI-only machine:
+AI-only machine (macOS Terminal Profile only):
 
 ```toml
 enableAiCliTools = true

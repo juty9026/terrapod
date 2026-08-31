@@ -31,7 +31,7 @@ clear_install_warning() {
   fi
 }
 
-{{ if not (or (default false (get . "enableAiCliTools")) (default false (get . "enableDevelopmentWorkspace"))) }}
+{{ if not (and (eq .chezmoi.os "darwin") (or (default false (get . "enableAiCliTools")) (default false (get . "enableDevelopmentWorkspace")))) }}
 clear_install_warning "$AI_CLI_WARNING_CATEGORY"
 exit 0
 {{ else }}

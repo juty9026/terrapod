@@ -50,7 +50,7 @@ tpod update
 
 - macOS terminal workstation과 Ubuntu 24.04 VPS를 위한 machine profile.
 - 구체적인 machine-local setting으로 펼쳐지는 Preset.
-- 풍부한 editor configuration, AI CLI tools, development workspace surface를 위한 optional stack.
+- 풍부한 editor configuration, macOS 전용 AI CLI tools, development workspace surface를 위한 optional stack.
 - 선택한 desktop tool을 묶는 macOS App Group.
 
 ## Choose a Preset
@@ -62,7 +62,7 @@ initial apply 전에 확정할 수 있습니다.
 | Preset | 적합한 용도 | 구성 |
 | --- | --- | --- |
 | `minimal` | 작은 VPS, 깨끗한 shell, recovery install | Core shell과 runtime baseline만 |
-| `development` | active coding에 쓰는 machine | Optional Editor Stack, Optional AI Tool Stack, Optional Development Workspace |
+| `development` | active coding에 쓰는 machine | Optional Editor Stack, Optional Development Workspace, 그리고 macOS에서는 Optional AI Tool Stack |
 | `workstation` | 개인 macOS workstation | Development setup에 모든 macOS App Group 추가 |
 
 Setup은 확인을 받은 뒤 구체적인 machine-local settings를 씁니다. Preset은
@@ -199,11 +199,14 @@ Ubuntu에서는 initial apply가 VPS shell profile을 위한 setup script를 실
 - mise를 통한 Bun, Node.js 24, Python 3.13, uv/uvx
 - Node.js Corepack을 통한 pnpm
 - login shell을 zsh로 전환
-- 해당 stack이 활성화된 경우 Homebrew를 통한 Optional AI Tool Stack cask
 
 VPS Shell Profile은 headless입니다. macOS App Group과 다른 GUI application은 optional
-macOS Desktop App Stack에만 속하며 Ubuntu에는 설치되지 않습니다. VPS에서 write
-access가 나중에 필요할 때만 GitHub authentication을 설정하세요.
+macOS Desktop App Stack에만 속하며 Ubuntu에는 설치되지 않습니다. Optional AI Tool Stack도
+macOS 전용입니다. Homebrew가 Antigravity CLI, Claude Code, Codex를 cask로 배포하는데
+Linux Homebrew는 cask를 설치하지 않기 때문입니다. VPS에서는 setup이 이 stack을 묻지 않고,
+`development` Preset도 비활성 상태로 기록하며, `tpod status`와 `tpod doctor`는 not
+applicable로 보고합니다. VPS에서 write access가 나중에 필요할 때만 GitHub
+authentication을 설정하세요.
 
 login shell이 자동으로 바뀌지 않았다면 first apply 이후 직접 전환하고 다시 접속합니다.
 
@@ -215,8 +218,8 @@ bootstrap 이후의 일반 관리는 Terrapod이 처리합니다. 특이한 reco
 
 ### Intentional Upgrades
 
-Homebrew는 양쪽 profile의 shared user-facing CLI tool과 enabled Optional AI Tool Stack을
-담당합니다. APT는 Ubuntu system 및 bootstrap prerequisite만 담당하고, mise는
+Homebrew는 양쪽 profile의 shared user-facing CLI tool을 담당하고, macOS에서는 enabled
+Optional AI Tool Stack도 담당합니다. APT는 Ubuntu system 및 bootstrap prerequisite만 담당하고, mise는
 Development Runtime Stack만 담당합니다.
 
 `tpod apply`는 `HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade`로 누락된 Homebrew
@@ -288,8 +291,8 @@ Optional stack profile과 macOS App Group setting은 기본적으로 disabled입
 | --- | --- | --- |
 | `profile` | setup/configure가 감지 | 활성 Terrapod machine profile을 기록합니다. |
 | `enableEditorStack` | `false` | rich Neovim configuration을 관리하는 Optional Editor Stack을 활성화합니다. Plain Neovim은 어느 쪽이든 Core Shell Stack에 남아 있습니다. |
-| `enableAiCliTools` | `false` | Homebrew cask `antigravity-cli`, `claude-code`, `codex`를 통해 Antigravity CLI, Claude Code, Codex를 설치합니다. |
-| `enableDevelopmentWorkspace` | `false` | Optional Editor Stack, Optional AI Tool Stack, development-specific Zellij workspace surface를 포함하는 Optional Development Workspace preset을 활성화합니다. |
+| `enableAiCliTools` | `false` | Homebrew cask `antigravity-cli`, `claude-code`, `codex`를 통해 Antigravity CLI, Claude Code, Codex를 설치합니다. macOS Terminal Profile 전용이며 VPS Shell Profile에서는 무시됩니다. |
+| `enableDevelopmentWorkspace` | `false` | Optional Editor Stack, 적용 가능한 경우의 Optional AI Tool Stack, development-specific Zellij workspace surface를 포함하는 Optional Development Workspace preset을 활성화합니다. |
 | `enableMacosAppGroupTerminalApps` | `false` | terminal-apps macOS App Group에 포함된 Ghostty를 설치합니다. |
 | `enableMacosAppGroupAutomation` | `false` | automation macOS App Group인 Hammerspoon, Karabiner-Elements, Scroll Reverser를 설치합니다. |
 | `enableMacosAppGroupLauncher` | `false` | launcher macOS App Group인 Raycast와 1Password CLI를 설치합니다. |
@@ -297,7 +300,7 @@ Optional stack profile과 macOS App Group setting은 기본적으로 disabled입
 | `enableMacosAppGroupDevelopmentApps` | `false` | development-apps macOS App Group인 Zed, Orca ADE(`stablyai/orca/orca`), OrbStack을 설치합니다. |
 | `enableMacosAppGroupMobileDev` | `false` | mobile-dev macOS App Group인 Android Studio와 Maestro(`mobile-dev-inc/tap/maestro`)를 설치합니다. `ANDROID_HOME`과 `JAVA_HOME`도 함께 설정합니다. |
 
-`enableDevelopmentWorkspace`가 `true`이면 `enableEditorStack`이나 `enableAiCliTools`가 false로 기록되어 있어도 Optional Editor Stack과 Optional AI Tool Stack이 함께 활성화됩니다.
+`enableDevelopmentWorkspace`가 `true`이면 `enableEditorStack`이나 `enableAiCliTools`가 false로 기록되어 있어도 Optional Editor Stack과 Optional AI Tool Stack이 함께 활성화됩니다. 다만 VPS Shell Profile에서는 Optional AI Tool Stack이 macOS 전용이므로 이 묶음에서 빠집니다.
 
 macOS Desktop App Stack installation은 `enableDevelopmentWorkspace`와 분리되어 있습니다. desktop cask가 한 사용자의 home directory 밖에 있는 shared application에 영향을 줄 수 있기 때문입니다.
 
@@ -344,7 +347,7 @@ Editor-only machine:
 enableEditorStack = true
 ```
 
-AI-only machine:
+AI-only machine (macOS Terminal Profile 전용):
 
 ```toml
 enableAiCliTools = true

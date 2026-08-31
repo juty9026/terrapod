@@ -531,7 +531,9 @@ show_setup_option_block() {
       printf '%s\n' "  Dev Zellij layouts."
       printf '%s\n' "  Includes:"
       printf '%s\n' "    - Optional Editor Stack"
-      printf '%s\n' "    - Optional AI Tool Stack"
+      if ai_cli_tools_supported_profile "${setup_profile:-macos-terminal}"; then
+        printf '%s\n' "    - Optional AI Tool Stack"
+      fi
       ;;
     "Optional Editor Stack")
       printf '%s\n' "  Rich Neovim configuration."
@@ -612,6 +614,7 @@ prompt_for_setup_settings() {
   profile="$2"
 
   load_setup_defaults "$preset"
+  setup_profile="$profile"
 
   printf '%s\n' "Customize Terrapod settings." >&2
 
@@ -622,7 +625,14 @@ prompt_for_setup_settings() {
     setup_enableAiCliTools=true
   else
     setup_enableEditorStack="$(prompt_setup_bool "Optional Editor Stack" "$setup_enableEditorStack")"
-    setup_enableAiCliTools="$(prompt_setup_bool "Optional AI Tool Stack" "$setup_enableAiCliTools")"
+    if ai_cli_tools_supported_profile "$profile"; then
+      setup_enableAiCliTools="$(prompt_setup_bool "Optional AI Tool Stack" "$setup_enableAiCliTools")"
+    fi
+  fi
+
+  if ! ai_cli_tools_supported_profile "$profile"; then
+    setup_enableAiCliTools=false
+    printf '%s\n' "Optional AI Tool Stack: not applicable for $(profile_context_label)" >&2
   fi
 
   if [ "$profile" = "macos-terminal" ]; then
@@ -920,8 +930,18 @@ effective_editor_stack_enabled() {
   fi
 }
 
+ai_cli_tools_supported_profile() {
+  [ "$1" = "macos-terminal" ]
+}
+
 effective_ai_cli_tools_enabled() {
   config_file="$1"
+  profile="$2"
+
+  if ! ai_cli_tools_supported_profile "$profile"; then
+    printf '%s\n' "false"
+    return
+  fi
 
   if [ "$(config_data_bool "$config_file" enableAiCliTools)" = "true" ] ||
     [ "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" = "true" ]; then
@@ -945,7 +965,7 @@ run_executable_selection() {
     "$executable_selection_helper" \
     "$mode" \
     "$profile" \
-    "$(effective_ai_cli_tools_enabled "$config_file")" \
+    "$(effective_ai_cli_tools_enabled "$config_file" "$profile")" \
     "$(config_data_bool "$config_file" enableMacosAppGroupLauncher)"
 }
 
@@ -1271,7 +1291,11 @@ run_status() {
   fi
   print_section "Optional stacks:"
   print_optional_setting_status "Optional Editor Stack" "$(effective_editor_stack_enabled "$config_file")" "rich Neovim configuration"
-  print_stack_status "Optional AI Tool Stack" "$(effective_ai_cli_tools_enabled "$config_file")" agy claude codex
+  if ai_cli_tools_supported_profile "$profile"; then
+    print_stack_status "Optional AI Tool Stack" "$(effective_ai_cli_tools_enabled "$config_file" "$profile")" agy claude codex
+  else
+    print_indented_colon_state_line "Optional AI Tool Stack" "not applicable" "($(profile_context_label))"
+  fi
   print_optional_setting_status "Optional Development Workspace" "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" "development Zellij layouts"
   print_macos_app_group_status "$config_file" "$profile"
   print_key_tool_status "$profile" "$config_file"
@@ -1330,10 +1354,14 @@ show_stack_context() {
 
   print_section "Optional stacks:"
   editor_state="$(effective_optional_stack_state_label "$config_file" enableEditorStack)"
-  ai_state="$(effective_optional_stack_state_label "$config_file" enableAiCliTools)"
   workspace_state="$(config_bool_state_label "$config_file" enableDevelopmentWorkspace)"
   print_named_state_line "Optional Editor Stack" "$editor_state"
-  print_named_state_line "Optional AI Tool Stack" "$ai_state"
+  if ai_cli_tools_supported_profile "$profile"; then
+    ai_state="$(effective_optional_stack_state_label "$config_file" enableAiCliTools)"
+    print_named_state_line "Optional AI Tool Stack" "$ai_state"
+  else
+    print_colon_state_line "Optional AI Tool Stack" "not applicable" "($(profile_context_label))"
+  fi
   print_named_state_line "Optional Development Workspace" "$workspace_state"
 
   if [ "$profile" != "macos-terminal" ]; then
@@ -1739,10 +1767,14 @@ run_doctor() {
     "$(effective_editor_stack_enabled "$config_file")" \
     "rich Neovim configuration"
 
-  doctor_check_optional_setting \
-    "Optional AI Tool Stack" \
-    "$(effective_ai_cli_tools_enabled "$config_file")" \
-    "Antigravity CLI, Claude Code, and Codex"
+  if ai_cli_tools_supported_profile "$profile"; then
+    doctor_check_optional_setting \
+      "Optional AI Tool Stack" \
+      "$(effective_ai_cli_tools_enabled "$config_file" "$profile")" \
+      "Antigravity CLI, Claude Code, and Codex"
+  else
+    doctor_ok "Optional AI Tool Stack is not applicable for $(profile_context_label)"
+  fi
 
   doctor_check_optional_setting \
     "Optional Development Workspace" \
@@ -1849,7 +1881,11 @@ render_preset_data() {
       render_settings_data "$profile" false false false false false false false false false
       ;;
     development)
-      render_settings_data "$profile" true true true false false false false false false
+      if ai_cli_tools_supported_profile "$profile"; then
+        render_settings_data "$profile" true true true false false false false false false
+      else
+        render_settings_data "$profile" true false true false false false false false false
+      fi
       ;;
     workstation)
       render_settings_data "$profile" true true true true true true true true true
