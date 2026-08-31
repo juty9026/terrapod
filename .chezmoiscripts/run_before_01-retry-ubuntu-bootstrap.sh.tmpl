@@ -1,0 +1,31 @@
+{{- if eq .chezmoi.os "linux" -}}
+#!/bin/sh
+set -eu
+
+install_warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
+if [ ! -f "$install_warnings_lib" ]; then
+  exit 0
+fi
+. "$install_warnings_lib"
+
+if ! terrapod_install_warning_existing_path ubuntu-bootstrap >/dev/null 2>&1; then
+  exit 0
+fi
+
+ubuntu_bootstrap_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/ubuntu-bootstrap.sh"
+. "$ubuntu_bootstrap_lib"
+
+os_id="{{ get .chezmoi.osRelease "id" }}"
+version_id="{{ get .chezmoi.osRelease "versionID" }}"
+
+if terrapod_ubuntu_bootstrap_run "$os_id" "$version_id"; then
+  terrapod_install_warning_clear ubuntu-bootstrap || exit 1
+  exit 0
+fi
+
+terrapod_install_warning_write \
+  ubuntu-bootstrap \
+  "$TERRAPOD_UBUNTU_BOOTSTRAP_SUMMARY" \
+  "$TERRAPOD_UBUNTU_BOOTSTRAP_GUIDANCE" || exit 1
+exit 0
+{{- end }}

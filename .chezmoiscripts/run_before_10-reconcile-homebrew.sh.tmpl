@@ -44,10 +44,6 @@ mark_install_warning() {
 }
 
 exit_after_install_warning() {
-  exit 1
-}
-
-exit_after_nonblocking_install_warning() {
   if [ "$INSTALL_WARNING_RECORDED" -eq 1 ]; then
     exit 0
   fi
@@ -287,13 +283,13 @@ if ! brew_shellenv="$("$brew_bin" shellenv)"; then
     homebrew-core \
     "Homebrew core install needs attention" \
     "Fix Homebrew shellenv, then rerun tpod apply."
-  exit_after_nonblocking_install_warning
+  exit_after_install_warning
 elif ! eval "$brew_shellenv"; then
   mark_install_warning \
     homebrew-core \
     "Homebrew core install needs attention" \
     "Fix Homebrew shellenv, then rerun tpod apply."
-  exit_after_nonblocking_install_warning
+  exit_after_install_warning
 else
   brew analytics off >/dev/null 2>&1 || true
 fi

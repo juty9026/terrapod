@@ -209,20 +209,46 @@ rm -rf "$HOME/.local/state/terrapod/install-warnings"
 : >"$BOOTSTRAP_TEST_LOG"
 BOOTSTRAP_APT_INSTALL_STATUS=42
 export BOOTSTRAP_APT_INSTALL_STATUS
-if TERRAPOD_FIRST_RUN_APPLY=1 sh "$rendered" >"$tmp_dir/bootstrap-first-run-apt-failure.out" 2>"$tmp_dir/bootstrap-first-run-apt-failure.err"; then
+if ! sh "$rendered" >"$tmp_dir/bootstrap-apt-failure.out" 2>"$tmp_dir/bootstrap-apt-failure.err"; then
   unset BOOTSTRAP_APT_INSTALL_STATUS
-  fail "Ubuntu bootstrap should fail when first-run APT prerequisite install fails"
+  fail "Ubuntu bootstrap should continue routine apply when APT prerequisite install fails"
 fi
-unset BOOTSTRAP_APT_INSTALL_STATUS
-pass "Ubuntu bootstrap fails when first-run APT prerequisite install fails"
+pass "Ubuntu bootstrap continues routine apply when APT prerequisite install fails"
 
 if [ ! -f "$ubuntu_bootstrap_marker" ]; then
+  unset BOOTSTRAP_APT_INSTALL_STATUS
+  fail "Ubuntu bootstrap should record an ubuntu-bootstrap warning when routine APT prerequisite install fails"
+fi
+pass "Ubuntu bootstrap records an ubuntu-bootstrap warning when routine APT prerequisite install fails"
+
+rm -rf "$HOME/.local/state/terrapod/install-warnings"
+: >"$BOOTSTRAP_TEST_LOG"
+if ! TERRAPOD_FIRST_RUN_APPLY=1 sh "$rendered" >"$tmp_dir/bootstrap-first-run-apt-failure.out" 2>"$tmp_dir/bootstrap-first-run-apt-failure.err"; then
+  unset BOOTSTRAP_APT_INSTALL_STATUS
+  fail "Ubuntu bootstrap should continue first-run apply when APT prerequisite install fails"
+fi
+pass "Ubuntu bootstrap continues first-run apply when APT prerequisite install fails"
+
+if [ ! -f "$ubuntu_bootstrap_marker" ]; then
+  unset BOOTSTRAP_APT_INSTALL_STATUS
   fail "Ubuntu bootstrap should keep an ubuntu-bootstrap warning when first-run APT prerequisite install fails"
 fi
 pass "Ubuntu bootstrap keeps an ubuntu-bootstrap warning when first-run APT prerequisite install fails"
 
 ubuntu_bootstrap_marker_text="$(cat "$ubuntu_bootstrap_marker")"
 assert_contains "$ubuntu_bootstrap_marker_text" "guidance='Review APT install output for system and Homebrew prerequisites, then rerun tpod apply.'" "Ubuntu bootstrap marker preserves APT prerequisite failure guidance"
+
+unwritable_state_parent="$tmp_dir/unwritable-state-parent"
+: >"$unwritable_state_parent"
+marker_write_failure_status=0
+XDG_STATE_HOME="$unwritable_state_parent/state" sh "$rendered" \
+  >"$tmp_dir/bootstrap-marker-write-failure.out" 2>"$tmp_dir/bootstrap-marker-write-failure.err" ||
+  marker_write_failure_status=$?
+unset BOOTSTRAP_APT_INSTALL_STATUS
+if [ "$marker_write_failure_status" -eq 0 ]; then
+  fail "Ubuntu bootstrap should fail when the install warning marker cannot be written"
+fi
+pass "Ubuntu bootstrap fails when the install warning marker cannot be written"
 
 unsupported_rendered="$tmp_dir/bootstrap-ubuntu-unsupported.sh"
 "$chezmoi_bin" execute-template \
@@ -233,10 +259,17 @@ unsupported_rendered="$tmp_dir/bootstrap-ubuntu-unsupported.sh"
 
 rm -rf "$HOME/.local/state/terrapod/install-warnings"
 : >"$BOOTSTRAP_TEST_LOG"
-if TERRAPOD_FIRST_RUN_APPLY=1 sh "$unsupported_rendered" >"$tmp_dir/bootstrap-first-run-unsupported.out" 2>"$tmp_dir/bootstrap-first-run-unsupported.err"; then
-  fail "Ubuntu bootstrap should fail on an unsupported release during first-run apply"
+if ! sh "$unsupported_rendered" >"$tmp_dir/bootstrap-unsupported.out" 2>"$tmp_dir/bootstrap-unsupported.err"; then
+  fail "Ubuntu bootstrap should continue routine apply on an unsupported release"
 fi
-pass "Ubuntu bootstrap fails on an unsupported release during first-run apply"
+pass "Ubuntu bootstrap continues routine apply on an unsupported release"
+
+rm -rf "$HOME/.local/state/terrapod/install-warnings"
+: >"$BOOTSTRAP_TEST_LOG"
+if ! TERRAPOD_FIRST_RUN_APPLY=1 sh "$unsupported_rendered" >"$tmp_dir/bootstrap-first-run-unsupported.out" 2>"$tmp_dir/bootstrap-first-run-unsupported.err"; then
+  fail "Ubuntu bootstrap should continue first-run apply on an unsupported release"
+fi
+pass "Ubuntu bootstrap continues first-run apply on an unsupported release"
 
 if [ ! -f "$ubuntu_bootstrap_marker" ]; then
   fail "Ubuntu bootstrap should keep an ubuntu-bootstrap warning for an unsupported release during first-run apply"
@@ -245,3 +278,71 @@ pass "Ubuntu bootstrap keeps an ubuntu-bootstrap warning for an unsupported rele
 
 ubuntu_bootstrap_marker_text="$(cat "$ubuntu_bootstrap_marker")"
 assert_contains "$ubuntu_bootstrap_marker_text" "guidance='Run Terrapod on Ubuntu 24.04, or use tpod doctor for current platform guidance.'" "Ubuntu bootstrap marker preserves unsupported release guidance"
+
+retry_rendered="$tmp_dir/retry-ubuntu-bootstrap.sh"
+"$chezmoi_bin" execute-template \
+  --source "$repo_root" \
+  --override-data '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableAiCliTools":false,"enableDevelopmentWorkspace":false}' \
+  --file "$repo_root/.chezmoiscripts/run_before_01-retry-ubuntu-bootstrap.sh.tmpl" \
+  >"$retry_rendered"
+sh -n "$retry_rendered" || fail "rendered Ubuntu bootstrap retry script should be valid sh"
+pass "rendered Ubuntu bootstrap retry script is valid sh"
+
+macos_retry_rendered="$tmp_dir/retry-ubuntu-bootstrap-macos.sh"
+"$chezmoi_bin" execute-template \
+  --source "$repo_root" \
+  --override-data '{"chezmoi":{"os":"darwin"},"enableAiCliTools":false,"enableDevelopmentWorkspace":false}' \
+  --file "$repo_root/.chezmoiscripts/run_before_01-retry-ubuntu-bootstrap.sh.tmpl" \
+  >"$macos_retry_rendered"
+if [ -n "$(tr -d '[:space:]' <"$macos_retry_rendered")" ]; then
+  fail "Ubuntu bootstrap retry script should render empty on macOS"
+fi
+pass "Ubuntu bootstrap retry script renders empty on macOS"
+
+rm -rf "$HOME/.local/state/terrapod/install-warnings"
+: >"$BOOTSTRAP_TEST_LOG"
+if ! sh "$retry_rendered" >"$tmp_dir/retry-no-marker.out" 2>"$tmp_dir/retry-no-marker.err"; then
+  fail "Ubuntu bootstrap retry should succeed when no ubuntu-bootstrap warning exists"
+fi
+pass "Ubuntu bootstrap retry succeeds when no ubuntu-bootstrap warning exists"
+
+if [ -s "$BOOTSTRAP_TEST_LOG" ]; then
+  fail "Ubuntu bootstrap retry should not run APT when no ubuntu-bootstrap warning exists"
+fi
+pass "Ubuntu bootstrap retry skips APT when no ubuntu-bootstrap warning exists"
+
+rm -rf "$HOME/.local/state/terrapod/install-warnings"
+: >"$BOOTSTRAP_TEST_LOG"
+BOOTSTRAP_APT_INSTALL_STATUS=42
+export BOOTSTRAP_APT_INSTALL_STATUS
+sh "$rendered" >"$tmp_dir/retry-seed.out" 2>"$tmp_dir/retry-seed.err" ||
+  fail "Ubuntu bootstrap should record a warning to seed the retry test"
+unset BOOTSTRAP_APT_INSTALL_STATUS
+
+: >"$BOOTSTRAP_TEST_LOG"
+BOOTSTRAP_APT_INSTALL_STATUS=42
+export BOOTSTRAP_APT_INSTALL_STATUS
+if ! sh "$retry_rendered" >"$tmp_dir/retry-failure.out" 2>"$tmp_dir/retry-failure.err"; then
+  unset BOOTSTRAP_APT_INSTALL_STATUS
+  fail "Ubuntu bootstrap retry should continue apply when the retried bootstrap fails again"
+fi
+unset BOOTSTRAP_APT_INSTALL_STATUS
+pass "Ubuntu bootstrap retry continues apply when the retried bootstrap fails again"
+
+assert_contains "$(cat "$BOOTSTRAP_TEST_LOG")" "apt-get args:install -y build-essential" "Ubuntu bootstrap retry reruns the APT prerequisite install"
+
+if [ ! -f "$ubuntu_bootstrap_marker" ]; then
+  fail "Ubuntu bootstrap retry should keep the ubuntu-bootstrap warning after a failed retry"
+fi
+pass "Ubuntu bootstrap retry keeps the ubuntu-bootstrap warning after a failed retry"
+
+: >"$BOOTSTRAP_TEST_LOG"
+if ! sh "$retry_rendered" >"$tmp_dir/retry-success.out" 2>"$tmp_dir/retry-success.err"; then
+  fail "Ubuntu bootstrap retry should succeed when the retried bootstrap succeeds"
+fi
+pass "Ubuntu bootstrap retry succeeds when the retried bootstrap succeeds"
+
+if [ -e "$ubuntu_bootstrap_marker" ]; then
+  fail "Ubuntu bootstrap retry should clear the ubuntu-bootstrap warning after a successful retry"
+fi
+pass "Ubuntu bootstrap retry clears the ubuntu-bootstrap warning after a successful retry"
