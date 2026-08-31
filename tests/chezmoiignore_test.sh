@@ -1816,19 +1816,27 @@ disabled_ai_cli_tools_cleanup="$(render_template "$ubuntu_data" ".chezmoiscripts
 ai_cli_tools_brewfile="$(render_template "$ai_cli_tools_data" "Brewfile.ai-cli-tools.tmpl")"
 development_workspace_ai_brewfile="$(render_template "$development_workspace_data" "Brewfile.ai-cli-tools.tmpl")"
 disabled_ai_cli_tools_brewfile="$(render_template "$ubuntu_data" "Brewfile.ai-cli-tools.tmpl")"
+macos_ai_cli_tools_brewfile="$(render_template "$macos_ai_cli_tools_data" "Brewfile.ai-cli-tools.tmpl")"
+macos_development_workspace_ai_brewfile="$(render_template "$macos_development_workspace_data" "Brewfile.ai-cli-tools.tmpl")"
 
 assert_not_contains_text "$ai_cli_tools_installer" "bootstrap_linux_homebrew" "AI installer no longer owns Linuxbrew bootstrap"
 assert_not_contains_text "$ai_cli_tools_installer" "raw.githubusercontent.com/Homebrew/install" "AI installer never downloads Homebrew"
-assert_contains_text "$ai_cli_tools_installer" "/home/linuxbrew/.linuxbrew/bin/brew" "AI installer uses mandatory standard Linuxbrew"
-assert_contains_text "$ai_cli_tools_installer" "HOMEBREW_NO_AUTO_UPDATE=1" "AI bundle disables Homebrew auto-update"
+assert_not_contains_text "$ai_cli_tools_installer" "HOMEBREW_NO_AUTO_UPDATE=1" "Ubuntu AI installer runs no Homebrew bundle"
+assert_not_contains_text "$ai_cli_tools_installer" "install_ai_cli_bundle" "Ubuntu AI installer renders no Homebrew bundle step"
+assert_not_contains_text "$ai_cli_tools_installer" 'cask "claude-code"' "Ubuntu AI installer renders no macOS-only casks"
+assert_contains_text "$ai_cli_tools_installer" 'clear_install_warning "$AI_CLI_WARNING_CATEGORY"' "Ubuntu AI installer only clears stale optional AI CLI markers"
+assert_contains_text "$macos_ai_cli_tools_installer" "/opt/homebrew/bin/brew" "macOS AI installer uses mandatory standard Homebrew"
+assert_contains_text "$macos_ai_cli_tools_installer" "HOMEBREW_NO_AUTO_UPDATE=1" "AI bundle disables Homebrew auto-update"
 assert_contains_text "$macos_terminal_apps_bootstrap" "HOMEBREW_NO_AUTO_UPDATE=1" "desktop bundle disables Homebrew auto-update"
 
-for rendered_brewfile in "$ai_cli_tools_brewfile" "$development_workspace_ai_brewfile"; do
+for rendered_brewfile in "$macos_ai_cli_tools_brewfile" "$macos_development_workspace_ai_brewfile"; do
   assert_contains_text "$rendered_brewfile" 'cask "antigravity-cli"' "Optional AI Tool Stack declares Antigravity CLI cask"
   assert_contains_text "$rendered_brewfile" 'cask "claude-code"' "Optional AI Tool Stack declares Claude Code cask"
   assert_contains_text "$rendered_brewfile" 'cask "codex"' "Optional AI Tool Stack declares Codex CLI cask"
 done
 assert_text_equals "$disabled_ai_cli_tools_brewfile" "" "disabled Optional AI Tool Stack renders no Homebrew casks"
+assert_text_equals "$ai_cli_tools_brewfile" "" "Ubuntu Optional AI Tool Stack renders no Homebrew casks"
+assert_text_equals "$development_workspace_ai_brewfile" "" "Ubuntu Optional Development Workspace renders no AI Homebrew casks"
 
 assert_contains_text "$disabled_ai_cli_tools_cleanup" "AI_CLI_WARNING_CATEGORY=optional-ai-cli-tools" "disabled Optional AI Tool Stack renders optional AI CLI warning category"
 assert_contains_text "$disabled_ai_cli_tools_cleanup" 'clear_install_warning "$AI_CLI_WARNING_CATEGORY"' "disabled Optional AI Tool Stack renders stale marker cleanup"
@@ -1960,11 +1968,20 @@ write_stub "$linux_ai_brew_bin/uname" \
   '  -m) printf "%s\n" x86_64 ;;' \
   '  *) printf "%s\n" Linux ;;' \
   'esac'
+HOME="$linux_ai_brew_home" XDG_STATE_HOME="$linux_ai_brew_state" sh -c \
+  '. "$1"; terrapod_install_warning_write optional-ai-cli-tools "Optional AI CLI tool install needs attention" "Rerun tpod apply after network access is restored."' \
+  sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
 HOME="$linux_ai_brew_home" XDG_STATE_HOME="$linux_ai_brew_state" \
   AI_BREW_BIN="$linux_ai_brew_bin" AI_BREW_LOG="$linux_ai_brew_log" AI_BREW_FAIL=0 \
   PATH="$linux_ai_brew_bin:/usr/bin:/bin" sh "$ai_cli_tools_installer_script"
-assert_contains_text "$(cat "$linux_ai_brew_log")" "brew args:bundle --no-upgrade --file=" "Ubuntu Optional AI Tool Stack installs the common no-upgrade bundle"
-assert_contains_text "$(cat "$linux_ai_brew_log")" "brew auto-update:1" "Ubuntu Optional AI Tool Stack disables Homebrew auto-update"
+if [ -e "$linux_ai_brew_log" ]; then
+  fail "Ubuntu Optional AI Tool Stack should never run Homebrew"
+fi
+pass "Ubuntu Optional AI Tool Stack never runs Homebrew"
+if [ -e "$linux_ai_brew_state/terrapod/install-warnings/optional-ai-cli-tools" ]; then
+  fail "Ubuntu Optional AI Tool Stack should clear stale optional-ai-cli-tools markers"
+fi
+pass "Ubuntu Optional AI Tool Stack clears stale optional AI CLI markers"
 
 ai_cli_failure_state="$tmp_dir/ai-cli-failure-state"
 ai_cli_failure_home="$tmp_dir/ai-cli-failure-home"

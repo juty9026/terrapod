@@ -508,7 +508,7 @@ fi
 pass "development Preset creates a chezmoi config file"
 
 assert_data_key_once_with_value "$development_config" "enableEditorStack" "true" "development Preset enables Optional Editor Stack in a new config"
-assert_data_key_once_with_value "$development_config" "enableAiCliTools" "true" "development Preset enables Optional AI Tool Stack in a new config"
+assert_data_key_once_with_value "$development_config" "enableAiCliTools" "false" "development Preset leaves Optional AI Tool Stack disabled on the VPS Shell Profile"
 assert_data_key_once_with_value "$development_config" "enableDevelopmentWorkspace" "true" "development Preset enables Optional Development Workspace in a new config"
 assert_data_key_once_with_value "$development_config" "profile" "\"vps-shell\"" "development Preset writes the detected profile in a new config"
 assert_data_key_once_with_value "$development_config" "enableMacosAppGroupTerminalApps" "false" "development Preset disables terminal-apps macOS App Group in a new config"
@@ -520,6 +520,22 @@ assert_data_key_once_with_value "$development_config" "enableMacosAppGroupMobile
 assert_not_contains "$development_config" "enableMacosDesktopApps" "development Preset does not write the legacy all-in desktop app toggle"
 assert_not_contains "$development_config" "terrapodPreset" "development Preset stores concrete values instead of a dynamic Preset"
 assert_backup_count "$development_config" 0 "development config creation does not create a backup"
+
+macos_development_home="$tmp_dir/macos-development-home"
+macos_development_xdg="$tmp_dir/macos-development-xdg"
+macos_development_config="$macos_development_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$macos_development_home"
+
+run_terrapod_configure development "" "$macos_development_home" "$macos_development_xdg" macos-terminal
+
+if [ ! -f "$macos_development_config" ]; then
+  fail "macOS development Preset creates a chezmoi config file"
+fi
+pass "macOS development Preset creates a chezmoi config file"
+
+assert_data_key_once_with_value "$macos_development_config" "enableEditorStack" "true" "macOS development Preset enables Optional Editor Stack in a new config"
+assert_data_key_once_with_value "$macos_development_config" "enableAiCliTools" "true" "macOS development Preset enables Optional AI Tool Stack in a new config"
+assert_data_key_once_with_value "$macos_development_config" "enableDevelopmentWorkspace" "true" "macOS development Preset enables Optional Development Workspace in a new config"
 
 workstation_home="$tmp_dir/workstation-home"
 workstation_xdg="$tmp_dir/workstation-xdg"
@@ -578,6 +594,7 @@ fi
 pass "no-gum development Preset creates a chezmoi config file"
 
 assert_data_key_once_with_value "$nogum_development_config" "enableEditorStack" "true" "no-gum development writes concrete Editor Stack setting"
+assert_data_key_once_with_value "$nogum_development_config" "enableAiCliTools" "false" "no-gum development leaves Optional AI Tool Stack disabled on the VPS Shell Profile"
 assert_data_key_once_with_value "$nogum_development_config" "enableDevelopmentWorkspace" "true" "no-gum development writes concrete Development Workspace setting"
 assert_data_key_once_with_value "$nogum_development_config" "enableMacosAppGroupTerminalApps" "false" "no-gum development writes concrete macOS App Group setting"
 assert_data_key_once_with_value "$nogum_development_config" "enableMacosAppGroupDevelopmentApps" "false" "no-gum development writes concrete development-apps App Group setting"
@@ -822,7 +839,6 @@ mkdir -p "$gum_vps_home"
 if ! run_terrapod_setup vps-shell 'minimal
 n
 y
-n
 y
 ' "$gum_vps_home" "$gum_vps_xdg" >"$tmp_dir/gum-vps.out" 2>"$tmp_dir/gum-vps.err"; then
   printf '%s\n' "gum VPS stdout:" >&2
@@ -838,6 +854,11 @@ if printf '%s\n' "$gum_vps_combined" | grep -F "terminal-apps macOS App Group" >
   fail "gum VPS setup does not show macOS App Group items"
 fi
 pass "gum VPS setup does not show macOS App Group items"
+
+if printf '%s\n' "$gum_vps_combined" | grep -F "Enable Optional AI Tool Stack?" >/dev/null; then
+  fail "gum VPS setup does not prompt for the Optional AI Tool Stack"
+fi
+pass "gum VPS setup does not prompt for the Optional AI Tool Stack"
 
 assert_data_key_once_with_value "$gum_vps_config" "enableEditorStack" "true" "gum VPS setup writes customized Optional Editor Stack"
 assert_data_key_once_with_value "$gum_vps_config" "enableAiCliTools" "false" "gum VPS setup writes customized Optional AI Tool Stack"
@@ -903,7 +924,6 @@ mkdir -p "$setup_vps_custom_home"
 if ! run_terrapod_setup vps-shell 'minimal
 n
 y
-n
 y
 ' "$setup_vps_custom_home" "$setup_vps_custom_xdg" >"$tmp_dir/setup-vps-custom.out" 2>"$tmp_dir/setup-vps-custom.err"; then
   printf '%s\n' "setup stdout:" >&2
@@ -920,6 +940,12 @@ if printf '%s\n' "$setup_vps_custom_output" | grep -F "terminal-apps macOS App G
 fi
 pass "VPS setup does not prompt for terminal-apps macOS App Group"
 
+if printf '%s\n' "$setup_vps_custom_output" | grep -F "Enable Optional AI Tool Stack?" >/dev/null; then
+  fail "VPS setup does not prompt for the Optional AI Tool Stack"
+fi
+pass "VPS setup does not prompt for the Optional AI Tool Stack"
+
+assert_contains "$tmp_dir/setup-vps-custom.out" "Optional AI Tool Stack: not applicable for VPS Shell Profile" "VPS setup explains the Optional AI Tool Stack is not applicable"
 assert_contains "$tmp_dir/setup-vps-custom.out" "macOS App Groups: not applicable for VPS Shell Profile" "VPS setup explains macOS App Groups are not applicable"
 assert_contains "$tmp_dir/setup-vps-custom.out" "enableEditorStack = true" "VPS setup summary reflects customized Optional Editor Stack"
 assert_contains "$tmp_dir/setup-vps-custom.out" "enableAiCliTools = false" "VPS setup summary reflects customized Optional AI Tool Stack"
@@ -1099,7 +1125,7 @@ assert_contains "$existing_config" "email = \"minu@example.com\"" "existing upda
 assert_contains "$existing_config" "command = \"nvim\"" "existing update preserves unrelated later sections"
 assert_data_key_once_with_value "$existing_config" "profile" "\"vps-shell\"" "existing update writes the detected profile exactly once in data"
 assert_data_key_once_with_value "$existing_config" "enableEditorStack" "true" "development Preset enables Optional Editor Stack exactly once in data"
-assert_data_key_once_with_value "$existing_config" "enableAiCliTools" "true" "development Preset enables Optional AI Tool Stack exactly once in data"
+assert_data_key_once_with_value "$existing_config" "enableAiCliTools" "false" "development Preset leaves Optional AI Tool Stack disabled exactly once on the VPS Shell Profile"
 assert_data_key_once_with_value "$existing_config" "enableDevelopmentWorkspace" "true" "development Preset enables Optional Development Workspace exactly once in data"
 assert_data_key_once_with_value "$existing_config" "enableMacosAppGroupTerminalApps" "false" "development Preset disables terminal-apps macOS App Group exactly once in data"
 assert_data_key_once_with_value "$existing_config" "enableMacosAppGroupAutomation" "false" "development Preset disables automation macOS App Group exactly once in data"
@@ -1129,7 +1155,7 @@ terrapodPreset = "minimal"
 branch = "main"
 TOML
 
-run_terrapod_configure development "y" "$quoted_table_home" "$quoted_table_xdg"
+run_terrapod_configure development "y" "$quoted_table_home" "$quoted_table_xdg" macos-terminal
 
 assert_contains "$quoted_table_config" "[\"data\"]" "quoted data table header is preserved"
 assert_not_contains "$quoted_table_config" "[data]" "quoted data table update does not append a duplicate bare data table"
@@ -1161,7 +1187,7 @@ terrapodPreset = "minimal"
 branch = "main"
 TOML
 
-run_terrapod_configure development "y" "$spaced_table_home" "$spaced_table_xdg"
+run_terrapod_configure development "y" "$spaced_table_home" "$spaced_table_xdg" macos-terminal
 
 assert_contains "$spaced_table_config" "[ data ]" "spaced data table header is preserved"
 assert_not_contains "$spaced_table_config" "[data]" "spaced data table update does not append a duplicate bare data table"
@@ -1201,7 +1227,7 @@ assert_contains "$dotted_config" "data.email = \"minu@example.com\"" "dotted dat
 assert_contains "$dotted_config" "branch = \"main\"" "dotted data update preserves later sections"
 assert_contains "$dotted_config" "data.profile = \"vps-shell\"" "dotted data update writes profile as a dotted data key"
 assert_contains "$dotted_config" "data.enableEditorStack = true" "dotted data update writes Editor Stack as a dotted data key"
-assert_contains "$dotted_config" "data.enableAiCliTools = true" "dotted data update writes AI Tool Stack as a dotted data key"
+assert_contains "$dotted_config" "data.enableAiCliTools = false" "dotted data update writes the profile-gated AI Tool Stack as a dotted data key"
 assert_contains "$dotted_config" "data.enableDevelopmentWorkspace = true" "dotted data update writes Development Workspace as a dotted data key"
 assert_contains "$dotted_config" "data.enableMacosAppGroupTerminalApps = false" "dotted data update writes terminal-apps App Group as a dotted data key"
 assert_contains "$dotted_config" "data.enableMacosAppGroupAutomation = false" "dotted data update writes automation App Group as a dotted data key"
@@ -1232,7 +1258,7 @@ cat >"$quoted_config" <<'TOML'
 keepLiteral = "preserve"
 TOML
 
-run_terrapod_configure development "y" "$quoted_home" "$quoted_xdg"
+run_terrapod_configure development "y" "$quoted_home" "$quoted_xdg" macos-terminal
 
 assert_data_key_once_with_value "$quoted_config" "enableEditorStack" "true" "quoted managed key update writes one Editor Stack value in data"
 assert_data_key_once_with_value "$quoted_config" "enableAiCliTools" "true" "quoted managed key update writes one AI Tool Stack value in data"
@@ -1268,7 +1294,7 @@ enableEditorStack = "do-not-touch"
 TOML
 chmod 600 "$array_config"
 
-run_terrapod_configure development "y" "$array_home" "$array_xdg"
+run_terrapod_configure development "y" "$array_home" "$array_xdg" macos-terminal
 
 assert_contains "$array_config" "keepMe = \"yes\"" "array-table update preserves unrelated data values"
 assert_data_key_once_with_value "$array_config" "enableEditorStack" "true" "array-table update writes Editor Stack only in data"
@@ -1312,7 +1338,7 @@ enableAiCliTools = false
 branch = "main"
 TOML
 
-run_terrapod_configure development "y" "$custom_array_home" "$custom_array_xdg"
+run_terrapod_configure development "y" "$custom_array_home" "$custom_array_xdg" macos-terminal
 
 assert_contains "$custom_array_config" "customValues = [" "custom array update preserves array header"
 assert_contains "$custom_array_config" "preserve-me" "custom array update preserves array value"

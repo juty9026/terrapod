@@ -1220,9 +1220,9 @@ write_stub "$fake_warning_bin/brew" \
 fake_ai_cli_installer="$tmp_dir/fake-ai-cli-installer.sh"
 chezmoi execute-template \
   --source "$repo_root" \
-  --override-data '{"chezmoi":{"os":"linux","sourceDir":"/missing-terrapod-source"},"enableAiCliTools":true}' \
+  --override-data '{"chezmoi":{"os":"darwin","sourceDir":"/missing-terrapod-source"},"enableAiCliTools":true}' \
   --file "$repo_root/.chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl" \
-  | sed "s#/home/linuxbrew/.linuxbrew/bin/brew#$fake_warning_bin/brew#g" \
+  | sed "s#/opt/homebrew/bin/brew#$fake_warning_bin/brew#g" \
   >"$fake_ai_cli_installer"
 
 if ! HOME="$fake_ai_cli_home" FAKE_INSTALL_WARNING_CALLS="$fake_warning_calls" TERRAPOD_MACHINE_ARCH=aarch64 PATH="$fake_warning_bin:/usr/bin:/bin" /bin/sh "$fake_ai_cli_installer" >"$tmp_dir/fake-ai-cli-installer.out" 2>"$tmp_dir/fake-ai-cli-installer.err"; then
@@ -1246,9 +1246,9 @@ write_stub "$fake_ai_cli_failure_home/.local/bin/brew" \
 fake_ai_cli_failure_installer="$tmp_dir/fake-ai-cli-failure-installer.sh"
 chezmoi execute-template \
   --source "$repo_root" \
-  --override-data '{"chezmoi":{"os":"linux","sourceDir":"/missing-terrapod-source"},"enableAiCliTools":true}' \
+  --override-data '{"chezmoi":{"os":"darwin","sourceDir":"/missing-terrapod-source"},"enableAiCliTools":true}' \
   --file "$repo_root/.chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl" \
-  | sed "s#/home/linuxbrew/.linuxbrew/bin/brew#$fake_ai_cli_failure_home/.local/bin/brew#g" \
+  | sed "s#/opt/homebrew/bin/brew#$fake_ai_cli_failure_home/.local/bin/brew#g" \
   >"$fake_ai_cli_failure_installer"
 
 fake_ai_cli_failure_status=0
@@ -1281,9 +1281,9 @@ write_stub "$fake_ai_cli_write_failure_home/.local/bin/brew" \
 fake_ai_cli_write_failure_installer="$tmp_dir/fake-ai-cli-write-failure-installer.sh"
 chezmoi execute-template \
   --source "$repo_root" \
-  --override-data "{\"chezmoi\":{\"os\":\"linux\",\"sourceDir\":\"$fake_ai_cli_warning_source\"},\"enableAiCliTools\":true}" \
+  --override-data "{\"chezmoi\":{\"os\":\"darwin\",\"sourceDir\":\"$fake_ai_cli_warning_source\"},\"enableAiCliTools\":true}" \
   --file "$repo_root/.chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl" \
-  | sed "s#/home/linuxbrew/.linuxbrew/bin/brew#$fake_ai_cli_write_failure_home/.local/bin/brew#g" \
+  | sed "s#/opt/homebrew/bin/brew#$fake_ai_cli_write_failure_home/.local/bin/brew#g" \
   >"$fake_ai_cli_write_failure_installer"
 
 fake_ai_cli_write_failure_status=0
@@ -2070,7 +2070,7 @@ ubuntu_status_output="$(
 
 assert_contains "$ubuntu_status_output" "Profile: VPS Shell Profile" "Terrapod status reports VPS Shell Profile context on Ubuntu 24.04"
 assert_contains "$ubuntu_status_output" "Optional Editor Stack         : disabled" "Terrapod status reports disabled Optional Editor Stack without treating nvim as missing"
-assert_contains "$ubuntu_status_output" "Optional AI Tool Stack        : disabled" "Terrapod status reports disabled Optional AI Tool Stack without missing-tool warnings"
+assert_contains "$ubuntu_status_output" "Optional AI Tool Stack        : not applicable (VPS Shell Profile)" "Terrapod status reports the Optional AI Tool Stack as not applicable on the VPS Shell Profile"
 assert_contains "$ubuntu_status_output" "Optional Development Workspace: disabled" "Terrapod status reports disabled Optional Development Workspace without missing-tool warnings"
 assert_contains "$ubuntu_status_output" "macOS App Groups: not applicable for VPS Shell Profile" "Terrapod status omits macOS App Group details on VPS Shell Profile"
 assert_contains "$ubuntu_status_output" "apt                           : available" "Terrapod status reports Ubuntu Bootstrap Package Manager availability"
@@ -2288,10 +2288,10 @@ missing_status_output="$(
 )"
 
 assert_contains "$missing_status_output" "Optional Editor Stack         : enabled (rich Neovim configuration)" "Terrapod status reports enabled Optional Editor Stack as rich config state"
-assert_contains "$missing_status_output" "Optional AI Tool Stack        : enabled (missing tools: agy, claude, codex)" "Terrapod status reports missing tools only for enabled Optional AI Tool Stack"
+assert_contains "$missing_status_output" "Optional AI Tool Stack        : not applicable (VPS Shell Profile)" "Terrapod status keeps a requested Optional AI Tool Stack not applicable on the VPS Shell Profile"
 assert_contains "$missing_status_output" "Optional Development Workspace: enabled (development Zellij layouts)" "Terrapod status reports enabled Optional Development Workspace as layout state"
-assert_contains "$missing_status_output" "brew                          : missing" "enabled Ubuntu Optional AI Tool Stack requires Homebrew"
-assert_contains "$missing_status_output" "Warning: missing key tools: brew" "enabled Ubuntu Optional AI Tool Stack warns when Homebrew is missing"
+assert_contains "$missing_status_output" "brew                          : missing" "Ubuntu reports missing mandatory Homebrew"
+assert_contains "$missing_status_output" "Warning: missing key tools: brew" "Ubuntu warns when mandatory Homebrew is missing"
 assert_not_contains "$missing_status_output" "Warning: Optional AI Tool Stack is enabled but missing tools" "Terrapod status avoids duplicate enabled AI tool warnings"
 
 status_shadow_config="$tmp_dir/status-shadow.toml"
@@ -2360,9 +2360,28 @@ workspace_bundle_status_output="$(
 )"
 
 assert_contains "$workspace_bundle_status_output" "Optional Editor Stack         : enabled (rich Neovim configuration)" "Terrapod status treats Optional Development Workspace as enabling Optional Editor Stack"
-assert_contains "$workspace_bundle_status_output" "Optional AI Tool Stack        : enabled (missing tools: agy, claude, codex)" "Terrapod status treats Optional Development Workspace as enabling Optional AI Tool Stack"
+assert_contains "$workspace_bundle_status_output" "Optional AI Tool Stack        : not applicable (VPS Shell Profile)" "Terrapod status keeps the workspace-implied Optional AI Tool Stack not applicable on the VPS Shell Profile"
 assert_contains "$workspace_bundle_status_output" "Optional Development Workspace: enabled (development Zellij layouts)" "Terrapod status reports enabled Optional Development Workspace"
 assert_not_contains "$workspace_bundle_status_output" "Warning: Optional AI Tool Stack is enabled but missing tools" "Terrapod status avoids duplicate optional tool warnings outside executable selection"
+
+status_macos_workspace_config="$tmp_dir/status-macos-workspace.toml"
+cat >"$status_macos_workspace_config" <<'TOML'
+[data]
+profile = "macos-terminal"
+enableEditorStack = false
+enableAiCliTools = false
+enableDevelopmentWorkspace = true
+TOML
+
+macos_workspace_status_path="$(status_doctor_path macos-workspace chezmoi git zsh mise brew nvim zellij)"
+
+macos_workspace_status_output="$(
+  TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$status_macos_workspace_config" PATH="$macos_workspace_status_path" \
+    /bin/sh "$terrapod" status
+)"
+
+assert_contains "$macos_workspace_status_output" "Optional Editor Stack         : enabled (rich Neovim configuration)" "macOS Terrapod status treats Optional Development Workspace as enabling Optional Editor Stack"
+assert_contains "$macos_workspace_status_output" "Optional AI Tool Stack        : enabled (missing tools: agy, claude, codex)" "macOS Terrapod status treats Optional Development Workspace as enabling Optional AI Tool Stack"
 
 status_unsupported_os_release="$tmp_dir/status-unsupported-os-release"
 write_os_release "$status_unsupported_os_release" debian 12 "Debian GNU/Linux 12"
@@ -2408,7 +2427,7 @@ assert_contains "$doctor_ok_output" "ok - Profile is supported: VPS Shell Profil
 assert_contains "$doctor_ok_output" "Canonical executable selection: ready" "Terrapod doctor validates canonical executable selection"
 assert_contains "$doctor_ok_output" "ok - apt is available" "Terrapod doctor validates Ubuntu Bootstrap Package Manager availability"
 assert_contains "$doctor_ok_output" "ok - Optional Editor Stack is disabled" "Terrapod doctor treats disabled Optional Editor Stack as valid"
-assert_contains "$doctor_ok_output" "ok - Optional AI Tool Stack is disabled" "Terrapod doctor treats disabled Optional AI Tool Stack as valid"
+assert_contains "$doctor_ok_output" "ok - Optional AI Tool Stack is not applicable for VPS Shell Profile" "Terrapod doctor reports the Optional AI Tool Stack as not applicable on the VPS Shell Profile"
 assert_contains "$doctor_ok_output" "ok - brew is available" "VPS Shell Profile doctor always requires Homebrew"
 assert_contains "$doctor_ok_output" "ok - Optional Development Workspace is disabled" "Terrapod doctor treats disabled Optional Development Workspace as valid"
 assert_contains "$doctor_ok_output" "Guidance: none" "Terrapod doctor prints no guidance when checks pass"

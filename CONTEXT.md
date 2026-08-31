@@ -29,8 +29,8 @@ The opt-in rich editor configuration that is excluded from every machine profile
 _Avoid_: core shell editor, mandatory editor config, default LazyVim setup
 
 **Optional AI Tool Stack**:
-The opt-in command-line AI tools that may be installed on selected development machines.
-_Avoid_: core shell tools, mandatory AI tools
+The opt-in command-line AI tools that may be installed on selected **macOS Terminal Profile** development machines.
+_Avoid_: core shell tools, mandatory AI tools, cross-profile AI tools
 
 **Optional Development Workspace**:
 The opt-in full development stack bundle for machines that need rich editor configuration, AI tools, and an integrated terminal workspace together.
@@ -179,9 +179,10 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - pnpm belongs to the **Development Runtime Stack** through Node.js Corepack, not as a mise-managed tool.
 - Rich Neovim configuration belongs to the **Optional Editor Stack**, not the **Core Shell Stack**, and is opt-in for every machine profile.
 - Antigravity CLI, Claude Code, and Codex belong to the **Optional AI Tool Stack**, not the **Core Shell Stack**.
-- The **Optional AI Tool Stack** installs Homebrew casks `antigravity-cli`, `claude-code`, and `codex` on both supported machine profiles.
-- `Brewfile.ai-cli-tools.tmpl` is the canonical cross-profile declaration for Optional AI Tool Stack packages.
-- The **Modern CLI Provider** installs the 20 mandatory formulae declared in `Brewfile` on both supported profiles and owns the three Optional AI Tool Stack casks when that stack is enabled.
+- The **Optional AI Tool Stack** installs Homebrew casks `antigravity-cli`, `claude-code`, and `codex` on the **macOS Terminal Profile** only; Homebrew publishes those three as casks, which Linux Homebrew does not install.
+- The **Optional AI Tool Stack** is not applicable on the **VPS Shell Profile**. Terrapod Setup does not offer it there, the development **Preset** writes it disabled there, and `tpod status` and `tpod doctor` report it as not applicable rather than missing.
+- `Brewfile.ai-cli-tools.tmpl` is the canonical declaration for Optional AI Tool Stack packages and renders empty outside the **macOS Terminal Profile**.
+- The **Modern CLI Provider** installs the 20 mandatory formulae declared in `Brewfile` on both supported profiles and owns the three Optional AI Tool Stack casks on macOS when that stack is enabled.
 - The **VPS Shell Profile** installs Homebrew at `/home/linuxbrew/.linuxbrew` for every **Preset** on supported `x86_64` and `aarch64` systems.
 - The **VPS Shell Profile** supports one non-root management user with initial sudo access; it does not manage multi-user Homebrew prefix ownership.
 - The recommended **VPS Shell Profile** floor is 1 vCPU, 1 GiB RAM, and 3 GiB free disk, with 2 GiB RAM comfortable; the installer warns below 3 GiB but does not make this recommendation a hard gate.
@@ -190,11 +191,11 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - **Optional AI Tool Stack** installer failures do not block first-run declared-state apply; missing optional AI tools are reported by `tpod status` and `tpod doctor`.
 - Homebrew bundle apply uses `HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade`; Terrapod apply restores missing declared packages without auto-updating or upgrading.
 - `tpod apply`, `tpod status`, and `tpod doctor` compare active command-bearing declarations with canonical provider installation and executable paths.
-- When the **Optional AI Tool Stack** is disabled, `tpod apply` clears the optional AI CLI tools warning marker because those tools are no longer part of desired machine readiness.
+- When the **Optional AI Tool Stack** is disabled or not applicable for the machine profile, `tpod apply` clears the optional AI CLI tools warning marker because those tools are no longer part of desired machine readiness.
 - Existing alternate-provider payloads remain user-managed and are never removed by Terrapod.
 - Enabling only the **Optional AI Tool Stack** does not imply the **Optional Editor Stack** or **Optional Development Workspace**.
 - Development-specific terminal layouts belong to the **Optional Development Workspace**, not the **Core Shell Stack**.
-- Enabling the **Optional Development Workspace** also enables the **Optional Editor Stack** and **Optional AI Tool Stack**.
+- Enabling the **Optional Development Workspace** also enables the **Optional Editor Stack**, and the **Optional AI Tool Stack** where that stack is applicable.
 - The **Optional Development Workspace** is a stack bundle that takes precedence over disabled optional stack flags.
 - Zellij and its general launcher alias belong to the **Core Shell Stack**, while development-specific Zellij layouts and aliases belong to the **Optional Development Workspace**.
 - Disabling an optional stack excludes its files from management but does not remove files already present on a machine.

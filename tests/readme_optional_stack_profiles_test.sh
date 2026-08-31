@@ -47,6 +47,21 @@ assert_key_row_contains() {
   pass "$message"
 }
 
+assert_ubuntu_setup_not_contains() {
+  needle="$1"
+  message="$2"
+
+  if awk '
+    /^### Ubuntu 24.04 VPS$/ { in_ubuntu = 1; next }
+    /^### Intentional Upgrades$/ { in_ubuntu = 0 }
+    in_ubuntu { print }
+  ' "$readme" | grep -F "$needle" >/dev/null; then
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
 assert_ubuntu_setup_contains() {
   needle="$1"
   message="$2"
@@ -228,6 +243,12 @@ assert_contains '## Platform Details' \
   "README moves platform inventory into platform details"
 assert_ubuntu_setup_contains 'GitHub CLI (`gh`)' \
   "README documents gh as part of the Ubuntu Core Shell Stack"
+assert_ubuntu_setup_not_contains 'Optional AI Tool Stack casks through Homebrew' \
+  "README does not promise Optional AI Tool Stack casks on Ubuntu"
+assert_ubuntu_setup_contains 'The Optional AI Tool Stack is also macOS-only' \
+  "README explains the Optional AI Tool Stack is macOS-only"
+assert_key_row_contains '`enableAiCliTools`' 'ignored on the VPS Shell Profile' \
+  "README documents that enableAiCliTools is ignored on the VPS Shell Profile"
 assert_contains 'When `enableDevelopmentWorkspace` is `true`' \
   "README documents enableDevelopmentWorkspace behavior"
 assert_contains 'Optional Editor Stack and Optional AI Tool Stack' \
