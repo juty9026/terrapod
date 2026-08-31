@@ -42,6 +42,19 @@ terrapod_standard_homebrew_prefix_for_os() {
   esac
 }
 
+terrapod_standard_homebrew_os_for_profile() {
+  case "$1" in
+    macos-terminal) printf '%s\n' darwin ;;
+    vps-shell) printf '%s\n' linux ;;
+    *) return 1 ;;
+  esac
+}
+
+terrapod_standard_homebrew_prefix_for_profile() {
+  os="$(terrapod_standard_homebrew_os_for_profile "$1")" || return 1
+  terrapod_standard_homebrew_prefix_for_os "$os"
+}
+
 terrapod_standard_homebrew_brew_path() {
   os="$1"
   hardware_arch="$(terrapod_homebrew_hardware_arch "$os")" || return 1

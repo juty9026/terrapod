@@ -14,6 +14,7 @@ esac
 command_dir="${command_path%/*}"
 command_dir="$(CDPATH= cd -- "$command_dir" 2>/dev/null && pwd || printf '%s\n' ".")"
 install_warnings_lib="${TERRAPOD_INSTALL_WARNINGS_LIB:-$command_dir/../lib/terrapod/install-warnings.sh}"
+homebrew_prefix_lib="${TERRAPOD_HOMEBREW_PREFIX_LIB:-$command_dir/../lib/terrapod/homebrew-prefix.sh}"
 executable_selection_helper="${TERRAPOD_EXECUTABLE_SELECTION_HELPER:-$command_dir/../lib/terrapod/executable-selection}"
 if [ ! -e "$executable_selection_helper" ] &&
   [ -e "$command_dir/../lib/terrapod/executable_executable-selection" ]; then
@@ -24,6 +25,11 @@ jetendard_settings_helper="${TERRAPOD_JETENDARD_SETTINGS_HELPER:-$command_dir/..
 TERRAPOD_INSTALL_WARNINGS_LOADED=
 if [ -f "$install_warnings_lib" ]; then
   . "$install_warnings_lib"
+fi
+
+TERRAPOD_HOMEBREW_PREFIX_LOADED=
+if [ -f "$homebrew_prefix_lib" ]; then
+  . "$homebrew_prefix_lib"
 fi
 
 run_jetendard_check() {
@@ -1028,26 +1034,12 @@ if [ "${TERRAPOD_PRINT_HOMEBREW_CLI_RECORDS:-}" = "1" ]; then
   exit 0
 fi
 
+# TERRAPOD_STANDARD_HOMEBREW_PREFIX is deliberately not consulted here: it is
+# how this command hands its own answer down to the executable-selection
+# helper, not a way to override the mapping for this command.
 standard_homebrew_prefix() {
-  profile="$1"
-  case "$profile" in
-    macos-terminal) os=darwin ;;
-    vps-shell) os=linux ;;
-    *) return 1 ;;
-  esac
-
-  arch="${TERRAPOD_MACHINE_ARCH:-$(uname -m 2>/dev/null || true)}"
-  if [ "$os" = darwin ] && [ "$arch" = x86_64 ] &&
-    [ "$(sysctl -in sysctl.proc_translated 2>/dev/null || true)" = 1 ]; then
-    arch=arm64
-  fi
-
-  case "$os:$arch" in
-    darwin:arm64|darwin:aarch64) printf '%s\n' /opt/homebrew ;;
-    darwin:x86_64) printf '%s\n' /usr/local ;;
-    linux:x86_64|linux:aarch64) printf '%s\n' /home/linuxbrew/.linuxbrew ;;
-    *) return 1 ;;
-  esac
+  [ "${TERRAPOD_HOMEBREW_PREFIX_LOADED:-}" = 1 ] || return 1
+  terrapod_standard_homebrew_prefix_for_profile "$1"
 }
 
 if [ "${TERRAPOD_PRINT_STANDARD_HOMEBREW_PREFIX:-}" = "1" ]; then

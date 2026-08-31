@@ -230,6 +230,62 @@ status_output="$(run_selection status)"
 assert_contains "$status_output" "Executable selection:" \
   "status exposes executable selection state"
 
+# The canonical path appears in whichever concern the record raises, so these
+# assertions observe the resolved prefix without depending on what the host
+# machine has actually installed.
+assert_canonical_prefix() {
+  profile="$1"
+  arch="$2"
+  translated="$3"
+  expected_prefix="$4"
+  rejected_prefix="$5"
+  label="$6"
+
+  set +e
+  prefix_output="$(
+    HOME="$tmp_dir/home" \
+      TERRAPOD_EXECUTABLE_SELECTION_INVENTORY_DIR="$inventory" \
+      TERRAPOD_MISE_SHIMS_DIR="$mise_shims" \
+      TERRAPOD_MACHINE_ARCH="$arch" \
+      TERRAPOD_DARWIN_TRANSLATED="$translated" \
+      PATH="$path_dir:/usr/bin:/bin" \
+      "$selection" doctor "$profile" false false 2>&1
+  )"
+  set -e
+
+  assert_contains "$prefix_output" "$expected_prefix/bin/bat" "$label"
+  assert_not_contains "$prefix_output" "$rejected_prefix/bin/bat" "$label rejects the other prefix"
+}
+
+assert_canonical_prefix macos-terminal x86_64 1 /opt/homebrew /usr/local \
+  "Rosetta on Apple Silicon resolves canonical executables under /opt/homebrew"
+assert_canonical_prefix macos-terminal x86_64 0 /usr/local /opt/homebrew \
+  "native Intel macOS resolves canonical executables under /usr/local"
+assert_canonical_prefix macos-terminal arm64 0 /opt/homebrew /usr/local \
+  "native Apple Silicon resolves canonical executables under /opt/homebrew"
+assert_canonical_prefix vps-shell x86_64 0 /home/linuxbrew/.linuxbrew /opt/homebrew \
+  "VPS Shell resolves canonical executables under the Linuxbrew prefix"
+
+set +e
+missing_lib_output="$(
+  HOME="$tmp_dir/home" \
+    TERRAPOD_EXECUTABLE_SELECTION_INVENTORY_DIR="$inventory" \
+    TERRAPOD_STANDARD_HOMEBREW_PREFIX="$prefix" \
+    TERRAPOD_MISE_SHIMS_DIR="$mise_shims" \
+    TERRAPOD_HOMEBREW_PREFIX_LIB="$tmp_dir/absent-homebrew-prefix.sh" \
+    PATH="$path_dir:/usr/bin:/bin" \
+    "$selection" doctor macos-terminal false false 2>&1
+)"
+missing_lib_status="$?"
+set -e
+[ "$missing_lib_status" -ne 0 ] ||
+  fail "a missing Homebrew prefix library fails instead of reporting absent executables"
+pass "a missing Homebrew prefix library fails instead of reporting absent executables"
+assert_contains "$missing_lib_output" "Homebrew prefix library is unavailable" \
+  "a missing Homebrew prefix library is diagnosed distinctly"
+assert_not_contains "$missing_lib_output" "canonical executable is missing" \
+  "a missing Homebrew prefix library is not reported as missing executables"
+
 integration_bin="$tmp_dir/integration-bin"
 integration_config="$tmp_dir/integration-config/chezmoi.toml"
 selection_log="$tmp_dir/selection.log"

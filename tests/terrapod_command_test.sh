@@ -662,13 +662,21 @@ homebrew_owned_status_doctor_path() {
   printf '%s\n' "$owned_path"
 }
 
+# The rendered command reads its Homebrew prefix mapping from a sibling
+# library, so the fixture reproduces the deployed bin/ and lib/ layout and
+# rewrites the prefix in both files.
 render_terrapod_with_homebrew_prefix() {
   name="$1"
   production_prefix="$2"
   fixture_prefix="$3"
-  rendered_terrapod="$tmp_dir/terrapod-$name"
+  rendered_root="$tmp_dir/terrapod-$name"
+  rendered_terrapod="$rendered_root/bin/terrapod"
+  rendered_prefix_lib="$rendered_root/lib/terrapod/homebrew-prefix.sh"
 
+  mkdir -p "$rendered_root/bin" "$rendered_root/lib/terrapod"
   sed "s|$production_prefix|$fixture_prefix|g" "$terrapod" >"$rendered_terrapod"
+  sed "s|$production_prefix|$fixture_prefix|g" \
+    "$repo_root/dot_local/lib/terrapod/homebrew-prefix.sh" >"$rendered_prefix_lib"
   chmod +x "$rendered_terrapod"
   printf '%s\n' "$rendered_terrapod"
 }
@@ -770,6 +778,38 @@ if [ "$rosetta_prefix_output" != /opt/homebrew ]; then
   fail "Rosetta doctor prefix mapping selects Apple Silicon Homebrew"
 fi
 pass "Rosetta doctor prefix mapping selects Apple Silicon Homebrew"
+
+write_stub "$standard_prefix_mapping_path/sysctl" 'exit 1'
+set +e
+translated_hook_output="$(
+  TERRAPOD_PRINT_STANDARD_HOMEBREW_PREFIX=1 TERRAPOD_PROFILE=macos-terminal \
+    TERRAPOD_MACHINE_ARCH=x86_64 TERRAPOD_DARWIN_TRANSLATED=1 \
+    PATH="$standard_prefix_mapping_path" /bin/sh "$terrapod"
+)"
+translated_hook_status=$?
+set -e
+assert_status "$translated_hook_status" 0 "TERRAPOD_DARWIN_TRANSLATED=1 prefix mapping succeeds"
+if [ "$translated_hook_output" != /opt/homebrew ]; then
+  fail "TERRAPOD_DARWIN_TRANSLATED=1 selects Apple Silicon Homebrew without sysctl"
+fi
+pass "TERRAPOD_DARWIN_TRANSLATED=1 selects Apple Silicon Homebrew without sysctl"
+
+write_stub "$standard_prefix_mapping_path/sysctl" \
+  'if [ "$*" = "-in sysctl.proc_translated" ]; then printf "%s\n" "1"; exit 0; fi' \
+  'exit 1'
+set +e
+untranslated_hook_output="$(
+  TERRAPOD_PRINT_STANDARD_HOMEBREW_PREFIX=1 TERRAPOD_PROFILE=macos-terminal \
+    TERRAPOD_MACHINE_ARCH=x86_64 TERRAPOD_DARWIN_TRANSLATED=0 \
+    PATH="$standard_prefix_mapping_path" /bin/sh "$terrapod"
+)"
+untranslated_hook_status=$?
+set -e
+assert_status "$untranslated_hook_status" 0 "TERRAPOD_DARWIN_TRANSLATED=0 prefix mapping succeeds"
+if [ "$untranslated_hook_output" != /usr/local ]; then
+  fail "TERRAPOD_DARWIN_TRANSLATED=0 overrides the sysctl translation report"
+fi
+pass "TERRAPOD_DARWIN_TRANSLATED=0 overrides the sysctl translation report"
 
 write_stub "$standard_prefix_mapping_path/uname" 'printf "%s\n" "mystery-arch"'
 set +e
