@@ -400,6 +400,8 @@ with Path(os.environ["JETENDARD_ADAPTER_LOG"]).open("a") as stream:
     stream.write("helper\n")
 PY
 
+# The adapters inline install-warnings.sh, so the stub is appended after the
+# helper assignment to override the real definitions rather than replacing a path.
 render_jetendard_adapter_fixture() {
   rendered="$1"
   destination="$2"
@@ -408,6 +410,8 @@ render_jetendard_adapter_fixture() {
       -e "s#^warnings_lib=.*#warnings_lib=\"$jetendard_warnings_stub\"#" \
       -e "s#^font_helper=.*#font_helper=\"$jetendard_helper_stub\"#" \
       -e "s#^settings_helper=.*#settings_helper=\"$jetendard_helper_stub\"#" \
+      -e "/^font_helper=/r $jetendard_warnings_stub" \
+      -e "/^settings_helper=/r $jetendard_warnings_stub" \
       >"$destination"
 }
 
@@ -437,6 +441,31 @@ assert_text_equals "$(cat "$jetendard_adapter_log")" 'marker-check
 helper
 clear' \
   "Jetendard retry checks the marker before install and clear"
+
+jetendard_no_python_bin="$tmp_dir/jetendard-no-python-bin"
+mkdir -p "$jetendard_no_python_bin"
+
+# Invoke the fixture by its own shebang rather than "sh $file": with PATH
+# restricted to an empty directory, a bare "sh" word would itself fail to
+# resolve (the shell searches the temporary PATH for "sh" too), which would
+# fail before the script ever ran. Direct execution resolves the interpreter
+# via the kernel's shebang handling, so only the script's internal PATH
+# lookups (e.g. "command -v python3") are affected.
+chmod +x "$jetendard_settings_fixture"
+: >"$jetendard_adapter_log"
+if ! JETENDARD_ADAPTER_LOG="$jetendard_adapter_log" \
+  JETENDARD_MARKER_EXISTS=0 \
+  JETENDARD_CLEAR_FAIL=0 \
+  PATH="$jetendard_no_python_bin" \
+  "$jetendard_settings_fixture" >/dev/null 2>&1; then
+  fail "Jetendard settings adapter records a warning and succeeds without python3"
+fi
+pass "Jetendard settings adapter records a warning and succeeds without python3"
+
+assert_text_equals \
+  "$(cat "$jetendard_adapter_log")" \
+  'write' \
+  "Jetendard settings adapter writes exactly one warning when python3 is missing"
 
 macos_mise_missing_script="$tmp_dir/macos-mise-missing.sh"
 printf '%s\n' "$macos_mise_tools_installer" |
