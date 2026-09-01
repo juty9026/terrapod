@@ -2699,3 +2699,13 @@ tpod_help_failure_stderr="$(cat "$tpod_help_failure_case/stderr")"
 tpod_help_failure_log_text="$(cat "$tpod_help_failure_log" 2>/dev/null || true)"
 assert_contains "$tpod_help_failure_stderr" "tpod help failed after recovery-core apply" "tpod help failure explains recovery-core validation failure"
 assert_not_contains "$tpod_help_failure_log_text" "chezmoi args:apply" "tpod help failure stops before full apply"
+
+if grep -n "mark_install_warning_from_source" "$repo_root/install.sh" >/dev/null; then
+  fail "install.sh no longer defines the never-called mark_install_warning_from_source"
+fi
+pass "install.sh no longer defines the never-called mark_install_warning_from_source"
+
+if grep -n "load_install_warnings_from_source .* || return 0" "$repo_root/install.sh" >/dev/null; then
+  fail "install.sh no longer skips the marker snapshot when the library is missing"
+fi
+pass "install.sh no longer skips the marker snapshot when the library is missing"
