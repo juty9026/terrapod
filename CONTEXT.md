@@ -248,6 +248,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - `tpod status` summarizes whether Terrapod install warnings are present and points to `tpod doctor`; `tpod doctor` prints category-level warning summary and guidance.
 - `tpod apply` should surface remaining Terrapod install warnings after apply, while `tpod help` stays free of install warning state.
 - `tpod apply` exit status reflects whether the declared-state apply command itself succeeded; unresolved install warning markers after apply are surfaced in output but do not make apply fail.
+- `tpod apply` treats a missing or failing executable selection helper as a broken Terrapod command surface and exits non-zero, while executable selection advisories from a successful helper run do not change exit status.
 - `tpod doctor` recovery guidance points to `tpod apply` as the general retry path; category-specific retry commands are outside the current command surface.
 - `mise-tools` install warning guidance covers failures while the **Development Runtime Manager** installs the declared runtime versions.
 - First-run initial apply runs a forced recovery-core apply for managed shell startup files and the **Terrapod** command surface before the full declared-state apply.
