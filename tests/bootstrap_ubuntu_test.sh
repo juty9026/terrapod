@@ -346,3 +346,22 @@ if [ -e "$ubuntu_bootstrap_marker" ]; then
   fail "Ubuntu bootstrap retry should clear the ubuntu-bootstrap warning after a successful retry"
 fi
 pass "Ubuntu bootstrap retry clears the ubuntu-bootstrap warning after a successful retry"
+
+missing_lib_source="$tmp_dir/onchange-missing-lib"
+mkdir -p "$missing_lib_source"
+cp -R "$repo_root/dot_local" "$missing_lib_source/dot_local"
+rm -f \
+  "$missing_lib_source/dot_local/lib/terrapod/install-warnings.sh" \
+  "$missing_lib_source/dot_local/lib/terrapod/install-warning-script.sh"
+
+rendered_missing_lib="$tmp_dir/onchange-missing-lib.sh"
+"$chezmoi_bin" execute-template \
+  --source "$repo_root" \
+  --override-data "{\"chezmoi\":{\"os\":\"linux\",\"sourceDir\":\"$missing_lib_source\",\"osRelease\":{\"id\":\"ubuntu\",\"versionID\":\"24.04\"}}}" \
+  --file "$repo_root/.chezmoiscripts/run_onchange_before_00-bootstrap-ubuntu.sh.tmpl" \
+  >"$rendered_missing_lib"
+
+if sh "$rendered_missing_lib" >/dev/null 2>&1; then
+  fail "Ubuntu bootstrap stops when the install warning library is missing"
+fi
+pass "Ubuntu bootstrap stops when the install warning library is missing"
