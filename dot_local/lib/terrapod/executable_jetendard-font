@@ -110,7 +110,7 @@ def atomic_json(path: Path, data: dict) -> None:
         os.chmod(temporary, 0o600)
         os.replace(temporary, path)
     finally:
-        if os.path.exists(temporary):
+        if os.path.lexists(temporary):
             os.unlink(temporary)
 
 
@@ -177,7 +177,10 @@ def create_transaction(recovery_root: Path) -> Path:
 
 
 def cleanup_transaction(transaction: Path, recovery_root: Path) -> None:
-    shutil.rmtree(transaction)
+    try:
+        shutil.rmtree(transaction)
+    except OSError:
+        pass
     try:
         recovery_root.rmdir()
     except OSError:
