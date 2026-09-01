@@ -135,6 +135,21 @@ expected_homebrew_path() {
   esac
 }
 
+# TERRAPOD_HOMEBREW_CANDIDATE_PATHS overrides the Homebrew search list. Entries
+# are colon-separated like PATH; an empty value means there are no candidates.
+first_executable_homebrew_candidate() {
+  candidate_paths="${TERRAPOD_HOMEBREW_CANDIDATE_PATHS-/opt/homebrew/bin/brew:/usr/local/bin/brew}"
+  old_ifs="$IFS"
+  IFS=:
+  for candidate in $candidate_paths; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      break
+    fi
+  done
+  IFS="$old_ifs"
+}
+
 reject_nonstandard_homebrew() {
   expected_brew="$1"
   discovered_brew=""
@@ -148,15 +163,7 @@ reject_nonstandard_homebrew() {
   if command -v brew >/dev/null 2>&1; then
     discovered_brew="$(command -v brew)"
   elif [ -n "${TERRAPOD_HOMEBREW_CANDIDATE_PATHS:-}" ]; then
-    old_ifs="$IFS"
-    IFS=:
-    for candidate in $TERRAPOD_HOMEBREW_CANDIDATE_PATHS; do
-      if [ -x "$candidate" ]; then
-        discovered_brew="$candidate"
-        break
-      fi
-    done
-    IFS="$old_ifs"
+    discovered_brew="$(first_executable_homebrew_candidate)"
   fi
 
   if [ -n "$discovered_brew" ] && [ "$discovered_brew" != "$expected_brew" ]; then
@@ -967,20 +974,9 @@ find_homebrew() {
     return 0
   fi
 
-  if [ "${TERRAPOD_HOMEBREW_CANDIDATE_PATHS+x}" ]; then
-    homebrew_candidate_paths="$TERRAPOD_HOMEBREW_CANDIDATE_PATHS"
-  else
-    homebrew_candidate_paths="/opt/homebrew/bin/brew /usr/local/bin/brew"
-  fi
-
-  for brew_path in $homebrew_candidate_paths; do
-    if [ -x "$brew_path" ]; then
-      printf '%s\n' "$brew_path"
-      return 0
-    fi
-  done
-
-  return 1
+  brew_path="$(first_executable_homebrew_candidate)"
+  [ -n "$brew_path" ] || return 1
+  printf '%s\n' "$brew_path"
 }
 
 mark_install_warning_from_source() {
