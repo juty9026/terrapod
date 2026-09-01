@@ -320,10 +320,10 @@ approach covers all three adapters uniformly rather than branching per script.
 ### Fixture source directories gain a file
 
 Both the `{{ include }}` rule and the path-source rule read from the source
-directory — one at render time, one at run time. The synthetic source trees in
-`tests/terrapod_command_test.sh:558-575`, `tests/terrapod_installer_test.sh:640`,
-and `:816` must therefore also copy `install-warning-script.sh`. Omitting it now
-fails the chezmoi render rather than producing a silently degraded script.
+directory — one at render time, one at run time. The synthetic source tree built
+by `copy_desktop_apply_source_fixture` in `tests/terrapod_command_test.sh:558-575`
+must therefore also copy `install-warning-script.sh`. Omitting it now fails the
+chezmoi render rather than producing a silently degraded script.
 
 ### Deployment assertion
 

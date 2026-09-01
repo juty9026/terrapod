@@ -2709,3 +2709,48 @@ if grep -n "load_install_warnings_from_source .* || return 0" "$repo_root/instal
   fail "install.sh no longer skips the marker snapshot when the library is missing"
 fi
 pass "install.sh no longer skips the marker snapshot when the library is missing"
+
+install_warnings_loader_case="$(make_case_dir install-warnings-loader)"
+install_warnings_loader_functions="$install_warnings_loader_case/install-functions.sh"
+sed '$d' "$repo_root/install.sh" >"$install_warnings_loader_functions"
+
+install_warnings_loader_empty_source="$install_warnings_loader_case/empty-source"
+mkdir -p "$install_warnings_loader_empty_source"
+if sh -c '. "$1"; load_install_warnings_from_source "$2"' \
+  sh "$install_warnings_loader_functions" "$install_warnings_loader_empty_source"; then
+  fail "install.sh treats a checkout without the marker library as fatal"
+fi
+pass "install.sh treats a checkout without the marker library as fatal"
+
+install_warnings_loader_real_source="$install_warnings_loader_case/real-source"
+mkdir -p "$install_warnings_loader_real_source/dot_local/lib/terrapod"
+cp "$repo_root/dot_local/lib/terrapod/install-warnings.sh" \
+  "$install_warnings_loader_real_source/dot_local/lib/terrapod/install-warnings.sh"
+if ! install_warnings_loader_categories="$(
+  sh -c '. "$1"; load_install_warnings_from_source "$2" && terrapod_install_warning_categories' \
+    sh "$install_warnings_loader_functions" "$install_warnings_loader_real_source"
+)"; then
+  fail "install.sh loads the install warning library from a real checkout and makes terrapod_install_warning_categories callable"
+fi
+assert_contains "$install_warnings_loader_categories" "homebrew-core" \
+  "install.sh loads the install warning library from a real checkout and makes terrapod_install_warning_categories callable"
+
+missing_install_warnings_library_case="$(make_case_dir missing-install-warnings-library)"
+write_uname_stub "$missing_install_warnings_library_case" "Darwin"
+write_command_call_stubs "$missing_install_warnings_library_case" "curl" "wget" "git" "sh"
+write_gum_command_stub "$missing_install_warnings_library_case"
+mkdir -p "$missing_install_warnings_library_case/home/.local/bin"
+write_chezmoi_flow_stub "$missing_install_warnings_library_case/home/.local/bin/chezmoi"
+TERRAPOD_STUB_CALL_LOG="$missing_install_warnings_library_case/command-calls"
+export TERRAPOD_STUB_CALL_LOG
+TERRAPOD_INSTALL_WARNINGS_LIB_TEMPLATE=
+export TERRAPOD_INSTALL_WARNINGS_LIB_TEMPLATE
+run_installer_case "$missing_install_warnings_library_case" 'minimal
+'
+TERRAPOD_INSTALL_WARNINGS_LIB_TEMPLATE="$install_warnings_lib_template"
+export TERRAPOD_INSTALL_WARNINGS_LIB_TEMPLATE
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "installer fails when the checked-out source is missing the install warning library"
+assert_contains "$(cat "$missing_install_warnings_library_case/stderr")" \
+  "failed to load the install warning library" \
+  "missing install warning library failure is explicit"

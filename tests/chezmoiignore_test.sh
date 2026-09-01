@@ -374,6 +374,22 @@ assert_contains_text \
   'python3 "$font_helper" install' \
   "Jetendard retry invokes the helper install command"
 
+jetendard_missing_lib_source="$tmp_dir/jetendard-onchange-missing-lib"
+mkdir -p "$jetendard_missing_lib_source"
+cp -R "$repo_root/dot_local" "$jetendard_missing_lib_source/dot_local"
+rm -f "$jetendard_missing_lib_source/dot_local/lib/terrapod/install-warnings.sh"
+
+jetendard_missing_lib_data="{\"chezmoi\":{\"os\":\"darwin\",\"sourceDir\":\"$jetendard_missing_lib_source\"},\"enableEditorStack\":false,\"enableAiCliTools\":false,\"enableDevelopmentWorkspace\":false}"
+macos_jetendard_installer_missing_lib="$(render_template "$jetendard_missing_lib_data" ".chezmoiscripts/run_onchange_after_65-install-jetendard-font.sh.tmpl")"
+
+macos_jetendard_installer_missing_lib_script="$tmp_dir/macos-jetendard-installer-missing-lib.sh"
+printf '%s\n' "$macos_jetendard_installer_missing_lib" >"$macos_jetendard_installer_missing_lib_script"
+
+if sh "$macos_jetendard_installer_missing_lib_script" >/dev/null 2>&1; then
+  fail "Jetendard font install should stop when the install warning library is missing"
+fi
+pass "Jetendard font install stops when the install warning library is missing"
+
 jetendard_adapter_fixture="$tmp_dir/jetendard-adapter-fixture"
 mkdir -p "$jetendard_adapter_fixture"
 jetendard_adapter_log="$jetendard_adapter_fixture/actions.log"

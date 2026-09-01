@@ -30,6 +30,14 @@ as fatal, since a checkout missing the library is a broken clone.
 `TERRAPOD_INSTALL_WARNINGS_LOADED` is a load memo for `tpod` and nothing else.
 It never again decides whether warnings work.
 
+A script records a warning through one of two call shapes, chosen by whether it
+needs the exit policy. A script that must record a warning, then exit 0 because
+the user was already told, inlines `install-warning-script.sh` and calls its
+`mark_install_warning` / `install_warning_recorded` / `exit_after_install_warning`
+trio. A script that only writes or clears a marker, with no exit decision to
+make, calls `terrapod_install_warning_write` or `terrapod_install_warning_clear`
+directly and does not inline the policy layer.
+
 ## Considered Options
 
 - Inline everywhere, including the two `run_onchange_` scripts: rejected on the
