@@ -361,21 +361,11 @@ run_integration_command() {
 }
 
 run_absent_helper_command() {
-  run_integration_terrapod "$absent_helper" "$absent_root/bin/terrapod" "$@"
+  run_integration_command "$absent_helper" "$@"
 }
 
 failing_helper="$integration_bin/executable-selection-failing"
 absent_helper="$integration_bin/executable-selection-absent"
-
-# The installed command falls back to the chezmoi-named helper next to itself
-# when the configured path does not exist, so an absent helper only stays
-# absent under a command root that carries no helper of its own.
-absent_root="$tmp_dir/absent-root"
-mkdir -p "$absent_root/bin" "$absent_root/lib/terrapod"
-cp "$repo_root/dot_local/bin/executable_terrapod" "$absent_root/bin/terrapod"
-for lib in install-warnings.sh homebrew-prefix.sh; do
-  cp "$repo_root/dot_local/lib/terrapod/$lib" "$absent_root/lib/terrapod/$lib"
-done
 
 set +e
 failing_apply_output="$(run_integration_command "$failing_helper" apply)"
