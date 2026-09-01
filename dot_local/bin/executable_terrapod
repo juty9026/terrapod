@@ -15,13 +15,29 @@ command_dir="${command_path%/*}"
 command_dir="$(CDPATH= cd -- "$command_dir" 2>/dev/null && pwd || printf '%s\n' ".")"
 install_warnings_lib="${TERRAPOD_INSTALL_WARNINGS_LIB:-$command_dir/../lib/terrapod/install-warnings.sh}"
 homebrew_prefix_lib="${TERRAPOD_HOMEBREW_PREFIX_LIB:-$command_dir/../lib/terrapod/homebrew-prefix.sh}"
-executable_selection_helper="${TERRAPOD_EXECUTABLE_SELECTION_HELPER:-$command_dir/../lib/terrapod/executable-selection}"
-if [ ! -e "$executable_selection_helper" ] &&
-  [ -e "$command_dir/../lib/terrapod/executable_executable-selection" ]; then
-  executable_selection_helper="$command_dir/../lib/terrapod/executable_executable-selection"
-fi
-jetendard_font_helper="${TERRAPOD_JETENDARD_FONT_HELPER:-$command_dir/../lib/terrapod/jetendard-font}"
-jetendard_settings_helper="${TERRAPOD_JETENDARD_SETTINGS_HELPER:-$command_dir/../lib/terrapod/jetendard-settings}"
+# Helpers ship as 'lib/terrapod/<name>' but are tracked under the chezmoi
+# source name 'executable_<name>', so a command run straight from the checkout
+# resolves the source name. An explicit override is used as given.
+resolve_helper() {
+  override="$1"
+  name="$2"
+
+  if [ -n "$override" ]; then
+    printf '%s\n' "$override"
+    return 0
+  fi
+
+  helper_path="$command_dir/../lib/terrapod/$name"
+  if [ ! -e "$helper_path" ] &&
+    [ -e "$command_dir/../lib/terrapod/executable_$name" ]; then
+    helper_path="$command_dir/../lib/terrapod/executable_$name"
+  fi
+  printf '%s\n' "$helper_path"
+}
+
+executable_selection_helper="$(resolve_helper "${TERRAPOD_EXECUTABLE_SELECTION_HELPER:-}" executable-selection)"
+jetendard_font_helper="$(resolve_helper "${TERRAPOD_JETENDARD_FONT_HELPER:-}" jetendard-font)"
+jetendard_settings_helper="$(resolve_helper "${TERRAPOD_JETENDARD_SETTINGS_HELPER:-}" jetendard-settings)"
 TERRAPOD_INSTALL_WARNINGS_LOADED=
 if [ -f "$install_warnings_lib" ]; then
   . "$install_warnings_lib"
