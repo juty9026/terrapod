@@ -572,6 +572,8 @@ copy_desktop_apply_source_fixture() {
     "$repo_root/dot_local/lib/terrapod/homebrew-prefix.sh" \
     >"$source_dir/dot_local/lib/terrapod/homebrew-prefix.sh"
   cp "$install_warnings_lib" "$source_dir/dot_local/lib/terrapod/install-warnings.sh"
+  cp "$repo_root/dot_local/lib/terrapod/install-warning-script.sh" \
+    "$source_dir/dot_local/lib/terrapod/install-warning-script.sh"
 }
 
 write_desktop_apply_config() {
