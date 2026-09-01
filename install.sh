@@ -1096,6 +1096,14 @@ ensure_first_run_setup() {
   run_terrapod_setup "$profile" "$source_dir"
 }
 
+fail_command_surface_repair() {
+  staged_path="$1"
+  message="$2"
+
+  rm -f "$staged_path"
+  fatal "$message"
+}
+
 apply_recovery_core_command_surface() {
   profile="$1"
   source_dir="$2"
@@ -1103,18 +1111,24 @@ apply_recovery_core_command_surface() {
   terrapod_source="$(checked_out_terrapod "$source_dir")"
   terrapod_target="$local_bin_dir/terrapod"
   tpod_target="$local_bin_dir/tpod"
+  terrapod_staged="$terrapod_target.terrapod-new"
+  tpod_staged="$tpod_target.terrapod-new"
 
   ensure_command_surface_path_repairable "$terrapod_target" "$source_dir" "$profile"
   ensure_command_surface_path_repairable "$tpod_target" "$source_dir" "$profile"
 
-  rm -f "$terrapod_target" "$tpod_target" ||
-    fatal "failed to repair Terrapod command surface under $local_bin_dir"
-  cp "$terrapod_source" "$terrapod_target" ||
-    fatal "failed to install Terrapod command at $terrapod_target"
-  chmod +x "$terrapod_target" ||
-    fatal "failed to make Terrapod command executable: $terrapod_target"
-  ln -s terrapod "$tpod_target" ||
-    fatal "failed to install tpod alias at $tpod_target"
+  rm -f "$terrapod_staged" "$tpod_staged" ||
+    fatal "failed to clear staged Terrapod command files under $local_bin_dir"
+  cp "$terrapod_source" "$terrapod_staged" ||
+    fail_command_surface_repair "$terrapod_staged" "failed to install Terrapod command at $terrapod_target"
+  chmod +x "$terrapod_staged" ||
+    fail_command_surface_repair "$terrapod_staged" "failed to make Terrapod command executable: $terrapod_target"
+  mv -f "$terrapod_staged" "$terrapod_target" ||
+    fail_command_surface_repair "$terrapod_staged" "failed to install Terrapod command at $terrapod_target"
+  ln -s terrapod "$tpod_staged" ||
+    fail_command_surface_repair "$tpod_staged" "failed to install tpod alias at $tpod_target"
+  mv -f "$tpod_staged" "$tpod_target" ||
+    fail_command_surface_repair "$tpod_staged" "failed to install tpod alias at $tpod_target"
 
   validate_recovery_core_command_surface "$profile" "$local_bin_dir"
 }

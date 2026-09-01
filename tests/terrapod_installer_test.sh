@@ -214,6 +214,18 @@ assert_failure() {
   pass "$message"
 }
 
+assert_no_staged_command_surface_files() {
+  local_bin_dir="$1"
+  message="$2"
+
+  for staged_candidate in "$local_bin_dir"/*.terrapod-new*; do
+    [ -e "$staged_candidate" ] || continue
+    fail "$message"
+  done
+
+  pass "$message"
+}
+
 assert_no_stub_calls() {
   log_file="$1"
   message="$2"
@@ -876,6 +888,38 @@ write_non_terrapod_command_stub() {
     printf '%s\n' 'printf "%s\n" "external command"'
   } >"$path"
   chmod +x "$path"
+}
+
+write_failing_terrapod_copy_stub() {
+  case_dir="$1"
+  real_cp="$(command -v cp)"
+
+  {
+    printf '%s\n' '#!/bin/sh'
+    printf '%s\n' 'set -eu'
+    printf '%s\n' 'for copy_arg do'
+    printf '%s\n' '  case "$copy_arg" in'
+    printf '%s\n' '    */dot_local/bin/executable_terrapod)'
+    printf '%s\n' '      printf "%s\n" "cp refused:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"'
+    printf '%s\n' '      exit 1'
+    printf '%s\n' '      ;;'
+    printf '%s\n' '  esac'
+    printf '%s\n' 'done'
+    printf '%s\n' "exec '$real_cp' \"\$@\""
+  } >"$case_dir/bin/cp"
+  chmod +x "$case_dir/bin/cp"
+}
+
+write_failing_symlink_stub() {
+  case_dir="$1"
+
+  {
+    printf '%s\n' '#!/bin/sh'
+    printf '%s\n' 'set -eu'
+    printf '%s\n' 'printf "%s\n" "ln refused:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"'
+    printf '%s\n' 'exit 1'
+  } >"$case_dir/bin/ln"
+  chmod +x "$case_dir/bin/ln"
 }
 
 write_source_pointer_command_file() {
@@ -2438,6 +2482,45 @@ missing_command_surface_log_text="$(cat "$missing_command_surface_log")"
 assert_first_occurrence_before "$missing_command_surface_log_text" "terrapod args:help" "chezmoi args:apply" "recovery-core validation happens before full apply"
 assert_contains "$missing_command_surface_log_text" "tpod args:help" "installed command surface is validated with tpod help"
 assert_contains "$missing_command_surface_log_text" "chezmoi args:apply" "missing command surface still continues to full apply after recovery-core validation"
+
+copy_failure_surface_case="$(make_case_dir command-surface-copy-failure)"
+prepare_resumable_macos_case "$copy_failure_surface_case"
+write_complete_setup_config "$copy_failure_surface_case/xdg-config/chezmoi/chezmoi.toml"
+write_installed_terrapod_command_stub "$copy_failure_surface_case/home/.local/bin/terrapod" 0
+write_failing_terrapod_copy_stub "$copy_failure_surface_case"
+copy_failure_surface_log="$copy_failure_surface_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$copy_failure_surface_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$copy_failure_surface_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "failed Terrapod command copy stops installation"
+if ! surviving_terrapod_help="$(TERRAPOD_STUB_CALL_LOG="$copy_failure_surface_log" TERRAPOD_PROFILE=macos-terminal \
+  "$copy_failure_surface_case/home/.local/bin/terrapod" help 2>/dev/null)"; then
+  fail "failed Terrapod command copy keeps the previous terrapod command runnable"
+fi
+pass "failed Terrapod command copy keeps the previous terrapod command runnable"
+assert_contains "$surviving_terrapod_help" "Terrapod - a small landing pod for your dotfiles" "surviving terrapod command still answers help"
+assert_no_staged_command_surface_files "$copy_failure_surface_case/home/.local/bin" "failed Terrapod command copy leaves no staged command file behind"
+
+alias_failure_surface_case="$(make_case_dir command-surface-alias-failure)"
+prepare_resumable_macos_case "$alias_failure_surface_case"
+write_complete_setup_config "$alias_failure_surface_case/xdg-config/chezmoi/chezmoi.toml"
+ln -s "$alias_failure_surface_case/xdg-data/chezmoi/dot_local/bin/executable_terrapod" \
+  "$alias_failure_surface_case/home/.local/bin/tpod"
+write_failing_symlink_stub "$alias_failure_surface_case"
+alias_failure_surface_log="$alias_failure_surface_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$alias_failure_surface_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$alias_failure_surface_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "failed tpod alias link stops installation"
+if ! surviving_tpod_help="$(TERRAPOD_STUB_CALL_LOG="$alias_failure_surface_log" TERRAPOD_PROFILE=macos-terminal \
+  "$alias_failure_surface_case/home/.local/bin/tpod" help 2>/dev/null)"; then
+  fail "failed tpod alias link keeps the previous tpod alias runnable"
+fi
+pass "failed tpod alias link keeps the previous tpod alias runnable"
+assert_contains "$surviving_tpod_help" "Terrapod - a small landing pod for your dotfiles" "surviving tpod alias still answers help"
+assert_no_staged_command_surface_files "$alias_failure_surface_case/home/.local/bin" "failed tpod alias link leaves no staged command file behind"
 
 dangling_symlink_conflict_case="$(make_case_dir dangling-symlink-command-conflict)"
 prepare_resumable_macos_case "$dangling_symlink_conflict_case"
