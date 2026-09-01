@@ -59,25 +59,24 @@ write_stub() {
 
 mkdir -p "$tmp_dir/bin" "$tmp_dir/home"
 
+for superseded_script in \
+  ".chezmoiscripts/run_onchange_before_30-install-shell-integrations.sh.tmpl" \
+  ".chezmoiscripts/run_before_31-retry-shell-integrations.sh.tmpl"; do
+  if [ -e "$repo_root/$superseded_script" ]; then
+    fail "shell integrations should install and retry from a single script, not $superseded_script"
+  fi
+done
+pass "shell integrations install and retry from a single script"
+
 rendered="$tmp_dir/shell-integrations.sh"
 chezmoi execute-template \
   --source "$repo_root" \
   --override-data '{"chezmoi":{"os":"linux"}}' \
-  --file "$repo_root/.chezmoiscripts/run_onchange_before_30-install-shell-integrations.sh.tmpl" \
+  --file "$repo_root/.chezmoiscripts/run_before_30-install-shell-integrations.sh.tmpl" \
   >"$rendered"
-
-retry_rendered="$tmp_dir/shell-integrations-retry.sh"
-chezmoi execute-template \
-  --source "$repo_root" \
-  --override-data '{"chezmoi":{"os":"linux"}}' \
-  --file "$repo_root/.chezmoiscripts/run_before_31-retry-shell-integrations.sh.tmpl" \
-  >"$retry_rendered"
 
 sh -n "$rendered" || fail "rendered shell integrations script should be valid sh"
 pass "rendered shell integrations script is valid sh"
-
-sh -n "$retry_rendered" || fail "rendered shell integrations retry script should be valid sh"
-pass "rendered shell integrations retry script is valid sh"
 
 write_stub "$tmp_dir/bin/curl" \
   'printf "%s\n" "curl args:$*" >>"$SHELL_INTEGRATIONS_TEST_LOG"' \
@@ -124,21 +123,27 @@ export HOME="$tmp_dir/home"
 export XDG_STATE_HOME="$tmp_dir/state"
 export SHELL_INTEGRATIONS_TEST_LOG="$tmp_dir/shell-integrations.log"
 
-retry_no_marker_home="$tmp_dir/retry-no-marker-home"
-retry_no_marker_state="$tmp_dir/retry-no-marker-state"
-retry_no_marker_log="$tmp_dir/retry-no-marker-shell-integrations.log"
-mkdir -p "$retry_no_marker_home"
-: >"$retry_no_marker_log"
-HOME="$retry_no_marker_home" \
-  XDG_STATE_HOME="$retry_no_marker_state" \
-  SHELL_INTEGRATIONS_TEST_LOG="$retry_no_marker_log" \
+installed_home="$tmp_dir/installed-home"
+installed_state="$tmp_dir/installed-state"
+installed_log="$tmp_dir/installed-shell-integrations.log"
+mkdir -p \
+  "$installed_home/.oh-my-zsh" \
+  "$installed_home/.local/share/zinit/zinit.git" \
+  "$installed_home/.scm_breeze"
+: >"$installed_home/.oh-my-zsh/oh-my-zsh.sh"
+: >"$installed_home/.local/share/zinit/zinit.git/zinit.zsh"
+write_stub "$installed_home/.scm_breeze/install.sh" 'exit 0'
+: >"$installed_log"
+HOME="$installed_home" \
+  XDG_STATE_HOME="$installed_state" \
+  SHELL_INTEGRATIONS_TEST_LOG="$installed_log" \
   SHELL_INTEGRATIONS_CURL_STATUS=23 \
   PATH="$tmp_dir/bin:/usr/bin:/bin" \
-  sh "$retry_rendered" >"$tmp_dir/shell-integrations-retry-no-marker.out" 2>"$tmp_dir/shell-integrations-retry-no-marker.err"
-if [ -s "$retry_no_marker_log" ]; then
-  fail "shell integrations retry should be a no-op when no marker exists"
+  sh "$rendered" >"$tmp_dir/shell-integrations-installed.out" 2>"$tmp_dir/shell-integrations-installed.err"
+if [ -s "$installed_log" ]; then
+  fail "shell integrations should be a no-op when every integration is installed and no marker exists"
 fi
-pass "shell integrations retry is a no-op when no marker exists"
+pass "shell integrations is a no-op when every integration is installed and no marker exists"
 
 retry_home="$tmp_dir/retry-home"
 retry_state="$tmp_dir/retry-state"
@@ -154,7 +159,7 @@ SHELL_INTEGRATIONS_CURL_STATUS=23 \
   XDG_STATE_HOME="$retry_state" \
   SHELL_INTEGRATIONS_TEST_LOG="$retry_log" \
   PATH="$tmp_dir/bin:/usr/bin:/bin" \
-  sh "$retry_rendered" >"$tmp_dir/shell-integrations-retry-curl-failure.out" 2>"$tmp_dir/shell-integrations-retry-curl-failure.err"
+  sh "$rendered" >"$tmp_dir/shell-integrations-retry-curl-failure.out" 2>"$tmp_dir/shell-integrations-retry-curl-failure.err"
 
 retry_marker="$retry_state/terrapod/install-warnings/shell-integrations"
 if [ ! -f "$retry_marker" ]; then
@@ -173,7 +178,7 @@ HOME="$retry_home" \
   XDG_STATE_HOME="$retry_state" \
   SHELL_INTEGRATIONS_TEST_LOG="$retry_log" \
   PATH="$tmp_dir/bin:/usr/bin:/bin" \
-  sh "$retry_rendered" >"$tmp_dir/shell-integrations-retry-recovery.out" 2>"$tmp_dir/shell-integrations-retry-recovery.err"
+  sh "$rendered" >"$tmp_dir/shell-integrations-retry-recovery.out" 2>"$tmp_dir/shell-integrations-retry-recovery.err"
 if [ -e "$retry_marker" ]; then
   fail "shell integrations retry should clear warning marker after recovery"
 fi
@@ -195,7 +200,7 @@ HOME="$partial_retry_home" \
   XDG_STATE_HOME="$partial_retry_state" \
   SHELL_INTEGRATIONS_TEST_LOG="$partial_retry_log" \
   PATH="$tmp_dir/bin:/usr/bin:/bin" \
-  sh "$retry_rendered" >"$tmp_dir/shell-integrations-retry-partial-dirs.out" 2>"$tmp_dir/shell-integrations-retry-partial-dirs.err"
+  sh "$rendered" >"$tmp_dir/shell-integrations-retry-partial-dirs.out" 2>"$tmp_dir/shell-integrations-retry-partial-dirs.err"
 
 partial_retry_marker="$partial_retry_state/terrapod/install-warnings/shell-integrations"
 if [ -f "$partial_retry_marker" ]; then
@@ -222,50 +227,6 @@ partial_retry_log_text="$(cat "$partial_retry_log")"
 assert_contains "$partial_retry_log_text" "curl args:-fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh" "shell integrations retry reruns Oh My Zsh installer for partial directory"
 assert_contains "$partial_retry_log_text" "git args:clone https://github.com/zdharma-continuum/zinit" "shell integrations retry reclones zinit for partial directory"
 assert_contains "$partial_retry_log_text" "git args:clone https://github.com/scmbreeze/scm_breeze.git" "shell integrations retry reclones SCM Breeze for partial directory"
-
-partial_onchange_home="$tmp_dir/partial-onchange-home"
-partial_onchange_state="$tmp_dir/partial-onchange-state"
-partial_onchange_log="$tmp_dir/partial-onchange-shell-integrations.log"
-mkdir -p \
-  "$partial_onchange_home/.oh-my-zsh" \
-  "$partial_onchange_home/.local/share/zinit/zinit.git" \
-  "$partial_onchange_home/.scm_breeze"
-: >"$partial_onchange_log"
-HOME="$partial_onchange_home" XDG_STATE_HOME="$partial_onchange_state" sh -c \
-  '. "$1"; terrapod_install_warning_write shell-integrations "Shell integration setup needs attention" "Previous shell integration warning."' \
-  sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
-
-HOME="$partial_onchange_home" \
-  XDG_STATE_HOME="$partial_onchange_state" \
-  SHELL_INTEGRATIONS_TEST_LOG="$partial_onchange_log" \
-  PATH="$tmp_dir/bin:/usr/bin:/bin" \
-  sh "$rendered" >"$tmp_dir/shell-integrations-onchange-partial-dirs.out" 2>"$tmp_dir/shell-integrations-onchange-partial-dirs.err"
-
-partial_onchange_marker="$partial_onchange_state/terrapod/install-warnings/shell-integrations"
-if [ -f "$partial_onchange_marker" ]; then
-  fail "shell integrations onchange should clear marker after reinstalling partial directories"
-fi
-pass "shell integrations onchange clears marker after reinstalling partial directories"
-
-if [ ! -f "$partial_onchange_home/.oh-my-zsh/oh-my-zsh.sh" ]; then
-  fail "shell integrations onchange reinstalls partial Oh My Zsh directory"
-fi
-pass "shell integrations onchange reinstalls partial Oh My Zsh directory"
-
-if [ ! -f "$partial_onchange_home/.local/share/zinit/zinit.git/zinit.zsh" ]; then
-  fail "shell integrations onchange reclones partial zinit directory"
-fi
-pass "shell integrations onchange reclones partial zinit directory"
-
-if [ ! -x "$partial_onchange_home/.scm_breeze/install.sh" ]; then
-  fail "shell integrations onchange reclones partial SCM Breeze directory"
-fi
-pass "shell integrations onchange reclones partial SCM Breeze directory"
-
-partial_onchange_log_text="$(cat "$partial_onchange_log")"
-assert_contains "$partial_onchange_log_text" "curl args:-fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh" "shell integrations onchange reruns Oh My Zsh installer for partial directory"
-assert_contains "$partial_onchange_log_text" "git args:clone https://github.com/zdharma-continuum/zinit" "shell integrations onchange reclones zinit for partial directory"
-assert_contains "$partial_onchange_log_text" "git args:clone https://github.com/scmbreeze/scm_breeze.git" "shell integrations onchange reclones SCM Breeze for partial directory"
 
 HOME="$HOME" XDG_STATE_HOME="$XDG_STATE_HOME" sh -c \
   '. "$1"; terrapod_install_warning_write shell-integrations "Shell integration setup needs attention" "Previous shell integration warning."' \
