@@ -1480,6 +1480,47 @@ unset TERRAPOD_HOMEBREW_CANDIDATE_PATHS TERRAPOD_EXPECTED_HOMEBREW_PATH TERRAPOD
 assert_failure "$installer_status" "nonstandard Homebrew prefix is rejected"
 assert_contains "$(cat "$nonstandard_prefix_case/stderr")" "Homebrew exists outside the supported prefix" "nonstandard prefix guidance is explicit"
 
+candidate_paths_case="$(make_case_dir homebrew-candidate-paths)"
+candidate_installer_functions="$candidate_paths_case/install-functions.sh"
+sed '$d' "$repo_root/install.sh" >"$candidate_installer_functions"
+candidate_missing_brew="$candidate_paths_case/opt/missing/bin/brew"
+candidate_present_brew="$candidate_paths_case/opt/custom/bin/brew"
+mkdir -p "${candidate_present_brew%/brew}"
+write_stub "$candidate_present_brew" '#!/bin/sh' 'exit 0'
+
+candidate_found_brew="$(
+  PATH="$safe_path_dir:/usr/bin:/bin" \
+    TERRAPOD_HOMEBREW_CANDIDATE_PATHS="$candidate_missing_brew:$candidate_present_brew" \
+    sh -c '. "$1"; find_homebrew || true' sh "$candidate_installer_functions"
+)"
+if [ "$candidate_found_brew" != "$candidate_present_brew" ]; then
+  fail "find_homebrew splits candidate paths on colons"
+fi
+pass "find_homebrew splits candidate paths on colons"
+
+default_candidate_brew="$(
+  PATH="$safe_path_dir:/usr/bin:/bin" sh -c '. "$1"; find_homebrew || true' sh "$candidate_installer_functions"
+)"
+case "$default_candidate_brew" in
+  ''|/opt/homebrew/bin/brew|/usr/local/bin/brew)
+    pass "find_homebrew keeps its default candidate list separable"
+    ;;
+  *)
+    fail "find_homebrew keeps its default candidate list separable"
+    ;;
+esac
+
+candidate_reject_stderr="$candidate_paths_case/reject-stderr"
+if PATH="$safe_path_dir:/usr/bin:/bin" \
+  TERRAPOD_HOMEBREW_CANDIDATE_PATHS="$candidate_missing_brew:$candidate_present_brew" \
+  sh -c '. "$1"; reject_nonstandard_homebrew "$2"' sh \
+    "$candidate_installer_functions" "$candidate_paths_case/opt/homebrew/bin/brew" \
+    2>"$candidate_reject_stderr"; then
+  fail "reject_nonstandard_homebrew splits candidate paths on colons"
+fi
+pass "reject_nonstandard_homebrew splits candidate paths on colons"
+assert_contains "$(cat "$candidate_reject_stderr")" "Homebrew exists outside the supported prefix" "colon-separated candidate rejection explains the unsupported prefix"
+
 low_disk_case="$(make_case_dir low-linuxbrew-disk)"
 write_uname_stub "$low_disk_case" "Linux"
 low_disk_os_release="$(write_os_release "$low_disk_case" "ID=ubuntu" 'VERSION_ID="24.04"')"
