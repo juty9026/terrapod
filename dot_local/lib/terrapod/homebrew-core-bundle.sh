@@ -131,7 +131,9 @@ terrapod_homebrew_core_run_bundle() {
   fi
 
   tab="$(printf '\t')"
-  while IFS="$tab" read -r item_kind item_name; do
+  # Keep the record list on fd 3 so a brew bundle run that reads stdin cannot
+  # consume the remaining items and silently skip them.
+  while IFS="$tab" read -r item_kind item_name <&3; do
     single_core_brewfile="$(mktemp "${TMPDIR:-/tmp}/terrapod-homebrew-core-item.XXXXXX")" || {
       terrapod_homebrew_core_cleanup_temps
       return 1
@@ -166,7 +168,7 @@ terrapod_homebrew_core_run_bundle() {
 
     rm -f "$single_core_brewfile"
     single_core_brewfile=
-  done <"$core_records_file"
+  done 3<"$core_records_file"
 
   terrapod_homebrew_core_failure_guidance_from_files || {
     terrapod_homebrew_core_cleanup_temps

@@ -489,6 +489,9 @@ write_brew_bundle_stub() {
     '    ;;' \
     '  analytics) exit 0 ;;' \
     '  bundle)' \
+    '    if [ "${MACOS_BREW_DRAIN_STDIN:-}" = "1" ]; then' \
+    '      cat >/dev/null' \
+    '    fi' \
     '    if [ "${MACOS_BREW_ECHO_OUTPUT:-}" = "1" ]; then' \
     '      printf "%s\n" "visible brew bundle output: $*"' \
     '    fi' \
@@ -932,6 +935,23 @@ assert_not_contains_text "$core_retry_failure_marker_text" "old core retry warni
 
 assert_contains_text "$core_retry_failure_marker_text" "updated_at='" "failed core reconciliation replacement marker keeps updated_at"
 
+# A cask post-install step that reads stdin must not consume the per-item record
+# list, which would silently skip every package after the first.
+core_stdin_bin="$tmp_dir/core-stdin-bin"
+core_stdin_state="$tmp_dir/core-stdin-state"
+core_stdin_home="$tmp_dir/core-stdin-home"
+core_stdin_log="$tmp_dir/core-stdin-brew.log"
+mkdir -p "$core_stdin_bin" "$core_stdin_home"
+write_brew_bundle_stub "$core_stdin_bin/brew"
+
+if ! HOME="$core_stdin_home" XDG_STATE_HOME="$core_stdin_state" MACOS_BREW_LOG="$core_stdin_log" MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_FORMULAE="bat zoxide" MACOS_BREW_DRAIN_STDIN=1 PATH="$core_stdin_bin:/usr/bin:/bin" \
+  sh "$macos_bootstrap_script" >"$tmp_dir/core-stdin.out" 2>"$tmp_dir/core-stdin.err" </dev/null; then
+  fail "core reconciliation survives a brew bundle that reads stdin"
+fi
+
+core_stdin_marker_text="$(cat "$core_stdin_state/terrapod/install-warnings/homebrew-core")"
+assert_contains_text "$core_stdin_marker_text" "failed formulae: bat, zoxide" "core retry keeps reading records when brew bundle consumes stdin"
+
 mise_missing_without_core_home="$tmp_dir/mise-missing-without-core-home"
 mise_missing_without_core_state="$tmp_dir/mise-missing-without-core-state"
 mkdir -p "$mise_missing_without_core_home"
@@ -1227,6 +1247,23 @@ assert_contains_text "$terminal_launcher_marker_text" "summary='Homebrew desktop
 assert_contains_text "$terminal_launcher_marker_text" "failed casks: ghostty, raycast" "desktop app marker guidance includes only casks whose single-cask bundle failed"
 assert_contains_text "$terminal_launcher_marker_text" "App Groups: terminal-apps, launcher" "desktop app marker guidance includes enabled App Groups"
 assert_not_contains_text "$terminal_launcher_marker_text" "1password-cli" "desktop app marker excludes casks whose single-cask bundle succeeded"
+
+# Same stdin hazard as the core retry loop: ghostty is the first record, so a
+# stdin-reading brew would hide the later raycast failure entirely.
+desktop_stdin_bin="$tmp_dir/desktop-stdin-bin"
+desktop_stdin_state="$tmp_dir/desktop-stdin-state"
+desktop_stdin_home="$tmp_dir/desktop-stdin-home"
+desktop_stdin_log="$tmp_dir/desktop-stdin-brew.log"
+mkdir -p "$desktop_stdin_bin" "$desktop_stdin_home"
+write_brew_bundle_stub "$desktop_stdin_bin/brew"
+
+if ! HOME="$desktop_stdin_home" XDG_STATE_HOME="$desktop_stdin_state" MACOS_BREW_LOG="$desktop_stdin_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty raycast" MACOS_BREW_DRAIN_STDIN=1 PATH="$desktop_stdin_bin:/usr/bin:/bin" \
+  sh "$terminal_launcher_bootstrap_script" >"$tmp_dir/desktop-stdin.out" 2>"$tmp_dir/desktop-stdin.err" </dev/null; then
+  fail "desktop app reconciliation survives a brew bundle that reads stdin"
+fi
+
+desktop_stdin_marker_text="$(cat "$desktop_stdin_state/terrapod/install-warnings/homebrew-desktop-apps")"
+assert_contains_text "$desktop_stdin_marker_text" "failed casks: ghostty, raycast" "desktop app retry keeps reading records when brew bundle consumes stdin"
 
 core_then_desktop_bin="$tmp_dir/core-then-desktop-bin"
 core_then_desktop_state="$tmp_dir/core-then-desktop-state"
