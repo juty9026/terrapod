@@ -1588,8 +1588,8 @@ assert_managed_paths_include_prefix \
 
 assert_managed_paths_include_prefix \
   "$ubuntu_managed" \
-  ".chezmoiscripts/run_before_31-retry-shell-integrations.sh.tmpl" \
-  "Ubuntu VPS includes marker-gated shell integration retry hook"
+  ".chezmoiscripts/run_before_30-install-shell-integrations.sh.tmpl" \
+  "Ubuntu VPS includes always-run shell integration install hook"
 
 assert_managed_paths_exclude_prefix \
   "$macos_managed" \
@@ -1603,8 +1603,8 @@ assert_managed_paths_include_prefix \
 
 assert_managed_paths_include_prefix \
   "$macos_managed" \
-  ".chezmoiscripts/run_before_31-retry-shell-integrations.sh.tmpl" \
-  "macOS includes marker-gated shell integration retry hook"
+  ".chezmoiscripts/run_before_30-install-shell-integrations.sh.tmpl" \
+  "macOS includes always-run shell integration install hook"
 
 if [ -e "$repo_root/dot_config/zsh/path.d/antigravity.zsh.tmpl" ]; then
   fail "legacy Antigravity app-bundle PATH snippet is no longer managed"
