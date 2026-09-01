@@ -850,6 +850,11 @@ assert_line \
 
 assert_line \
   "$managed_targets" \
+  ".local/lib/terrapod/install-warning-script.sh" \
+  "chezmoi manages the shared install warning script helper library"
+
+assert_line \
+  "$managed_targets" \
   ".local/lib/terrapod/executable-selection" \
   "chezmoi manages the executable selection helper"
 
@@ -915,6 +920,16 @@ pass "shared install warning marker library source exists"
 
 sh -n "$install_warnings_lib" || fail "shared install warning marker library is valid POSIX shell"
 pass "shared install warning marker library is valid POSIX shell"
+
+install_warning_script_lib="$repo_root/dot_local/lib/terrapod/install-warning-script.sh"
+
+if [ ! -f "$install_warning_script_lib" ]; then
+  fail "shared install warning script helper library exists"
+fi
+pass "shared install warning script helper library exists"
+
+sh -n "$install_warning_script_lib" || fail "shared install warning script helper library is valid POSIX shell"
+pass "shared install warning script helper library is valid POSIX shell"
 
 sh -n "$executable_selection_helper" || fail "executable selection helper is valid POSIX shell"
 pass "executable selection helper is valid POSIX shell"
