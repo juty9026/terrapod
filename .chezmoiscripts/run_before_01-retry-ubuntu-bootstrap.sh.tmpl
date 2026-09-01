@@ -2,11 +2,7 @@
 #!/bin/sh
 set -eu
 
-install_warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
-if [ ! -f "$install_warnings_lib" ]; then
-  exit 0
-fi
-. "$install_warnings_lib"
+{{ include "dot_local/lib/terrapod/install-warnings.sh" }}
 
 if ! terrapod_install_warning_existing_path ubuntu-bootstrap >/dev/null 2>&1; then
   exit 0
