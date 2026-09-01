@@ -3884,3 +3884,71 @@ assert_not_contains \
   "$apply_override_validation_error" \
   "Run 'terrapod chezmoi -- --config $diff_config managed'" \
   "Terrapod apply avoids old config-aware post-apply validation command"
+
+lazy_home="$tmp_dir/lazy-lib-home"
+lazy_state="$lazy_home/.local/state"
+lazy_lib="$tmp_dir/lazy-lib/install-warnings.sh"
+lazy_bin="$tmp_dir/lazy-lib-bin"
+lazy_config="$tmp_dir/lazy-lib-chezmoi.toml"
+mkdir -p "$lazy_home" "$lazy_state" "$lazy_bin" "$tmp_dir/lazy-lib"
+# A complete managed setup config, so the run reaches the delegated chezmoi
+# apply instead of failing preflight on missing managed setup keys.
+cat >"$lazy_config" <<'TOML'
+[data]
+profile = "macos-terminal"
+enableEditorStack = true
+enableAiCliTools = true
+enableDevelopmentWorkspace = true
+enableMacosAppGroupTerminalApps = true
+enableMacosAppGroupAutomation = true
+enableMacosAppGroupLauncher = true
+enableMacosAppGroupMonitoring = false
+enableMacosAppGroupDevelopmentApps = true
+enableMacosAppGroupMobileDev = true
+TOML
+
+if [ -e "$lazy_lib" ]; then
+  fail "lazy library fixture starts without the install warning library"
+fi
+
+# The stub apply creates the library mid-run, exactly as the first real apply does.
+# Scan all args (not just $1): run_chezmoi_command prepends "--config <path>"
+# ahead of the "apply" subcommand whenever TERRAPOD_CHEZMOI_CONFIG is set.
+write_stub "$lazy_bin/chezmoi" \
+  'is_apply=' \
+  'for arg do' \
+  '  if [ "$arg" = "apply" ]; then' \
+  '    is_apply=1' \
+  '  fi' \
+  'done' \
+  'if [ "$is_apply" = "1" ]; then' \
+  '  mkdir -p "$(dirname "$LAZY_LIB_TARGET")"' \
+  '  cp "$LAZY_LIB_SOURCE" "$LAZY_LIB_TARGET"' \
+  '  HOME="$LAZY_HOME" XDG_STATE_HOME="$LAZY_STATE" sh -c '"'"'. "$1"; terrapod_install_warning_write mise-tools "mise tool install needs attention" "Rerun tpod apply."'"'"' sh "$LAZY_LIB_TARGET"' \
+  '  printf "%s\n" "stub apply output"' \
+  'fi' \
+  'exit 0'
+
+lazy_output="$(
+  LAZY_LIB_TARGET="$lazy_lib" \
+  LAZY_LIB_SOURCE="$repo_root/dot_local/lib/terrapod/install-warnings.sh" \
+  LAZY_HOME="$lazy_home" \
+  LAZY_STATE="$lazy_state" \
+  HOME="$lazy_home" \
+  XDG_STATE_HOME="$lazy_state" \
+  TERRAPOD_INSTALL_WARNINGS_LIB="$lazy_lib" \
+  TERRAPOD_PROFILE=macos-terminal \
+  TERRAPOD_CHEZMOI_CONFIG="$lazy_config" \
+  PATH="$lazy_bin:$PATH" \
+    "$terrapod" apply 2>&1
+)" || true
+
+assert_contains \
+  "$lazy_output" \
+  "Remaining install warnings:" \
+  "Terrapod apply reports warnings written by an apply that also installed the marker library"
+
+assert_contains \
+  "$lazy_output" \
+  "mise-tools: mise tool install needs attention" \
+  "Terrapod apply reads the marker library that appeared during the delegated apply"

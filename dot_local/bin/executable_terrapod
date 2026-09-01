@@ -22,15 +22,24 @@ if [ ! -e "$executable_selection_helper" ] &&
 fi
 jetendard_font_helper="${TERRAPOD_JETENDARD_FONT_HELPER:-$command_dir/../lib/terrapod/jetendard-font}"
 jetendard_settings_helper="${TERRAPOD_JETENDARD_SETTINGS_HELPER:-$command_dir/../lib/terrapod/jetendard-settings}"
-TERRAPOD_INSTALL_WARNINGS_LOADED=
-if [ -f "$install_warnings_lib" ]; then
-  . "$install_warnings_lib"
-fi
-
 TERRAPOD_HOMEBREW_PREFIX_LOADED=
 if [ -f "$homebrew_prefix_lib" ]; then
   . "$homebrew_prefix_lib"
 fi
+
+# Resolved per call rather than once at startup: during the first-run apply the
+# library target does not exist yet when tpod starts, but does by the time the
+# post-apply readers run.
+ensure_install_warnings_loaded() {
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
+    return 0
+  fi
+  if [ ! -f "$install_warnings_lib" ]; then
+    return 1
+  fi
+
+  . "$install_warnings_lib"
+}
 
 run_jetendard_check() {
   helper="$1"
@@ -1241,7 +1250,7 @@ print_status_warnings() {
 install_warning_categories_csv() {
   categories=
 
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
+  if ! ensure_install_warnings_loaded; then
     return 0
   fi
 
@@ -1516,7 +1525,7 @@ show_apply_context() {
 }
 
 prune_retired_install_warnings() {
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
+  if ! ensure_install_warnings_loaded; then
     return
   fi
 
@@ -1657,7 +1666,7 @@ install_warning_value_or_unknown() {
 }
 
 doctor_check_install_warnings() {
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
+  if ! ensure_install_warnings_loaded; then
     doctor_ok "No install warning marker reader is installed"
     return
   fi
@@ -1682,7 +1691,7 @@ doctor_check_install_warnings() {
 }
 
 print_remaining_install_warnings() {
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
+  if ! ensure_install_warnings_loaded; then
     return
   fi
 
