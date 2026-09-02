@@ -1876,6 +1876,31 @@ run_update_preflight() {
   fi
 }
 
+# The refreshed command normally sits beside the running one, so a tpod
+# installed outside the default location hands off to itself; the default
+# install location stays the fallback for a tpod run straight from a checkout.
+resolve_refreshed_tpod() {
+  refreshed_tpod="$command_dir/tpod"
+  fallback_tpod="$HOME/.local/bin/tpod"
+
+  if [ "$fallback_tpod" = "$refreshed_tpod" ]; then
+    refreshed_tpod_locations="$refreshed_tpod"
+  else
+    refreshed_tpod_locations="$refreshed_tpod or $fallback_tpod"
+  fi
+
+  if [ -x "$refreshed_tpod" ]; then
+    return 0
+  fi
+
+  if [ -x "$fallback_tpod" ]; then
+    refreshed_tpod="$fallback_tpod"
+    return 0
+  fi
+
+  return 1
+}
+
 run_update() {
   if [ "$#" -ne 0 ]; then
     fail_usage "update accepts no arguments"
@@ -1884,13 +1909,17 @@ run_update() {
   config_file="$(chezmoi_config_file)"
   show_update_context
   run_update_preflight "$config_file"
-  run_chezmoi_command update --exclude scripts
 
-  installed_tpod="$HOME/.local/bin/tpod"
-  if [ ! -x "$installed_tpod" ]; then
-    fatal "refreshed tpod command is missing: $installed_tpod"
+  if ! run_chezmoi_command update --exclude scripts; then
+    printf '%s\n' "terrapod: chezmoi update failed; fix the error above, then rerun 'tpod update'." >&2
+    return 1
   fi
-  exec "$installed_tpod" apply
+
+  if ! resolve_refreshed_tpod; then
+    fatal "refreshed tpod command is missing: $refreshed_tpod_locations"
+  fi
+
+  exec "$refreshed_tpod" apply
 }
 
 render_settings_data() {
