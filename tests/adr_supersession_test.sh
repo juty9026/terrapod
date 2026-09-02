@@ -17,20 +17,54 @@ for adr in "$adr_dir"/*.md; do
 done
 pass "every ADR cross-reference resolves to an existing record"
 
-# ADR 0008 has always recorded that it supersedes ADR 0006; this is the reverse
-# direction, so a reader landing on 0006 is not left believing it is current.
-adr_0006="$adr_dir/0006-use-official-installers-for-ai-cli-tools.md"
-grep -F 'ADR 0008 supersedes this decision' "$adr_0006" >/dev/null ||
-  fail "ADR 0006 records that ADR 0008 superseded its package source"
-pass "ADR 0006 records that ADR 0008 superseded its package source"
+# Supersession is recorded in prose on both sides: the superseding ADR says
+# "This decision supersedes ADR NNNN's ..." and the superseded one answers
+# "ADR MMMM supersedes this decision's ...". Every sentence that speaks of
+# supersession therefore has to be matched by a mention of this ADR in each
+# other ADR that sentence names, whichever side of the link it sits on.
+#
+# Sentences are cut at ". " after the file is flattened to one line, so a
+# claim wrapped over several lines is still read as one sentence.
+supersession_links() {
+  tr '\n' ' ' <"$1" | awk '
+    {
+      count = split($0, sentences, /\. /)
+      for (i = 1; i <= count; i++) {
+        sentence = sentences[i]
+        if (sentence !~ /supersed/) continue
+        while (match(sentence, /ADR [0-9][0-9][0-9][0-9]/)) {
+          print substr(sentence, RSTART + 4, 4)
+          sentence = substr(sentence, RSTART + RLENGTH)
+        }
+      }
+    }'
+}
 
-grep -F 'ADR 0017' "$adr_0006" >/dev/null ||
-  fail "ADR 0006 records the Claude Code vendor installer ADR 0017 restored"
-pass "ADR 0006 records the Claude Code vendor installer ADR 0017 restored"
+link_count=0
+for adr in "$adr_dir"/*.md; do
+  adr_name="${adr##*/}"
+  adr_number="${adr_name%%-*}"
 
-grep -F "ADR 0006's vendor-installer choice" "$adr_dir/0008-use-homebrew-for-optional-ai-cli-tools.md" >/dev/null ||
-  fail "ADR 0008 still records the supersession ADR 0006 points back to"
-pass "ADR 0008 still records the supersession ADR 0006 points back to"
+  for other in $(supersession_links "$adr" | sort -u); do
+    [ "$other" != "$adr_number" ] || continue
+    link_count=$((link_count + 1))
+    other_adr="$(find "$adr_dir" -name "$other-*.md")"
+
+    grep -F "ADR $adr_number" "$other_adr" >/dev/null ||
+      fail "ADR $other names ADR $adr_number back ($adr_name links them in a supersession sentence)"
+    pass "ADR $other names ADR $adr_number back"
+  done
+done
+
+[ "$link_count" -gt 0 ] ||
+  fail "at least one supersession sentence was found (the sentence scan is not silently empty)"
+pass "at least one supersession sentence was found"
+
+# ADR 0017 supersedes ADR 0008, not ADR 0006, so the invariant above does not
+# reach this: a reader of 0006 still has to learn that a vendor installer came
+# back for Claude Code.
+assert_file_contains "$adr_dir/0006-use-official-installers-for-ai-cli-tools.md" 'ADR 0017' \
+  "ADR 0006 records the Claude Code vendor installer ADR 0017 restored"
 
 # ADR 0017 moved Claude Code off the cask, so ADR 0008's upgrade guidance must
 # not name `claude-code` while still covering the two casks that remain.

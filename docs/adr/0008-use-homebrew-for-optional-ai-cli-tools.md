@@ -10,6 +10,18 @@ ADR 0006's vendor-installer choice only for the Optional AI Tool Stack. APT
 remains Ubuntu's Bootstrap Package Manager, and mise remains the Modern CLI
 Provider for other shared command-line tools and development runtimes.
 
+ADR 0010 supersedes this decision's restriction of Linuxbrew to the Optional AI
+Tool Stack: standard-prefix Homebrew is the **Modern CLI Provider** for the Core
+Shell Stack on both profiles, so the stack no longer governs whether Ubuntu
+bootstraps Homebrew. ADR 0015 supersedes the claim that the stack installs from
+the same casks on both profiles and the consequence that Ubuntu bootstraps
+Homebrew only when the stack is enabled; the stack is scoped to the **macOS
+Terminal Profile**. ADR 0017 supersedes the package source for Claude Code alone,
+which the **Claude Code Installer** now installs while `antigravity-cli` and
+`codex` stay Homebrew casks. This decision's choice of Homebrew over vendor
+installers stays in force on macOS for those two casks, as does
+`Brewfile.ai-cli-tools.tmpl` as their canonical declaration.
+
 ## Considered Options
 
 - Keep vendor installers on both profiles: rejected because installation,

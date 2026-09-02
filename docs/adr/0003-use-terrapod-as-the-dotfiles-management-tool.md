@@ -2,6 +2,8 @@
 
 This repository will present Terrapod as the user-facing installer and management command for personal dotfiles while keeping chezmoi as the internal apply engine. This avoids requiring users to install or remember chezmoi directly, lets first-run setup collect Preset and macOS App Group choices before applying dotfiles, and gives routine commands such as status, diff, apply, and update room to add profile, installer, and validation context around chezmoi behavior.
 
+ADR 0007 supersedes this decision's consequence that the first-run installer stops whenever the default chezmoi source directory already exists: the installer now resumes from an existing checked-out Terrapod Source Repository, force-applies only the recovery core, then runs the full declared-state apply. Terrapod as the user-facing command over chezmoi, and the rest of this decision, remain in force.
+
 ## Considered Options
 
 - Keep chezmoi as the documented entry point: rejected because the first setup flow would still require users to install chezmoi first and manually discover local configuration flags.
