@@ -3010,6 +3010,107 @@ fi
 
 pass "Terrapod update rejects extra arguments before broad upgrade flows"
 
+update_sibling_bin="$tmp_dir/update-sibling-bin"
+mkdir -p "$update_sibling_bin"
+cp "$terrapod" "$update_sibling_bin/terrapod"
+chmod +x "$update_sibling_bin/terrapod"
+update_sibling_handoff_file="$tmp_dir/update-sibling-handoff.args"
+write_stub "$update_sibling_bin/tpod" \
+  'printf "%s\n" "$*" >"'"$update_sibling_handoff_file"'"' \
+  'exit 0'
+
+: >"$update_handoff_file"
+rm -f "$CHEZMOI_CALL_FILE" "$CHEZMOI_INVOKED_FILE"
+
+if ! HOME="$update_home" XDG_CONFIG_HOME="$update_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$update_sibling_bin/terrapod" update >"$tmp_dir/update-sibling.out" 2>"$tmp_dir/update-sibling.err"; then
+  printf '%s\n' "sibling update stdout:" >&2
+  sed 's/^/  /' "$tmp_dir/update-sibling.out" >&2
+  printf '%s\n' "sibling update stderr:" >&2
+  sed 's/^/  /' "$tmp_dir/update-sibling.err" >&2
+  fail "Terrapod update runs successfully from a non-default install location"
+fi
+
+assert_line "$(cat "$update_sibling_handoff_file")" "apply" "Terrapod update hands off to the tpod beside the running command"
+
+if [ -s "$update_handoff_file" ]; then
+  fail "Terrapod update does not hand off to the default install location when a sibling tpod exists"
+fi
+
+pass "Terrapod update does not hand off to the default install location when a sibling tpod exists"
+
+update_missing_home="$tmp_dir/update-missing-home"
+update_missing_xdg="$tmp_dir/update-missing-xdg"
+update_missing_config="$update_missing_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$update_missing_home" "$(dirname "$update_missing_config")"
+cp "$update_config" "$update_missing_config"
+
+rm -f "$CHEZMOI_CALL_FILE" "$CHEZMOI_INVOKED_FILE"
+
+if HOME="$update_missing_home" XDG_CONFIG_HOME="$update_missing_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$terrapod" update >"$tmp_dir/update-missing.out" 2>"$tmp_dir/update-missing.err"; then
+  fail "Terrapod update fails when no refreshed tpod command exists"
+fi
+
+pass "Terrapod update fails when no refreshed tpod command exists"
+
+update_missing_error="$(cat "$tmp_dir/update-missing.err")"
+
+assert_contains \
+  "$update_missing_error" \
+  "refreshed tpod command is missing: $(dirname "$terrapod")/tpod or $update_missing_home/.local/bin/tpod" \
+  "Terrapod update names both places it looked for the refreshed tpod command"
+
+update_fail_home="$tmp_dir/update-fail-home"
+update_fail_xdg="$tmp_dir/update-fail-xdg"
+update_fail_config="$update_fail_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$update_fail_home/.local/bin" "$(dirname "$update_fail_config")"
+cp "$update_config" "$update_fail_config"
+update_fail_handoff_file="$tmp_dir/update-fail-handoff.args"
+write_stub "$update_fail_home/.local/bin/tpod" \
+  'printf "%s\n" "$*" >"'"$update_fail_handoff_file"'"' \
+  'exit 0'
+
+rm -f "$CHEZMOI_CALL_FILE" "$CHEZMOI_INVOKED_FILE"
+
+write_stub "$tmp_dir/bin/chezmoi" \
+  'printf "%s\n" invoked >"$CHEZMOI_INVOKED_FILE"' \
+  'printf "%s\n" "chezmoi: source state update failed" >&2' \
+  'exit 1'
+
+if HOME="$update_fail_home" XDG_CONFIG_HOME="$update_fail_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
+  sh "$terrapod" update >"$tmp_dir/update-failed.out" 2>"$tmp_dir/update-failed.err"; then
+  fail "Terrapod update fails when chezmoi update fails"
+fi
+
+pass "Terrapod update fails when chezmoi update fails"
+
+update_failed_error="$(cat "$tmp_dir/update-failed.err")"
+
+assert_contains \
+  "$update_failed_error" \
+  "chezmoi: source state update failed" \
+  "Terrapod update keeps the chezmoi error visible"
+
+assert_contains \
+  "$update_failed_error" \
+  "terrapod: chezmoi update failed; fix the error above, then rerun 'tpod update'." \
+  "Terrapod update guides recovery after a failed source update"
+
+if [ -e "$update_fail_handoff_file" ]; then
+  fail "Terrapod update does not hand off to apply after a failed source update"
+fi
+
+pass "Terrapod update does not hand off to apply after a failed source update"
+
+write_stub "$tmp_dir/bin/chezmoi" \
+  'printf "%s\n" invoked >"$CHEZMOI_INVOKED_FILE"' \
+  ': >"$CHEZMOI_CALL_FILE"' \
+  'for arg do' \
+  '  printf "%s\n" "$arg" >>"$CHEZMOI_CALL_FILE"' \
+  'done' \
+  'exit 0'
+
 export CHEZMOI_CALL_FILE="$tmp_dir/chezmoi-diff.args"
 export CHEZMOI_INVOKED_FILE="$tmp_dir/chezmoi-diff.invoked"
 
