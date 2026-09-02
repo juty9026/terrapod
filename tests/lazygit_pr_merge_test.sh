@@ -2,21 +2,8 @@
 set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-tmp_dir="$(mktemp -d)"
-
-cleanup() {
-  rm -rf "$tmp_dir"
-}
-trap cleanup EXIT INT TERM
-
-fail() {
-  printf '%s\n' "not ok - $1" >&2
-  exit 1
-}
-
-pass() {
-  printf '%s\n' "ok - $1"
-}
+. "$repo_root/tests/lib/harness.sh"
+make_tmp_dir
 
 write_stub() {
   path="$1"
@@ -26,30 +13,6 @@ write_stub() {
     printf '%s\n' "$@"
   } >"$path"
   chmod +x "$path"
-}
-
-assert_contains() {
-  haystack="$1"
-  needle="$2"
-  message="$3"
-
-  if ! printf '%s\n' "$haystack" | grep -F "$needle" >/dev/null; then
-    fail "$message"
-  fi
-
-  pass "$message"
-}
-
-assert_not_contains() {
-  haystack="$1"
-  needle="$2"
-  message="$3"
-
-  if printf '%s\n' "$haystack" | grep -F "$needle" >/dev/null; then
-    fail "$message"
-  fi
-
-  pass "$message"
 }
 
 assert_no_arg() {

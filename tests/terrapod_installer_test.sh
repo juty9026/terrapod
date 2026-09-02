@@ -2,56 +2,19 @@
 set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+. "$repo_root/tests/lib/harness.sh"
 install_warnings_lib_template="$repo_root/dot_local/lib/terrapod/install-warnings.sh"
 export TERRAPOD_INSTALL_WARNINGS_LIB_TEMPLATE="$install_warnings_lib_template"
 config_toml_lib_template="$repo_root/dot_local/lib/terrapod/config-toml.sh"
 export TERRAPOD_CONFIG_TOML_LIB_TEMPLATE="$config_toml_lib_template"
-tmp_dir="$(mktemp -d)"
+make_tmp_dir
 safe_path_dir="$tmp_dir/safe-bin"
-
-cleanup() {
-  rm -rf "$tmp_dir"
-}
-trap cleanup EXIT INT TERM
-
-fail() {
-  printf '%s\n' "not ok - $1" >&2
-  exit 1
-}
-
-pass() {
-  printf '%s\n' "ok - $1"
-}
 
 mkdir -p "$safe_path_dir"
 for command_name in awk cat chmod cmp cp date df grep ln mkdir mktemp mv readlink rm sed; do
   command_path="$(command -v "$command_name")"
   ln -s "$command_path" "$safe_path_dir/$command_name"
 done
-
-assert_contains() {
-  haystack="$1"
-  needle="$2"
-  message="$3"
-
-  if ! printf '%s\n' "$haystack" | grep -F "$needle" >/dev/null; then
-    fail "$message"
-  fi
-
-  pass "$message"
-}
-
-assert_not_contains() {
-  haystack="$1"
-  needle="$2"
-  message="$3"
-
-  if printf '%s\n' "$haystack" | grep -F -e "$needle" >/dev/null; then
-    fail "$message"
-  fi
-
-  pass "$message"
-}
 
 assert_line() {
   haystack="$1"

@@ -2,21 +2,8 @@
 set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-tmp_dir="$(mktemp -d)"
-
-cleanup() {
-  rm -rf "$tmp_dir"
-}
-trap cleanup EXIT INT TERM
-
-fail() {
-  printf '%s\n' "not ok - $1" >&2
-  exit 1
-}
-
-pass() {
-  printf '%s\n' "ok - $1"
-}
+. "$repo_root/tests/lib/harness.sh"
+make_tmp_dir
 
 write_gum_stub() {
   path="$1"
@@ -169,34 +156,6 @@ run_setup_in_pty() {
   else
     script -q /dev/null env TERM="$term" TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" setup
   fi
-}
-
-assert_contains() {
-  file="$1"
-  needle="$2"
-  message="$3"
-
-  if ! grep -F "$needle" "$file" >/dev/null; then
-    printf '%s\n' "file contents:" >&2
-    sed 's/^/  /' "$file" >&2
-    fail "$message"
-  fi
-
-  pass "$message"
-}
-
-assert_not_contains() {
-  file="$1"
-  needle="$2"
-  message="$3"
-
-  if grep -F "$needle" "$file" >/dev/null; then
-    printf '%s\n' "file contents:" >&2
-    sed 's/^/  /' "$file" >&2
-    fail "$message"
-  fi
-
-  pass "$message"
 }
 
 extract_data_section() {
@@ -500,9 +459,9 @@ if [ ! -f "$new_config" ]; then
 fi
 pass "minimal Preset creates a chezmoi config file"
 
-assert_contains "$tmp_dir/new-configure.out" "Configured Terrapod Preset 'minimal' in $new_config" "minimal Preset reports config write target"
-assert_contains "$tmp_dir/new-configure.out" "tpod apply" "minimal Preset guides the user to tpod apply after writing config"
-assert_contains "$new_config" "[data]" "new config contains a data section"
+assert_file_contains "$tmp_dir/new-configure.out" "Configured Terrapod Preset 'minimal' in $new_config" "minimal Preset reports config write target"
+assert_file_contains "$tmp_dir/new-configure.out" "tpod apply" "minimal Preset guides the user to tpod apply after writing config"
+assert_file_contains "$new_config" "[data]" "new config contains a data section"
 assert_data_key_once_with_value "$new_config" "profile" "\"vps-shell\"" "minimal Preset writes the detected profile exactly once in data"
 assert_data_key_once_with_value "$new_config" "enableEditorStack" "false" "minimal Preset disables Optional Editor Stack exactly once in data"
 assert_data_key_once_with_value "$new_config" "enableAiCliTools" "false" "minimal Preset disables Optional AI Tool Stack exactly once in data"
@@ -513,8 +472,8 @@ assert_data_key_once_with_value "$new_config" "enableMacosAppGroupLauncher" "fal
 assert_data_key_once_with_value "$new_config" "enableMacosAppGroupMonitoring" "false" "minimal Preset disables monitoring macOS App Group exactly once in data"
 assert_data_key_once_with_value "$new_config" "enableMacosAppGroupDevelopmentApps" "false" "minimal Preset disables development-apps macOS App Group exactly once in data"
 assert_data_key_once_with_value "$new_config" "enableMacosAppGroupMobileDev" "false" "minimal Preset disables mobile-dev macOS App Group exactly once in data"
-assert_not_contains "$new_config" "enableMacosDesktopApps" "minimal Preset does not write the legacy all-in desktop app toggle"
-assert_not_contains "$new_config" "terrapodPreset" "minimal Preset stores concrete values instead of a dynamic Preset"
+assert_file_not_contains "$new_config" "enableMacosDesktopApps" "minimal Preset does not write the legacy all-in desktop app toggle"
+assert_file_not_contains "$new_config" "terrapodPreset" "minimal Preset stores concrete values instead of a dynamic Preset"
 assert_backup_count "$new_config" 0 "new config creation does not create a backup"
 assert_no_shell_startup_backups_under "$new_home" "minimal Preset does not create shell startup backups"
 
@@ -540,8 +499,8 @@ assert_data_key_once_with_value "$development_config" "enableMacosAppGroupLaunch
 assert_data_key_once_with_value "$development_config" "enableMacosAppGroupMonitoring" "false" "development Preset disables monitoring macOS App Group in a new config"
 assert_data_key_once_with_value "$development_config" "enableMacosAppGroupDevelopmentApps" "false" "development Preset disables development-apps macOS App Group in a new config"
 assert_data_key_once_with_value "$development_config" "enableMacosAppGroupMobileDev" "false" "development Preset disables mobile-dev macOS App Group in a new config"
-assert_not_contains "$development_config" "enableMacosDesktopApps" "development Preset does not write the legacy all-in desktop app toggle"
-assert_not_contains "$development_config" "terrapodPreset" "development Preset stores concrete values instead of a dynamic Preset"
+assert_file_not_contains "$development_config" "enableMacosDesktopApps" "development Preset does not write the legacy all-in desktop app toggle"
+assert_file_not_contains "$development_config" "terrapodPreset" "development Preset stores concrete values instead of a dynamic Preset"
 assert_backup_count "$development_config" 0 "development config creation does not create a backup"
 
 macos_development_home="$tmp_dir/macos-development-home"
@@ -582,8 +541,8 @@ assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupLaunch
 assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupMonitoring" "true" "workstation Preset enables monitoring macOS App Group exactly once in data"
 assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupDevelopmentApps" "true" "workstation Preset enables development-apps macOS App Group exactly once in data"
 assert_data_key_once_with_value "$workstation_config" "enableMacosAppGroupMobileDev" "true" "workstation Preset enables mobile-dev macOS App Group exactly once in data"
-assert_not_contains "$workstation_config" "enableMacosDesktopApps" "workstation Preset does not write the legacy all-in desktop app toggle"
-assert_not_contains "$workstation_config" "terrapodPreset" "workstation Preset stores concrete values instead of a dynamic Preset"
+assert_file_not_contains "$workstation_config" "enableMacosDesktopApps" "workstation Preset does not write the legacy all-in desktop app toggle"
+assert_file_not_contains "$workstation_config" "terrapodPreset" "workstation Preset stores concrete values instead of a dynamic Preset"
 assert_backup_count "$workstation_config" 0 "workstation config creation does not create a backup"
 
 nogum_minimal_home="$tmp_dir/nogum-minimal-home"
@@ -602,7 +561,7 @@ assert_data_key_once_with_value "$nogum_minimal_config" "enableEditorStack" "fal
 assert_data_key_once_with_value "$nogum_minimal_config" "enableDevelopmentWorkspace" "false" "no-gum minimal writes concrete Development Workspace setting"
 assert_data_key_once_with_value "$nogum_minimal_config" "enableMacosAppGroupDevelopmentApps" "false" "no-gum minimal writes concrete development-apps App Group setting"
 assert_data_key_once_with_value "$nogum_minimal_config" "enableMacosAppGroupMobileDev" "false" "no-gum minimal writes concrete mobile-dev App Group setting"
-assert_not_contains "$nogum_minimal_config" "terrapodPreset" "no-gum minimal stores concrete values instead of a dynamic Preset"
+assert_file_not_contains "$nogum_minimal_config" "terrapodPreset" "no-gum minimal stores concrete values instead of a dynamic Preset"
 
 nogum_development_home="$tmp_dir/nogum-development-home"
 nogum_development_xdg="$tmp_dir/nogum-development-xdg"
@@ -622,7 +581,7 @@ assert_data_key_once_with_value "$nogum_development_config" "enableDevelopmentWo
 assert_data_key_once_with_value "$nogum_development_config" "enableMacosAppGroupTerminalApps" "false" "no-gum development writes concrete macOS App Group setting"
 assert_data_key_once_with_value "$nogum_development_config" "enableMacosAppGroupDevelopmentApps" "false" "no-gum development writes concrete development-apps App Group setting"
 assert_data_key_once_with_value "$nogum_development_config" "enableMacosAppGroupMobileDev" "false" "no-gum development writes concrete mobile-dev App Group setting"
-assert_not_contains "$nogum_development_config" "terrapodPreset" "no-gum development stores concrete values instead of a dynamic Preset"
+assert_file_not_contains "$nogum_development_config" "terrapodPreset" "no-gum development stores concrete values instead of a dynamic Preset"
 
 nogum_macos_minimal_home="$tmp_dir/nogum-macos-minimal-home"
 nogum_macos_minimal_xdg="$tmp_dir/nogum-macos-minimal-xdg"
@@ -640,7 +599,7 @@ assert_data_key_once_with_value "$nogum_macos_minimal_config" "enableEditorStack
 assert_data_key_once_with_value "$nogum_macos_minimal_config" "enableDevelopmentWorkspace" "false" "no-gum macOS minimal writes concrete Development Workspace setting"
 assert_data_key_once_with_value "$nogum_macos_minimal_config" "enableMacosAppGroupDevelopmentApps" "false" "no-gum macOS minimal writes concrete development-apps App Group setting"
 assert_data_key_once_with_value "$nogum_macos_minimal_config" "enableMacosAppGroupMobileDev" "false" "no-gum macOS minimal writes concrete mobile-dev App Group setting"
-assert_not_contains "$nogum_macos_minimal_config" "terrapodPreset" "no-gum macOS minimal stores concrete values instead of a dynamic Preset"
+assert_file_not_contains "$nogum_macos_minimal_config" "terrapodPreset" "no-gum macOS minimal stores concrete values instead of a dynamic Preset"
 
 nogum_macos_development_home="$tmp_dir/nogum-macos-development-home"
 nogum_macos_development_xdg="$tmp_dir/nogum-macos-development-xdg"
@@ -659,7 +618,7 @@ assert_data_key_once_with_value "$nogum_macos_development_config" "enableDevelop
 assert_data_key_once_with_value "$nogum_macos_development_config" "enableMacosAppGroupTerminalApps" "false" "no-gum macOS development writes concrete macOS App Group setting"
 assert_data_key_once_with_value "$nogum_macos_development_config" "enableMacosAppGroupDevelopmentApps" "false" "no-gum macOS development writes concrete development-apps App Group setting"
 assert_data_key_once_with_value "$nogum_macos_development_config" "enableMacosAppGroupMobileDev" "false" "no-gum macOS development writes concrete mobile-dev App Group setting"
-assert_not_contains "$nogum_macos_development_config" "terrapodPreset" "no-gum macOS development stores concrete values instead of a dynamic Preset"
+assert_file_not_contains "$nogum_macos_development_config" "terrapodPreset" "no-gum macOS development stores concrete values instead of a dynamic Preset"
 
 nogum_workstation_home="$tmp_dir/nogum-workstation-home"
 nogum_workstation_xdg="$tmp_dir/nogum-workstation-xdg"
@@ -678,7 +637,7 @@ assert_data_key_once_with_value "$nogum_workstation_config" "enableDevelopmentWo
 assert_data_key_once_with_value "$nogum_workstation_config" "enableMacosAppGroupMonitoring" "true" "no-gum workstation writes concrete macOS App Group setting"
 assert_data_key_once_with_value "$nogum_workstation_config" "enableMacosAppGroupDevelopmentApps" "true" "no-gum workstation writes concrete development-apps App Group setting"
 assert_data_key_once_with_value "$nogum_workstation_config" "enableMacosAppGroupMobileDev" "true" "no-gum workstation writes concrete mobile-dev App Group setting"
-assert_not_contains "$nogum_workstation_config" "terrapodPreset" "no-gum workstation stores concrete values instead of a dynamic Preset"
+assert_file_not_contains "$nogum_workstation_config" "terrapodPreset" "no-gum workstation stores concrete values instead of a dynamic Preset"
 
 setup_workstation_home="$tmp_dir/setup-workstation-home"
 setup_workstation_xdg="$tmp_dir/setup-workstation-xdg"
@@ -718,10 +677,10 @@ assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroup
 assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroupMonitoring" "true" "confirmed setup enables monitoring macOS App Group exactly once in data"
 assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroupDevelopmentApps" "true" "confirmed setup enables development-apps macOS App Group exactly once in data"
 assert_data_key_once_with_value "$setup_workstation_config" "enableMacosAppGroupMobileDev" "true" "confirmed setup enables mobile-dev macOS App Group exactly once in data"
-assert_not_contains "$setup_workstation_config" "enableMacosDesktopApps" "confirmed setup does not write the legacy all-in desktop app toggle"
-assert_not_contains "$setup_workstation_config" "terrapodPreset" "confirmed setup stores concrete values instead of a dynamic Preset"
+assert_file_not_contains "$setup_workstation_config" "enableMacosDesktopApps" "confirmed setup does not write the legacy all-in desktop app toggle"
+assert_file_not_contains "$setup_workstation_config" "terrapodPreset" "confirmed setup stores concrete values instead of a dynamic Preset"
 assert_backup_count "$setup_workstation_config" 0 "confirmed setup new config creation does not create a backup"
-assert_contains "$tmp_dir/setup-workstation.out" "tpod apply" "confirmed setup guides the user to tpod apply after writing config"
+assert_file_contains "$tmp_dir/setup-workstation.out" "tpod apply" "confirmed setup guides the user to tpod apply after writing config"
 assert_no_shell_startup_backups_under "$setup_workstation_home" "confirmed setup does not create shell startup backups"
 
 setup_custom_workspace_home="$tmp_dir/setup-custom-workspace-home"
@@ -747,22 +706,22 @@ y
 fi
 pass "macOS setup prompts for customization before final confirmation and customizes Optional Development Workspace and App Groups"
 
-assert_contains "$tmp_dir/setup-custom-workspace.out" "  Includes:" "workspace-enabled setup groups included optional stacks"
-assert_contains "$tmp_dir/setup-custom-workspace.out" "    - Optional Editor Stack" "workspace-enabled setup lists Optional Editor Stack under workspace"
-assert_contains "$tmp_dir/setup-custom-workspace.out" "    - Optional AI Tool Stack" "workspace-enabled setup lists Optional AI Tool Stack under workspace"
-assert_contains "$tmp_dir/setup-custom-workspace.out" "🌱 Terrapod Setup" "setup presents a rich setup heading"
-assert_contains "$tmp_dir/setup-custom-workspace.out" "Choose a Preset" "setup presents a Preset choice section"
-assert_not_contains "$tmp_dir/setup-custom-workspace.out" "Preset guide:" "setup does not print a separate Preset guide"
-assert_not_contains "$tmp_dir/setup-custom-workspace.out" "Option guide:" "setup does not print a separate option guide"
-assert_contains "$tmp_dir/setup-custom-workspace.out" "enableEditorStack = true" "workspace-enabled setup summary reflects included Optional Editor Stack"
-assert_contains "$tmp_dir/setup-custom-workspace.out" "enableAiCliTools = true" "workspace-enabled setup summary reflects included Optional AI Tool Stack"
-assert_contains "$tmp_dir/setup-custom-workspace.out" "enableDevelopmentWorkspace = true" "workspace-enabled setup summary reflects enabled Optional Development Workspace"
-assert_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupTerminalApps = false" "macOS setup summary reflects customized terminal-apps App Group"
-assert_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupAutomation = true" "macOS setup summary reflects customized automation App Group"
-assert_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupLauncher = false" "macOS setup summary reflects customized launcher App Group"
-assert_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupMonitoring = true" "macOS setup summary reflects customized monitoring App Group"
-assert_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupDevelopmentApps = false" "macOS setup summary reflects customized development-apps App Group"
-assert_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupMobileDev = false" "macOS setup summary reflects customized mobile-dev App Group"
+assert_file_contains "$tmp_dir/setup-custom-workspace.out" "  Includes:" "workspace-enabled setup groups included optional stacks"
+assert_file_contains "$tmp_dir/setup-custom-workspace.out" "    - Optional Editor Stack" "workspace-enabled setup lists Optional Editor Stack under workspace"
+assert_file_contains "$tmp_dir/setup-custom-workspace.out" "    - Optional AI Tool Stack" "workspace-enabled setup lists Optional AI Tool Stack under workspace"
+assert_file_contains "$tmp_dir/setup-custom-workspace.out" "🌱 Terrapod Setup" "setup presents a rich setup heading"
+assert_file_contains "$tmp_dir/setup-custom-workspace.out" "Choose a Preset" "setup presents a Preset choice section"
+assert_file_not_contains "$tmp_dir/setup-custom-workspace.out" "Preset guide:" "setup does not print a separate Preset guide"
+assert_file_not_contains "$tmp_dir/setup-custom-workspace.out" "Option guide:" "setup does not print a separate option guide"
+assert_file_contains "$tmp_dir/setup-custom-workspace.out" "enableEditorStack = true" "workspace-enabled setup summary reflects included Optional Editor Stack"
+assert_file_contains "$tmp_dir/setup-custom-workspace.out" "enableAiCliTools = true" "workspace-enabled setup summary reflects included Optional AI Tool Stack"
+assert_file_contains "$tmp_dir/setup-custom-workspace.out" "enableDevelopmentWorkspace = true" "workspace-enabled setup summary reflects enabled Optional Development Workspace"
+assert_file_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupTerminalApps = false" "macOS setup summary reflects customized terminal-apps App Group"
+assert_file_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupAutomation = true" "macOS setup summary reflects customized automation App Group"
+assert_file_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupLauncher = false" "macOS setup summary reflects customized launcher App Group"
+assert_file_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupMonitoring = true" "macOS setup summary reflects customized monitoring App Group"
+assert_file_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupDevelopmentApps = false" "macOS setup summary reflects customized development-apps App Group"
+assert_file_contains "$tmp_dir/setup-custom-workspace.out" "enableMacosAppGroupMobileDev = false" "macOS setup summary reflects customized mobile-dev App Group"
 
 if [ ! -f "$setup_custom_workspace_config" ]; then
   fail "macOS customized setup creates a chezmoi config file"
@@ -802,8 +761,8 @@ y
 fi
 pass "gum setup customizes concrete settings and completes"
 
-assert_contains "$tmp_dir/gum-equivalent.out" "terminal-apps" "gum setup labels terminal-apps App Group with the group name"
-assert_contains "$tmp_dir/gum-equivalent.out" "  Installs Ghostty." "gum setup describes terminal-apps App Group as Ghostty-only"
+assert_file_contains "$tmp_dir/gum-equivalent.out" "terminal-apps" "gum setup labels terminal-apps App Group with the group name"
+assert_file_contains "$tmp_dir/gum-equivalent.out" "  Installs Ghostty." "gum setup describes terminal-apps App Group as Ghostty-only"
 assert_data_key_once_with_value "$gum_equivalent_config" "enableEditorStack" "true" "gum setup writes included Optional Editor Stack"
 assert_data_key_once_with_value "$gum_equivalent_config" "enableAiCliTools" "true" "gum setup writes included Optional AI Tool Stack"
 assert_data_key_once_with_value "$gum_equivalent_config" "enableDevelopmentWorkspace" "true" "gum setup writes enabled Optional Development Workspace"
@@ -846,7 +805,7 @@ y
 fi
 pass "gum Preset selection selects development and completes"
 
-assert_contains "$tmp_dir/gum-development.out" "Configured Terrapod Preset 'development'" "gum Preset selection selects development"
+assert_file_contains "$tmp_dir/gum-development.out" "Configured Terrapod Preset 'development'" "gum Preset selection selects development"
 assert_data_key_once_with_value "$gum_development_config" "enableEditorStack" "true" "gum development writes development Editor Stack setting"
 assert_data_key_once_with_value "$gum_development_config" "enableAiCliTools" "true" "gum development writes development AI Tool Stack setting"
 assert_data_key_once_with_value "$gum_development_config" "enableDevelopmentWorkspace" "true" "gum development writes development workspace setting"
@@ -918,11 +877,11 @@ y
 fi
 pass "workspace-disabled setup prompts for customization before final confirmation and customizes leaf stacks independently"
 
-assert_contains "$tmp_dir/setup-leaf.out" "enableEditorStack = false" "workspace-disabled setup summary reflects customized Optional Editor Stack"
-assert_contains "$tmp_dir/setup-leaf.out" "enableAiCliTools = true" "workspace-disabled setup summary reflects customized Optional AI Tool Stack"
-assert_contains "$tmp_dir/setup-leaf.out" "enableDevelopmentWorkspace = false" "workspace-disabled setup summary reflects disabled Optional Development Workspace"
-assert_contains "$tmp_dir/setup-leaf.out" "enableMacosAppGroupDevelopmentApps = true" "workspace-disabled setup summary reflects customized development-apps App Group"
-assert_contains "$tmp_dir/setup-leaf.out" "enableMacosAppGroupMobileDev = false" "workspace-disabled setup summary reflects customized mobile-dev App Group"
+assert_file_contains "$tmp_dir/setup-leaf.out" "enableEditorStack = false" "workspace-disabled setup summary reflects customized Optional Editor Stack"
+assert_file_contains "$tmp_dir/setup-leaf.out" "enableAiCliTools = true" "workspace-disabled setup summary reflects customized Optional AI Tool Stack"
+assert_file_contains "$tmp_dir/setup-leaf.out" "enableDevelopmentWorkspace = false" "workspace-disabled setup summary reflects disabled Optional Development Workspace"
+assert_file_contains "$tmp_dir/setup-leaf.out" "enableMacosAppGroupDevelopmentApps = true" "workspace-disabled setup summary reflects customized development-apps App Group"
+assert_file_contains "$tmp_dir/setup-leaf.out" "enableMacosAppGroupMobileDev = false" "workspace-disabled setup summary reflects customized mobile-dev App Group"
 
 if [ ! -f "$setup_leaf_config" ]; then
   fail "workspace-disabled customized setup creates a chezmoi config file"
@@ -968,11 +927,11 @@ if printf '%s\n' "$setup_vps_custom_output" | grep -F "Enable Optional AI Tool S
 fi
 pass "VPS setup does not prompt for the Optional AI Tool Stack"
 
-assert_contains "$tmp_dir/setup-vps-custom.out" "Optional AI Tool Stack: not applicable for VPS Shell Profile" "VPS setup explains the Optional AI Tool Stack is not applicable"
-assert_contains "$tmp_dir/setup-vps-custom.out" "macOS App Groups: not applicable for VPS Shell Profile" "VPS setup explains macOS App Groups are not applicable"
-assert_contains "$tmp_dir/setup-vps-custom.out" "enableEditorStack = true" "VPS setup summary reflects customized Optional Editor Stack"
-assert_contains "$tmp_dir/setup-vps-custom.out" "enableAiCliTools = false" "VPS setup summary reflects customized Optional AI Tool Stack"
-assert_contains "$tmp_dir/setup-vps-custom.out" "enableDevelopmentWorkspace = false" "VPS setup summary reflects disabled Optional Development Workspace"
+assert_file_contains "$tmp_dir/setup-vps-custom.out" "Optional AI Tool Stack: not applicable for VPS Shell Profile" "VPS setup explains the Optional AI Tool Stack is not applicable"
+assert_file_contains "$tmp_dir/setup-vps-custom.out" "macOS App Groups: not applicable for VPS Shell Profile" "VPS setup explains macOS App Groups are not applicable"
+assert_file_contains "$tmp_dir/setup-vps-custom.out" "enableEditorStack = true" "VPS setup summary reflects customized Optional Editor Stack"
+assert_file_contains "$tmp_dir/setup-vps-custom.out" "enableAiCliTools = false" "VPS setup summary reflects customized Optional AI Tool Stack"
+assert_file_contains "$tmp_dir/setup-vps-custom.out" "enableDevelopmentWorkspace = false" "VPS setup summary reflects disabled Optional Development Workspace"
 
 if [ ! -f "$setup_vps_custom_config" ]; then
   fail "VPS customized setup creates a chezmoi config file"
@@ -1001,8 +960,8 @@ y
 fi
 pass "VPS setup workstation rejection exits non-zero"
 
-assert_contains "$tmp_dir/setup-vps-workstation-error.out" "workstation Preset is only available for the macOS Terminal Profile" "VPS setup workstation rejection writes the error"
-assert_not_contains "$tmp_dir/setup-vps-workstation-error.err" "workstation Preset is only available for the macOS Terminal Profile" "VPS setup workstation rejection does not write outside the PTY transcript"
+assert_file_contains "$tmp_dir/setup-vps-workstation-error.out" "workstation Preset is only available for the macOS Terminal Profile" "VPS setup workstation rejection writes the error"
+assert_file_not_contains "$tmp_dir/setup-vps-workstation-error.err" "workstation Preset is only available for the macOS Terminal Profile" "VPS setup workstation rejection does not write outside the PTY transcript"
 
 if [ -e "$setup_vps_workstation_error_config" ]; then
   fail "VPS setup workstation rejection does not create a config"
@@ -1023,8 +982,8 @@ __CANCEL__
 fi
 pass "setup setting cancellation exits non-zero"
 
-assert_contains "$tmp_dir/setup-setting-cancel.out" "setup cancelled" "setup setting cancellation writes the error"
-assert_not_contains "$tmp_dir/setup-setting-cancel.err" "setup cancelled" "setup setting cancellation does not write outside the PTY transcript"
+assert_file_contains "$tmp_dir/setup-setting-cancel.out" "setup cancelled" "setup setting cancellation writes the error"
+assert_file_not_contains "$tmp_dir/setup-setting-cancel.err" "setup cancelled" "setup setting cancellation does not write outside the PTY transcript"
 
 if [ -e "$setup_setting_cancel_config" ]; then
   fail "setup setting cancellation does not create a config"
@@ -1052,7 +1011,7 @@ n
 fi
 pass "cancelled setup exits non-zero"
 
-assert_contains "$tmp_dir/setup-cancel.out" "setup cancelled" "cancelled setup explains cancellation"
+assert_file_contains "$tmp_dir/setup-cancel.out" "setup cancelled" "cancelled setup explains cancellation"
 
 if [ -e "$setup_cancel_config" ]; then
   fail "cancelled setup does not create a new config"
@@ -1087,7 +1046,7 @@ if run_terrapod_setup macos-terminal 'development
 fi
 pass "empty final confirmation cancels setup"
 
-assert_contains "$tmp_dir/setup-existing-cancel.out" "setup cancelled" "empty final confirmation explains cancellation"
+assert_file_contains "$tmp_dir/setup-existing-cancel.out" "setup cancelled" "empty final confirmation explains cancellation"
 
 if ! cmp -s "$setup_existing_cancel_config" "$tmp_dir/setup-existing-cancel-before.toml"; then
   fail "cancelled setup leaves existing config unchanged"
@@ -1143,9 +1102,9 @@ cp "$existing_config" "$tmp_dir/existing-before.toml"
 
 run_terrapod_configure_yes development "$existing_home" "$existing_xdg"
 
-assert_contains "$existing_config" "branch = \"main\"" "existing update preserves unrelated sourceState values"
-assert_contains "$existing_config" "email = \"minu@example.com\"" "existing update preserves unrelated data values"
-assert_contains "$existing_config" "command = \"nvim\"" "existing update preserves unrelated later sections"
+assert_file_contains "$existing_config" "branch = \"main\"" "existing update preserves unrelated sourceState values"
+assert_file_contains "$existing_config" "email = \"minu@example.com\"" "existing update preserves unrelated data values"
+assert_file_contains "$existing_config" "command = \"nvim\"" "existing update preserves unrelated later sections"
 assert_data_key_once_with_value "$existing_config" "profile" "\"vps-shell\"" "existing update writes the detected profile exactly once in data"
 assert_data_key_once_with_value "$existing_config" "enableEditorStack" "true" "development Preset enables Optional Editor Stack exactly once in data"
 assert_data_key_once_with_value "$existing_config" "enableAiCliTools" "false" "development Preset leaves Optional AI Tool Stack disabled exactly once on the VPS Shell Profile"
@@ -1156,9 +1115,9 @@ assert_data_key_once_with_value "$existing_config" "enableMacosAppGroupLauncher"
 assert_data_key_once_with_value "$existing_config" "enableMacosAppGroupMonitoring" "false" "development Preset disables monitoring macOS App Group exactly once in data"
 assert_data_key_once_with_value "$existing_config" "enableMacosAppGroupDevelopmentApps" "false" "development Preset writes development-apps exactly once in data"
 assert_data_key_once_with_value "$existing_config" "enableMacosAppGroupMobileDev" "false" "development Preset writes mobile-dev exactly once in data"
-assert_not_contains "$existing_config" "enableMacosAppGroupAiApps" "explicit config migration removes deprecated ai-apps key"
-assert_not_contains "$existing_config" "enableMacosDesktopApps" "existing update removes the legacy all-in desktop app toggle"
-assert_not_contains "$existing_config" "terrapodPreset" "existing update removes stale dynamic Preset key"
+assert_file_not_contains "$existing_config" "enableMacosAppGroupAiApps" "explicit config migration removes deprecated ai-apps key"
+assert_file_not_contains "$existing_config" "enableMacosDesktopApps" "existing update removes the legacy all-in desktop app toggle"
+assert_file_not_contains "$existing_config" "terrapodPreset" "existing update removes stale dynamic Preset key"
 assert_single_backup_matches "$existing_config" "$tmp_dir/existing-before.toml" "existing update creates one backup before changing managed keys"
 assert_no_shell_startup_backups_under "$existing_home" "existing update does not create shell startup backups"
 
@@ -1180,10 +1139,10 @@ TOML
 
 run_terrapod_configure_yes development "$quoted_table_home" "$quoted_table_xdg" macos-terminal
 
-assert_contains "$quoted_table_config" "[\"data\"]" "quoted data table header is preserved"
-assert_not_contains "$quoted_table_config" "[data]" "quoted data table update does not append a duplicate bare data table"
-assert_contains "$quoted_table_config" "keepQuotedTable = \"preserve\"" "quoted data table update preserves unrelated data values"
-assert_contains "$quoted_table_config" "branch = \"main\"" "quoted data table update preserves later sections"
+assert_file_contains "$quoted_table_config" "[\"data\"]" "quoted data table header is preserved"
+assert_file_not_contains "$quoted_table_config" "[data]" "quoted data table update does not append a duplicate bare data table"
+assert_file_contains "$quoted_table_config" "keepQuotedTable = \"preserve\"" "quoted data table update preserves unrelated data values"
+assert_file_contains "$quoted_table_config" "branch = \"main\"" "quoted data table update preserves later sections"
 assert_data_key_once_with_value "$quoted_table_config" "enableEditorStack" "true" "quoted data table update writes Editor Stack in data"
 assert_data_key_once_with_value "$quoted_table_config" "enableAiCliTools" "true" "quoted data table update writes AI Tool Stack in data"
 assert_data_key_once_with_value "$quoted_table_config" "enableDevelopmentWorkspace" "true" "quoted data table update writes Development Workspace in data"
@@ -1191,8 +1150,8 @@ assert_data_key_once_with_value "$quoted_table_config" "enableMacosAppGroupTermi
 assert_data_key_once_with_value "$quoted_table_config" "enableMacosAppGroupAutomation" "false" "quoted data table update writes automation App Group in data"
 assert_data_key_once_with_value "$quoted_table_config" "enableMacosAppGroupLauncher" "false" "quoted data table update writes launcher App Group in data"
 assert_data_key_once_with_value "$quoted_table_config" "enableMacosAppGroupMonitoring" "false" "quoted data table update writes monitoring App Group in data"
-assert_not_contains "$quoted_table_config" "enableMacosDesktopApps" "quoted data table update removes the legacy all-in desktop app toggle"
-assert_not_contains "$quoted_table_config" "terrapodPreset" "quoted data table update removes stale dynamic Preset key"
+assert_file_not_contains "$quoted_table_config" "enableMacosDesktopApps" "quoted data table update removes the legacy all-in desktop app toggle"
+assert_file_not_contains "$quoted_table_config" "terrapodPreset" "quoted data table update removes stale dynamic Preset key"
 
 spaced_table_home="$tmp_dir/spaced-table-home"
 spaced_table_xdg="$tmp_dir/spaced-table-xdg"
@@ -1212,10 +1171,10 @@ TOML
 
 run_terrapod_configure_yes development "$spaced_table_home" "$spaced_table_xdg" macos-terminal
 
-assert_contains "$spaced_table_config" "[ data ]" "spaced data table header is preserved"
-assert_not_contains "$spaced_table_config" "[data]" "spaced data table update does not append a duplicate bare data table"
-assert_contains "$spaced_table_config" "keepSpacedTable = \"preserve\"" "spaced data table update preserves unrelated data values"
-assert_contains "$spaced_table_config" "branch = \"main\"" "spaced data table update preserves later sections"
+assert_file_contains "$spaced_table_config" "[ data ]" "spaced data table header is preserved"
+assert_file_not_contains "$spaced_table_config" "[data]" "spaced data table update does not append a duplicate bare data table"
+assert_file_contains "$spaced_table_config" "keepSpacedTable = \"preserve\"" "spaced data table update preserves unrelated data values"
+assert_file_contains "$spaced_table_config" "branch = \"main\"" "spaced data table update preserves later sections"
 assert_data_key_once_with_value "$spaced_table_config" "enableEditorStack" "true" "spaced data table update writes Editor Stack in data"
 assert_data_key_once_with_value "$spaced_table_config" "enableAiCliTools" "true" "spaced data table update writes AI Tool Stack in data"
 assert_data_key_once_with_value "$spaced_table_config" "enableDevelopmentWorkspace" "true" "spaced data table update writes Development Workspace in data"
@@ -1223,8 +1182,8 @@ assert_data_key_once_with_value "$spaced_table_config" "enableMacosAppGroupTermi
 assert_data_key_once_with_value "$spaced_table_config" "enableMacosAppGroupAutomation" "false" "spaced data table update writes automation App Group in data"
 assert_data_key_once_with_value "$spaced_table_config" "enableMacosAppGroupLauncher" "false" "spaced data table update writes launcher App Group in data"
 assert_data_key_once_with_value "$spaced_table_config" "enableMacosAppGroupMonitoring" "false" "spaced data table update writes monitoring App Group in data"
-assert_not_contains "$spaced_table_config" "enableMacosDesktopApps" "spaced data table update removes the legacy all-in desktop app toggle"
-assert_not_contains "$spaced_table_config" "terrapodPreset" "spaced data table update removes stale dynamic Preset key"
+assert_file_not_contains "$spaced_table_config" "enableMacosDesktopApps" "spaced data table update removes the legacy all-in desktop app toggle"
+assert_file_not_contains "$spaced_table_config" "terrapodPreset" "spaced data table update removes stale dynamic Preset key"
 
 dotted_home="$tmp_dir/dotted-home"
 dotted_xdg="$tmp_dir/dotted-xdg"
@@ -1245,19 +1204,19 @@ TOML
 
 run_terrapod_configure_yes development "$dotted_home" "$dotted_xdg"
 
-assert_not_contains "$dotted_config" "[data]" "dotted data update does not append a duplicate data table"
-assert_contains "$dotted_config" "data.email = \"minu@example.com\"" "dotted data update preserves unrelated data values"
-assert_contains "$dotted_config" "branch = \"main\"" "dotted data update preserves later sections"
-assert_contains "$dotted_config" "data.profile = \"vps-shell\"" "dotted data update writes profile as a dotted data key"
-assert_contains "$dotted_config" "data.enableEditorStack = true" "dotted data update writes Editor Stack as a dotted data key"
-assert_contains "$dotted_config" "data.enableAiCliTools = false" "dotted data update writes the profile-gated AI Tool Stack as a dotted data key"
-assert_contains "$dotted_config" "data.enableDevelopmentWorkspace = true" "dotted data update writes Development Workspace as a dotted data key"
-assert_contains "$dotted_config" "data.enableMacosAppGroupTerminalApps = false" "dotted data update writes terminal-apps App Group as a dotted data key"
-assert_contains "$dotted_config" "data.enableMacosAppGroupAutomation = false" "dotted data update writes automation App Group as a dotted data key"
-assert_contains "$dotted_config" "data.enableMacosAppGroupLauncher = false" "dotted data update writes launcher App Group as a dotted data key"
-assert_contains "$dotted_config" "data.enableMacosAppGroupMonitoring = false" "dotted data update writes monitoring App Group as a dotted data key"
-assert_not_contains "$dotted_config" "data.enableMacosDesktopApps" "dotted data update removes the legacy all-in desktop app toggle"
-assert_not_contains "$dotted_config" "data.terrapodPreset" "dotted data update removes stale dynamic Preset key"
+assert_file_not_contains "$dotted_config" "[data]" "dotted data update does not append a duplicate data table"
+assert_file_contains "$dotted_config" "data.email = \"minu@example.com\"" "dotted data update preserves unrelated data values"
+assert_file_contains "$dotted_config" "branch = \"main\"" "dotted data update preserves later sections"
+assert_file_contains "$dotted_config" "data.profile = \"vps-shell\"" "dotted data update writes profile as a dotted data key"
+assert_file_contains "$dotted_config" "data.enableEditorStack = true" "dotted data update writes Editor Stack as a dotted data key"
+assert_file_contains "$dotted_config" "data.enableAiCliTools = false" "dotted data update writes the profile-gated AI Tool Stack as a dotted data key"
+assert_file_contains "$dotted_config" "data.enableDevelopmentWorkspace = true" "dotted data update writes Development Workspace as a dotted data key"
+assert_file_contains "$dotted_config" "data.enableMacosAppGroupTerminalApps = false" "dotted data update writes terminal-apps App Group as a dotted data key"
+assert_file_contains "$dotted_config" "data.enableMacosAppGroupAutomation = false" "dotted data update writes automation App Group as a dotted data key"
+assert_file_contains "$dotted_config" "data.enableMacosAppGroupLauncher = false" "dotted data update writes launcher App Group as a dotted data key"
+assert_file_contains "$dotted_config" "data.enableMacosAppGroupMonitoring = false" "dotted data update writes monitoring App Group as a dotted data key"
+assert_file_not_contains "$dotted_config" "data.enableMacosDesktopApps" "dotted data update removes the legacy all-in desktop app toggle"
+assert_file_not_contains "$dotted_config" "data.terrapodPreset" "dotted data update removes stale dynamic Preset key"
 
 if ! HOME="$dotted_home" XDG_CONFIG_HOME="$dotted_xdg" chezmoi --config "$dotted_config" data >"$tmp_dir/dotted-data.out" 2>"$tmp_dir/dotted-data.err"; then
   printf '%s\n' "stderr:" >&2
@@ -1290,16 +1249,16 @@ assert_data_key_once_with_value "$quoted_config" "enableMacosAppGroupTerminalApp
 assert_data_key_once_with_value "$quoted_config" "enableMacosAppGroupAutomation" "false" "quoted managed key update writes one automation App Group value in data"
 assert_data_key_once_with_value "$quoted_config" "enableMacosAppGroupLauncher" "false" "quoted managed key update writes one launcher App Group value in data"
 assert_data_key_once_with_value "$quoted_config" "enableMacosAppGroupMonitoring" "false" "quoted managed key update writes one monitoring App Group value in data"
-assert_not_contains "$quoted_config" "\"enableEditorStack\"" "quoted managed key update removes quoted Editor Stack key"
-assert_not_contains "$quoted_config" "\"enableAiCliTools\"" "quoted managed key update removes quoted AI Tool Stack key"
-assert_not_contains "$quoted_config" "\"enableDevelopmentWorkspace\"" "quoted managed key update removes quoted Development Workspace key"
-assert_not_contains "$quoted_config" "\"enableMacosDesktopApps\"" "quoted managed key update removes quoted macOS desktop-app boundary key"
-assert_not_contains "$quoted_config" "'enableEditorStack'" "quoted managed key update removes literal Editor Stack key"
-assert_not_contains "$quoted_config" "'enableAiCliTools'" "quoted managed key update removes literal AI Tool Stack key"
-assert_not_contains "$quoted_config" "'enableDevelopmentWorkspace'" "quoted managed key update removes literal Development Workspace key"
-assert_not_contains "$quoted_config" "'enableMacosDesktopApps'" "quoted managed key update removes literal macOS desktop-app boundary key"
-assert_not_contains "$quoted_config" "terrapodPreset" "quoted managed key update removes stale dynamic Preset key"
-assert_contains "$quoted_config" "keepLiteral = \"preserve\"" "quoted managed key update preserves unrelated literal data values"
+assert_file_not_contains "$quoted_config" "\"enableEditorStack\"" "quoted managed key update removes quoted Editor Stack key"
+assert_file_not_contains "$quoted_config" "\"enableAiCliTools\"" "quoted managed key update removes quoted AI Tool Stack key"
+assert_file_not_contains "$quoted_config" "\"enableDevelopmentWorkspace\"" "quoted managed key update removes quoted Development Workspace key"
+assert_file_not_contains "$quoted_config" "\"enableMacosDesktopApps\"" "quoted managed key update removes quoted macOS desktop-app boundary key"
+assert_file_not_contains "$quoted_config" "'enableEditorStack'" "quoted managed key update removes literal Editor Stack key"
+assert_file_not_contains "$quoted_config" "'enableAiCliTools'" "quoted managed key update removes literal AI Tool Stack key"
+assert_file_not_contains "$quoted_config" "'enableDevelopmentWorkspace'" "quoted managed key update removes literal Development Workspace key"
+assert_file_not_contains "$quoted_config" "'enableMacosDesktopApps'" "quoted managed key update removes literal macOS desktop-app boundary key"
+assert_file_not_contains "$quoted_config" "terrapodPreset" "quoted managed key update removes stale dynamic Preset key"
+assert_file_contains "$quoted_config" "keepLiteral = \"preserve\"" "quoted managed key update preserves unrelated literal data values"
 
 array_home="$tmp_dir/array-home"
 array_xdg="$tmp_dir/array-xdg"
@@ -1319,7 +1278,7 @@ chmod 600 "$array_config"
 
 run_terrapod_configure_yes development "$array_home" "$array_xdg" macos-terminal
 
-assert_contains "$array_config" "keepMe = \"yes\"" "array-table update preserves unrelated data values"
+assert_file_contains "$array_config" "keepMe = \"yes\"" "array-table update preserves unrelated data values"
 assert_data_key_once_with_value "$array_config" "enableEditorStack" "true" "array-table update writes Editor Stack only in data"
 assert_data_key_once_with_value "$array_config" "enableAiCliTools" "true" "array-table update writes AI Tool Stack only in data"
 assert_data_key_once_with_value "$array_config" "enableDevelopmentWorkspace" "true" "array-table update writes Development Workspace only in data"
@@ -1327,8 +1286,8 @@ assert_data_key_once_with_value "$array_config" "enableMacosAppGroupTerminalApps
 assert_data_key_once_with_value "$array_config" "enableMacosAppGroupAutomation" "false" "array-table update writes automation App Group only in data"
 assert_data_key_once_with_value "$array_config" "enableMacosAppGroupLauncher" "false" "array-table update writes launcher App Group only in data"
 assert_data_key_once_with_value "$array_config" "enableMacosAppGroupMonitoring" "false" "array-table update writes monitoring App Group only in data"
-assert_contains "$array_config" "[[merge.command]]" "array-table update preserves TOML array table"
-assert_contains "$array_config" "enableEditorStack = \"do-not-touch\"" "array-table update preserves same-named external key"
+assert_file_contains "$array_config" "[[merge.command]]" "array-table update preserves TOML array table"
+assert_file_contains "$array_config" "enableEditorStack = \"do-not-touch\"" "array-table update preserves same-named external key"
 assert_lines_after_header_not_contains "$array_config" "[[merge.command]]" "enableAiCliTools = true" "array-table update does not append AI Tool Stack under array table"
 assert_lines_after_header_not_contains "$array_config" "[[merge.command]]" "enableDevelopmentWorkspace = true" "array-table update does not append Development Workspace under array table"
 assert_lines_after_header_not_contains "$array_config" "[[merge.command]]" "enableMacosAppGroupTerminalApps = false" "array-table update does not append terminal-apps App Group under array table"
@@ -1363,8 +1322,8 @@ TOML
 
 run_terrapod_configure_yes development "$custom_array_home" "$custom_array_xdg" macos-terminal
 
-assert_contains "$custom_array_config" "customValues = [" "custom array update preserves array header"
-assert_contains "$custom_array_config" "preserve-me" "custom array update preserves array value"
+assert_file_contains "$custom_array_config" "customValues = [" "custom array update preserves array header"
+assert_file_contains "$custom_array_config" "preserve-me" "custom array update preserves array value"
 assert_data_key_once_with_value "$custom_array_config" "enableEditorStack" "true" "custom array update writes Editor Stack in data"
 assert_data_key_once_with_value "$custom_array_config" "enableAiCliTools" "true" "custom array update writes AI Tool Stack in data"
 assert_data_key_once_with_value "$custom_array_config" "enableDevelopmentWorkspace" "true" "custom array update writes Development Workspace in data"
@@ -1372,7 +1331,7 @@ assert_data_key_once_with_value "$custom_array_config" "enableMacosAppGroupTermi
 assert_data_key_once_with_value "$custom_array_config" "enableMacosAppGroupAutomation" "false" "custom array update writes automation App Group in data"
 assert_data_key_once_with_value "$custom_array_config" "enableMacosAppGroupLauncher" "false" "custom array update writes launcher App Group in data"
 assert_data_key_once_with_value "$custom_array_config" "enableMacosAppGroupMonitoring" "false" "custom array update writes monitoring App Group in data"
-assert_contains "$custom_array_config" "branch = \"main\"" "custom array update preserves later sections"
+assert_file_contains "$custom_array_config" "branch = \"main\"" "custom array update preserves later sections"
 
 multiline_array_home="$tmp_dir/multiline-array-home"
 multiline_array_xdg="$tmp_dir/multiline-array-xdg"
@@ -1399,9 +1358,9 @@ if printf '%s\n' "y" |
 fi
 pass "section-like multiline array config is rejected before rewriting"
 
-assert_contains "$tmp_dir/multiline-array.err" "unsupported multiline array" "section-like multiline array rejection explains unsupported format"
-assert_not_contains "$tmp_dir/multiline-array.err" "Update Terrapod-managed data keys" "section-like multiline array rejection does not prompt before failing"
-assert_not_contains "$tmp_dir/multiline-array.out" "Configured Terrapod Preset" "section-like multiline array rejection does not report success"
+assert_file_contains "$tmp_dir/multiline-array.err" "unsupported multiline array" "section-like multiline array rejection explains unsupported format"
+assert_file_not_contains "$tmp_dir/multiline-array.err" "Update Terrapod-managed data keys" "section-like multiline array rejection does not prompt before failing"
+assert_file_not_contains "$tmp_dir/multiline-array.out" "Configured Terrapod Preset" "section-like multiline array rejection does not report success"
 
 if ! cmp -s "$multiline_array_config" "$tmp_dir/multiline-array-before.toml"; then
   fail "section-like multiline array rejection leaves existing config unchanged"
@@ -1479,9 +1438,9 @@ if printf '%s\n' "y" |
 fi
 pass "inline data table config is rejected instead of rewritten"
 
-assert_contains "$tmp_dir/inline-table.err" "unsupported inline data table" "inline data table rejection explains unsupported format"
-assert_not_contains "$tmp_dir/inline-table.err" "Update Terrapod-managed data keys" "inline data table rejection does not prompt before failing"
-assert_not_contains "$tmp_dir/inline-table.out" "Configured Terrapod Preset" "inline data table rejection does not report success"
+assert_file_contains "$tmp_dir/inline-table.err" "unsupported inline data table" "inline data table rejection explains unsupported format"
+assert_file_not_contains "$tmp_dir/inline-table.err" "Update Terrapod-managed data keys" "inline data table rejection does not prompt before failing"
+assert_file_not_contains "$tmp_dir/inline-table.out" "Configured Terrapod Preset" "inline data table rejection does not report success"
 
 if ! cmp -s "$inline_table_config" "$tmp_dir/inline-table-before.toml"; then
   fail "inline data table rejection leaves existing config unchanged"
@@ -1514,9 +1473,9 @@ if printf '%s\n' "y" |
 fi
 pass "multiline string with data-like content is rejected instead of rewritten"
 
-assert_contains "$tmp_dir/multiline-string.err" "unsupported multiline string" "multiline string rejection explains unsupported format"
-assert_not_contains "$tmp_dir/multiline-string.err" "Update Terrapod-managed data keys" "multiline string rejection does not prompt before failing"
-assert_not_contains "$tmp_dir/multiline-string.out" "Configured Terrapod Preset" "multiline string rejection does not report success"
+assert_file_contains "$tmp_dir/multiline-string.err" "unsupported multiline string" "multiline string rejection explains unsupported format"
+assert_file_not_contains "$tmp_dir/multiline-string.err" "Update Terrapod-managed data keys" "multiline string rejection does not prompt before failing"
+assert_file_not_contains "$tmp_dir/multiline-string.out" "Configured Terrapod Preset" "multiline string rejection does not report success"
 
 if ! cmp -s "$multiline_string_config" "$tmp_dir/multiline-string-before.toml"; then
   fail "multiline string rejection leaves existing config unchanged"
@@ -1547,9 +1506,9 @@ if printf '%s\n' "y" |
 fi
 pass "dotted data update rejects multiline strings before injecting managed keys"
 
-assert_contains "$tmp_dir/dotted-multiline.err" "unsupported multiline string" "dotted multiline rejection explains unsupported format"
-assert_not_contains "$tmp_dir/dotted-multiline.err" "Update Terrapod-managed data keys" "dotted multiline rejection does not prompt before failing"
-assert_not_contains "$tmp_dir/dotted-multiline.out" "Configured Terrapod Preset" "dotted multiline rejection does not report success"
+assert_file_contains "$tmp_dir/dotted-multiline.err" "unsupported multiline string" "dotted multiline rejection explains unsupported format"
+assert_file_not_contains "$tmp_dir/dotted-multiline.err" "Update Terrapod-managed data keys" "dotted multiline rejection does not prompt before failing"
+assert_file_not_contains "$tmp_dir/dotted-multiline.out" "Configured Terrapod Preset" "dotted multiline rejection does not report success"
 
 if ! cmp -s "$dotted_multiline_config" "$tmp_dir/dotted-multiline-before.toml"; then
   fail "dotted multiline rejection leaves existing config unchanged"
@@ -1582,9 +1541,9 @@ if printf '%s\n' "y" |
 fi
 pass "dotted data update rejects multiline strings in arrays before injecting managed keys"
 
-assert_contains "$tmp_dir/dotted-array-multiline.err" "unsupported multiline string" "dotted array multiline rejection explains unsupported format"
-assert_not_contains "$tmp_dir/dotted-array-multiline.err" "Update Terrapod-managed data keys" "dotted array multiline rejection does not prompt before failing"
-assert_not_contains "$tmp_dir/dotted-array-multiline.out" "Configured Terrapod Preset" "dotted array multiline rejection does not report success"
+assert_file_contains "$tmp_dir/dotted-array-multiline.err" "unsupported multiline string" "dotted array multiline rejection explains unsupported format"
+assert_file_not_contains "$tmp_dir/dotted-array-multiline.err" "Update Terrapod-managed data keys" "dotted array multiline rejection does not prompt before failing"
+assert_file_not_contains "$tmp_dir/dotted-array-multiline.out" "Configured Terrapod Preset" "dotted array multiline rejection does not report success"
 
 if ! cmp -s "$dotted_array_multiline_config" "$tmp_dir/dotted-array-multiline-before.toml"; then
   fail "dotted array multiline rejection leaves existing config unchanged"
@@ -1616,8 +1575,8 @@ if ! cmp -s "$decline_config" "$tmp_dir/decline-before.toml"; then
 fi
 pass "declined config update leaves existing config unchanged"
 
-assert_contains "$tmp_dir/decline.out" "Update Terrapod-managed data keys" "existing config update asks before writing"
-assert_contains "$tmp_dir/decline.out" "config update cancelled" "declined config update explains the cancellation"
+assert_file_contains "$tmp_dir/decline.out" "Update Terrapod-managed data keys" "existing config update asks before writing"
+assert_file_contains "$tmp_dir/decline.out" "config update cancelled" "declined config update explains the cancellation"
 assert_backup_count "$decline_config" 0 "declined config update does not create a backup"
 
 accept_home="$tmp_dir/accept-home"
@@ -1633,9 +1592,9 @@ TOML
 
 run_terrapod_configure_in_pty development "y" "$accept_home" "$accept_xdg" >"$tmp_dir/accept.out" 2>&1
 
-assert_contains "$tmp_dir/accept.out" "Update Terrapod-managed data keys" "accepted config update asks before writing"
+assert_file_contains "$tmp_dir/accept.out" "Update Terrapod-managed data keys" "accepted config update asks before writing"
 assert_data_key_once_with_value "$accept_config" "enableEditorStack" "true" "accepted config update writes the Preset settings"
-assert_contains "$accept_config" "keepMe = \"yes\"" "accepted config update preserves unrelated data values"
+assert_file_contains "$accept_config" "keepMe = \"yes\"" "accepted config update preserves unrelated data values"
 
 no_tty_home="$tmp_dir/no-tty-home"
 no_tty_xdg="$tmp_dir/no-tty-xdg"
@@ -1659,10 +1618,10 @@ if ! cmp -s "$no_tty_config" "$tmp_dir/no-tty-before.toml"; then
 fi
 pass "refused config update leaves existing config unchanged"
 
-assert_not_contains "$tmp_dir/no-tty.err" "Update Terrapod-managed data keys" "configure without a terminal does not print an unanswerable prompt"
-assert_contains "$tmp_dir/no-tty.err" "tpod configure --yes" "configure without a terminal names the flag that allows the overwrite"
-assert_contains "$tmp_dir/no-tty.err" "TERRAPOD_ASSUME_YES=1" "configure without a terminal names the environment variable that allows the overwrite"
-assert_not_contains "$tmp_dir/no-tty.out" "Configured Terrapod Preset" "configure without a terminal does not report success"
+assert_file_not_contains "$tmp_dir/no-tty.err" "Update Terrapod-managed data keys" "configure without a terminal does not print an unanswerable prompt"
+assert_file_contains "$tmp_dir/no-tty.err" "tpod configure --yes" "configure without a terminal names the flag that allows the overwrite"
+assert_file_contains "$tmp_dir/no-tty.err" "TERRAPOD_ASSUME_YES=1" "configure without a terminal names the environment variable that allows the overwrite"
+assert_file_not_contains "$tmp_dir/no-tty.out" "Configured Terrapod Preset" "configure without a terminal does not report success"
 assert_backup_count "$no_tty_config" 0 "refused config update does not create a backup"
 assert_no_terrapod_temp_files "$no_tty_config" "refused config update leaves no Terrapod temp files"
 
@@ -1706,10 +1665,10 @@ TERRAPOD_ASSUME_YES=1 TERRAPOD_PROFILE=vps-shell TERRAPOD_CHEZMOI_CONFIG= \
   HOME="$assume_yes_home" XDG_CONFIG_HOME="$assume_yes_xdg" \
   sh "$terrapod" configure development >"$tmp_dir/assume-yes.out" 2>&1 </dev/null
 
-assert_contains "$tmp_dir/assume-yes.out" "Configured Terrapod Preset 'development'" "TERRAPOD_ASSUME_YES=1 lets configure overwrite an existing config"
-assert_not_contains "$tmp_dir/assume-yes.out" "Update Terrapod-managed data keys" "TERRAPOD_ASSUME_YES=1 skips the confirmation prompt"
+assert_file_contains "$tmp_dir/assume-yes.out" "Configured Terrapod Preset 'development'" "TERRAPOD_ASSUME_YES=1 lets configure overwrite an existing config"
+assert_file_not_contains "$tmp_dir/assume-yes.out" "Update Terrapod-managed data keys" "TERRAPOD_ASSUME_YES=1 skips the confirmation prompt"
 assert_data_key_once_with_value "$assume_yes_config" "enableEditorStack" "true" "TERRAPOD_ASSUME_YES=1 writes the Preset settings"
-assert_contains "$assume_yes_config" "keepMe = \"yes\"" "TERRAPOD_ASSUME_YES=1 preserves unrelated data values"
+assert_file_contains "$assume_yes_config" "keepMe = \"yes\"" "TERRAPOD_ASSUME_YES=1 preserves unrelated data values"
 assert_single_backup_matches "$assume_yes_config" "$tmp_dir/assume-yes-before.toml" "TERRAPOD_ASSUME_YES=1 still backs up the config before changing managed keys"
 
 flag_new_home="$tmp_dir/flag-new-home"
@@ -1719,7 +1678,7 @@ mkdir -p "$flag_new_home"
 
 run_terrapod_configure_yes minimal "$flag_new_home" "$flag_new_xdg" >"$tmp_dir/flag-new.out"
 
-assert_contains "$tmp_dir/flag-new.out" "Configured Terrapod Preset 'minimal' in $flag_new_config" "--yes writes a new config the same way as a bare configure"
+assert_file_contains "$tmp_dir/flag-new.out" "Configured Terrapod Preset 'minimal' in $flag_new_config" "--yes writes a new config the same way as a bare configure"
 assert_backup_count "$flag_new_config" 0 "--yes new config creation does not create a backup"
 
 if TERRAPOD_PROFILE=vps-shell TERRAPOD_CHEZMOI_CONFIG= HOME="$tmp_dir/unknown-option-home" XDG_CONFIG_HOME="$tmp_dir/unknown-option-xdg" \
@@ -1728,7 +1687,7 @@ if TERRAPOD_PROFILE=vps-shell TERRAPOD_CHEZMOI_CONFIG= HOME="$tmp_dir/unknown-op
 fi
 pass "configure rejects an unknown option"
 
-assert_contains "$tmp_dir/unknown-option.err" "unknown configure option: --force" "configure names the unknown option it rejected"
+assert_file_contains "$tmp_dir/unknown-option.err" "unknown configure option: --force" "configure names the unknown option it rejected"
 
 if TERRAPOD_PROFILE=vps-shell TERRAPOD_CHEZMOI_CONFIG= HOME="$tmp_dir/flag-only-home" XDG_CONFIG_HOME="$tmp_dir/flag-only-xdg" \
   sh "$terrapod" configure --yes >"$tmp_dir/flag-only.out" 2>"$tmp_dir/flag-only.err" </dev/null; then
@@ -1736,7 +1695,7 @@ if TERRAPOD_PROFILE=vps-shell TERRAPOD_CHEZMOI_CONFIG= HOME="$tmp_dir/flag-only-
 fi
 pass "configure still requires a Preset when only the overwrite flag is given"
 
-assert_contains "$tmp_dir/flag-only.err" "Preset is required" "configure with only the overwrite flag reports the missing Preset"
+assert_file_contains "$tmp_dir/flag-only.err" "Preset is required" "configure with only the overwrite flag reports the missing Preset"
 
 directory_home="$tmp_dir/directory-home"
 directory_xdg="$tmp_dir/directory-xdg"
@@ -1748,8 +1707,8 @@ if TERRAPOD_CHEZMOI_CONFIG="$directory_config" HOME="$directory_home" XDG_CONFIG
 fi
 pass "config path that is a directory fails explicitly"
 
-assert_contains "$tmp_dir/directory.err" "not a regular file" "directory config path explains it is not usable"
-assert_not_contains "$tmp_dir/directory.out" "Configured Terrapod Preset" "directory config path does not report success"
+assert_file_contains "$tmp_dir/directory.err" "not a regular file" "directory config path explains it is not usable"
+assert_file_not_contains "$tmp_dir/directory.out" "Configured Terrapod Preset" "directory config path does not report success"
 assert_no_terrapod_temp_files "$directory_config" "directory config path leaves no Terrapod temp files"
 
 symlink_home="$tmp_dir/symlink-home"
@@ -1773,9 +1732,9 @@ if TERRAPOD_CHEZMOI_CONFIG="$symlink_config" HOME="$symlink_home" XDG_CONFIG_HOM
 fi
 pass "config path that is a symlink to a regular file fails explicitly"
 
-assert_contains "$tmp_dir/symlink.err" "not a regular file" "symlink config path explains it is not usable"
-assert_not_contains "$tmp_dir/symlink.err" "Update Terrapod-managed data keys" "symlink config path does not prompt before failing"
-assert_not_contains "$tmp_dir/symlink.err" "config update cancelled" "symlink config path does not report a declined update"
+assert_file_contains "$tmp_dir/symlink.err" "not a regular file" "symlink config path explains it is not usable"
+assert_file_not_contains "$tmp_dir/symlink.err" "Update Terrapod-managed data keys" "symlink config path does not prompt before failing"
+assert_file_not_contains "$tmp_dir/symlink.err" "config update cancelled" "symlink config path does not report a declined update"
 
 if [ ! -L "$symlink_config" ]; then
   fail "symlink config path remains a symlink after failed update"
@@ -1809,7 +1768,7 @@ if TERRAPOD_CHEZMOI_CONFIG="$dangling_config" HOME="$dangling_home" XDG_CONFIG_H
 fi
 pass "config path that is a dangling symlink fails explicitly"
 
-assert_contains "$tmp_dir/dangling.err" "not a regular file" "dangling symlink config path explains it is not usable"
+assert_file_contains "$tmp_dir/dangling.err" "not a regular file" "dangling symlink config path explains it is not usable"
 
 if [ ! -L "$dangling_config" ]; then
   fail "dangling symlink config path remains a symlink after failed update"
@@ -1846,11 +1805,11 @@ if [ "$empty_preset_status" -ne 64 ]; then
 fi
 pass "empty Preset exits with usage status 64"
 
-assert_contains "$tmp_dir/empty-preset.err" "Preset is required" "empty Preset reports required Preset"
-assert_not_contains "$tmp_dir/empty-preset.err" "unknown Preset" "empty Preset does not report unknown Preset"
-assert_not_contains "$tmp_dir/empty-preset.err" "Update Terrapod-managed data keys" "empty Preset does not prompt before failing"
-assert_not_contains "$tmp_dir/empty-preset.out" "Update Terrapod-managed data keys" "empty Preset does not prompt on stdout before failing"
-assert_not_contains "$tmp_dir/empty-preset.out" "Configured Terrapod Preset" "empty Preset does not report success"
+assert_file_contains "$tmp_dir/empty-preset.err" "Preset is required" "empty Preset reports required Preset"
+assert_file_not_contains "$tmp_dir/empty-preset.err" "unknown Preset" "empty Preset does not report unknown Preset"
+assert_file_not_contains "$tmp_dir/empty-preset.err" "Update Terrapod-managed data keys" "empty Preset does not prompt before failing"
+assert_file_not_contains "$tmp_dir/empty-preset.out" "Update Terrapod-managed data keys" "empty Preset does not prompt on stdout before failing"
+assert_file_not_contains "$tmp_dir/empty-preset.out" "Configured Terrapod Preset" "empty Preset does not report success"
 
 if ! cmp -s "$empty_preset_config" "$tmp_dir/empty-preset-before.toml"; then
   fail "empty Preset leaves existing config unchanged"
@@ -1883,8 +1842,8 @@ if [ "$invalid_status" -ne 64 ]; then
 fi
 pass "invalid Preset exits with usage status 64"
 
-assert_contains "$tmp_dir/invalid.err" "unknown Preset: typo" "invalid Preset names rejected Preset"
-assert_not_contains "$tmp_dir/invalid.err" "Update Terrapod-managed data keys" "invalid Preset does not prompt before failing"
+assert_file_contains "$tmp_dir/invalid.err" "unknown Preset: typo" "invalid Preset names rejected Preset"
+assert_file_not_contains "$tmp_dir/invalid.err" "Update Terrapod-managed data keys" "invalid Preset does not prompt before failing"
 
 if ! cmp -s "$invalid_config" "$tmp_dir/invalid-before.toml"; then
   fail "invalid Preset leaves existing config unchanged"

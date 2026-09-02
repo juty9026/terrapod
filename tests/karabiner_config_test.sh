@@ -2,16 +2,8 @@
 set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+. "$repo_root/tests/lib/harness.sh"
 karabiner_config="$repo_root/dot_config/private_karabiner/private_karabiner.json"
-
-fail() {
-  printf '%s\n' "not ok - $1" >&2
-  exit 1
-}
-
-pass() {
-  printf '%s\n' "ok - $1"
-}
 
 assert_json_value() {
   filter="$1"

@@ -2,11 +2,8 @@
 set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-tmp_dir="$(mktemp -d)"
-trap 'rm -rf "$tmp_dir"' EXIT INT TERM
-
-fail() { printf '%s\n' "not ok - $1" >&2; exit 1; }
-pass() { printf '%s\n' "ok - $1"; }
+. "$repo_root/tests/lib/harness.sh"
+make_tmp_dir
 
 expected_formulae="$tmp_dir/expected-formulae"
 actual_formulae="$tmp_dir/actual-formulae"

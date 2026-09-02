@@ -3,21 +3,8 @@
 set -u
 
 repo_root="${0:A:h:h}"
-tmp_dir="$(mktemp -d)"
-
-cleanup() {
-  rm -rf "$tmp_dir"
-}
-trap cleanup EXIT INT TERM
-
-fail() {
-  print -u2 -- "not ok - $1"
-  exit 1
-}
-
-pass() {
-  print -- "ok - $1"
-}
+. "$repo_root/tests/lib/harness.sh"
+make_tmp_dir
 
 assert_log_contains() {
   local expected="$1"

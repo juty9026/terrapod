@@ -2,40 +2,10 @@
 set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+. "$repo_root/tests/lib/harness.sh"
 readme="$repo_root/README.md"
 korean_readme="$repo_root/README.ko.md"
 terrapod_command="$repo_root/dot_local/bin/executable_terrapod"
-
-fail() {
-  printf '%s\n' "not ok - $1" >&2
-  exit 1
-}
-
-pass() {
-  printf '%s\n' "ok - $1"
-}
-
-assert_contains() {
-  needle="$1"
-  message="$2"
-
-  if ! grep -F "$needle" "$readme" >/dev/null; then
-    fail "$message"
-  fi
-
-  pass "$message"
-}
-
-assert_not_contains() {
-  needle="$1"
-  message="$2"
-
-  if grep -F "$needle" "$readme" >/dev/null; then
-    fail "$message"
-  fi
-
-  pass "$message"
-}
 
 assert_key_row_contains() {
   key="$1"
@@ -141,9 +111,9 @@ assert_minimal_vps_is_complete() {
 assert_minimal_vps_is_complete "$readme" "README.md"
 assert_minimal_vps_is_complete "$korean_readme" "README.ko.md"
 
-assert_contains '| `enableEditorStack` | `false` |' \
+assert_file_contains "$readme" '| `enableEditorStack` | `false` |' \
   "README documents enableEditorStack default"
-assert_contains '| `enableAiCliTools` | `false` |' \
+assert_file_contains "$readme" '| `enableAiCliTools` | `false` |' \
   "README documents enableAiCliTools default"
 assert_key_row_contains '`enableAiCliTools`' 'Antigravity CLI, Claude Code, and Codex' \
   "README documents the new Optional AI Tool Stack membership"
@@ -151,11 +121,11 @@ assert_key_row_contains '`enableAiCliTools`' 'Homebrew casks `antigravity-cli` a
   "README documents Homebrew-owned Optional AI Tool Stack members"
 assert_key_row_contains '`enableAiCliTools`' 'Claude Code through its official installer' \
   "README documents the vendor-installed Optional AI Tool Stack member"
-assert_contains '| `enableDevelopmentWorkspace` | `false` |' \
+assert_file_contains "$readme" '| `enableDevelopmentWorkspace` | `false` |' \
   "README documents enableDevelopmentWorkspace default"
-assert_contains '| `profile` |' \
+assert_file_contains "$readme" '| `profile` |' \
   "README documents profile as a managed setup config key"
-assert_not_contains 'enableMacosDesktopApps' \
+assert_file_not_contains "$readme" 'enableMacosDesktopApps' \
   "README does not document legacy enableMacosDesktopApps option"
 
 for key in \
@@ -166,7 +136,7 @@ for key in \
   enableMacosAppGroupDevelopmentApps \
   enableMacosAppGroupMobileDev
 do
-  assert_contains "\`$key\`" "README documents $key option"
+  assert_file_contains "$readme" "\`$key\`" "README documents $key option"
   if ! awk -F '|' -v key="\`$key\`" '$0 ~ key { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); if ($3 == "`false`") found=1 } END { exit found ? 0 : 1 }' "$readme"; then
     fail "README documents $key default"
   fi
@@ -177,7 +147,7 @@ assert_key_row_contains '`enableMacosAppGroupTerminalApps`' 'terminal-apps' \
   "README documents terminal-apps group on its option row"
 assert_key_row_contains '`enableMacosAppGroupTerminalApps`' 'Ghostty' \
   "README documents Ghostty on the terminal-apps option row"
-assert_not_contains 'cmux' \
+assert_file_not_contains "$readme" 'cmux' \
   "README no longer documents cmux as part of the macOS Desktop App Stack"
 assert_key_row_contains '`enableMacosAppGroupAutomation`' 'automation' \
   "README documents automation group on its option row"
@@ -205,7 +175,7 @@ assert_key_row_contains '`enableMacosAppGroupDevelopmentApps`' 'OrbStack' \
   "README documents OrbStack on the development-apps option row"
 assert_key_row_contains '`enableMacosAppGroupDevelopmentApps`' 'stablyai/orca/orca' \
   "README documents Orca's fully-qualified cask source"
-assert_contains 'When installing Orca, Terrapod trusts only the fully-qualified `stablyai/orca/orca` cask, not the entire `stablyai/orca` tap.' \
+assert_file_contains "$readme" 'When installing Orca, Terrapod trusts only the fully-qualified `stablyai/orca/orca` cask, not the entire `stablyai/orca` tap.' \
   "README documents Orca's cask-specific trust boundary"
 
 assert_key_row_contains '`enableMacosAppGroupMobileDev`' 'mobile-dev' \
@@ -214,83 +184,83 @@ assert_key_row_contains '`enableMacosAppGroupMobileDev`' 'Android Studio' \
   "README documents Android Studio on the mobile-dev option row"
 assert_key_row_contains '`enableMacosAppGroupMobileDev`' 'mobile-dev-inc/tap/maestro' \
   "README documents Maestro's fully-qualified formula source"
-assert_contains 'Terrapod does not install Android SDK components or Xcode. Android Studio'"'"'s SDK Manager owns the SDK, and Xcode is distributed through the App Store.' \
+assert_file_contains "$readme" 'Terrapod does not install Android SDK components or Xcode. Android Studio'"'"'s SDK Manager owns the SDK, and Xcode is distributed through the App Store.' \
   "README documents the mobile development scope boundary"
 
-assert_contains 'The development-apps group also sources the OrbStack shell integration from the managed `.zprofile` when OrbStack is installed.' \
+assert_file_contains "$readme" 'The development-apps group also sources the OrbStack shell integration from the managed `.zprofile` when OrbStack is installed.' \
   "README documents where the OrbStack shell integration comes from"
 
-assert_contains 'Optional stack profiles and macOS App Group settings are disabled by default.' \
+assert_file_contains "$readme" 'Optional stack profiles and macOS App Group settings are disabled by default.' \
   "README states optional stack profiles and App Groups are disabled by default"
-assert_contains 'complete managed setup config' \
+assert_file_contains "$readme" 'complete managed setup config' \
   "README explains local overrides must keep a complete managed setup config"
-assert_contains 'not standalone config files' \
+assert_file_contains "$readme" 'not standalone config files' \
   "README marks optional stack examples as fragments instead of standalone configs"
-assert_not_contains 'false or omitted' \
+assert_file_not_contains "$readme" 'false or omitted' \
   "README no longer suggests omitted managed setup keys are valid routine-command config"
-assert_contains 'Terrapod is a small landing pod for your machines' \
+assert_file_contains "$readme" 'Terrapod is a small landing pod for your machines' \
   "README opens with the Terrapod product promise"
-assert_contains 'Under the hood, Terrapod uses chezmoi as the apply engine' \
+assert_file_contains "$readme" 'Under the hood, Terrapod uses chezmoi as the apply engine' \
   "README keeps chezmoi visible as underlying machinery"
-assert_contains '## Quick Start' \
+assert_file_contains "$readme" '## Quick Start' \
   "README leads with a Quick Start section"
-assert_contains '## What Terrapod Carries' \
+assert_file_contains "$readme" '## What Terrapod Carries' \
   "README summarizes Terrapod's carried domain concepts"
-assert_contains '## Choose a Preset' \
+assert_file_contains "$readme" '## Choose a Preset' \
   "README uses the canonical Preset section title"
-assert_contains 'Terrapod Setup requires `gum` (the Bootstrap UI Dependency)' \
+assert_file_contains "$readme" 'Terrapod Setup requires `gum` (the Bootstrap UI Dependency)' \
   "README documents Bootstrap UI Dependency requirement for setup"
-assert_contains '`terrapod configure <Preset>` is the script-friendly Preset configuration' \
+assert_file_contains "$readme" '`terrapod configure <Preset>` is the script-friendly Preset configuration' \
   "README documents script-friendly Preset configuration"
-assert_contains 'It writes concrete settings for exactly one supported Preset' \
+assert_file_contains "$readme" 'It writes concrete settings for exactly one supported Preset' \
   "README documents configure writes concrete settings for one Preset"
-assert_contains 'require `gum`, and has no interactive customization.' \
+assert_file_contains "$readme" 'require `gum`, and has no interactive customization.' \
   "README documents configure as no-gum and non-interactive"
-assert_contains 'There is no plain text fallback.' \
+assert_file_contains "$readme" 'There is no plain text fallback.' \
   "README documents plain text fallback is intentionally disabled"
-assert_contains '`terrapod configure <Preset>` are intentionally separate.' \
+assert_file_contains "$readme" '`terrapod configure <Preset>` are intentionally separate.' \
   "README documents setup and configure are intentionally separate"
-assert_contains '`terrapod configure <Preset>` are intentionally separate. The latter writes' \
+assert_file_contains "$readme" '`terrapod configure <Preset>` are intentionally separate. The latter writes' \
   "README documents setup and configure are intentionally separate"
-assert_contains 'settings without the setup UI. If Terrapod Setup cannot run because `gum` or an' \
+assert_file_contains "$readme" 'settings without the setup UI. If Terrapod Setup cannot run because `gum` or an' \
   "README documents configure is script-friendly and setup UI is intentionally separate"
-assert_contains '<Preset>` is not a plain fallback for Terrapod Setup.' \
+assert_file_contains "$readme" '<Preset>` is not a plain fallback for Terrapod Setup.' \
   "README states configure is not a Setup fallback"
-assert_contains 'terminal environment and rerun `terrapod setup`.' \
+assert_file_contains "$readme" 'terminal environment and rerun `terrapod setup`.' \
   "README documents missing-gum Setup recovery guidance"
-assert_contains 'Homebrew is the Modern CLI Provider for the Core Shell Stack on both supported profiles.' \
+assert_file_contains "$readme" 'Homebrew is the Modern CLI Provider for the Core Shell Stack on both supported profiles.' \
   "README names Homebrew as the cross-profile Modern CLI Provider"
-assert_contains 'mise is the Development Runtime Manager for Bun, Node.js, Python, and uv.' \
+assert_file_contains "$readme" 'mise is the Development Runtime Manager for Bun, Node.js, Python, and uv.' \
   "README limits mise to development runtimes"
-assert_contains 'On Apple Silicon, Homebrew installs at `/opt/homebrew`; on Intel Macs, it installs at `/usr/local`.' \
+assert_file_contains "$readme" 'On Apple Silicon, Homebrew installs at `/opt/homebrew`; on Intel Macs, it installs at `/usr/local`.' \
   "README documents macOS architecture-to-prefix mapping"
-assert_contains 'Ubuntu 24.04 installs Homebrew at `/home/linuxbrew/.linuxbrew` for every Preset.' \
+assert_file_contains "$readme" 'Ubuntu 24.04 installs Homebrew at `/home/linuxbrew/.linuxbrew` for every Preset.' \
   "README documents mandatory Linuxbrew"
-assert_contains 'The first-run installer installs `chezmoi` and `gum` through Homebrew before Terrapod Setup.' \
+assert_file_contains "$readme" 'The first-run installer installs `chezmoi` and `gum` through Homebrew before Terrapod Setup.' \
   "README documents cross-profile Setup bootstrap"
-assert_contains '1 vCPU, 1 GiB RAM, and at least 3 GiB of free disk space before installation' \
+assert_file_contains "$readme" '1 vCPU, 1 GiB RAM, and at least 3 GiB of free disk space before installation' \
   "README documents the recommended VPS floor"
-assert_contains '`x86_64` and `aarch64`' \
+assert_file_contains "$readme" '`x86_64` and `aarch64`' \
   "README documents supported Ubuntu architectures"
-assert_not_contains 'get.chezmoi.io' \
+assert_file_not_contains "$readme" 'get.chezmoi.io' \
   "README removes the standalone chezmoi installer"
-assert_not_contains 'Charm APT' \
+assert_file_not_contains "$readme" 'Charm APT' \
   "README removes the Charm APT trust boundary"
-assert_not_contains 'mise from the official mise APT repository' \
+assert_file_not_contains "$readme" 'mise from the official mise APT repository' \
   "README removes mise APT ownership"
-assert_contains 'HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade' \
+assert_file_contains "$readme" 'HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade' \
   "README documents restore-only apply semantics"
-assert_contains 'Existing mise, APT, vendor-installed, and other alternate payloads are not' \
+assert_file_contains "$readme" 'Existing mise, APT, vendor-installed, and other alternate payloads are not' \
   "README documents non-destructive package source handling"
-assert_contains 'Terrapod does not infer the installer provenance of the selected' \
+assert_file_contains "$readme" 'Terrapod does not infer the installer provenance of the selected' \
   "README documents provenance-neutral executable guidance"
-assert_not_contains 'Proceed with removing these legacy package installations? [y/N]' \
+assert_file_not_contains "$readme" 'Proceed with removing these legacy package installations? [y/N]' \
   "README removes the package migration confirmation"
-assert_contains '## What Terrapod Leaves Alone' \
+assert_file_contains "$readme" '## What Terrapod Leaves Alone' \
   "README documents product boundaries near the top"
-assert_contains '## Daily Commands' \
+assert_file_contains "$readme" '## Daily Commands' \
   "README uses a product-friendly daily command section"
-assert_contains '## Platform Details' \
+assert_file_contains "$readme" '## Platform Details' \
   "README moves platform inventory into platform details"
 assert_ubuntu_setup_contains 'GitHub CLI (`gh`)' \
   "README documents gh as part of the Ubuntu Core Shell Stack"
@@ -302,60 +272,60 @@ assert_ubuntu_setup_contains 'Claude Code stays macOS-only as a profile decision
   "README attributes Claude Code's macOS scope to a profile decision, not its package source"
 assert_key_row_contains '`enableAiCliTools`' 'ignored on the VPS Shell Profile' \
   "README documents that enableAiCliTools is ignored on the VPS Shell Profile"
-assert_contains 'When `enableDevelopmentWorkspace` is `true`' \
+assert_file_contains "$readme" 'When `enableDevelopmentWorkspace` is `true`' \
   "README documents enableDevelopmentWorkspace behavior"
-assert_contains 'Optional Editor Stack and Optional AI Tool Stack' \
+assert_file_contains "$readme" 'Optional Editor Stack and Optional AI Tool Stack' \
   "README documents development workspace included stacks"
-assert_contains 'macOS Desktop App Stack' \
+assert_file_contains "$readme" 'macOS Desktop App Stack' \
   "README documents macOS Desktop App Stack"
-assert_not_contains 'Terminal font casks' \
+assert_file_not_contains "$readme" 'Terminal font casks' \
   "README no longer documents terminal font casks"
-assert_contains 'Jetendard terminal font from the latest stable GitHub release' \
+assert_file_contains "$readme" 'Jetendard terminal font from the latest stable GitHub release' \
   "README documents the Jetendard release source"
-assert_contains 'Terrapod checks the latest Jetendard release only when its managed font installer source changes or a failed install is retried.' \
+assert_file_contains "$readme" 'Terrapod checks the latest Jetendard release only when its managed font installer source changes or a failed install is retried.' \
   "README documents the Jetendard release-check trigger"
-assert_contains 'Terrapod installs every TTF in that Jetendard release and verifies the asset digest published by GitHub.' \
+assert_file_contains "$readme" 'Terrapod installs every TTF in that Jetendard release and verifies the asset digest published by GitHub.' \
   "README directly documents every-TTF installation and digest verification"
-assert_contains 'It sets only the font-family keys used by Ghostty, Zed buffers and terminals, and Orca terminals.' \
+assert_file_contains "$readme" 'It sets only the font-family keys used by Ghostty, Zed buffers and terminals, and Orca terminals.' \
   "README directly documents the app-key-only settings scope"
-assert_contains 'Restart Ghostty, Zed, or Orca if an existing window still uses a cached font.' \
+assert_file_contains "$readme" 'Restart Ghostty, Zed, or Orca if an existing window still uses a cached font.' \
   "README directly documents cached-font restart guidance"
-assert_contains 'Terrapod does not uninstall existing JetBrains Mono Nerd Font or D2Coding copies.' \
+assert_file_contains "$readme" 'Terrapod does not uninstall existing JetBrains Mono Nerd Font or D2Coding copies.' \
   "README documents non-destructive legacy font migration"
-assert_contains 'Quit Orca before rerunning `tpod apply` when Jetendard settings are deferred.' \
+assert_file_contains "$readme" 'Quit Orca before rerunning `tpod apply` when Jetendard settings are deferred.' \
   "README documents Orca font-setting recovery"
-assert_contains 'separate from `enableDevelopmentWorkspace`' \
+assert_file_contains "$readme" 'separate from `enableDevelopmentWorkspace`' \
   "README documents macOS Desktop App Stack separation from enableDevelopmentWorkspace"
-assert_contains 'casks can affect shared applications' \
+assert_file_contains "$readme" 'casks can affect shared applications' \
   "README documents why macOS Desktop App Stack remains separate"
-assert_contains '`terrapod update` refreshes the Terrapod Source Repository and installed command' \
+assert_file_contains "$readme" '`terrapod update` refreshes the Terrapod Source Repository and installed command' \
   "README documents Terrapod update source refresh"
-assert_contains 'then hands off to the refreshed' \
+assert_file_contains "$readme" 'then hands off to the refreshed' \
   "README documents refreshed tpod apply handoff"
-assert_contains 'Terrapod does not run broad Homebrew, APT, or mise upgrades.' \
+assert_file_contains "$readme" 'Terrapod does not run broad Homebrew, APT, or mise upgrades.' \
   "README states Terrapod does not run broad package or tool upgrades"
-assert_contains 'Use OS package managers directly only when intentionally updating OS-managed packages.' \
+assert_file_contains "$readme" 'Use OS package managers directly only when intentionally updating OS-managed packages.' \
   "README keeps OS package upgrades outside Terrapod"
-assert_contains 'Use mise directly when intentionally updating development runtimes.' \
+assert_file_contains "$readme" 'Use mise directly when intentionally updating development runtimes.' \
   "README keeps Development Runtime Manager upgrades outside Terrapod"
 assert_raycast_restore_contains '`enableMacosAppGroupLauncher`' \
   "README Raycast restore procedure mentions launcher App Group"
-assert_contains 'Opting out of an optional stack excludes its files from chezmoi management; it does not remove files already present on a machine.' \
+assert_file_contains "$readme" 'Opting out of an optional stack excludes its files from chezmoi management; it does not remove files already present on a machine.' \
   "README documents non-destructive optional stack opt-out"
-assert_contains 'brew upgrade --cask codex antigravity-cli' \
+assert_file_contains "$readme" 'brew upgrade --cask codex antigravity-cli' \
   "README documents targeted AI CLI upgrades"
-assert_contains 'Claude Code updates itself and is not part of that command.' \
+assert_file_contains "$readme" 'Claude Code updates itself and is not part of that command.' \
   "README documents who owns Claude Code freshness"
-assert_contains '`enableMacosAppGroupAiApps` is deprecated and is not treated as an alias' \
+assert_file_contains "$readme" '`enableMacosAppGroupAiApps` is deprecated and is not treated as an alias' \
   "README documents explicit development-apps key migration"
-assert_contains 'If another executable is selected first, Terrapod' \
+assert_file_contains "$readme" 'If another executable is selected first, Terrapod' \
   "README documents primary executable advisories"
 
-assert_contains 'Minimal VPS' \
+assert_file_contains "$readme" 'Minimal VPS' \
   "README includes a minimal VPS example"
-assert_contains 'Editor-only machine' \
+assert_file_contains "$readme" 'Editor-only machine' \
   "README includes an editor-only example"
-assert_contains 'AI-only machine' \
+assert_file_contains "$readme" 'AI-only machine' \
   "README includes an AI-only example"
-assert_contains 'Full development workspace machine' \
+assert_file_contains "$readme" 'Full development workspace machine' \
   "README includes a full development workspace example"

@@ -2,22 +2,9 @@
 set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+. "$repo_root/tests/lib/harness.sh"
 hammerspoon_config="$repo_root/dot_hammerspoon/init.lua"
-tmp_dir="$(mktemp -d)"
-
-cleanup() {
-  rm -rf "$tmp_dir"
-}
-trap cleanup EXIT INT TERM
-
-fail() {
-  printf '%s\n' "not ok - $1" >&2
-  exit 1
-}
-
-pass() {
-  printf '%s\n' "ok - $1"
-}
+make_tmp_dir
 
 # Reads the appBindings table out of init.lua as tab-separated
 # key/label/bundleID rows. Entries may name a top-level `local` string instead

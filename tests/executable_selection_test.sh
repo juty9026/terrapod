@@ -2,48 +2,9 @@
 set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+. "$repo_root/tests/lib/harness.sh"
 selection="$repo_root/dot_local/lib/terrapod/executable_executable-selection"
-tmp_dir="$(mktemp -d)"
-
-cleanup() {
-  rm -rf "$tmp_dir"
-}
-trap cleanup EXIT INT TERM
-
-fail() {
-  printf '%s\n' "not ok - $1" >&2
-  exit 1
-}
-
-pass() {
-  printf '%s\n' "ok - $1"
-}
-
-assert_contains() {
-  text="$1"
-  expected="$2"
-  label="$3"
-  case "$text" in
-    *"$expected"*) pass "$label" ;;
-    *)
-      printf '%s\n' "$text" >&2
-      fail "$label (missing: $expected)"
-      ;;
-  esac
-}
-
-assert_not_contains() {
-  text="$1"
-  unexpected="$2"
-  label="$3"
-  case "$text" in
-    *"$unexpected"*)
-      printf '%s\n' "$text" >&2
-      fail "$label (unexpected: $unexpected)"
-      ;;
-    *) pass "$label" ;;
-  esac
-}
+make_tmp_dir
 
 write_executable() {
   path="$1"

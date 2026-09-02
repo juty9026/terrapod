@@ -2,22 +2,9 @@
 set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+. "$repo_root/tests/lib/harness.sh"
 helper="$repo_root/dot_local/lib/terrapod/executable_jetendard-settings"
-tmp_dir="$(mktemp -d)"
-
-cleanup() {
-  rm -rf "$tmp_dir"
-}
-trap cleanup EXIT INT TERM
-
-fail() {
-  printf '%s\n' "not ok - $1" >&2
-  exit 1
-}
-
-pass() {
-  printf '%s\n' "ok - $1"
-}
+make_tmp_dir
 
 first_statement="$(awk 'NR == 1 && /^#!/ { next } /^[[:space:]]*$/ { next } { print; exit }' "$helper")"
 [ "$first_statement" = "from __future__ import annotations" ] || fail "helper defers annotation evaluation so Python 3.9 can import it"

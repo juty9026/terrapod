@@ -2,16 +2,8 @@
 set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+. "$repo_root/tests/lib/harness.sh"
 ghostty_config="$repo_root/dot_config/ghostty/config"
-
-fail() {
-  printf '%s\n' "not ok - $1" >&2
-  exit 1
-}
-
-pass() {
-  printf '%s\n' "ok - $1"
-}
 
 features_line="$(
   sed -n 's/^shell-integration-features[[:space:]]*=[[:space:]]*//p' "$ghostty_config" |

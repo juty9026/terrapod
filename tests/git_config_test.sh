@@ -2,44 +2,11 @@
 set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+. "$repo_root/tests/lib/harness.sh"
 managed_config="$repo_root/dot_config/git/config"
 user_config_source="$repo_root/create_dot_gitconfig"
 readme="$repo_root/README.md"
-tmp_dir="$(mktemp -d)"
-trap 'rm -rf "$tmp_dir"' EXIT INT TERM
-
-fail() {
-  printf '%s\n' "not ok - $1" >&2
-  exit 1
-}
-
-pass() {
-  printf '%s\n' "ok - $1"
-}
-
-assert_contains() {
-  file="$1"
-  needle="$2"
-  message="$3"
-
-  if ! grep -F "$needle" "$file" >/dev/null; then
-    fail "$message"
-  fi
-
-  pass "$message"
-}
-
-assert_not_contains() {
-  file="$1"
-  needle="$2"
-  message="$3"
-
-  if grep -F "$needle" "$file" >/dev/null; then
-    fail "$message"
-  fi
-
-  pass "$message"
-}
+make_tmp_dir
 
 if [ ! -f "$managed_config" ]; then
   fail "Terrapod manages shared Git settings through ~/.config/git/config"
@@ -61,9 +28,9 @@ if [ -e "$repo_root/private_dot_ssh/allowed_signers.tmpl" ]; then
 fi
 pass "Terrapod leaves SSH allowed signers unmanaged"
 
-assert_contains "$managed_config" "[merge]" "shared Git config preserves merge settings"
-assert_contains "$managed_config" "[pull]" "shared Git config preserves pull settings"
-assert_contains "$managed_config" "[delta]" "shared Git config preserves delta settings"
+assert_file_contains "$managed_config" "[merge]" "shared Git config preserves merge settings"
+assert_file_contains "$managed_config" "[pull]" "shared Git config preserves pull settings"
+assert_file_contains "$managed_config" "[delta]" "shared Git config preserves delta settings"
 
 for personal_setting in \
   "[user]" \
@@ -73,7 +40,7 @@ for personal_setting in \
   "allowedSignersFile" \
   "gpgsign"
 do
-  assert_not_contains "$managed_config" "$personal_setting" \
+  assert_file_not_contains "$managed_config" "$personal_setting" \
     "shared Git config excludes personal setting: $personal_setting"
 done
 
@@ -114,21 +81,21 @@ if ! cmp -s "$tmp_dir/user-config-before" "$test_home/.gitconfig"; then
 fi
 pass "Terrapod preserves user changes in ~/.gitconfig on later applies"
 
-assert_contains "$readme" 'git config set --global user.name "Your Name"' \
+assert_file_contains "$readme" 'git config set --global user.name "Your Name"' \
   "README documents user-level Git name setup"
-assert_contains "$readme" 'git config set --global user.email "you@example.com"' \
+assert_file_contains "$readme" 'git config set --global user.email "you@example.com"' \
   "README documents user-level Git email setup"
-assert_contains "$readme" 'git config set --global user.signingKey "ssh-ed25519 YOUR_PUBLIC_KEY"' \
+assert_file_contains "$readme" 'git config set --global user.signingKey "ssh-ed25519 YOUR_PUBLIC_KEY"' \
   "README documents optional SSH signing setup"
-assert_not_contains "$readme" "gitAllowedSigners" \
+assert_file_not_contains "$readme" "gitAllowedSigners" \
   "README removes the managed Git signer option"
 
 # The configured diff tool has to be one Terrapod actually installs; `vimdiff`
 # was not, so `git difftool` failed on the VPS Shell Profile and fell back to
 # the system vim on macOS.
-assert_contains "$managed_config" "tool = nvimdiff" "shared Git config drives diffs through nvim"
-assert_not_contains "$managed_config" "tool = vimdiff" "shared Git config no longer names an uninstalled diff tool"
-assert_contains "$repo_root/Brewfile" 'brew "neovim"' "the configured diff tool comes from a declared package"
+assert_file_contains "$managed_config" "tool = nvimdiff" "shared Git config drives diffs through nvim"
+assert_file_not_contains "$managed_config" "tool = vimdiff" "shared Git config no longer names an uninstalled diff tool"
+assert_file_contains "$repo_root/Brewfile" 'brew "neovim"' "the configured diff tool comes from a declared package"
 
 difftool_repo="$tmp_dir/difftool-repo"
 difftool_bin="$tmp_dir/difftool-bin"
