@@ -1004,28 +1004,47 @@ snapshot_install_warnings_from_source() {
   done
 }
 
-install_warning_markers_changed_since_snapshot() {
+# Reports 0 when no marker changed, 1 when at least one did, and 2 when the
+# answer could not be determined: the marker library is not loaded, or a
+# marker exists but cannot be read. Reporting either of those as "nothing
+# changed" would hide fresh warnings behind a clean completion message.
+install_warning_marker_change_status() {
   source_dir="$1"
   snapshot_dir="$2"
   changed=false
 
+  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
+    return 2
+  fi
+
   for category in $(terrapod_install_warning_categories); do
+    marker_path="$(terrapod_install_warning_existing_path "$category" 2>/dev/null || true)"
+    if [ -z "$marker_path" ]; then
+      continue
+    fi
+
     current_file="$snapshot_dir/current-$category"
-    if terrapod_install_warning_read "$category" >"$current_file" 2>/dev/null; then
-      marker_path="$(terrapod_install_warning_existing_path "$category" 2>/dev/null || true)"
-      if [ ! -f "$snapshot_dir/$category" ] ||
-        ! cmp -s "$snapshot_dir/$category" "$current_file" ||
-        {
-          [ -f "$snapshot_dir/$category.identity" ] &&
-            [ ! "$snapshot_dir/$category.identity" -ef "$marker_path" ]
-        }; then
-        changed=true
-      fi
+    if ! terrapod_install_warning_read "$category" >"$current_file" 2>/dev/null; then
+      rm -f "$current_file"
+      return 2
+    fi
+
+    if [ ! -f "$snapshot_dir/$category" ] ||
+      ! cmp -s "$snapshot_dir/$category" "$current_file" ||
+      {
+        [ -f "$snapshot_dir/$category.identity" ] &&
+          [ ! "$snapshot_dir/$category.identity" -ef "$marker_path" ]
+      }; then
+      changed=true
     fi
     rm -f "$current_file"
   done
 
-  [ "$changed" = "true" ]
+  if [ "$changed" = "true" ]; then
+    return 1
+  fi
+
+  return 0
 }
 
 run_terrapod_setup() {
@@ -1218,6 +1237,8 @@ apply_recovery_core_shell_startup_files() {
   fi
 }
 
+# Returns 0 for a clean apply, 2 when install warning markers changed, and 3
+# when the marker state could not be read.
 run_initial_apply() {
   profile="$1"
   source_dir="$2"
@@ -1225,22 +1246,34 @@ run_initial_apply() {
   tpod_bin="$local_bin_dir/tpod"
   marker_snapshot_dir="$(mktemp -d)" ||
     fatal "failed to create install-warning snapshot directory"
+  trap 'rm -rf "$marker_snapshot_dir"' EXIT
+  trap 'rm -rf "$marker_snapshot_dir"; exit 1' INT TERM
 
   snapshot_install_warnings_from_source "$source_dir" "$marker_snapshot_dir" ||
     fatal "failed to snapshot install warning markers"
 
   if ! TERRAPOD_PROFILE="$profile" TERRAPOD_FIRST_RUN_APPLY=1 "$tpod_bin" apply; then
-    rm -rf "$marker_snapshot_dir"
     fatal "installed tpod apply failed"
   fi
 
-  if install_warning_markers_changed_since_snapshot "$source_dir" "$marker_snapshot_dir"; then
-    rm -rf "$marker_snapshot_dir"
-    return 2
-  fi
+  marker_change_status=0
+  install_warning_marker_change_status "$source_dir" "$marker_snapshot_dir" ||
+    marker_change_status="$?"
 
   rm -rf "$marker_snapshot_dir"
-  return 0
+  trap - EXIT INT TERM
+
+  case "$marker_change_status" in
+    0)
+      return 0
+      ;;
+    1)
+      return 2
+      ;;
+    *)
+      return 3
+      ;;
+  esac
 }
 
 show_first_run_help() {
@@ -1277,6 +1310,18 @@ print_first_run_warning_completion() {
   printf '%s\n' "Terrapod first-run apply completed with warnings."
   printf '%s\n' "Warning:"
   printf '%s\n' "  Terrapod installed and the recovery core is valid, but machine profile readiness needs attention."
+  printf '%s\n' "  Review the full apply output above, then run:"
+  printf '%s\n' "  $local_bin_dir/tpod doctor"
+}
+
+print_first_run_unknown_marker_completion() {
+  local_bin_dir="$1"
+
+  printf '\n'
+  printf '%s\n' "Terrapod first-run apply completed with an unknown warning state."
+  printf '%s\n' "Warning:"
+  printf '%s\n' "  Terrapod installed and the recovery core is valid, but install warning markers could not be read,"
+  printf '%s\n' "  so new machine profile readiness warnings could not be detected."
   printf '%s\n' "  Review the full apply output above, then run:"
   printf '%s\n' "  $local_bin_dir/tpod doctor"
 }
@@ -1338,6 +1383,9 @@ main() {
       ;;
     2)
       print_first_run_warning_completion "$local_bin_dir"
+      ;;
+    3)
+      print_first_run_unknown_marker_completion "$local_bin_dir"
       ;;
     *)
       fatal "unexpected initial apply status: $initial_apply_status"
