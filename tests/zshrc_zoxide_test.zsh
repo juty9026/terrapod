@@ -94,8 +94,13 @@ if [ "${1:-}" = "--zsh" ]; then
   exit 0
 fi
 
-if [ -n "${FZF_TEST_SELECTION:-}" ]; then
+if [ -n "${FZF_TEST_STDIN_LOG:-}" ]; then
+  cat >"$FZF_TEST_STDIN_LOG"
+else
   cat >/dev/null
+fi
+
+if [ -n "${FZF_TEST_SELECTION:-}" ]; then
   printf '%s\n' "$FZF_TEST_SELECTION"
   exit 0
 fi
@@ -291,7 +296,9 @@ git -C "$tmp_dir/worktree-main" config user.name "Test User"
 git -C "$tmp_dir/worktree-main" add file.txt
 git -C "$tmp_dir/worktree-main" commit -m "initial commit" >/dev/null
 git -C "$tmp_dir/worktree-main" branch feature/worktree
+git -C "$tmp_dir/worktree-main" branch feature/third
 git -C "$tmp_dir/worktree-main" worktree add "$tmp_dir/worktree selected" feature/worktree >/dev/null 2>&1
+git -C "$tmp_dir/worktree-main" worktree add "$tmp_dir/worktree third" feature/third >/dev/null 2>&1
 
 cd "$tmp_dir/worktree-main" || fail "could not enter worktree main directory"
 worktree_display="$(git -C "$tmp_dir/worktree-main" worktree list | command grep -F "$tmp_dir/worktree selected")"
@@ -299,6 +306,55 @@ export FZF_TEST_SELECTION="$tmp_dir/worktree selected"$'\t'"$worktree_display"
 wcd
 assert_pwd "$tmp_dir/worktree selected" "wcd should jump to the selected worktree path"
 pass "wcd changes directory to a selected worktree path containing spaces"
+
+# The fzf stub answers with FZF_TEST_SELECTION no matter what it is fed, so
+# nothing above this point can see the paste/awk half of wcd's pipeline. These
+# assertions read what wcd actually wrote to fzf's stdin.
+cd "$tmp_dir/worktree-main" || fail "could not reset to worktree main directory"
+export FZF_TEST_STDIN_LOG="$tmp_dir/wcd-fzf-stdin.log"
+export FZF_TEST_SELECTION="$tmp_dir/worktree selected"$'\t'"$worktree_display"
+wcd
+cd "$tmp_dir/worktree-main" || fail "could not reset to worktree main directory"
+
+typeset -a pipeline_lines
+# .zshrc aliases cat to bat, which is not on the stub PATH.
+pipeline_lines=("${(@f)$(command cat "$tmp_dir/wcd-fzf-stdin.log")}")
+
+if (( ${#pipeline_lines} != 3 )); then
+  fail "wcd should offer one row per worktree; got ${#pipeline_lines} for 3 worktrees"
+fi
+pass "wcd offers one row per worktree"
+
+typeset -a offered_paths
+offered_paths=()
+for pipeline_line in "${pipeline_lines[@]}"; do
+  worktree_path="${pipeline_line%%$'\t'*}"
+  worktree_row="${pipeline_line#*$'\t'}"
+
+  if [[ ! -d "$worktree_path" ]]; then
+    fail "wcd's first field should be a worktree directory; got '$worktree_path'"
+  fi
+
+  # git worktree list prints the path first, so a row whose display half does
+  # not start with the porcelain half means paste mispaired its two inputs.
+  if [[ "$worktree_row" != "$worktree_path"* ]]; then
+    fail "wcd should pair each porcelain path with its own listing row; '$worktree_path' got '$worktree_row'"
+  fi
+
+  offered_paths+=("$worktree_path")
+done
+pass "wcd's first field is the worktree directory cd receives"
+pass "wcd pairs each porcelain path with its own listing row"
+
+# git reports resolved paths, and mktemp -d hands out a symlinked one on macOS.
+typeset -a expected_paths
+expected_paths=("${tmp_dir:A}/worktree-main" "${tmp_dir:A}/worktree selected" "${tmp_dir:A}/worktree third")
+if [[ "${(j:\n:)${(o)offered_paths}}" != "${(j:\n:)${(o)expected_paths}}" ]]; then
+  fail "wcd should offer every worktree path verbatim; got ${(j:, :)offered_paths}"
+fi
+pass "wcd offers every worktree path verbatim, spaces included"
+
+unset FZF_TEST_STDIN_LOG
 
 cd "$tmp_dir/worktree-main" || fail "could not reset to worktree main directory"
 export FZF_TEST_SELECTION=""
