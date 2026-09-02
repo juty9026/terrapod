@@ -20,6 +20,12 @@ and exits non-zero when any file fails.
 
 The suite needs `chezmoi`, `zsh`, `python3`, and `jq` on `PATH`.
 
+A Lua interpreter (`lua5.4`, `lua`, or `luajit`, in that order) is optional:
+`tests/hammerspoon_runtime_test.sh` loads `dot_hammerspoon/init.lua` through
+it with `hs` stubbed, and reports a skip instead of running when none is
+found. CI installs one on both runners so the skip never hides a regression
+there.
+
 `python3` has to be a real interpreter, not a mise shim. The tests that
 exercise the Jetendard helpers override `HOME`, and a shim resolving its
 tool versions under that empty `HOME` blocks on a download instead of
