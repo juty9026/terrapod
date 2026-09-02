@@ -16,5 +16,6 @@ This is a narrow exception to ADR 0001's normal Homebrew ownership of macOS font
 - The installer needs Python and network access only during install or retry.
 - Failed replacement preserves the prior working font files and records a non-blocking warning.
 - Terrapod removes only obsolete files named by its own manifest.
+- Jetendard is effectively pinned to the installed release between helper changes; `tpod apply` never upgrades it, and the manual upgrade path is running the installed helper, `~/.local/lib/terrapod/jetendard-font install`.
 - Existing Homebrew-installed JetBrains Mono Nerd Font and D2Coding copies remain installed but unmanaged.
 - App settings change only font-family keys; Orca updates wait until the app is closed.

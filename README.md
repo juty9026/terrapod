@@ -157,6 +157,14 @@ On Apple Silicon, Homebrew installs at `/opt/homebrew`; on Intel Macs, it instal
 
 Terrapod installs every TTF in that Jetendard release and verifies the asset digest published by GitHub. Terrapod checks the latest Jetendard release only when its managed font installer source changes or a failed install is retried. It sets only the font-family keys used by Ghostty, Zed buffers and terminals, and Orca terminals. Quit Orca before rerunning `tpod apply` when Jetendard settings are deferred. Terrapod does not uninstall existing JetBrains Mono Nerd Font or D2Coding copies. Restart Ghostty, Zed, or Orca if an existing window still uses a cached font.
 
+Jetendard stays pinned to the release Terrapod installed until the managed font installer source itself changes. A newer upstream release does not upgrade it, and neither does rerunning `tpod apply`: the install script reruns only when its own rendered content changes, and the retry script runs only while a `jetendard-font` install warning is recorded. To move to the latest stable release on purpose, run the installer helper yourself:
+
+```sh
+~/.local/lib/terrapod/jetendard-font install
+```
+
+The helper installs every TTF from the latest stable release, removes the files the previous release owned, and rewrites the manifest that `tpod status` and `tpod doctor` read. Restart Ghostty, Zed, or Orca afterwards. Deleting that manifest is not an upgrade path: nothing reinstalls the font, and both checks report Jetendard as missing until the helper runs.
+
 macOS desktop applications are split into opt-in App Groups controlled by
 machine-local data keys. During Homebrew bootstrap, chezmoi renders selected
 groups from `Brewfile.macos-desktop-apps.tmpl` into a temporary Brewfile and
