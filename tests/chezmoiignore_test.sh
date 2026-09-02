@@ -241,6 +241,7 @@ macos_only_entries="
 .chezmoiscripts/run_onchange_after_65-install-jetendard-font.sh.tmpl
 dot_local/lib/terrapod/executable_jetendard-font
 dot_local/lib/terrapod/executable_jetendard-settings
+dot_local/lib/terrapod/jetendard-font-status.sh
 dot_config/ghostty
 dot_config/private_karabiner
 dot_hammerspoon
@@ -406,6 +407,7 @@ terrapod_install_warning_clear() {
 }
 terrapod_install_warning_write() {
   printf '%s\n' write >>"$JETENDARD_ADAPTER_LOG"
+  printf '%s\n' "$3" >"$JETENDARD_ADAPTER_LOG.guidance"
   return 0
 }
 SH
@@ -414,6 +416,7 @@ import os
 from pathlib import Path
 with Path(os.environ["JETENDARD_ADAPTER_LOG"]).open("a") as stream:
     stream.write("helper\n")
+raise SystemExit(int(os.environ.get("JETENDARD_HELPER_EXIT", "0")))
 PY
 
 # The adapters inline install-warnings.sh, so the stub is appended after the
@@ -457,6 +460,44 @@ assert_text_equals "$(cat "$jetendard_adapter_log")" 'marker-check
 helper
 clear' \
   "Jetendard retry checks the marker before install and clear"
+
+# The helper exit status, not its message, is what the wrappers branch on:
+# 2 rate limit, 3 unreachable GitHub, 4 unusable release, anything else generic.
+assert_jetendard_guidance() {
+  adapter="$1"
+  helper_exit="$2"
+  expected="$3"
+  label="$4"
+
+  : >"$jetendard_adapter_log"
+  rm -f "$jetendard_adapter_log.guidance"
+  JETENDARD_ADAPTER_LOG="$jetendard_adapter_log" \
+    JETENDARD_MARKER_EXISTS=1 \
+    JETENDARD_CLEAR_FAIL=0 \
+    JETENDARD_HELPER_EXIT="$helper_exit" \
+    sh "$adapter" >/dev/null 2>&1 ||
+    fail "$label (adapter exited non-zero)"
+
+  assert_text_equals "$(cat "$jetendard_adapter_log.guidance")" "$expected" "$label"
+}
+
+for adapter in "$jetendard_installer_fixture" "$jetendard_retry_fixture"; do
+  assert_jetendard_guidance "$adapter" 2 \
+    "GitHub API rate limit reached while resolving the Jetendard release. Export a temporary GITHUB_TOKEN or run gh auth login, then rerun tpod apply." \
+    "Jetendard adapter offers GITHUB_TOKEN guidance on a rate limit: $adapter"
+
+  assert_jetendard_guidance "$adapter" 3 \
+    "GitHub was unreachable while resolving the Jetendard release. Restore network access, then rerun tpod apply." \
+    "Jetendard adapter offers network guidance on an unreachable GitHub: $adapter"
+
+  assert_jetendard_guidance "$adapter" 4 \
+    "The latest Jetendard GitHub release is not installable. Wait for a corrected upstream release, then rerun tpod apply." \
+    "Jetendard adapter offers release guidance on an unusable release: $adapter"
+
+  assert_jetendard_guidance "$adapter" 1 \
+    "Restore Python and GitHub access, then rerun tpod apply." \
+    "Jetendard adapter keeps the generic guidance for an uncategorized failure: $adapter"
+done
 
 jetendard_no_python_bin="$tmp_dir/jetendard-no-python-bin"
 mkdir -p "$jetendard_no_python_bin"
