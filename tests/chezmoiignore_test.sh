@@ -235,6 +235,50 @@ do
 done
 pass "Ubuntu manages cross-profile Homebrew core state"
 
+# .chezmoiignore names target paths, so an entry only means anything if some
+# source script actually renders to it. A dead entry rots into false safety: the
+# list looks complete while a macOS-only script that is genuinely missing from it
+# goes unnoticed.
+chezmoiscript_target_name() {
+  script_target_name="${1##*/}"
+  script_target_name="${script_target_name%.tmpl}"
+
+  case "$script_target_name" in
+    run_onchange_before_*) script_target_name="${script_target_name#run_onchange_before_}" ;;
+    run_onchange_after_*) script_target_name="${script_target_name#run_onchange_after_}" ;;
+    run_onchange_*) script_target_name="${script_target_name#run_onchange_}" ;;
+    run_before_*) script_target_name="${script_target_name#run_before_}" ;;
+    run_after_*) script_target_name="${script_target_name#run_after_}" ;;
+    run_*) script_target_name="${script_target_name#run_}" ;;
+  esac
+
+  printf '%s\n' "$script_target_name"
+}
+
+chezmoiscript_target_names=""
+for script_source in "$repo_root"/.chezmoiscripts/*; do
+  chezmoiscript_target_names="$chezmoiscript_target_names$(chezmoiscript_target_name "$script_source")
+"
+done
+
+ignored_chezmoiscripts="$(grep -E '^\.chezmoiscripts/' "$repo_root/.chezmoiignore" || true)"
+
+if [ -z "$ignored_chezmoiscripts" ]; then
+  fail ".chezmoiignore still names chezmoi scripts to check"
+fi
+pass ".chezmoiignore still names chezmoi scripts to check"
+
+for ignored_chezmoiscript in $ignored_chezmoiscripts; do
+  ignored_chezmoiscript_name="${ignored_chezmoiscript#.chezmoiscripts/}"
+
+  if ! printf '%s' "$chezmoiscript_target_names" | grep -Fx -- "$ignored_chezmoiscript_name" >/dev/null; then
+    printf '%s\n' "known .chezmoiscripts target names:" >&2
+    printf '%s' "$chezmoiscript_target_names" | sed 's/^/  /' >&2
+    fail ".chezmoiignore entry resolves to a source script: $ignored_chezmoiscript"
+  fi
+  pass ".chezmoiignore entry resolves to a source script: $ignored_chezmoiscript"
+done
+
 macos_only_entries="
 .chezmoiscripts/run_before_02-retry-jetendard-font.sh.tmpl
 .chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl
