@@ -2017,6 +2017,7 @@ write_claude_installer_stubs() {
   write_stub "$stub_dir/curl" \
     'log="${CLAUDE_INSTALLER_LOG:-/dev/null}"' \
     'printf "%s\n" "curl args:$*" >>"$log"' \
+    '[ "${CLAUDE_INSTALLER_CURL_FAIL:-0}" = "0" ] || exit 4' \
     'output=' \
     'while [ "$#" -gt 0 ]; do' \
     '  if [ "$1" = "-o" ]; then output="$2"; shift 2; else shift; fi' \
@@ -2027,6 +2028,10 @@ write_claude_installer_stubs() {
     'log="${CLAUDE_INSTALLER_LOG:-/dev/null}"' \
     'printf "%s\n" "bash args:$*" >>"$log"' \
     '[ "${CLAUDE_INSTALLER_FAIL:-0}" = "0" ] || exit 3' \
+    'if [ "${CLAUDE_INSTALLER_SKIP_BINARY:-0}" != "0" ]; then' \
+    '  printf "%s\n" "bash skipped binary" >>"$log"' \
+    '  exit 0' \
+    'fi' \
     'mkdir -p "$HOME/.local/bin"' \
     'printf "%s\n" "#!/bin/sh" "exit 0" >"$HOME/.local/bin/claude"' \
     'chmod +x "$HOME/.local/bin/claude"'
@@ -2230,7 +2235,86 @@ if [ ! -f "$claude_failure_marker" ]; then
 fi
 assert_contains_text "$(cat "$claude_failure_marker")" "Claude Code" \
   "a Claude Code install failure names Claude Code in its marker"
+assert_not_contains_text "$(cat "$claude_failure_marker")" "Homebrew bundle" \
+  "a Claude Code install failure does not name the Homebrew bundle in its marker"
 pass "a Claude Code install failure records a warning and exits zero"
+
+claude_skip_binary_home="$tmp_dir/claude-skip-binary-home"
+claude_skip_binary_state="$tmp_dir/claude-skip-binary-state"
+claude_skip_binary_brew_log="$tmp_dir/claude-skip-binary-brew.log"
+claude_skip_binary_installer_log="$tmp_dir/claude-skip-binary-installer.log"
+mkdir -p "$claude_skip_binary_home"
+claude_skip_binary_status=0
+HOME="$claude_skip_binary_home" XDG_STATE_HOME="$claude_skip_binary_state" \
+  AI_UNAME_ARCH=arm64 AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$claude_skip_binary_brew_log" AI_BREW_FAIL=0 \
+  CLAUDE_INSTALLER_LOG="$claude_skip_binary_installer_log" CLAUDE_INSTALLER_SKIP_BINARY=1 \
+  PATH="$macos_ai_brew_bin:/usr/bin:/bin" sh "$macos_ai_cli_tools_installer_script" >/dev/null 2>&1 ||
+  claude_skip_binary_status=$?
+if [ "$claude_skip_binary_status" -ne 0 ]; then
+  fail "a vendor installer that exits zero without installing the canonical executable should continue apply after recording a warning"
+fi
+if [ -x "$claude_skip_binary_home/.local/bin/claude" ]; then
+  fail "the CLAUDE_INSTALLER_SKIP_BINARY stub should not create the canonical executable"
+fi
+claude_skip_binary_marker="$claude_skip_binary_state/terrapod/install-warnings/optional-ai-cli-tools"
+if [ ! -f "$claude_skip_binary_marker" ]; then
+  fail "a vendor installer that exits zero without the canonical executable records the optional-ai-cli-tools marker"
+fi
+assert_contains_text "$(cat "$claude_skip_binary_marker")" "Claude Code" \
+  "a vendor installer that exits zero without the canonical executable names Claude Code in its marker"
+pass "a vendor installer that exits zero without installing the canonical executable records a warning and exits zero"
+
+claude_curl_failure_home="$tmp_dir/claude-curl-failure-home"
+claude_curl_failure_state="$tmp_dir/claude-curl-failure-state"
+claude_curl_failure_brew_log="$tmp_dir/claude-curl-failure-brew.log"
+claude_curl_failure_installer_log="$tmp_dir/claude-curl-failure-installer.log"
+mkdir -p "$claude_curl_failure_home"
+claude_curl_failure_status=0
+HOME="$claude_curl_failure_home" XDG_STATE_HOME="$claude_curl_failure_state" \
+  AI_UNAME_ARCH=arm64 AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$claude_curl_failure_brew_log" AI_BREW_FAIL=0 \
+  CLAUDE_INSTALLER_LOG="$claude_curl_failure_installer_log" CLAUDE_INSTALLER_CURL_FAIL=1 \
+  PATH="$macos_ai_brew_bin:/usr/bin:/bin" sh "$macos_ai_cli_tools_installer_script" >/dev/null 2>&1 ||
+  claude_curl_failure_status=$?
+if [ "$claude_curl_failure_status" -ne 0 ]; then
+  fail "a Claude Code installer download failure should continue apply after recording a warning"
+fi
+if grep -F "bash args:" "$claude_curl_failure_installer_log" >/dev/null 2>&1; then
+  fail "a Claude Code installer download failure should not run the downloaded script"
+fi
+claude_curl_failure_marker="$claude_curl_failure_state/terrapod/install-warnings/optional-ai-cli-tools"
+if [ ! -f "$claude_curl_failure_marker" ]; then
+  fail "a Claude Code installer download failure records the optional-ai-cli-tools marker"
+fi
+assert_contains_text "$(cat "$claude_curl_failure_marker")" "Claude Code" \
+  "a Claude Code installer download failure names Claude Code in its marker"
+pass "a Claude Code installer download failure records a warning and exits zero"
+
+claude_both_failure_home="$tmp_dir/claude-both-failure-home"
+claude_both_failure_state="$tmp_dir/claude-both-failure-state"
+claude_both_failure_brew_log="$tmp_dir/claude-both-failure-brew.log"
+mkdir -p "$claude_both_failure_home"
+claude_both_failure_status=0
+HOME="$claude_both_failure_home" XDG_STATE_HOME="$claude_both_failure_state" \
+  AI_UNAME_ARCH=arm64 AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$claude_both_failure_brew_log" AI_BREW_FAIL=1 \
+  CLAUDE_INSTALLER_FAIL=1 \
+  PATH="$macos_ai_brew_bin:/usr/bin:/bin" sh "$macos_ai_cli_tools_installer_script" >/dev/null 2>&1 ||
+  claude_both_failure_status=$?
+if [ "$claude_both_failure_status" -ne 0 ]; then
+  fail "a Homebrew bundle failure together with a Claude Code install failure should continue apply after recording a warning"
+fi
+claude_both_failure_marker="$claude_both_failure_state/terrapod/install-warnings/optional-ai-cli-tools"
+if [ ! -f "$claude_both_failure_marker" ]; then
+  fail "a Homebrew bundle failure together with a Claude Code install failure records the optional-ai-cli-tools marker"
+fi
+claude_both_failure_marker_text="$(cat "$claude_both_failure_marker")"
+assert_contains_text "$claude_both_failure_marker_text" "Homebrew bundle" \
+  "a combined install failure names the Homebrew bundle in its marker"
+assert_contains_text "$claude_both_failure_marker_text" "Claude Code" \
+  "a combined install failure names Claude Code in its marker"
+if ! grep -F "Failed: Homebrew bundle, Claude Code." "$claude_both_failure_marker" >/dev/null; then
+  fail "a combined install failure names both sources on a single line"
+fi
+pass "a combined install failure records both sources on a single-line marker"
 
 claude_bundle_failure_home="$tmp_dir/claude-bundle-failure-home"
 claude_bundle_failure_state="$tmp_dir/claude-bundle-failure-state"

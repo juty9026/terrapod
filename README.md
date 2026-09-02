@@ -152,6 +152,8 @@ On Apple Silicon, Homebrew installs at `/opt/homebrew`; on Intel Macs, it instal
 - Bun, Node.js 24, Python 3.13, and uv/uvx through mise
 - pnpm through Node.js Corepack
 - Optional AI Tool Stack casks through Homebrew when that stack is enabled
+- Claude Code through the Claude Code Installer, the vendor-published script at
+  `https://claude.ai/install.sh`, when that stack is enabled
 
 Terrapod installs every TTF in that Jetendard release and verifies the asset digest published by GitHub. Terrapod checks the latest Jetendard release only when its managed font installer source changes or a failed install is retried. It sets only the font-family keys used by Ghostty, Zed buffers and terminals, and Orca terminals. Quit Orca before rerunning `tpod apply` when Jetendard settings are deferred. Terrapod does not uninstall existing JetBrains Mono Nerd Font or D2Coding copies. Restart Ghostty, Zed, or Orca if an existing window still uses a cached font.
 
@@ -211,10 +213,11 @@ On Ubuntu, the initial apply runs setup scripts for the VPS shell profile:
 The VPS Shell Profile is headless: macOS App Groups and other GUI applications
 remain in the optional macOS Desktop App Stack and are never installed on Ubuntu.
 The Optional AI Tool Stack is also macOS-only, because Homebrew publishes
-Antigravity CLI, Claude Code, and Codex as casks and Homebrew on Linux does not
-install casks. Setup does not offer the stack on a VPS, the `development` Preset
-writes it disabled there, and `tpod status` and `tpod doctor` report it as not
-applicable.
+Antigravity CLI and Codex as casks and Homebrew on Linux does not install
+casks. Claude Code stays macOS-only as a profile decision rather than a
+consequence of its package source. Setup does not offer the stack on a VPS,
+the `development` Preset writes it disabled there, and `tpod status` and
+`tpod doctor` report it as not applicable.
 Only configure GitHub authentication on a VPS if write access is needed later.
 
 If the login shell could not be changed automatically, switch it after the first apply and reconnect.

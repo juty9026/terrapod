@@ -249,6 +249,8 @@ assert_ubuntu_setup_not_contains 'Optional AI Tool Stack casks through Homebrew'
   "README does not promise Optional AI Tool Stack casks on Ubuntu"
 assert_ubuntu_setup_contains 'The Optional AI Tool Stack is also macOS-only' \
   "README explains the Optional AI Tool Stack is macOS-only"
+assert_ubuntu_setup_contains 'Claude Code stays macOS-only as a profile decision rather than a' \
+  "README attributes Claude Code's macOS scope to a profile decision, not its package source"
 assert_key_row_contains '`enableAiCliTools`' 'ignored on the VPS Shell Profile' \
   "README documents that enableAiCliTools is ignored on the VPS Shell Profile"
 assert_contains 'When `enableDevelopmentWorkspace` is `true`' \

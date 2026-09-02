@@ -159,6 +159,8 @@ assert_contains "$korean_readme" '선택된 executable의 installer provenance�
   "README.ko.md documents provenance-neutral executable guidance"
 assert_not_contains "$korean_readme" 'Proceed with removing these legacy package installations? [y/N]' \
   "README.ko.md removes the package migration confirmation"
+assert_contains "$korean_readme" 'Claude Code는 package source의 결과가 아니라 profile 결정으로 macOS 전용을 유지합니다.' \
+  "README.ko.md attributes Claude Code's macOS scope to a profile decision, not its package source"
 assert_contains "$korean_readme" '`development-apps`: Zed, Orca ADE(`stablyai/orca/orca`), OrbStack.' \
   "README.ko.md documents Zed, Orca ADE, and OrbStack in the development-apps inventory"
 assert_contains "$korean_readme" '| `enableMacosAppGroupDevelopmentApps` | `false` | development-apps macOS App Group인 Zed, Orca ADE(`stablyai/orca/orca`), OrbStack을 설치합니다. |' \
