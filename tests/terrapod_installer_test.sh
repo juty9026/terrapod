@@ -2878,3 +2878,151 @@ assert_failure "$installer_status" "installer fails when the checked-out source 
 assert_contains "$(cat "$missing_install_warnings_library_case/stderr")" \
   "failed to load the install warning library" \
   "missing install warning library failure is explicit"
+
+unreadable_marker_case="$(make_case_dir unreadable-marker)"
+prepare_resumable_macos_case "$unreadable_marker_case"
+write_complete_setup_config "$unreadable_marker_case/xdg-config/chezmoi/chezmoi.toml"
+HOME="$unreadable_marker_case/home" sh -c \
+  '. "$1"; terrapod_install_warning_write mise-tools "unreadable warning" "unreadable guidance"' \
+  sh "$install_warnings_lib_template"
+chmod 000 "$unreadable_marker_case/home/.local/state/terrapod/install-warnings/mise-tools"
+unreadable_marker_log="$unreadable_marker_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$unreadable_marker_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$unreadable_marker_case"
+unset TERRAPOD_STUB_CALL_LOG
+chmod 600 "$unreadable_marker_case/home/.local/state/terrapod/install-warnings/mise-tools"
+assert_status "$installer_status" 0 "an unreadable install warning marker does not fail the installer"
+unreadable_marker_stdout="$(cat "$unreadable_marker_case/stdout")"
+assert_not_contains "$unreadable_marker_stdout" "Terrapod first-run apply complete." "an unreadable install warning marker is not reported as a clean completion"
+assert_contains "$unreadable_marker_stdout" "Terrapod first-run apply completed with an unknown warning state." "an unreadable install warning marker is reported as an unknown warning state"
+assert_contains "$unreadable_marker_stdout" "install warning markers could not be read" "unknown warning state explains that markers could not be read"
+assert_contains "$unreadable_marker_stdout" "$unreadable_marker_case/home/.local/bin/tpod doctor" "unknown warning state prints the absolute doctor recovery command"
+
+marker_status_case="$(make_case_dir marker-change-status)"
+marker_status_functions="$marker_status_case/install-functions.sh"
+sed '$d' "$repo_root/install.sh" >"$marker_status_functions"
+marker_status_home="$marker_status_case/home"
+marker_status_snapshot="$marker_status_case/snapshot"
+mkdir -p "$marker_status_home" "$marker_status_snapshot"
+
+marker_status_result=0
+sh -c '. "$1"; install_warning_marker_change_status "$2" "$3"' \
+  sh "$marker_status_functions" "$marker_status_case" "$marker_status_snapshot" ||
+  marker_status_result="$?"
+assert_status "$marker_status_result" 2 "marker change status reports an unknown state when the warning library is not loaded"
+
+HOME="$marker_status_home" sh -c \
+  '. "$1"; terrapod_install_warning_write mise-tools "snapshot warning" "snapshot guidance"' \
+  sh "$install_warnings_lib_template"
+HOME="$marker_status_home" sh -c \
+  '. "$1"; . "$2"; snapshot_install_warnings_from_source "$3" "$4"' \
+  sh "$install_warnings_lib_template" "$marker_status_functions" \
+  "$marker_status_case" "$marker_status_snapshot"
+
+marker_status_result=0
+HOME="$marker_status_home" sh -c \
+  '. "$1"; . "$2"; install_warning_marker_change_status "$3" "$4"' \
+  sh "$install_warnings_lib_template" "$marker_status_functions" \
+  "$marker_status_case" "$marker_status_snapshot" ||
+  marker_status_result="$?"
+assert_status "$marker_status_result" 0 "marker change status reports no change when every marker still matches the snapshot"
+
+HOME="$marker_status_home" sh -c \
+  '. "$1"; terrapod_install_warning_write mise-tools "changed warning" "changed guidance"' \
+  sh "$install_warnings_lib_template"
+
+marker_status_result=0
+HOME="$marker_status_home" sh -c \
+  '. "$1"; . "$2"; install_warning_marker_change_status "$3" "$4"' \
+  sh "$install_warnings_lib_template" "$marker_status_functions" \
+  "$marker_status_case" "$marker_status_snapshot" ||
+  marker_status_result="$?"
+assert_status "$marker_status_result" 1 "marker change status reports a change when a marker was rewritten"
+
+chmod 000 "$marker_status_home/.local/state/terrapod/install-warnings/mise-tools"
+marker_status_result=0
+HOME="$marker_status_home" sh -c \
+  '. "$1"; . "$2"; install_warning_marker_change_status "$3" "$4"' \
+  sh "$install_warnings_lib_template" "$marker_status_functions" \
+  "$marker_status_case" "$marker_status_snapshot" ||
+  marker_status_result="$?"
+chmod 600 "$marker_status_home/.local/state/terrapod/install-warnings/mise-tools"
+assert_status "$marker_status_result" 2 "marker change status reports an unknown state when a marker exists but cannot be read"
+
+write_mktemp_dir_stub() {
+  stub="$1"
+  snapshot_root="$2"
+  real_mktemp="$(command -v mktemp)"
+
+  cat >"$stub" <<EOF
+#!/bin/sh
+set -eu
+
+if [ "\${1:-}" = "-d" ] && [ "\$#" -eq 1 ]; then
+  target="$snapshot_root/snapshot.\$\$"
+  mkdir -p "\$target"
+  printf '%s\n' "\$target"
+  exit 0
+fi
+
+exec "$real_mktemp" "\$@"
+EOF
+  chmod +x "$stub"
+}
+
+snapshot_trap_case="$(make_case_dir marker-snapshot-trap)"
+snapshot_trap_functions="$snapshot_trap_case/install-functions.sh"
+sed '$d' "$repo_root/install.sh" >"$snapshot_trap_functions"
+snapshot_trap_root="$snapshot_trap_case/snapshots"
+mkdir -p "$snapshot_trap_root" "$snapshot_trap_case/home/.local/bin"
+write_mktemp_dir_stub "$snapshot_trap_case/bin/mktemp" "$snapshot_trap_root"
+
+if PATH="$snapshot_trap_case/bin:$PATH" sh -c '
+. "$1"
+snapshot_install_warnings_from_source() {
+  return 1
+}
+run_initial_apply macos-terminal "$2" "$3"
+' sh "$snapshot_trap_functions" "$snapshot_trap_case" "$snapshot_trap_case/home/.local/bin" \
+  >"$snapshot_trap_case/stdout" 2>"$snapshot_trap_case/stderr"; then
+  fail "a failed marker snapshot stops the initial apply"
+fi
+pass "a failed marker snapshot stops the initial apply"
+
+assert_contains "$(cat "$snapshot_trap_case/stderr")" "failed to snapshot install warning markers" \
+  "a failed marker snapshot explains itself"
+
+if [ -n "$(find "$snapshot_trap_root" -mindepth 1 -print)" ]; then
+  printf '%s\n' "leftover snapshot temp entries:" >&2
+  find "$snapshot_trap_root" -mindepth 1 -print | sed 's/^/  /' >&2
+  fail "a failed marker snapshot removes the snapshot temp directory"
+fi
+pass "a failed marker snapshot removes the snapshot temp directory"
+
+signal_trap_case="$(make_case_dir marker-snapshot-signal)"
+signal_trap_functions="$signal_trap_case/install-functions.sh"
+sed '$d' "$repo_root/install.sh" >"$signal_trap_functions"
+signal_trap_root="$signal_trap_case/snapshots"
+mkdir -p "$signal_trap_root" "$signal_trap_case/home/.local/bin"
+write_mktemp_dir_stub "$signal_trap_case/bin/mktemp" "$signal_trap_root"
+
+if PATH="$signal_trap_case/bin:$PATH" sh -c '
+. "$1"
+snapshot_install_warnings_from_source() {
+  kill -TERM $$
+  sleep 5
+}
+run_initial_apply macos-terminal "$2" "$3"
+' sh "$signal_trap_functions" "$signal_trap_case" "$signal_trap_case/home/.local/bin" \
+  >"$signal_trap_case/stdout" 2>"$signal_trap_case/stderr"; then
+  fail "an interrupted initial apply stops instead of continuing"
+fi
+pass "an interrupted initial apply stops instead of continuing"
+
+if [ -n "$(find "$signal_trap_root" -mindepth 1 -print)" ]; then
+  printf '%s\n' "leftover snapshot temp entries:" >&2
+  find "$signal_trap_root" -mindepth 1 -print | sed 's/^/  /' >&2
+  fail "an interrupted initial apply removes the snapshot temp directory"
+fi
+pass "an interrupted initial apply removes the snapshot temp directory"
