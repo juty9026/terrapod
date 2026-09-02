@@ -98,7 +98,6 @@ install_claude_code() {
   [ -x "$CLAUDE_CODE_CANONICAL_EXECUTABLE" ]
 }
 
-# Optional AI Tool Stack Brewfile checksum: {{ includeTemplate "Brewfile.ai-cli-tools.tmpl" . | sha256sum }}
 install_ai_cli_bundle || append_failed_ai_cli_tool "Homebrew bundle"
 install_claude_code || append_failed_ai_cli_tool "Claude Code"
 

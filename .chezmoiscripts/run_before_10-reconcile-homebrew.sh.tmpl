@@ -20,22 +20,6 @@ set -eu
 
 {{ include "dot_local/lib/terrapod/homebrew-core-bundle.sh" }}
 
-join_lines_with_commas() {
-  awk '
-    NF {
-      if (joined == "") {
-        joined = $0
-      } else {
-        joined = joined ", " $0
-      }
-    }
-
-    END {
-      print joined
-    }
-  ' "$1"
-}
-
 desktop_app_package_records() {
   brewfile="$1"
 
@@ -151,11 +135,11 @@ run_desktop_app_bundle() {
   done 3<"$records_file"
 
   if [ -s "$failed_casks_file" ]; then
-    if ! failed_casks="$(join_lines_with_commas "$failed_casks_file")"; then
+    if ! failed_casks="$(terrapod_homebrew_core_join_lines_with_commas "$failed_casks_file")"; then
       cleanup_desktop_app_bundle_temps
       return 1
     fi
-    if ! failed_groups="$(join_lines_with_commas "$failed_groups_file")"; then
+    if ! failed_groups="$(terrapod_homebrew_core_join_lines_with_commas "$failed_groups_file")"; then
       cleanup_desktop_app_bundle_temps
       return 1
     fi
@@ -266,7 +250,6 @@ fi
 
 core_brewfile="{{ .chezmoi.sourceDir }}/Brewfile"
 
-# Core Brewfile checksum: {{ include "Brewfile" | sha256sum }}
 if [ -f "$core_brewfile" ]; then
   if terrapod_homebrew_core_run_bundle "$core_brewfile"; then
     clear_install_warning homebrew-core
@@ -289,7 +272,6 @@ cleanup_desktop_brewfile() {
 }
 trap cleanup_desktop_brewfile EXIT HUP INT TERM
 
-# macOS Desktop App Stack App Groups checksum: {{ include "Brewfile.macos-desktop-apps.tmpl" | sha256sum }}
 cat >"$desktop_brewfile" <<'BREWFILE'
 {{ includeTemplate "Brewfile.macos-desktop-apps.tmpl" . -}}
 BREWFILE
