@@ -39,6 +39,7 @@ tests/**
 .chezmoiscripts/65-install-jetendard-font.sh
 .chezmoiscripts/70-apply-jetendard-settings.sh
 .local/lib/terrapod/jetendard-font
+.local/lib/terrapod/jetendard-font-status.sh
 .local/lib/terrapod/jetendard-settings
 .config/ghostty
 .config/ghostty/**

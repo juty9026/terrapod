@@ -300,6 +300,8 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - The **macOS Terminal Profile** installs every TTF from the latest stable `kuskhan/jetendard` GitHub release and verifies the asset digest published by GitHub instead of using a Homebrew font cask.
 - The Jetendard installer queries GitHub only when its managed source changes or a failed installation is retried; ordinary `tpod status` and `tpod doctor` checks remain offline, and an upstream release alone does not trigger an upgrade.
 - Jetendard installation records its tag, digest, and owned font files in a user-scoped manifest, and cleanup removes only obsolete files named by that manifest after a successful replacement.
+- The Jetendard release lookup sends `Authorization: Bearer $GITHUB_TOKEN` when that variable is set and retries transient failures up to three times with exponential backoff; a GitHub API rate limit is reported rather than retried.
+- A failed Jetendard install distinguishes a GitHub API rate limit, an unreachable GitHub, and an unusable release from every other failure, and its install warning marker carries guidance specific to that category — the rate-limit guidance names `GITHUB_TOKEN`, matching the mise/aqua guidance.
 - Jetendard app-setting management changes only font-family keys for Ghostty, Zed buffers and terminals, and initialized Orca terminal profiles; other app settings remain outside Terrapod ownership.
 - Jetendard settings for Orca are deferred while Orca is running and require quitting Orca before rerunning `tpod apply`.
 - The **VPS Shell Profile** excludes the Jetendard installer, app-setting adapter, status, and doctor checks.

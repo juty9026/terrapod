@@ -9,13 +9,53 @@ import re
 import secrets
 import shutil
 import stat
+import sys
 import tempfile
+import time
+import urllib.error
 import urllib.request
 import zipfile
 
 RELEASE_API_URL = "https://api.github.com/repos/kuskhan/jetendard/releases/latest"
 ASSET_NAME = "Jetendard-TTF.zip"
 FONT_NAME = re.compile(r"Jetendard-[A-Za-z0-9]+\.ttf\Z")
+USER_AGENT = "terrapod-jetendard"
+RETRY_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = 2.0
+
+# Exit codes the shell wrappers branch on to pick failure-specific guidance.
+EXIT_FAILURE = 1
+EXIT_RATE_LIMIT = 2
+EXIT_NETWORK = 3
+EXIT_INVALID_RELEASE = 4
+
+
+class HelperError(Exception):
+    """A failure whose category the caller can act on.
+
+    ``marker`` is printed in brackets on the single stderr line and
+    ``exit_code`` is returned by ``main``; the shell wrapper reads either one.
+    """
+
+    marker = ""
+    exit_code = EXIT_FAILURE
+
+
+class RateLimitError(HelperError):
+    marker = "rate-limit"
+    exit_code = EXIT_RATE_LIMIT
+
+
+class NetworkError(HelperError):
+    marker = "network"
+    exit_code = EXIT_NETWORK
+
+
+# Also a ValueError: the release-shape checks below raised ValueError before
+# they were categorized, and callers still catch that.
+class InvalidReleaseError(HelperError, ValueError):
+    marker = "invalid-release"
+    exit_code = EXIT_INVALID_RELEASE
 
 
 class ArgumentParser(argparse.ArgumentParser):
@@ -36,32 +76,72 @@ def manifest_path(home: Path, state_home: str | None = None) -> Path:
     return state_root(home, state_home) / "manifest.json"
 
 
+def is_rate_limited(error: urllib.error.HTTPError) -> bool:
+    if error.code == 429:
+        return True
+    if error.code != 403:
+        return False
+    headers = getattr(error, "headers", None)
+    remaining = headers.get("X-RateLimit-Remaining") if headers is not None else None
+    return isinstance(remaining, str) and remaining.strip() == "0"
+
+
+def open_url(url: str, headers: dict[str, str], timeout: int):
+    """Open ``url``, retrying transient failures with exponential backoff.
+
+    A rate limit is never retried: the quota resets on GitHub's clock, not
+    within the seconds an apply can wait.
+    """
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            return urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout)
+        except urllib.error.HTTPError as error:
+            if is_rate_limited(error):
+                raise RateLimitError(f"GitHub API rate limit reached for {url} (HTTP {error.code})") from error
+            if error.code < 500 or attempt >= RETRY_ATTEMPTS:
+                raise NetworkError(f"GitHub returned HTTP {error.code} for {url}") from error
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            if attempt >= RETRY_ATTEMPTS:
+                raise NetworkError(f"could not reach {url} in {attempt} attempts: {error}") from error
+        time.sleep(RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1)))
+
+
 def load_json_url(url: str) -> dict:
-    request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "terrapod-jetendard"})
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return json.load(response)
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": USER_AGENT}
+    # Only the release lookup is authenticated. browser_download_url redirects
+    # to an asset CDN, and urllib replays request headers across the redirect,
+    # so a token attached to the download would leave GitHub.
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    with open_url(url, headers, 30) as response:
+        try:
+            return json.load(response)
+        except ValueError as error:
+            raise InvalidReleaseError(f"GitHub release response is not valid JSON: {error}") from error
 
 
 def select_asset(release: dict) -> tuple[str, str, str]:
     if release.get("draft") or release.get("prerelease"):
-        raise ValueError("latest GitHub release is not a stable published release")
+        raise InvalidReleaseError("latest GitHub release is not a stable published release")
     tag = release.get("tag_name")
     assets = [asset for asset in release.get("assets", []) if asset.get("name") == ASSET_NAME and asset.get("state") == "uploaded"]
     if not isinstance(tag, str) or not tag or len(assets) != 1:
-        raise ValueError("latest GitHub release must contain one uploaded Jetendard-TTF.zip asset")
+        raise InvalidReleaseError("latest GitHub release must contain one uploaded Jetendard-TTF.zip asset")
     asset = assets[0]
     digest = asset.get("digest")
     url = asset.get("browser_download_url")
     if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest):
-        raise ValueError("Jetendard-TTF.zip does not publish a SHA-256 digest")
+        raise InvalidReleaseError("Jetendard-TTF.zip does not publish a SHA-256 digest")
     if not isinstance(url, str) or not url:
-        raise ValueError("Jetendard-TTF.zip does not publish a download URL")
+        raise InvalidReleaseError("Jetendard-TTF.zip does not publish a download URL")
     return tag, digest.lower(), url
 
 
 def download(url: str, destination: Path) -> None:
-    request = urllib.request.Request(url, headers={"User-Agent": "terrapod-jetendard"})
-    with urllib.request.urlopen(request, timeout=60) as response, destination.open("wb") as output:
+    with open_url(url, {"User-Agent": USER_AGENT}, 60) as response, destination.open("wb") as output:
         shutil.copyfileobj(response, output)
 
 
@@ -83,10 +163,10 @@ def font_entries(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
         if not FONT_NAME.fullmatch(basename):
             continue
         if basename in selected:
-            raise ValueError(f"release archive contains duplicate font: {basename}")
+            raise InvalidReleaseError(f"release archive contains duplicate font: {basename}")
         selected[basename] = info
     if not selected:
-        raise ValueError("release archive contains no Jetendard TTF files")
+        raise InvalidReleaseError("release archive contains no Jetendard TTF files")
     return selected
 
 
@@ -240,16 +320,19 @@ def install(home: Path) -> None:
         download(asset_url, archive_path)
         actual_digest = sha256(archive_path)
         if actual_digest != digest:
-            raise ValueError(f"Jetendard archive digest mismatch: expected {digest}, got {actual_digest}")
-        with zipfile.ZipFile(archive_path) as archive:
-            entries = font_entries(archive)
-            staged = Path(temporary) / "fonts"
-            staged.mkdir()
-            for basename, info in entries.items():
-                destination = staged / basename
-                with archive.open(info) as source, destination.open("wb") as output:
-                    shutil.copyfileobj(source, output)
-                destination.chmod(0o644)
+            raise InvalidReleaseError(f"Jetendard archive digest mismatch: expected {digest}, got {actual_digest}")
+        try:
+            with zipfile.ZipFile(archive_path) as archive:
+                entries = font_entries(archive)
+                staged = Path(temporary) / "fonts"
+                staged.mkdir()
+                for basename, info in entries.items():
+                    destination = staged / basename
+                    with archive.open(info) as source, destination.open("wb") as output:
+                        shutil.copyfileobj(source, output)
+                    destination.chmod(0o644)
+        except zipfile.BadZipFile as error:
+            raise InvalidReleaseError(f"Jetendard release archive is not a readable zip: {error}") from error
         new_files = sorted(entries)
         old_files = list(old.get("files", []))
         touched = sorted(set(old_files) | set(new_files))
@@ -335,8 +418,10 @@ def main() -> int:
         else:
             check(Path(args.home or os.environ.get("HOME", str(Path.home()))), args.state_home)
     except Exception as error:
-        print(f"Jetendard font: {error}", file=__import__("sys").stderr)
-        return 1
+        marker = getattr(error, "marker", "")
+        label = f"[{marker}] " if marker else ""
+        print(f"Jetendard font: {label}{error}", file=sys.stderr)
+        return getattr(error, "exit_code", EXIT_FAILURE)
     return 0
 
 

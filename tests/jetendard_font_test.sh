@@ -602,3 +602,167 @@ assert_snapshot(home, state, before)
 PY
 pass "installer rolls back failures and preserves backups when restore fails"
 pass "recovery cleanup failures never change the reported install outcome"
+
+python3 - "$helper" "$tmp_dir" <<'FETCH'
+import contextlib
+import email.message
+import importlib.machinery
+import importlib.util
+import io
+import json
+import os
+from pathlib import Path
+import sys
+import urllib.error
+
+helper_path, temp_arg = sys.argv[1:]
+loader = importlib.machinery.SourceFileLoader("jetendard_font_fetch", helper_path)
+spec = importlib.util.spec_from_loader(loader.name, loader)
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+temp = Path(temp_arg)
+
+API_URL = "https://api.github.com/repos/kuskhan/jetendard/releases/latest"
+RELEASE = json.dumps({
+    "tag_name": "v1.2.3",
+    "draft": False,
+    "prerelease": False,
+    "assets": [],
+}).encode("utf-8")
+
+requests = []
+sleeps = []
+module.time.sleep = lambda seconds: sleeps.append(seconds)
+
+
+class FakeResponse(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *details):
+        return False
+
+
+def rate_limit_error(remaining):
+    headers = email.message.Message()
+    headers["X-RateLimit-Remaining"] = remaining
+    return urllib.error.HTTPError(API_URL, 403, "rate limit exceeded", headers, None)
+
+
+def server_error():
+    return urllib.error.HTTPError(API_URL, 502, "bad gateway", email.message.Message(), None)
+
+
+def arrange(*items):
+    queue = list(items)
+    requests.clear()
+    sleeps.clear()
+
+    def fake_urlopen(request, timeout=None):
+        requests.append(request)
+        item = queue.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        return FakeResponse(item)
+
+    module.urllib.request.urlopen = fake_urlopen
+
+
+os.environ["GITHUB_TOKEN"] = "secret-token"
+arrange(RELEASE)
+assert module.load_json_url(API_URL)["tag_name"] == "v1.2.3"
+assert requests[0].get_header("Authorization") == "Bearer secret-token"
+assert requests[0].get_header("User-agent") == "terrapod-jetendard"
+
+os.environ["GITHUB_TOKEN"] = "   "
+arrange(RELEASE)
+module.load_json_url(API_URL)
+assert requests[0].get_header("Authorization") is None
+
+os.environ.pop("GITHUB_TOKEN")
+arrange(RELEASE)
+module.load_json_url(API_URL)
+assert requests[0].get_header("Authorization") is None
+
+arrange(urllib.error.URLError("connection reset"), server_error(), RELEASE)
+assert module.load_json_url(API_URL)["tag_name"] == "v1.2.3"
+assert len(requests) == 3
+assert sleeps == [2.0, 4.0]
+
+arrange(*[urllib.error.URLError("connection reset")] * 3)
+try:
+    module.load_json_url(API_URL)
+except module.NetworkError as error:
+    assert error.marker == "network" and error.exit_code == 3
+else:
+    raise AssertionError("exhausted retries did not raise NetworkError")
+assert len(requests) == module.RETRY_ATTEMPTS == 3
+assert sleeps == [2.0, 4.0]
+
+arrange(rate_limit_error("0"))
+try:
+    module.load_json_url(API_URL)
+except module.RateLimitError as error:
+    assert error.marker == "rate-limit" and error.exit_code == 2
+else:
+    raise AssertionError("a rate limit did not raise RateLimitError")
+assert len(requests) == 1 and sleeps == []
+
+arrange(rate_limit_error("57"))
+try:
+    module.load_json_url(API_URL)
+except module.RateLimitError:
+    raise AssertionError("a 403 with quota left was reported as a rate limit")
+except module.NetworkError as error:
+    assert error.exit_code == 3
+assert len(requests) == 1 and sleeps == []
+
+arrange(b"<html>not json</html>")
+try:
+    module.load_json_url(API_URL)
+except module.InvalidReleaseError as error:
+    assert error.marker == "invalid-release" and error.exit_code == 4
+    assert isinstance(error, ValueError)
+else:
+    raise AssertionError("a non-JSON response did not raise InvalidReleaseError")
+
+
+def cli_install(items):
+    arrange(*items)
+    old_argv = sys.argv
+    old_home = os.environ.get("HOME")
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    sys.argv = [helper_path, "install"]
+    os.environ["HOME"] = str(temp / "fetch-home")
+    os.environ["TERRAPOD_JETENDARD_RELEASE_API_URL"] = API_URL
+    try:
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            result = module.main()
+    finally:
+        sys.argv = old_argv
+        if old_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = old_home
+    return result, stdout.getvalue(), stderr.getvalue()
+
+
+result, stdout, stderr = cli_install([rate_limit_error("0")])
+assert result == 2 and not stdout, (result, stdout)
+assert stderr.count("\n") == 1
+assert stderr.startswith("Jetendard font: [rate-limit] "), stderr
+
+result, stdout, stderr = cli_install([urllib.error.URLError("connection reset")] * 3)
+assert result == 3 and not stdout
+assert stderr.count("\n") == 1
+assert stderr.startswith("Jetendard font: [network] "), stderr
+
+prerelease = json.dumps({"tag_name": "v1.2.4", "draft": False, "prerelease": True, "assets": []}).encode("utf-8")
+result, stdout, stderr = cli_install([prerelease])
+assert result == 4 and not stdout
+assert stderr.count("\n") == 1
+assert stderr.startswith("Jetendard font: [invalid-release] "), stderr
+FETCH
+pass "release lookup authenticates, retries, and categorizes its failures"
