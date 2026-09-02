@@ -598,6 +598,7 @@ copy_desktop_apply_source_fixture() {
     >"$source_dir/.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl"
   cp "$terrapod" "$source_dir/dot_local/bin/executable_terrapod"
   cp "$tpod_source" "$source_dir/dot_local/bin/symlink_tpod"
+  cp "$repo_root/dot_local/lib/terrapod/config-toml.sh" "$source_dir/dot_local/lib/terrapod/config-toml.sh"
   cp "$repo_root/dot_local/lib/terrapod/homebrew-core-bundle.sh" "$source_dir/dot_local/lib/terrapod/homebrew-core-bundle.sh"
   sed \
     -e "s#/opt/homebrew/bin/brew#$fixture_brew_bin#g" \
@@ -701,6 +702,16 @@ homebrew_owned_status_doctor_path() {
 # The rendered command reads its Homebrew prefix mapping from a sibling
 # library, so the fixture reproduces the deployed bin/ and lib/ layout and
 # rewrites the prefix in both files.
+# Terrapod reads its managed config through the recovery-core library beside
+# the command, so any staged copy of the command needs it too.
+stage_terrapod_config_reader() {
+  bin_dir="$1"
+  lib_dir="${bin_dir%/*}/lib/terrapod"
+
+  mkdir -p "$lib_dir"
+  cp "$repo_root/dot_local/lib/terrapod/config-toml.sh" "$lib_dir/config-toml.sh"
+}
+
 render_terrapod_with_homebrew_prefix() {
   name="$1"
   production_prefix="$2"
@@ -714,6 +725,7 @@ render_terrapod_with_homebrew_prefix() {
   sed "s|$production_prefix|$fixture_prefix|g" \
     "$repo_root/dot_local/lib/terrapod/homebrew-prefix.sh" >"$rendered_prefix_lib"
   chmod +x "$rendered_terrapod"
+  stage_terrapod_config_reader "$rendered_root/bin"
   printf '%s\n' "$rendered_terrapod"
 }
 
@@ -896,6 +908,11 @@ assert_line \
   "$managed_targets" \
   ".local/lib/terrapod/install-warnings.sh" \
   "chezmoi manages the shared install warning marker library"
+
+assert_line \
+  "$managed_targets" \
+  ".local/lib/terrapod/config-toml.sh" \
+  "chezmoi manages the shared managed config reader"
 
 assert_line \
   "$managed_targets" \
@@ -1421,6 +1438,7 @@ assert_not_contains "$help_with_marker_output" "Install warnings" "Terrapod help
 assert_not_contains "$help_with_marker_output" "Warning:" "Terrapod help remains warning-free when install warning markers exist"
 
 ln -s "$terrapod" "$tmp_dir/bin/tpod"
+stage_terrapod_config_reader "$tmp_dir/bin"
 tpod_help_output="$(TERRAPOD_PROFILE=macos-terminal PATH="$tmp_dir/bin:/usr/bin:/bin" "$tmp_dir/bin/tpod" help)"
 
 if [ "$tpod_help_output" != "$help_output" ]; then
@@ -1977,6 +1995,35 @@ enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = true
 enableMacosAppGroupMobileDev = true
 TOML
+
+recovery_core_root="$tmp_dir/recovery-core-only"
+mkdir -p "$recovery_core_root/bin" "$recovery_core_root/lib/terrapod"
+cp "$terrapod" "$recovery_core_root/bin/terrapod"
+chmod +x "$recovery_core_root/bin/terrapod"
+ln -s terrapod "$recovery_core_root/bin/tpod"
+cp "$repo_root/dot_local/lib/terrapod/config-toml.sh" "$recovery_core_root/lib/terrapod/config-toml.sh"
+
+recovery_core_status_output="$(
+  TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$status_config" PATH="/usr/bin:/bin" \
+    "$recovery_core_root/bin/tpod" status
+)"
+assert_contains "$recovery_core_status_output" "Config: $status_config (present)" "a recovery-core-only install reads the managed config"
+assert_contains "$recovery_core_status_output" "Optional Editor Stack         : enabled" "a recovery-core-only install reports managed stack settings"
+
+recovery_core_help_output="$(TERRAPOD_PROFILE=macos-terminal PATH="/usr/bin:/bin" "$recovery_core_root/bin/tpod" help)"
+assert_contains "$recovery_core_help_output" "Terrapod - a small landing pod for your dotfiles" "a recovery-core-only install answers tpod help"
+
+rm -f "$recovery_core_root/lib/terrapod/config-toml.sh"
+if TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$status_config" PATH="/usr/bin:/bin" \
+  "$recovery_core_root/bin/tpod" status >"$tmp_dir/missing-reader.out" 2>"$tmp_dir/missing-reader.err"; then
+  fail "Terrapod fails when the managed config reader is missing"
+fi
+pass "Terrapod fails when the managed config reader is missing"
+
+assert_contains \
+  "$(cat "$tmp_dir/missing-reader.err")" \
+  "managed config reader is missing: $recovery_core_root/bin/../lib/terrapod/config-toml.sh" \
+  "Terrapod names the managed config reader it could not load"
 
 macos_standard_brew_prefix="$tmp_dir/macos-standard-homebrew"
 macos_status_path="$(homebrew_owned_status_doctor_path macos "$macos_standard_brew_prefix" zsh agy claude codex ghostty op)"
@@ -3047,6 +3094,7 @@ update_sibling_bin="$tmp_dir/update-sibling-bin"
 mkdir -p "$update_sibling_bin"
 cp "$terrapod" "$update_sibling_bin/terrapod"
 chmod +x "$update_sibling_bin/terrapod"
+stage_terrapod_config_reader "$update_sibling_bin"
 update_sibling_handoff_file="$tmp_dir/update-sibling-handoff.args"
 write_stub "$update_sibling_bin/tpod" \
   'printf "%s\n" "$*" >"'"$update_sibling_handoff_file"'"' \
