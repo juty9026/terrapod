@@ -57,7 +57,16 @@ desktop_app_package_records() {
       sub(/".*$/, "", token)
 
       if (token != "") {
-        printf "%s\t%s\t%s\n", group, token, declaration
+        # Tab is IFS whitespace, so an empty leading field would be swallowed by
+        # the reader and shift token and declaration left. Emit a placeholder
+        # instead; the reader maps it back to "no App Group". The declaration
+        # stays last so a tab inside it cannot shift anything either.
+        group_field = group
+        if (group_field == "") {
+          group_field = "-"
+        }
+
+        printf "%s\t%s\t%s\n", group_field, token, declaration
       }
     }
   ' "$brewfile"
@@ -109,6 +118,12 @@ run_desktop_app_bundle() {
   # Keep the record list on fd 3 so a cask post-install step that reads stdin
   # cannot consume the remaining packages and silently skip them.
   while IFS="$tab" read -r app_group token declaration <&3; do
+    # "-" is the placeholder desktop_app_package_records emits for a declaration
+    # that precedes every macOS App Group header.
+    if [ "$app_group" = "-" ]; then
+      app_group=
+    fi
+
     single_package_brewfile="$(mktemp "${TMPDIR:-/tmp}/terrapod-macos-desktop-package.XXXXXX")" || {
       cleanup_desktop_app_bundle_temps
       return 1
