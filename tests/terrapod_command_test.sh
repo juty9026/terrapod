@@ -2,31 +2,12 @@
 set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-tmp_dir="$(mktemp -d)"
+. "$repo_root/tests/lib/harness.sh"
+make_tmp_dir
 
 # PATH is later pointed at a stub bin directory whose uname always reports
 # Darwin, so the real host has to be recorded before that happens.
 host_os="$(uname -s)"
-
-cleanup() {
-  rm -rf "$tmp_dir"
-}
-trap cleanup EXIT INT TERM
-
-fail() {
-  printf '%s\n' "not ok - $1" >&2
-  exit 1
-}
-
-pass() {
-  printf '%s\n' "ok - $1"
-}
-
-# Reported instead of an assertion when a case cannot hold on this platform.
-# tests/run counts these lines, so a skip stays visible in a green CI log.
-skip() {
-  printf '%s\n' "skip - $1"
-}
 
 write_stub() {
   path="$1"
@@ -281,18 +262,6 @@ run_command_in_pty() {
   fi
 }
 
-assert_contains() {
-  haystack="$1"
-  needle="$2"
-  message="$3"
-
-  if ! printf '%s\n' "$haystack" | grep -F "$needle" >/dev/null; then
-    fail "$message"
-  fi
-
-  pass "$message"
-}
-
 assert_status() {
   actual="$1"
   expected="$2"
@@ -310,18 +279,6 @@ assert_failure() {
   message="$2"
 
   if [ "$actual" -eq 0 ]; then
-    fail "$message"
-  fi
-
-  pass "$message"
-}
-
-assert_not_contains() {
-  haystack="$1"
-  needle="$2"
-  message="$3"
-
-  if printf '%s\n' "$haystack" | grep -F "$needle" >/dev/null; then
     fail "$message"
   fi
 

@@ -2,16 +2,8 @@
 set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+. "$repo_root/tests/lib/harness.sh"
 adr_dir="$repo_root/docs/adr"
-
-fail() {
-  printf '%s\n' "not ok - $1" >&2
-  exit 1
-}
-
-pass() {
-  printf '%s\n' "ok - $1"
-}
 
 # Every "ADR NNNN" an ADR names must resolve to a file, so a renumbered or
 # deleted record cannot leave a dangling cross-reference behind.

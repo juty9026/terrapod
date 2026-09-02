@@ -2,24 +2,11 @@
 set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-tmp_dir="$(mktemp -d)"
+. "$repo_root/tests/lib/harness.sh"
+make_tmp_dir
 chezmoi_config="$tmp_dir/chezmoi.toml"
 
-cleanup() {
-  rm -rf "$tmp_dir"
-}
-trap cleanup EXIT INT TERM
-
 : >"$chezmoi_config"
-
-fail() {
-  printf '%s\n' "not ok - $1" >&2
-  exit 1
-}
-
-pass() {
-  printf '%s\n' "ok - $1"
-}
 
 managed_source_paths() {
   data="$1"
@@ -83,30 +70,6 @@ write_stub() {
     printf '%s\n' "$@"
   } >"$path"
   chmod +x "$path"
-}
-
-assert_contains_text() {
-  text="$1"
-  needle="$2"
-  message="$3"
-
-  if ! printf '%s\n' "$text" | grep -F -- "$needle" >/dev/null; then
-    fail "$message"
-  fi
-
-  pass "$message"
-}
-
-assert_not_contains_text() {
-  text="$1"
-  needle="$2"
-  message="$3"
-
-  if printf '%s\n' "$text" | grep -F -- "$needle" >/dev/null; then
-    fail "$message"
-  fi
-
-  pass "$message"
 }
 
 assert_texts_differ() {
@@ -343,15 +306,15 @@ macos_terminal_apps_karabiner_opener="$(render_template "$macos_terminal_apps_da
 macos_automation_apps_karabiner_opener="$(render_template "$macos_automation_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 macos_development_apps_karabiner_opener="$(render_template "$macos_development_apps_data" ".chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl")"
 
-assert_contains_text \
+assert_contains \
   "$macos_bootstrap" \
   'terrapod_homebrew_core_run_bundle "$core_brewfile"' \
   "macOS bootstrap always runs the core Brewfile through the core bundle helper"
 
-assert_contains_text "$ubuntu_homebrew_bootstrap" 'core_brewfile="' "Ubuntu renders the mandatory CLI bundle"
-assert_contains_text "$ubuntu_homebrew_bootstrap" 'HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade' "Ubuntu bundle apply disables automatic updates"
-assert_not_contains_text "$ubuntu_homebrew_bootstrap" 'linux:arm64' "Ubuntu Homebrew bootstrap rejects the arm64 identifier"
-assert_contains_text "$ubuntu_homebrew_bootstrap" 'linux:x86_64|linux:aarch64)' "Ubuntu Homebrew reconciliation accepts exactly the supported Linux architecture identifiers"
+assert_contains "$ubuntu_homebrew_bootstrap" 'core_brewfile="' "Ubuntu renders the mandatory CLI bundle"
+assert_contains "$ubuntu_homebrew_bootstrap" 'HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade' "Ubuntu bundle apply disables automatic updates"
+assert_not_contains "$ubuntu_homebrew_bootstrap" 'linux:arm64' "Ubuntu Homebrew bootstrap rejects the arm64 identifier"
+assert_contains "$ubuntu_homebrew_bootstrap" 'linux:x86_64|linux:aarch64)' "Ubuntu Homebrew reconciliation accepts exactly the supported Linux architecture identifiers"
 
 for bundle_source in \
   "$repo_root/.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl" \
@@ -364,22 +327,22 @@ do
 done
 pass "every Homebrew bundle call disables automatic updates"
 
-assert_not_contains_text \
+assert_not_contains \
   "$macos_bootstrap" \
   "Brewfile.macos-desktop-apps" \
   "macOS bootstrap default skips macOS Desktop App Stack Brewfile"
 
-assert_not_contains_text \
+assert_not_contains \
   "$macos_bootstrap" \
   "terrapod-macos-desktop-apps" \
   "macOS bootstrap default skips macOS Desktop App Stack temp Brewfile"
 
-assert_not_contains_text \
+assert_not_contains \
   "$macos_bootstrap" \
   'brew bundle --no-upgrade --file="$desktop_brewfile"' \
   "macOS bootstrap default skips macOS Desktop App Stack bundle"
 
-assert_contains_text \
+assert_contains \
   "$macos_bootstrap" \
   "clear_install_warning homebrew-desktop-apps" \
   "macOS bootstrap default renders macOS Desktop App Stack warning cleanup"
@@ -399,22 +362,22 @@ printf '%s\n' "$macos_jetendard_retry" >"$macos_jetendard_retry_script"
 sh -n "$macos_jetendard_retry_script" || fail "macOS Jetendard retry script should be valid sh"
 pass "macOS Jetendard retry script is valid sh"
 
-assert_contains_text \
+assert_contains \
   "$macos_jetendard_installer" \
   "Jetendard font helper checksum:" \
   "Jetendard installer tracks the helper checksum"
 
-assert_contains_text \
+assert_contains \
   "$macos_jetendard_installer" \
   'python3 "$font_helper" install' \
   "Jetendard installer invokes the helper install command"
 
-assert_contains_text \
+assert_contains \
   "$macos_jetendard_retry" \
   'if ! terrapod_install_warning_existing_path jetendard-font >/dev/null 2>&1; then' \
   "Jetendard retry is gated by its warning marker"
 
-assert_contains_text \
+assert_contains \
   "$macos_jetendard_retry" \
   'python3 "$font_helper" install' \
   "Jetendard retry invokes the helper install command"
@@ -841,8 +804,8 @@ fi
 pass "macOS bootstrap records homebrew-core marker when the Homebrew installer command fails"
 
 homebrew_installer_failure_marker_text="$(cat "$homebrew_installer_failure_marker")"
-assert_contains_text "$homebrew_installer_failure_marker_text" "summary='Homebrew core install needs attention'" "macOS bootstrap Homebrew installer failure marker keeps the expected summary"
-assert_contains_text "$homebrew_installer_failure_marker_text" "guidance='Install Homebrew from https://brew.sh, then rerun tpod apply.'" "macOS bootstrap Homebrew installer failure marker keeps recovery guidance"
+assert_contains "$homebrew_installer_failure_marker_text" "summary='Homebrew core install needs attention'" "macOS bootstrap Homebrew installer failure marker keeps the expected summary"
+assert_contains "$homebrew_installer_failure_marker_text" "guidance='Install Homebrew from https://brew.sh, then rerun tpod apply.'" "macOS bootstrap Homebrew installer failure marker keeps recovery guidance"
 
 homebrew_first_run_failure_state="$tmp_dir/homebrew-first-run-failure-state"
 homebrew_first_run_failure_home="$tmp_dir/homebrew-first-run-failure-home"
@@ -953,7 +916,7 @@ for shellenv_mode in command-failure eval-failure; do
   if [ ! -f "$shellenv_failure_marker" ]; then
     fail "core Homebrew $shellenv_mode records a homebrew-core marker"
   fi
-  assert_contains_text "$(cat "$shellenv_failure_marker")" \
+  assert_contains "$(cat "$shellenv_failure_marker")" \
     "Fix Homebrew shellenv, then rerun tpod apply." \
     "core Homebrew $shellenv_mode marker provides actionable recovery guidance"
   if grep -F "brew args:bundle" "$shellenv_failure_log" >/dev/null; then
@@ -991,7 +954,7 @@ if ! HOME="$core_detail_home" XDG_STATE_HOME="$core_detail_state" MACOS_BREW_LOG
 fi
 chmod 755 "$core_detail_prefix"
 
-assert_contains_text "$(cat "$tmp_dir/core-detail.out")" "visible brew bundle output:" "core Homebrew failure preserves visible brew output"
+assert_contains "$(cat "$tmp_dir/core-detail.out")" "visible brew bundle output:" "core Homebrew failure preserves visible brew output"
 core_detail_marker="$core_detail_state/terrapod/install-warnings/homebrew-core"
 if [ ! -f "$core_detail_marker" ]; then
   fail "core Homebrew bundle failure records a homebrew-core marker"
@@ -999,13 +962,13 @@ fi
 pass "core Homebrew bundle failure records a homebrew-core marker"
 
 core_detail_marker_text="$(cat "$core_detail_marker")"
-assert_contains_text "$core_detail_marker_text" "category='homebrew-core'" "core marker keeps one stable category"
-assert_contains_text "$core_detail_marker_text" "summary='Homebrew core install needs attention'" "core marker keeps stable summary"
-assert_contains_text "$core_detail_marker_text" "failed formulae: gum" "core marker guidance includes reliable failed formula names"
-assert_not_contains_text "$core_detail_marker_text" "failed casks:" "core marker guidance contains no cask detail after core casks are removed"
-assert_contains_text "$core_detail_marker_text" "Homebrew prefix is not writable: $core_detail_prefix" "core marker guidance identifies unwritable shared prefix"
-assert_not_contains_text "$core_detail_marker_text" "btop" "core marker excludes successful formula names"
-assert_not_contains_text "$core_detail_marker_text" "chown" "core marker avoids broad ownership command guidance"
+assert_contains "$core_detail_marker_text" "category='homebrew-core'" "core marker keeps one stable category"
+assert_contains "$core_detail_marker_text" "summary='Homebrew core install needs attention'" "core marker keeps stable summary"
+assert_contains "$core_detail_marker_text" "failed formulae: gum" "core marker guidance includes reliable failed formula names"
+assert_not_contains "$core_detail_marker_text" "failed casks:" "core marker guidance contains no cask detail after core casks are removed"
+assert_contains "$core_detail_marker_text" "Homebrew prefix is not writable: $core_detail_prefix" "core marker guidance identifies unwritable shared prefix"
+assert_not_contains "$core_detail_marker_text" "btop" "core marker excludes successful formula names"
+assert_not_contains "$core_detail_marker_text" "chown" "core marker avoids broad ownership command guidance"
 
 core_fallback_bin="$tmp_dir/core-fallback-bin"
 core_fallback_state="$tmp_dir/core-fallback-state"
@@ -1020,9 +983,9 @@ if ! HOME="$core_fallback_home" XDG_STATE_HOME="$core_fallback_state" MACOS_BREW
 fi
 
 core_fallback_marker_text="$(cat "$core_fallback_state/terrapod/install-warnings/homebrew-core")"
-assert_contains_text "$core_fallback_marker_text" "Review Homebrew core bundle output, fix package access, then rerun tpod apply." "core marker falls back to visible-output rerun guidance"
-assert_not_contains_text "$core_fallback_marker_text" "failed formulae:" "core fallback marker avoids invented formula detail"
-assert_not_contains_text "$core_fallback_marker_text" "failed casks:" "core fallback marker avoids invented cask detail"
+assert_contains "$core_fallback_marker_text" "Review Homebrew core bundle output, fix package access, then rerun tpod apply." "core marker falls back to visible-output rerun guidance"
+assert_not_contains "$core_fallback_marker_text" "failed formulae:" "core fallback marker avoids invented formula detail"
+assert_not_contains "$core_fallback_marker_text" "failed casks:" "core fallback marker avoids invented cask detail"
 
 core_retry_success_bin="$tmp_dir/core-retry-success-bin"
 core_retry_success_state="$tmp_dir/core-retry-success-state"
@@ -1060,10 +1023,10 @@ if ! HOME="$core_retry_failure_home" XDG_STATE_HOME="$core_retry_failure_state" 
 fi
 
 core_retry_failure_marker_text="$(cat "$core_retry_failure_state/terrapod/install-warnings/homebrew-core")"
-assert_contains_text "$core_retry_failure_marker_text" "failed formulae: mise" "failed core reconciliation replaces marker with current failed formula detail"
-assert_not_contains_text "$core_retry_failure_marker_text" "old core retry warning" "failed core reconciliation replaces stale marker guidance"
+assert_contains "$core_retry_failure_marker_text" "failed formulae: mise" "failed core reconciliation replaces marker with current failed formula detail"
+assert_not_contains "$core_retry_failure_marker_text" "old core retry warning" "failed core reconciliation replaces stale marker guidance"
 
-assert_contains_text "$core_retry_failure_marker_text" "updated_at='" "failed core reconciliation replacement marker keeps updated_at"
+assert_contains "$core_retry_failure_marker_text" "updated_at='" "failed core reconciliation replacement marker keeps updated_at"
 
 # A cask post-install step that reads stdin must not consume the per-item record
 # list, which would silently skip every package after the first.
@@ -1080,7 +1043,7 @@ if ! HOME="$core_stdin_home" XDG_STATE_HOME="$core_stdin_state" MACOS_BREW_LOG="
 fi
 
 core_stdin_marker_text="$(cat "$core_stdin_state/terrapod/install-warnings/homebrew-core")"
-assert_contains_text "$core_stdin_marker_text" "failed formulae: bat, zoxide" "core retry keeps reading records when brew bundle consumes stdin"
+assert_contains "$core_stdin_marker_text" "failed formulae: bat, zoxide" "core retry keeps reading records when brew bundle consumes stdin"
 
 mise_missing_without_core_home="$tmp_dir/mise-missing-without-core-home"
 mise_missing_without_core_state="$tmp_dir/mise-missing-without-core-state"
@@ -1136,41 +1099,41 @@ assert_managed_paths_exclude_prefix \
   "Brewfile.macos-desktop-apps" \
   "terminal-apps group does not manage rendered macOS Desktop App Stack Brewfile target"
 
-assert_not_contains_text "$macos_brewfile" 'cask "ghostty"' "macOS default does not render Ghostty"
-assert_not_contains_text "$macos_brewfile" 'cask "cmux"' "macOS default does not render cmux"
-assert_not_contains_text "$macos_brewfile" 'cask "hammerspoon"' "macOS default does not render Hammerspoon"
-assert_not_contains_text "$macos_brewfile" 'cask "karabiner-elements"' "macOS default does not render Karabiner-Elements"
-assert_not_contains_text "$macos_brewfile" 'cask "scroll-reverser"' "macOS default does not render Scroll Reverser"
-assert_not_contains_text "$macos_brewfile" 'cask "raycast"' "macOS default does not render Raycast"
-assert_not_contains_text "$macos_brewfile" 'cask "1password-cli"' "macOS default does not render 1Password CLI"
-assert_not_contains_text "$macos_brewfile" 'cask "istat-menus"' "macOS default does not render iStat Menus"
-assert_not_contains_text "$macos_brewfile" 'cask "claude"' "macOS default does not render Claude Desktop"
-assert_not_contains_text "$macos_brewfile" 'cask "codex-app"' "macOS default does not render the unified ChatGPT desktop app"
-assert_not_contains_text "$macos_brewfile" 'cask "chatgpt"' "macOS default does not render the legacy ChatGPT cask"
-assert_not_contains_text "$macos_brewfile" 'cask "codex"' "macOS default does not render Codex CLI as a desktop app"
-assert_not_contains_text "$macos_brewfile" 'cask "antigravity"' "macOS default does not render Antigravity 2.0"
-assert_not_contains_text "$macos_brewfile" 'cask "antigravity-ide"' "macOS default does not render Antigravity IDE"
-assert_not_contains_text "$macos_brewfile" 'cask "stablyai/orca/orca"' "macOS default does not render Orca"
-assert_not_contains_text "$macos_brewfile" 'cask "orbstack"' "macOS default does not render OrbStack"
+assert_not_contains "$macos_brewfile" 'cask "ghostty"' "macOS default does not render Ghostty"
+assert_not_contains "$macos_brewfile" 'cask "cmux"' "macOS default does not render cmux"
+assert_not_contains "$macos_brewfile" 'cask "hammerspoon"' "macOS default does not render Hammerspoon"
+assert_not_contains "$macos_brewfile" 'cask "karabiner-elements"' "macOS default does not render Karabiner-Elements"
+assert_not_contains "$macos_brewfile" 'cask "scroll-reverser"' "macOS default does not render Scroll Reverser"
+assert_not_contains "$macos_brewfile" 'cask "raycast"' "macOS default does not render Raycast"
+assert_not_contains "$macos_brewfile" 'cask "1password-cli"' "macOS default does not render 1Password CLI"
+assert_not_contains "$macos_brewfile" 'cask "istat-menus"' "macOS default does not render iStat Menus"
+assert_not_contains "$macos_brewfile" 'cask "claude"' "macOS default does not render Claude Desktop"
+assert_not_contains "$macos_brewfile" 'cask "codex-app"' "macOS default does not render the unified ChatGPT desktop app"
+assert_not_contains "$macos_brewfile" 'cask "chatgpt"' "macOS default does not render the legacy ChatGPT cask"
+assert_not_contains "$macos_brewfile" 'cask "codex"' "macOS default does not render Codex CLI as a desktop app"
+assert_not_contains "$macos_brewfile" 'cask "antigravity"' "macOS default does not render Antigravity 2.0"
+assert_not_contains "$macos_brewfile" 'cask "antigravity-ide"' "macOS default does not render Antigravity IDE"
+assert_not_contains "$macos_brewfile" 'cask "stablyai/orca/orca"' "macOS default does not render Orca"
+assert_not_contains "$macos_brewfile" 'cask "orbstack"' "macOS default does not render OrbStack"
 
-assert_contains_text "$terminal_apps_brewfile" 'cask "ghostty"' "terminal-apps group renders Ghostty"
-assert_not_contains_text "$terminal_apps_brewfile" 'cask "cmux"' "terminal-apps group does not render cmux"
-assert_not_contains_text "$terminal_apps_brewfile" 'cask "hammerspoon"' "terminal-apps group does not render automation casks"
+assert_contains "$terminal_apps_brewfile" 'cask "ghostty"' "terminal-apps group renders Ghostty"
+assert_not_contains "$terminal_apps_brewfile" 'cask "cmux"' "terminal-apps group does not render cmux"
+assert_not_contains "$terminal_apps_brewfile" 'cask "hammerspoon"' "terminal-apps group does not render automation casks"
 
-assert_contains_text "$automation_apps_brewfile" 'cask "hammerspoon"' "automation group renders Hammerspoon"
-assert_contains_text "$automation_apps_brewfile" 'cask "karabiner-elements"' "automation group renders Karabiner-Elements"
-assert_contains_text "$automation_apps_brewfile" 'cask "scroll-reverser"' "automation group renders Scroll Reverser"
+assert_contains "$automation_apps_brewfile" 'cask "hammerspoon"' "automation group renders Hammerspoon"
+assert_contains "$automation_apps_brewfile" 'cask "karabiner-elements"' "automation group renders Karabiner-Elements"
+assert_contains "$automation_apps_brewfile" 'cask "scroll-reverser"' "automation group renders Scroll Reverser"
 
-assert_contains_text "$launcher_apps_brewfile" 'cask "raycast"' "launcher group renders Raycast"
-assert_contains_text "$launcher_apps_brewfile" 'cask "1password-cli"' "launcher group renders 1Password CLI"
+assert_contains "$launcher_apps_brewfile" 'cask "raycast"' "launcher group renders Raycast"
+assert_contains "$launcher_apps_brewfile" 'cask "1password-cli"' "launcher group renders 1Password CLI"
 
-assert_contains_text "$monitoring_apps_brewfile" 'cask "istat-menus"' "monitoring group renders iStat Menus"
+assert_contains "$monitoring_apps_brewfile" 'cask "istat-menus"' "monitoring group renders iStat Menus"
 
-assert_contains_text "$development_apps_brewfile" 'cask "zed"' "development-apps group renders Zed"
-assert_contains_text "$development_apps_brewfile" 'cask "stablyai/orca/orca", trusted: true' "development-apps group trusts only Orca's fully-qualified vendor cask"
-assert_contains_text "$development_apps_brewfile" 'cask "orbstack"' "development-apps group renders OrbStack"
+assert_contains "$development_apps_brewfile" 'cask "zed"' "development-apps group renders Zed"
+assert_contains "$development_apps_brewfile" 'cask "stablyai/orca/orca", trusted: true' "development-apps group trusts only Orca's fully-qualified vendor cask"
+assert_contains "$development_apps_brewfile" 'cask "orbstack"' "development-apps group renders OrbStack"
 for removed_cask in claude codex-app chatgpt antigravity antigravity-ide; do
-  assert_not_contains_text "$development_apps_brewfile" "cask \"$removed_cask\"" "development-apps group excludes removed desktop cask: $removed_cask"
+  assert_not_contains "$development_apps_brewfile" "cask \"$removed_cask\"" "development-apps group excludes removed desktop cask: $removed_cask"
 done
 development_apps_casks="$(
   printf '%s\n' "$development_apps_brewfile" |
@@ -1184,13 +1147,13 @@ assert_text_equals \
   "$expected_development_apps_casks" \
   "development-apps group renders exactly the expected casks"
 
-assert_contains_text "$mobile_dev_brewfile" 'cask "android-studio"' "mobile-dev group renders Android Studio"
-assert_contains_text "$mobile_dev_brewfile" 'brew "mobile-dev-inc/tap/maestro", trusted: true' "mobile-dev group trusts only the fully-qualified Maestro formula, not the entire mobile-dev-inc/tap tap"
-assert_not_contains_text "$mobile_dev_brewfile" 'cask "maestro"' "mobile-dev group does not render the unrelated homebrew-cask maestro"
-assert_not_contains_text "$mobile_dev_brewfile" 'tap "mobile-dev-inc/tap"' "mobile-dev group taps on demand through the fully-qualified token instead of trusting the whole tap"
-assert_not_contains_text "$mobile_dev_brewfile" 'android-platform-tools' "mobile-dev group leaves platform tools to the Android SDK"
-assert_not_contains_text "$mobile_dev_brewfile" 'cask "temurin"' "mobile-dev group resolves Java through the Android Studio bundled runtime instead of a declared JDK"
-assert_not_contains_text "$mobile_dev_brewfile" 'cask "zed"' "mobile-dev group does not render development-apps casks"
+assert_contains "$mobile_dev_brewfile" 'cask "android-studio"' "mobile-dev group renders Android Studio"
+assert_contains "$mobile_dev_brewfile" 'brew "mobile-dev-inc/tap/maestro", trusted: true' "mobile-dev group trusts only the fully-qualified Maestro formula, not the entire mobile-dev-inc/tap tap"
+assert_not_contains "$mobile_dev_brewfile" 'cask "maestro"' "mobile-dev group does not render the unrelated homebrew-cask maestro"
+assert_not_contains "$mobile_dev_brewfile" 'tap "mobile-dev-inc/tap"' "mobile-dev group taps on demand through the fully-qualified token instead of trusting the whole tap"
+assert_not_contains "$mobile_dev_brewfile" 'android-platform-tools' "mobile-dev group leaves platform tools to the Android SDK"
+assert_not_contains "$mobile_dev_brewfile" 'cask "temurin"' "mobile-dev group resolves Java through the Android Studio bundled runtime instead of a declared JDK"
+assert_not_contains "$mobile_dev_brewfile" 'cask "zed"' "mobile-dev group does not render development-apps casks"
 
 mobile_dev_packages="$(
   printf '%s\n' "$mobile_dev_brewfile" |
@@ -1203,21 +1166,21 @@ assert_text_equals \
   "$expected_mobile_dev_packages" \
   "mobile-dev group renders exactly the expected packages"
 
-assert_not_contains_text "$macos_brewfile" 'cask "android-studio"' "macOS default does not render Android Studio"
-assert_not_contains_text "$macos_brewfile" 'mobile-dev-inc/tap/maestro' "macOS default does not render Maestro"
-assert_not_contains_text "$development_apps_brewfile" 'cask "android-studio"' "development-apps group does not render Android Studio"
+assert_not_contains "$macos_brewfile" 'cask "android-studio"' "macOS default does not render Android Studio"
+assert_not_contains "$macos_brewfile" 'mobile-dev-inc/tap/maestro' "macOS default does not render Maestro"
+assert_not_contains "$development_apps_brewfile" 'cask "android-studio"' "development-apps group does not render Android Studio"
 
 mobile_dev_zshenv="$(render_managed_file "$macos_mobile_dev_data" ".zshenv")"
 macos_default_zshenv="$(render_managed_file "$macos_data" ".zshenv")"
 
-assert_contains_text "$mobile_dev_zshenv" 'export ANDROID_HOME="$HOME/Library/Android/sdk"' "mobile-dev group exports ANDROID_HOME"
-assert_contains_text "$mobile_dev_zshenv" 'export ANDROID_SDK_ROOT="$ANDROID_HOME"' "mobile-dev group exports ANDROID_SDK_ROOT"
-assert_contains_text "$mobile_dev_zshenv" 'export JAVA_HOME="$android_studio_jbr"' "mobile-dev group resolves JAVA_HOME to the Android Studio bundled runtime"
-assert_contains_text "$mobile_dev_zshenv" 'if [[ -d "$android_studio_jbr" ]]; then' "JAVA_HOME is guarded so a failed Android Studio install cannot break java"
-assert_contains_text "$mobile_dev_zshenv" 'if [[ -d "$ANDROID_HOME/platform-tools" ]]; then' "platform-tools joins PATH only when the SDK provides it"
-assert_not_contains_text "$mobile_dev_zshenv" '.maestro/bin' "Maestro resolves through the Homebrew prefix instead of its vendor install directory"
-assert_not_contains_text "$mobile_dev_zshenv" 'mise activate' "the Android environment does not repeat the mise activation the managed zshrc already runs"
-assert_not_contains_text "$macos_default_zshenv" 'ANDROID_HOME' "macOS default does not render the Android environment"
+assert_contains "$mobile_dev_zshenv" 'export ANDROID_HOME="$HOME/Library/Android/sdk"' "mobile-dev group exports ANDROID_HOME"
+assert_contains "$mobile_dev_zshenv" 'export ANDROID_SDK_ROOT="$ANDROID_HOME"' "mobile-dev group exports ANDROID_SDK_ROOT"
+assert_contains "$mobile_dev_zshenv" 'export JAVA_HOME="$android_studio_jbr"' "mobile-dev group resolves JAVA_HOME to the Android Studio bundled runtime"
+assert_contains "$mobile_dev_zshenv" 'if [[ -d "$android_studio_jbr" ]]; then' "JAVA_HOME is guarded so a failed Android Studio install cannot break java"
+assert_contains "$mobile_dev_zshenv" 'if [[ -d "$ANDROID_HOME/platform-tools" ]]; then' "platform-tools joins PATH only when the SDK provides it"
+assert_not_contains "$mobile_dev_zshenv" '.maestro/bin' "Maestro resolves through the Homebrew prefix instead of its vendor install directory"
+assert_not_contains "$mobile_dev_zshenv" 'mise activate' "the Android environment does not repeat the mise activation the managed zshrc already runs"
+assert_not_contains "$macos_default_zshenv" 'ANDROID_HOME' "macOS default does not render the Android environment"
 
 mobile_dev_android_line="$(printf '%s\n' "$mobile_dev_zshenv" | grep -n 'export ANDROID_HOME' | head -1 | cut -d: -f1)"
 mobile_dev_override_line="$(printf '%s\n' "$mobile_dev_zshenv" | grep -n 'zsh/path.d' | head -1 | cut -d: -f1)"
@@ -1232,15 +1195,15 @@ pass "the Android environment renders before the machine-local override loop"
 development_apps_zprofile="$(render_managed_file "$macos_development_apps_data" ".zprofile")"
 macos_default_zprofile="$(render_managed_file "$macos_data" ".zprofile")"
 
-assert_contains_text \
+assert_contains \
   "$development_apps_zprofile" \
   '. "$HOME/.orbstack/shell/init.zsh"' \
   "development-apps group renders the OrbStack shell integration in .zprofile"
-assert_contains_text \
+assert_contains \
   "$development_apps_zprofile" \
   '[ -r "$HOME/.orbstack/shell/init.zsh" ]' \
   "OrbStack shell integration is guarded by a readability check so a missing cask cannot break login shells"
-assert_not_contains_text \
+assert_not_contains \
   "$macos_default_zprofile" \
   '.orbstack/shell/init.zsh' \
   "macOS default does not render the OrbStack shell integration"
@@ -1301,11 +1264,11 @@ assert_text_equals \
   "$expected_headerless_records" \
   "a declaration before the first macOS App Group header keeps a non-empty group field"
 
-assert_contains_text \
+assert_contains \
   "$macos_development_apps_bootstrap" \
   'read -r app_group token declaration' \
   "per-package retry reads the declaration field alongside the group and token"
-assert_contains_text \
+assert_contains \
   "$macos_development_apps_bootstrap" \
   '>"$single_package_brewfile"' \
   "per-package retry writes the recorded declaration so options such as trusted: true survive"
@@ -1329,8 +1292,8 @@ fi
 pass "Orca desktop app bundle failure records a homebrew-desktop-apps marker"
 
 development_apps_failure_marker_text="$(cat "$development_apps_failure_marker")"
-assert_contains_text "$development_apps_failure_marker_text" "failed casks: stablyai/orca/orca" "Orca failure attribution preserves its fully-qualified cask source"
-assert_contains_text "$development_apps_failure_marker_text" "App Groups: development-apps" "Orca failure attribution identifies the development-apps group"
+assert_contains "$development_apps_failure_marker_text" "failed casks: stablyai/orca/orca" "Orca failure attribution preserves its fully-qualified cask source"
+assert_contains "$development_apps_failure_marker_text" "App Groups: development-apps" "Orca failure attribution identifies the development-apps group"
 
 mobile_dev_bootstrap_script="$tmp_dir/macos-mobile-dev-bootstrap.sh"
 printf '%s\n' "$macos_mobile_dev_bootstrap" | sed \
@@ -1359,9 +1322,9 @@ fi
 pass "Maestro formula failure records a homebrew-desktop-apps marker"
 
 mobile_dev_failure_marker_text="$(cat "$mobile_dev_failure_marker")"
-assert_contains_text "$mobile_dev_failure_marker_text" "mobile-dev-inc/tap/maestro" \
+assert_contains "$mobile_dev_failure_marker_text" "mobile-dev-inc/tap/maestro" \
   "a failed tap formula is named in the desktop app warning marker"
-assert_contains_text "$mobile_dev_failure_marker_text" "App Groups: mobile-dev" \
+assert_contains "$mobile_dev_failure_marker_text" "App Groups: mobile-dev" \
   "a failed tap formula is attributed to its macOS App Group"
 
 terminal_launcher_bootstrap_script="$tmp_dir/macos-terminal-launcher-bootstrap.sh"
@@ -1391,11 +1354,11 @@ fi
 pass "macOS desktop app bundle failure records a homebrew-desktop-apps marker"
 
 terminal_launcher_marker_text="$(cat "$terminal_launcher_marker")"
-assert_contains_text "$terminal_launcher_marker_text" "category='homebrew-desktop-apps'" "desktop app marker keeps one stable category"
-assert_contains_text "$terminal_launcher_marker_text" "summary='Homebrew desktop app install needs attention'" "desktop app marker keeps stable summary"
-assert_contains_text "$terminal_launcher_marker_text" "failed casks: ghostty, raycast" "desktop app marker guidance includes only casks whose single-cask bundle failed"
-assert_contains_text "$terminal_launcher_marker_text" "App Groups: terminal-apps, launcher" "desktop app marker guidance includes enabled App Groups"
-assert_not_contains_text "$terminal_launcher_marker_text" "1password-cli" "desktop app marker excludes casks whose single-cask bundle succeeded"
+assert_contains "$terminal_launcher_marker_text" "category='homebrew-desktop-apps'" "desktop app marker keeps one stable category"
+assert_contains "$terminal_launcher_marker_text" "summary='Homebrew desktop app install needs attention'" "desktop app marker keeps stable summary"
+assert_contains "$terminal_launcher_marker_text" "failed casks: ghostty, raycast" "desktop app marker guidance includes only casks whose single-cask bundle failed"
+assert_contains "$terminal_launcher_marker_text" "App Groups: terminal-apps, launcher" "desktop app marker guidance includes enabled App Groups"
+assert_not_contains "$terminal_launcher_marker_text" "1password-cli" "desktop app marker excludes casks whose single-cask bundle succeeded"
 
 # Same stdin hazard as the core retry loop: ghostty is the first record, so a
 # stdin-reading brew would hide the later raycast failure entirely.
@@ -1412,7 +1375,7 @@ if ! HOME="$desktop_stdin_home" XDG_STATE_HOME="$desktop_stdin_state" MACOS_BREW
 fi
 
 desktop_stdin_marker_text="$(cat "$desktop_stdin_state/terrapod/install-warnings/homebrew-desktop-apps")"
-assert_contains_text "$desktop_stdin_marker_text" "failed casks: ghostty, raycast" "desktop app retry keeps reading records when brew bundle consumes stdin"
+assert_contains "$desktop_stdin_marker_text" "failed casks: ghostty, raycast" "desktop app retry keeps reading records when brew bundle consumes stdin"
 
 core_then_desktop_bin="$tmp_dir/core-then-desktop-bin"
 core_then_desktop_state="$tmp_dir/core-then-desktop-state"
@@ -1442,8 +1405,8 @@ pass "macOS bootstrap records core and desktop app warnings in one App Groups ru
 
 core_then_desktop_core_text="$(cat "$core_then_desktop_core_marker")"
 core_then_desktop_desktop_text="$(cat "$core_then_desktop_desktop_marker")"
-assert_contains_text "$core_then_desktop_core_text" "failed formulae: mise" "combined bootstrap core marker keeps failed formula detail"
-assert_contains_text "$core_then_desktop_desktop_text" "failed casks: ghostty, raycast" "combined bootstrap desktop marker keeps failed cask detail"
+assert_contains "$core_then_desktop_core_text" "failed formulae: mise" "combined bootstrap core marker keeps failed formula detail"
+assert_contains "$core_then_desktop_desktop_text" "failed casks: ghostty, raycast" "combined bootstrap desktop marker keeps failed cask detail"
 
 terminal_launcher_marker_failure_bin="$tmp_dir/terminal-launcher-marker-failure-bin"
 terminal_launcher_marker_failure_state="$tmp_dir/terminal-launcher-marker-failure-state"
@@ -1515,9 +1478,9 @@ if ! HOME="$bulk_only_home" XDG_STATE_HOME="$bulk_only_state" MACOS_BREW_LOG="$b
 fi
 
 bulk_only_marker_text="$(cat "$bulk_only_state/terrapod/install-warnings/homebrew-desktop-apps")"
-assert_contains_text "$bulk_only_marker_text" "Review Homebrew desktop app bundle output" "desktop app marker falls back when bulk fails but single-cask attribution succeeds"
-assert_not_contains_text "$bulk_only_marker_text" "failed casks:" "desktop app bulk-only fallback avoids invented cask detail"
-assert_not_contains_text "$bulk_only_marker_text" "App Groups:" "desktop app bulk-only fallback avoids invented App Group detail"
+assert_contains "$bulk_only_marker_text" "Review Homebrew desktop app bundle output" "desktop app marker falls back when bulk fails but single-cask attribution succeeds"
+assert_not_contains "$bulk_only_marker_text" "failed casks:" "desktop app bulk-only fallback avoids invented cask detail"
+assert_not_contains "$bulk_only_marker_text" "App Groups:" "desktop app bulk-only fallback avoids invented App Group detail"
 
 fallback_bootstrap_script="$tmp_dir/macos-desktop-fallback-bootstrap.sh"
 awk '
@@ -1553,9 +1516,9 @@ if ! HOME="$fallback_home" XDG_STATE_HOME="$fallback_state" MACOS_BREW_LOG="$fal
 fi
 
 fallback_marker_text="$(cat "$fallback_state/terrapod/install-warnings/homebrew-desktop-apps")"
-assert_contains_text "$fallback_marker_text" "Review Homebrew desktop app bundle output" "desktop app marker falls back to bulk bundle guidance when casks are not reliable"
-assert_not_contains_text "$fallback_marker_text" "failed casks:" "desktop app fallback marker avoids invented cask detail"
-assert_not_contains_text "$fallback_marker_text" "App Groups:" "desktop app fallback marker avoids invented App Group detail"
+assert_contains "$fallback_marker_text" "Review Homebrew desktop app bundle output" "desktop app marker falls back to bulk bundle guidance when casks are not reliable"
+assert_not_contains "$fallback_marker_text" "failed casks:" "desktop app fallback marker avoids invented cask detail"
+assert_not_contains "$fallback_marker_text" "App Groups:" "desktop app fallback marker avoids invented App Group detail"
 
 headerless_bootstrap_script="$tmp_dir/macos-desktop-headerless-bootstrap.sh"
 awk '
@@ -1602,11 +1565,11 @@ fi
 pass "headerless desktop app bundle failure records a homebrew-desktop-apps marker"
 
 headerless_marker_text="$(cat "$headerless_marker")"
-assert_contains_text "$headerless_marker_text" "failed casks: ghostty" \
+assert_contains "$headerless_marker_text" "failed casks: ghostty" \
   "a cask declared before the first macOS App Group header is still retried and attributed"
-assert_not_contains_text "$headerless_marker_text" "App Groups:" \
+assert_not_contains "$headerless_marker_text" "App Groups:" \
   "a cask with no macOS App Group contributes no App Group detail"
-assert_not_contains_text "$headerless_marker_text" "raycast" \
+assert_not_contains "$headerless_marker_text" "raycast" \
   "a grouped cask whose single-cask bundle succeeds stays out of the marker"
 
 terminal_only_bootstrap_script="$tmp_dir/macos-terminal-only-bootstrap.sh"
@@ -1634,11 +1597,11 @@ if ! HOME="$terminal_only_home" XDG_STATE_HOME="$terminal_only_state" MACOS_BREW
 fi
 
 terminal_only_marker_text="$(cat "$terminal_only_state/terrapod/install-warnings/homebrew-desktop-apps")"
-assert_contains_text "$terminal_only_marker_text" "failed casks: ghostty" "enabled terminal-apps failure remains in desktop app marker"
-assert_contains_text "$terminal_only_marker_text" "App Groups: terminal-apps" "enabled terminal-apps group remains in desktop app marker"
-assert_not_contains_text "$terminal_only_marker_text" "raycast" "disabled launcher cask is removed from desktop app marker"
-assert_not_contains_text "$terminal_only_marker_text" "1password-cli" "disabled launcher CLI cask is removed from desktop app marker"
-assert_not_contains_text "$terminal_only_marker_text" "launcher" "disabled launcher group is removed from desktop app marker"
+assert_contains "$terminal_only_marker_text" "failed casks: ghostty" "enabled terminal-apps failure remains in desktop app marker"
+assert_contains "$terminal_only_marker_text" "App Groups: terminal-apps" "enabled terminal-apps group remains in desktop app marker"
+assert_not_contains "$terminal_only_marker_text" "raycast" "disabled launcher cask is removed from desktop app marker"
+assert_not_contains "$terminal_only_marker_text" "1password-cli" "disabled launcher CLI cask is removed from desktop app marker"
+assert_not_contains "$terminal_only_marker_text" "launcher" "disabled launcher group is removed from desktop app marker"
 
 terminal_success_bin="$tmp_dir/terminal-success-bin"
 terminal_success_state="$tmp_dir/terminal-success-state"
@@ -1661,57 +1624,57 @@ if [ -e "$terminal_success_state/terrapod/install-warnings/homebrew-desktop-apps
 fi
 pass "successful desktop app rerun clears homebrew-desktop-apps marker"
 
-assert_contains_text \
+assert_contains \
   "$macos_terminal_apps_bootstrap" \
   "terrapod-macos-desktop-apps" \
   "terminal-apps group renders macOS Desktop App Stack Brewfile"
 
-assert_contains_text \
+assert_contains \
   "$macos_terminal_apps_bootstrap" \
   'run_desktop_app_bundle "$desktop_brewfile"' \
   "terminal-apps group runs macOS Desktop App Stack installer"
 
-assert_contains_text \
+assert_contains \
   "$macos_development_apps_bootstrap" \
   "terrapod-macos-desktop-apps" \
   "development-apps group renders macOS Desktop App Stack Brewfile"
 
-assert_contains_text \
+assert_contains \
   "$macos_development_apps_bootstrap" \
   'run_desktop_app_bundle "$desktop_brewfile"' \
   "development-apps group runs macOS Desktop App Stack installer"
 
-assert_not_contains_text \
+assert_not_contains \
   "$macos_development_workspace_bootstrap" \
   "Brewfile.macos-desktop-apps" \
   "enableDevelopmentWorkspace does not imply macOS Desktop App Stack Brewfile"
 
-assert_contains_text \
+assert_contains \
   "$macos_karabiner_opener" \
   "macOS Desktop App Stack enabled: false" \
   "Karabiner opener tracks disabled macOS Desktop App Stack state"
 
-assert_not_contains_text \
+assert_not_contains \
   "$macos_karabiner_opener" \
   "macOS Desktop App Stack Brewfile checksum" \
   "Karabiner opener default skips macOS Desktop App Stack Brewfile checksum"
 
-assert_contains_text \
+assert_contains \
   "$macos_automation_apps_karabiner_opener" \
   "macOS Desktop App Stack enabled: true" \
   "Karabiner opener tracks enabled macOS Desktop App Stack state"
 
-assert_contains_text \
+assert_contains \
   "$macos_automation_apps_karabiner_opener" \
   "macOS Desktop App Stack Brewfile checksum" \
   "Karabiner opener tracks macOS Desktop App Stack Brewfile changes"
 
-assert_contains_text \
+assert_contains \
   "$macos_development_apps_karabiner_opener" \
   "macOS Desktop App Stack enabled: true" \
   "Karabiner opener tracks enabled development-apps Desktop App Stack state"
 
-assert_contains_text \
+assert_contains \
   "$macos_development_apps_karabiner_opener" \
   "macOS Desktop App Stack Brewfile checksum" \
   "Karabiner opener tracks development-apps Desktop App Stack Brewfile changes"
@@ -1771,9 +1734,9 @@ assert_managed_paths_exclude_prefix \
 ghostty_font_lines="$(grep -E '^[[:space:]]*font-family[[:space:]]*=' "$repo_root/dot_config/ghostty/config")"
 assert_text_equals "$ghostty_font_lines" 'font-family = "Jetendard"' \
   "Ghostty uses Jetendard as its sole font family"
-assert_not_contains_text "$(cat "$repo_root/dot_config/ghostty/config")" "JetBrainsMono Nerd Font" \
+assert_not_contains "$(cat "$repo_root/dot_config/ghostty/config")" "JetBrainsMono Nerd Font" \
   "Ghostty no longer declares JetBrains Mono Nerd Font"
-assert_not_contains_text "$(cat "$repo_root/dot_config/ghostty/config")" "D2Coding" \
+assert_not_contains "$(cat "$repo_root/dot_config/ghostty/config")" "D2Coding" \
   "Ghostty no longer declares D2Coding"
 
 cmux_fixture_source="$tmp_dir/cmux-fixture-source"
@@ -1913,9 +1876,9 @@ pass "cross-profile Brewfile declares migrated Neovim and GitHub CLI"
 
 mise_tools_installer="$(render_template "$ubuntu_data" ".chezmoiscripts/run_after_20-install-mise-tools.sh.tmpl")"
 
-assert_contains_text "$mise_tools_installer" 'mise_bin="$(standard_mise_path || true)"' "mise installer resolves mise from a standard Homebrew prefix"
-assert_contains_text "$mise_tools_installer" '"$mise_bin" install --yes -C "$HOME"' "Ubuntu runtime install invokes the resolved Homebrew mise"
-assert_not_contains_text "$mise_tools_installer" '/usr/bin/mise' "Ubuntu runtime install never falls back to APT mise"
+assert_contains "$mise_tools_installer" 'mise_bin="$(standard_mise_path || true)"' "mise installer resolves mise from a standard Homebrew prefix"
+assert_contains "$mise_tools_installer" '"$mise_bin" install --yes -C "$HOME"' "Ubuntu runtime install invokes the resolved Homebrew mise"
+assert_not_contains "$mise_tools_installer" '/usr/bin/mise' "Ubuntu runtime install never falls back to APT mise"
 
 # run_after_20 is not a run_onchange_ script, so a source checksum in it gates
 # nothing and only reads as if the script were change-tracked.
@@ -1983,15 +1946,15 @@ if [ ! -f "$mise_tools_marker" ]; then
   fail "mise tool installer should write a mise-tools warning marker after mise install failure"
 fi
 mise_tools_marker_text="$(cat "$mise_tools_marker")"
-assert_contains_text "$mise_tools_marker_text" "summary='mise tool install needs attention'" "mise install failure marker keeps the expected summary"
-assert_contains_text "$mise_tools_marker_text" "Failed step(s): mise install" "mise install failure marker records failed mise install step"
-assert_contains_text "$mise_tools_marker_text" "GITHUB_TOKEN" "mise install failure marker suggests GitHub token recovery"
-assert_contains_text "$mise_tools_marker_text" "gh auth login" "mise install failure marker suggests GitHub auth recovery"
+assert_contains "$mise_tools_marker_text" "summary='mise tool install needs attention'" "mise install failure marker keeps the expected summary"
+assert_contains "$mise_tools_marker_text" "Failed step(s): mise install" "mise install failure marker records failed mise install step"
+assert_contains "$mise_tools_marker_text" "GITHUB_TOKEN" "mise install failure marker suggests GitHub token recovery"
+assert_contains "$mise_tools_marker_text" "gh auth login" "mise install failure marker suggests GitHub auth recovery"
 mise_tools_log_text="$(cat "$mise_tools_log")"
-assert_contains_text "$mise_tools_log_text" "/home/linuxbrew/.linuxbrew/bin/mise args:install --yes -C $mise_tools_home" "Ubuntu runtime install uses Linuxbrew mise"
-assert_not_contains_text "$mise_tools_log_text" "/usr/bin/mise" "Ubuntu runtime install never falls back to APT mise"
-assert_contains_text "$mise_tools_log_text" "mise args:exec --yes -C $mise_tools_home -- sh -c command -v corepack" "mise install failure still checks corepack availability"
-assert_contains_text "$mise_tools_log_text" "mise args:exec --yes -C $mise_tools_home -- corepack enable" "mise install failure still attempts corepack enable"
+assert_contains "$mise_tools_log_text" "/home/linuxbrew/.linuxbrew/bin/mise args:install --yes -C $mise_tools_home" "Ubuntu runtime install uses Linuxbrew mise"
+assert_not_contains "$mise_tools_log_text" "/usr/bin/mise" "Ubuntu runtime install never falls back to APT mise"
+assert_contains "$mise_tools_log_text" "mise args:exec --yes -C $mise_tools_home -- sh -c command -v corepack" "mise install failure still checks corepack availability"
+assert_contains "$mise_tools_log_text" "mise args:exec --yes -C $mise_tools_home -- corepack enable" "mise install failure still attempts corepack enable"
 
 HOME="$mise_tools_home" \
   XDG_STATE_HOME="$mise_tools_state" \
@@ -2019,10 +1982,10 @@ HOME="$mise_tools_home" \
   PATH="$mise_tools_bin:/usr/bin:/bin" \
   sh "$mise_tools_installer_script"
 mise_tools_marker_text="$(cat "$mise_tools_marker")"
-assert_contains_text "$mise_tools_marker_text" "summary='mise tool install needs attention'" "mise tool installer replacement marker keeps the expected summary"
-assert_contains_text "$mise_tools_marker_text" "Failed step(s): corepack enable" "mise tool installer replaces stale marker with corepack enable failure"
-assert_not_contains_text "$mise_tools_marker_text" "stale guidance" "mise tool installer replaces stale marker guidance"
-assert_contains_text "$mise_tools_marker_text" "updated_at='" "mise tool installer replacement marker includes update timestamp"
+assert_contains "$mise_tools_marker_text" "summary='mise tool install needs attention'" "mise tool installer replacement marker keeps the expected summary"
+assert_contains "$mise_tools_marker_text" "Failed step(s): corepack enable" "mise tool installer replaces stale marker with corepack enable failure"
+assert_not_contains "$mise_tools_marker_text" "stale guidance" "mise tool installer replaces stale marker guidance"
+assert_contains "$mise_tools_marker_text" "updated_at='" "mise tool installer replacement marker includes update timestamp"
 
 : >"$mise_tools_log"
 HOME="$mise_tools_home" \
@@ -2036,7 +1999,7 @@ if [ -e "$mise_tools_marker" ]; then
 fi
 pass "mise tool reconciliation clears stale mise-tools marker after a successful apply"
 mise_tools_retry_log_text="$(cat "$mise_tools_log")"
-assert_contains_text "$mise_tools_retry_log_text" "mise args:install --yes -C $mise_tools_home" "mise tool reconciliation attempts mise install when marker exists"
+assert_contains "$mise_tools_retry_log_text" "mise args:install --yes -C $mise_tools_home" "mise tool reconciliation attempts mise install when marker exists"
 
 : >"$mise_tools_log"
 HOME="$mise_tools_home" \
@@ -2066,7 +2029,7 @@ if [ ! -f "$mise_tools_marker" ]; then
 fi
 pass "mise tool reconciliation keeps a warning marker when apply still fails"
 mise_tools_marker_text="$(cat "$mise_tools_marker")"
-assert_contains_text "$mise_tools_marker_text" "Failed step(s): mise install" "mise tool reconciliation replacement marker records failed mise install step"
+assert_contains "$mise_tools_marker_text" "Failed step(s): mise install" "mise tool reconciliation replacement marker records failed mise install step"
 
 : >"$mise_tools_log"
 HOME="$mise_tools_home" \
@@ -2090,28 +2053,28 @@ disabled_ai_cli_tools_brewfile="$(render_template "$ubuntu_data" "Brewfile.ai-cl
 macos_ai_cli_tools_brewfile="$(render_template "$macos_ai_cli_tools_data" "Brewfile.ai-cli-tools.tmpl")"
 macos_development_workspace_ai_brewfile="$(render_template "$macos_development_workspace_data" "Brewfile.ai-cli-tools.tmpl")"
 
-assert_not_contains_text "$ai_cli_tools_installer" "bootstrap_linux_homebrew" "AI installer no longer owns Linuxbrew bootstrap"
-assert_not_contains_text "$ai_cli_tools_installer" "raw.githubusercontent.com/Homebrew/install" "AI installer never downloads Homebrew"
-assert_not_contains_text "$ai_cli_tools_installer" "HOMEBREW_NO_AUTO_UPDATE=1" "Ubuntu AI installer runs no Homebrew bundle"
-assert_not_contains_text "$ai_cli_tools_installer" "install_ai_cli_bundle" "Ubuntu AI installer renders no Homebrew bundle step"
-assert_not_contains_text "$ai_cli_tools_installer" 'cask "codex"' "Ubuntu AI installer renders no macOS-only casks"
-assert_contains_text "$ai_cli_tools_installer" 'clear_install_warning "$AI_CLI_WARNING_CATEGORY"' "Ubuntu AI installer only clears stale optional AI CLI markers"
-assert_contains_text "$macos_ai_cli_tools_installer" "/opt/homebrew/bin/brew" "macOS AI installer uses mandatory standard Homebrew"
-assert_contains_text "$macos_ai_cli_tools_installer" "HOMEBREW_NO_AUTO_UPDATE=1" "AI bundle disables Homebrew auto-update"
-assert_contains_text "$macos_terminal_apps_bootstrap" "HOMEBREW_NO_AUTO_UPDATE=1" "desktop bundle disables Homebrew auto-update"
+assert_not_contains "$ai_cli_tools_installer" "bootstrap_linux_homebrew" "AI installer no longer owns Linuxbrew bootstrap"
+assert_not_contains "$ai_cli_tools_installer" "raw.githubusercontent.com/Homebrew/install" "AI installer never downloads Homebrew"
+assert_not_contains "$ai_cli_tools_installer" "HOMEBREW_NO_AUTO_UPDATE=1" "Ubuntu AI installer runs no Homebrew bundle"
+assert_not_contains "$ai_cli_tools_installer" "install_ai_cli_bundle" "Ubuntu AI installer renders no Homebrew bundle step"
+assert_not_contains "$ai_cli_tools_installer" 'cask "codex"' "Ubuntu AI installer renders no macOS-only casks"
+assert_contains "$ai_cli_tools_installer" 'clear_install_warning "$AI_CLI_WARNING_CATEGORY"' "Ubuntu AI installer only clears stale optional AI CLI markers"
+assert_contains "$macos_ai_cli_tools_installer" "/opt/homebrew/bin/brew" "macOS AI installer uses mandatory standard Homebrew"
+assert_contains "$macos_ai_cli_tools_installer" "HOMEBREW_NO_AUTO_UPDATE=1" "AI bundle disables Homebrew auto-update"
+assert_contains "$macos_terminal_apps_bootstrap" "HOMEBREW_NO_AUTO_UPDATE=1" "desktop bundle disables Homebrew auto-update"
 
 for rendered_brewfile in "$macos_ai_cli_tools_brewfile" "$macos_development_workspace_ai_brewfile"; do
-  assert_contains_text "$rendered_brewfile" 'cask "antigravity-cli"' "Optional AI Tool Stack declares Antigravity CLI cask"
-  assert_contains_text "$rendered_brewfile" 'cask "codex"' "Optional AI Tool Stack declares Codex CLI cask"
-  assert_not_contains_text "$rendered_brewfile" 'cask "claude-code"' "Optional AI Tool Stack no longer declares a Claude Code cask"
+  assert_contains "$rendered_brewfile" 'cask "antigravity-cli"' "Optional AI Tool Stack declares Antigravity CLI cask"
+  assert_contains "$rendered_brewfile" 'cask "codex"' "Optional AI Tool Stack declares Codex CLI cask"
+  assert_not_contains "$rendered_brewfile" 'cask "claude-code"' "Optional AI Tool Stack no longer declares a Claude Code cask"
 done
 assert_text_equals "$disabled_ai_cli_tools_brewfile" "" "disabled Optional AI Tool Stack renders no Homebrew casks"
 assert_text_equals "$ai_cli_tools_brewfile" "" "Ubuntu Optional AI Tool Stack renders no Homebrew casks"
 assert_text_equals "$development_workspace_ai_brewfile" "" "Ubuntu Optional Development Workspace renders no AI Homebrew casks"
 
-assert_contains_text "$disabled_ai_cli_tools_cleanup" "AI_CLI_WARNING_CATEGORY=optional-ai-cli-tools" "disabled Optional AI Tool Stack renders optional AI CLI warning category"
-assert_contains_text "$disabled_ai_cli_tools_cleanup" 'clear_install_warning "$AI_CLI_WARNING_CATEGORY"' "disabled Optional AI Tool Stack renders stale marker cleanup"
-assert_not_contains_text "$disabled_ai_cli_tools_cleanup" "raw.githubusercontent.com/Homebrew/install" "disabled Optional AI Tool Stack cleanup does not render Homebrew installer URL"
+assert_contains "$disabled_ai_cli_tools_cleanup" "AI_CLI_WARNING_CATEGORY=optional-ai-cli-tools" "disabled Optional AI Tool Stack renders optional AI CLI warning category"
+assert_contains "$disabled_ai_cli_tools_cleanup" 'clear_install_warning "$AI_CLI_WARNING_CATEGORY"' "disabled Optional AI Tool Stack renders stale marker cleanup"
+assert_not_contains "$disabled_ai_cli_tools_cleanup" "raw.githubusercontent.com/Homebrew/install" "disabled Optional AI Tool Stack cleanup does not render Homebrew installer URL"
 
 disabled_ai_cli_tools_cleanup_script="$tmp_dir/disabled-ai-cli-tools-cleanup.sh"
 printf '%s\n' "$disabled_ai_cli_tools_cleanup" >"$disabled_ai_cli_tools_cleanup_script"
@@ -2216,10 +2179,10 @@ run_macos_ai_arch_case() {
     AI_UNAME_ARCH="$arch" AI_BREW_BIN="$expected_brew_bin" AI_BREW_LOG="$case_log" AI_BREW_FAIL=0 \
     PATH="$macos_ai_brew_bin:/usr/bin:/bin" sh "$macos_ai_cli_tools_installer_script"
   case_log_text="$(cat "$case_log")"
-  assert_contains_text "$case_log_text" "brew path:$expected_brew_bin/brew" "macOS $arch Optional AI Tool Stack selects its standard Homebrew prefix"
-  assert_contains_text "$case_log_text" "brew args:shellenv" "macOS $arch Optional AI Tool Stack loads Homebrew shellenv"
-  assert_contains_text "$case_log_text" "brew args:bundle --no-upgrade --file=" "macOS $arch Optional AI Tool Stack installs the common no-upgrade bundle"
-  assert_contains_text "$case_log_text" "brew auto-update:1" "macOS $arch Optional AI Tool Stack disables Homebrew auto-update"
+  assert_contains "$case_log_text" "brew path:$expected_brew_bin/brew" "macOS $arch Optional AI Tool Stack selects its standard Homebrew prefix"
+  assert_contains "$case_log_text" "brew args:shellenv" "macOS $arch Optional AI Tool Stack loads Homebrew shellenv"
+  assert_contains "$case_log_text" "brew args:bundle --no-upgrade --file=" "macOS $arch Optional AI Tool Stack installs the common no-upgrade bundle"
+  assert_contains "$case_log_text" "brew auto-update:1" "macOS $arch Optional AI Tool Stack disables Homebrew auto-update"
 }
 
 run_macos_ai_arch_case arm64 "$macos_ai_brew_bin"
@@ -2250,15 +2213,15 @@ for vendor_url in \
   "https://antigravity.google/cli/install.sh" \
   "https://chatgpt.com/codex/install.sh"
 do
-  assert_not_contains_text "$ai_cli_tools_installer" "$vendor_url" "Optional AI Tool Stack no longer renders vendor installer URL: $vendor_url"
-  assert_not_contains_text "$macos_ai_cli_tools_installer" "$vendor_url" "macOS Optional AI Tool Stack no longer renders vendor installer URL: $vendor_url"
+  assert_not_contains "$ai_cli_tools_installer" "$vendor_url" "Optional AI Tool Stack no longer renders vendor installer URL: $vendor_url"
+  assert_not_contains "$macos_ai_cli_tools_installer" "$vendor_url" "macOS Optional AI Tool Stack no longer renders vendor installer URL: $vendor_url"
 done
 
-assert_contains_text "$macos_ai_cli_tools_installer" "https://claude.ai/install.sh" \
+assert_contains "$macos_ai_cli_tools_installer" "https://claude.ai/install.sh" \
   "macOS Optional AI Tool Stack renders the Claude Code installer URL"
-assert_not_contains_text "$ai_cli_tools_installer" "https://claude.ai/install.sh" \
+assert_not_contains "$ai_cli_tools_installer" "https://claude.ai/install.sh" \
   "Ubuntu Optional AI Tool Stack renders no Claude Code installer URL"
-assert_contains_text "$macos_ai_cli_tools_installer" 'bash "$claude_code_installer" </dev/null' \
+assert_contains "$macos_ai_cli_tools_installer" 'bash "$claude_code_installer" </dev/null' \
   "Claude Code installer runs under bash with stdin detached"
 
 linux_ai_brew_bin="$tmp_dir/linux-ai-brew-bin"
@@ -2346,9 +2309,9 @@ HOME="$claude_fresh_home" XDG_STATE_HOME="$claude_fresh_state" \
   AI_UNAME_ARCH=arm64 AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$claude_fresh_brew_log" AI_BREW_FAIL=0 \
   CLAUDE_INSTALLER_LOG="$claude_fresh_installer_log" \
   PATH="$macos_ai_brew_bin:/usr/bin:/bin" sh "$macos_ai_cli_tools_installer_script"
-assert_contains_text "$(cat "$claude_fresh_installer_log")" "curl args:" \
+assert_contains "$(cat "$claude_fresh_installer_log")" "curl args:" \
   "Optional AI Tool Stack downloads the Claude Code installer when Claude Code is absent"
-assert_contains_text "$(cat "$claude_fresh_installer_log")" "bash args:" \
+assert_contains "$(cat "$claude_fresh_installer_log")" "bash args:" \
   "Optional AI Tool Stack runs the Claude Code installer when Claude Code is absent"
 if [ ! -x "$claude_fresh_home/.local/bin/claude" ]; then
   fail "Optional AI Tool Stack installs the canonical Claude Code executable"
@@ -2391,9 +2354,9 @@ claude_failure_marker="$claude_failure_state/terrapod/install-warnings/optional-
 if [ ! -f "$claude_failure_marker" ]; then
   fail "a Claude Code install failure records the optional-ai-cli-tools marker"
 fi
-assert_contains_text "$(cat "$claude_failure_marker")" "Claude Code" \
+assert_contains "$(cat "$claude_failure_marker")" "Claude Code" \
   "a Claude Code install failure names Claude Code in its marker"
-assert_not_contains_text "$(cat "$claude_failure_marker")" "Homebrew bundle" \
+assert_not_contains "$(cat "$claude_failure_marker")" "Homebrew bundle" \
   "a Claude Code install failure does not name the Homebrew bundle in its marker"
 pass "a Claude Code install failure records a warning and exits zero"
 
@@ -2418,7 +2381,7 @@ claude_skip_binary_marker="$claude_skip_binary_state/terrapod/install-warnings/o
 if [ ! -f "$claude_skip_binary_marker" ]; then
   fail "a vendor installer that exits zero without the canonical executable records the optional-ai-cli-tools marker"
 fi
-assert_contains_text "$(cat "$claude_skip_binary_marker")" "Claude Code" \
+assert_contains "$(cat "$claude_skip_binary_marker")" "Claude Code" \
   "a vendor installer that exits zero without the canonical executable names Claude Code in its marker"
 pass "a vendor installer that exits zero without installing the canonical executable records a warning and exits zero"
 
@@ -2443,7 +2406,7 @@ claude_curl_failure_marker="$claude_curl_failure_state/terrapod/install-warnings
 if [ ! -f "$claude_curl_failure_marker" ]; then
   fail "a Claude Code installer download failure records the optional-ai-cli-tools marker"
 fi
-assert_contains_text "$(cat "$claude_curl_failure_marker")" "Claude Code" \
+assert_contains "$(cat "$claude_curl_failure_marker")" "Claude Code" \
   "a Claude Code installer download failure names Claude Code in its marker"
 pass "a Claude Code installer download failure records a warning and exits zero"
 
@@ -2465,9 +2428,9 @@ if [ ! -f "$claude_both_failure_marker" ]; then
   fail "a Homebrew bundle failure together with a Claude Code install failure records the optional-ai-cli-tools marker"
 fi
 claude_both_failure_marker_text="$(cat "$claude_both_failure_marker")"
-assert_contains_text "$claude_both_failure_marker_text" "Homebrew bundle" \
+assert_contains "$claude_both_failure_marker_text" "Homebrew bundle" \
   "a combined install failure names the Homebrew bundle in its marker"
-assert_contains_text "$claude_both_failure_marker_text" "Claude Code" \
+assert_contains "$claude_both_failure_marker_text" "Claude Code" \
   "a combined install failure names Claude Code in its marker"
 if ! grep -F "Failed: Homebrew bundle, Claude Code." "$claude_both_failure_marker" >/dev/null; then
   fail "a combined install failure names both sources on a single line"
@@ -2488,13 +2451,13 @@ HOME="$claude_bundle_failure_home" XDG_STATE_HOME="$claude_bundle_failure_state"
 if [ "$claude_bundle_failure_status" -ne 0 ]; then
   fail "a Homebrew bundle failure should continue apply after recording a warning"
 fi
-assert_contains_text "$(cat "$claude_bundle_failure_installer_log")" "bash args:" \
+assert_contains "$(cat "$claude_bundle_failure_installer_log")" "bash args:" \
   "a Homebrew bundle failure does not skip the Claude Code step"
 claude_bundle_failure_marker="$claude_bundle_failure_state/terrapod/install-warnings/optional-ai-cli-tools"
 if [ ! -f "$claude_bundle_failure_marker" ]; then
   fail "a Homebrew bundle failure records the optional-ai-cli-tools marker"
 fi
-assert_contains_text "$(cat "$claude_bundle_failure_marker")" "Homebrew bundle" \
+assert_contains "$(cat "$claude_bundle_failure_marker")" "Homebrew bundle" \
   "a Homebrew bundle failure names the bundle in its marker"
 
 development_workspace_zellij_layout="$(render_managed_file "$development_workspace_data" ".config/zellij/layouts/dev.kdl")"
@@ -2586,12 +2549,12 @@ done
 for warning_script in $inlined_warning_scripts; do
   rendered_warning_script="$(render_template "$(warning_script_data "$warning_script")" "$warning_script")"
 
-  assert_contains_text \
+  assert_contains \
     "$rendered_warning_script" \
     "terrapod_install_warning_write() {" \
     "always-run script inlines the marker library: $warning_script"
 
-  assert_not_contains_text \
+  assert_not_contains \
     "$rendered_warning_script" \
     'if [ -f "$install_warnings_lib" ]; then' \
     "always-run script keeps no install warning loader guard: $warning_script"
@@ -2600,17 +2563,17 @@ done
 for warning_script in $path_sourced_warning_scripts; do
   rendered_warning_script="$(render_template "$(warning_script_data "$warning_script")" "$warning_script")"
 
-  assert_not_contains_text \
+  assert_not_contains \
     "$rendered_warning_script" \
     "terrapod_install_warning_write() {" \
     "run_onchange script keeps the marker library out of its content hash: $warning_script"
 
-  assert_contains_text \
+  assert_contains \
     "$rendered_warning_script" \
     "/dot_local/lib/terrapod/install-warnings.sh" \
     "run_onchange script sources the marker library by path: $warning_script"
 
-  assert_not_contains_text \
+  assert_not_contains \
     "$rendered_warning_script" \
     'if [ -f "$install_warnings_lib" ]; then' \
     "run_onchange script keeps no install warning loader guard: $warning_script"
