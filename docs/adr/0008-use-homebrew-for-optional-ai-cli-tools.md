@@ -30,5 +30,7 @@ Provider for other shared command-line tools and development runtimes.
 - Existing vendor-installed commands are not deleted. `tpod status` and
   `tpod doctor` warn when a command outside the active Homebrew prefix shadows
   a managed cask.
-- Intentional upgrades use
-  `brew upgrade --cask claude-code codex antigravity-cli`.
+- Intentional cask upgrades use `brew upgrade --cask codex antigravity-cli`.
+  Claude Code is not upgraded through Homebrew: ADR 0017 moved it to the
+  **Claude Code Installer** at `https://claude.ai/install.sh`, and its own
+  updater owns version freshness.
