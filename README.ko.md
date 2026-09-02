@@ -74,6 +74,11 @@ machine이 조용히 다시 바뀌지는 않습니다.
 `terrapod configure <Preset>`는 script-friendly Preset configuration
 command입니다. 지원되는 Preset 정확히 하나의 concrete settings를 쓰고,
 `gum`이 필요 없으며, interactive customization은 제공하지 않습니다.
+config에 이미 Terrapod-managed data key가 있으면 덮어쓰기 전에 확인을
+받습니다. 이 prompt를 건너뛰려면 `--yes`를 넘기거나
+`TERRAPOD_ASSUME_YES=1`을 설정합니다. script와 CI에는 답할 terminal이
+없으므로, `terrapod configure <Preset>`는 기존 설정을 조용히 덮어쓰지 않고
+같은 안내와 함께 실패합니다.
 `terrapod configure <Preset>`는 Terrapod Setup의 plain fallback이 아닙니다.
 `terrapod configure <Preset>`는 setup UI 없이 설정을 쓰는
 script-friendly 경로입니다. 이 경로는 Terrapod Setup과 의도적으로 분리되어

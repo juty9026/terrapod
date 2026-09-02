@@ -145,7 +145,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - **Terrapod Setup** invoked by the first-run installer is followed by initial apply, while explicit routine `tpod setup` writes config only and guides users to run `tpod apply`.
 - `terrapod setup` is the human-facing **Terrapod Setup** wizard, while `terrapod configure <Preset>` remains the script-friendly command for writing concrete settings from one **Preset**.
 - `terrapod configure <Preset>` is not a plain fallback for **Terrapod Setup**; it is a separate script-friendly configuration command without interactive customization.
-- `terrapod configure <Preset>` may overwrite existing managed setup settings non-interactively after the user explicitly invokes it; config backup rules still apply.
+- `terrapod configure <Preset>` overwrites existing managed setup settings non-interactively only when the user passes `--yes` or sets `TERRAPOD_ASSUME_YES=1`; without a terminal to confirm on it fails with that guidance instead of overwriting, and config backup rules still apply.
 - `terrapod configure <Preset>` writes config only and does not run `tpod apply` automatically; its output should guide users to the next explicit apply step.
 - `terrapod configure <Preset>` does not create shell startup file backups because it does not apply or overwrite shell startup files.
 - **Terrapod Setup** does not expose a setup presentation mode switch; it has one gum-backed interactive presentation.
