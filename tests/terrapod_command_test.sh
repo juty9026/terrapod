@@ -2358,13 +2358,13 @@ write_linux_uname_stub "$status_shadow_path/uname"
 
 status_shadow_output="$(
   TERRAPOD_EXECUTABLE_SELECTION_OUTPUT="  advisory - claude-code resolves to $status_shadow_legacy/claude
-             canonical: /home/linuxbrew/.linuxbrew/bin/claude
+             canonical: $tmp_dir/status-shadow-canonical/.local/bin/claude
              Adjust PATH or remove the other installation manually, then rerun 'tpod doctor'." \
     TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_shadow_config" PATH="$status_shadow_legacy:$status_shadow_path" \
     /bin/sh "$terrapod" status
 )"
 
-assert_contains "$status_shadow_output" "advisory - claude-code resolves to $status_shadow_legacy/claude" "Terrapod status reports legacy Claude shadowing the Homebrew cask"
+assert_contains "$status_shadow_output" "advisory - claude-code resolves to $status_shadow_legacy/claude" "Terrapod status reports a legacy Claude shadowing the Claude Code installer"
 
 status_broken_prefix_path="$(status_doctor_path broken-prefix chezmoi git zsh mise nvim zellij apt brew agy claude codex)"
 write_stub "$status_broken_prefix_path/brew" \
@@ -2478,7 +2478,7 @@ mv "$doctor_ai_shadow_path/claude" "$doctor_ai_shadow_legacy/claude"
 
 if ! doctor_shadow_output="$(
   TERRAPOD_EXECUTABLE_SELECTION_OUTPUT="  advisory - claude-code resolves to $doctor_ai_shadow_legacy/claude
-             canonical: $doctor_standard_brew_prefix/bin/claude
+             canonical: $tmp_dir/doctor-ai-shadow-canonical/.local/bin/claude
              Adjust PATH or remove the other installation manually, then rerun 'tpod doctor'." \
     TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_shadow_config" PATH="$doctor_ai_shadow_legacy:$doctor_ai_shadow_path" \
     /bin/sh "$doctor_terrapod" doctor
@@ -2487,7 +2487,7 @@ if ! doctor_shadow_output="$(
 fi
 
 assert_contains "$doctor_shadow_output" "ok - brew is available" "enabled Ubuntu Optional AI Tool Stack doctor requires Homebrew"
-assert_contains "$doctor_shadow_output" "advisory - claude-code resolves to $doctor_ai_shadow_legacy/claude" "Terrapod doctor reports legacy Claude shadowing the Homebrew cask"
+assert_contains "$doctor_shadow_output" "advisory - claude-code resolves to $doctor_ai_shadow_legacy/claude" "Terrapod doctor reports a legacy Claude shadowing the Claude Code installer"
 assert_contains "$doctor_shadow_output" "Adjust PATH or remove the other installation manually" "Terrapod doctor gives provenance-neutral cleanup guidance"
 
 if ! TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_shadow_config" PATH="$status_broken_prefix_path" \
@@ -2599,7 +2599,7 @@ doctor_missing_path="$(status_doctor_path doctor-missing chezmoi git zsh mise nv
 write_linux_uname_stub "$doctor_missing_path/uname"
 
 if TERRAPOD_EXECUTABLE_SELECTION_OUTPUT="  failure - antigravity-cli is not installed through Homebrew Cask
-  failure - claude-code is not installed through Homebrew Cask
+  failure - claude-code is not installed through the Claude Code installer
   failure - codex is not installed through Homebrew Cask" \
   TERRAPOD_EXECUTABLE_SELECTION_STATUS=1 \
   TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_missing_config" PATH="$doctor_missing_path" \
