@@ -191,6 +191,18 @@ assert_contains "$korean_readme" 'Terrapod은 기존에 설치된 JetBrains Mono
   "README.ko.md documents non-destructive legacy font migration"
 assert_contains "$korean_readme" 'Jetendard 설정 적용이 보류되면 Orca를 종료한 뒤 `tpod apply`를 다시 실행합니다.' \
   "README.ko.md documents Orca font-setting recovery"
+assert_contains "$readme" 'Jetendard stays pinned to the release Terrapod installed until the managed font installer source itself changes.' \
+  "README.md documents that Jetendard is pinned between installer changes"
+assert_contains "$readme" '~/.local/lib/terrapod/jetendard-font install' \
+  "README.md documents the manual Jetendard upgrade command"
+assert_contains "$readme" 'Deleting that manifest is not an upgrade path' \
+  "README.md rules out manifest removal as an upgrade path"
+assert_contains "$korean_readme" 'Jetendard는 managed font installer source가 바뀌기 전까지 Terrapod이 설치한 release에 고정됩니다.' \
+  "README.ko.md documents that Jetendard is pinned between installer changes"
+assert_contains "$korean_readme" '~/.local/lib/terrapod/jetendard-font install' \
+  "README.ko.md documents the manual Jetendard upgrade command"
+assert_contains "$korean_readme" 'manifest를 지우는 것은 업그레이드 경로가 아닙니다.' \
+  "README.ko.md rules out manifest removal as an upgrade path"
 assert_contains "$korean_readme" 'brew upgrade --cask codex antigravity-cli' \
   "README.ko.md documents targeted AI CLI upgrades"
 assert_contains "$korean_readme" 'Claude Code는 자체적으로 업데이트하며 이 명령의 대상이 아닙니다.' \
