@@ -51,7 +51,7 @@ mkdir -p \
   "$tmp_dir/selected" \
   "$tmp_dir/recent" \
   "$tmp_dir/git-project/.git" \
-  "$tmp_dir/worktree-main" \
+  "$tmp_dir/worktree-seed" \
   "$tmp_dir/plain"
 
 cat >"$tmp_dir/home/.local/share/zinit/zinit.git/zinit.zsh" <<'STUB'
@@ -264,41 +264,59 @@ fi
 PATH="$old_path"
 assert_file_contains "$tmp_dir/wcd-missing-fzf.out" "fzf가 설치되어 있지 않습니다." "wcd explains missing fzf"
 
-git -C "$tmp_dir/worktree-main" init -b main >/dev/null
-git -C "$tmp_dir/worktree-main" config user.email "test@example.com"
-git -C "$tmp_dir/worktree-main" config user.name "Test User"
-: >"$tmp_dir/worktree-main/file.txt"
-git -C "$tmp_dir/worktree-main" add file.txt
-git -C "$tmp_dir/worktree-main" commit -m "initial commit" >/dev/null
-git -C "$tmp_dir/worktree-main" branch feature/worktree
-git -C "$tmp_dir/worktree-main" branch feature/third
-git -C "$tmp_dir/worktree-main" worktree add "$tmp_dir/worktree selected" feature/worktree >/dev/null 2>&1
-git -C "$tmp_dir/worktree-main" worktree add "$tmp_dir/worktree third" feature/third >/dev/null 2>&1
+# `git worktree list` only emits a `bare` record for a bare main repository, so
+# the fixture's main is a bare clone and every checkout is a linked worktree.
+# The seed repository exists only to give that clone a commit; it is a separate
+# repository and never appears in the worktree list.
+git -C "$tmp_dir/worktree-seed" init -b main >/dev/null
+git -C "$tmp_dir/worktree-seed" config user.email "test@example.com"
+git -C "$tmp_dir/worktree-seed" config user.name "Test User"
+: >"$tmp_dir/worktree-seed/file.txt"
+git -C "$tmp_dir/worktree-seed" add file.txt
+git -C "$tmp_dir/worktree-seed" commit -m "initial commit" >/dev/null
+git clone --bare "$tmp_dir/worktree-seed" "$tmp_dir/worktree-bare.git" >/dev/null 2>&1
+git -C "$tmp_dir/worktree-bare.git" worktree add "$tmp_dir/worktree-main" main >/dev/null 2>&1
+git -C "$tmp_dir/worktree-bare.git" worktree add "$tmp_dir/worktree selected" -b feature/worktree >/dev/null 2>&1
+git -C "$tmp_dir/worktree-bare.git" worktree add "$tmp_dir/worktree third" -b feature/third >/dev/null 2>&1
+# A worktree whose directory has been removed is what git reports as prunable.
+git -C "$tmp_dir/worktree-bare.git" worktree add "$tmp_dir/worktree pruned" -b feature/pruned >/dev/null 2>&1
+rm -rf "$tmp_dir/worktree pruned"
 
-cd "$tmp_dir/worktree-main" || fail "could not enter worktree main directory"
-worktree_display="$(git -C "$tmp_dir/worktree-main" worktree list | command grep -F "$tmp_dir/worktree selected")"
-export FZF_TEST_SELECTION="$tmp_dir/worktree selected"$'\t'"$worktree_display"
-wcd
-assert_pwd "$tmp_dir/worktree selected" "wcd should jump to the selected worktree path"
-pass "wcd changes directory to a selected worktree path containing spaces"
+# Guard the fixture itself: if git stopped reporting either record, the
+# exclusion assertions below would pass without testing anything.
+typeset -a fixture_porcelain_lines
+fixture_porcelain_lines=("${(@f)$(git -C "$tmp_dir/worktree-main" worktree list --porcelain)}")
+if (( ! ${fixture_porcelain_lines[(I)bare]} )); then
+  fail "fixture should contain a bare worktree record"
+fi
+if (( ! ${fixture_porcelain_lines[(I)prunable *]} )); then
+  fail "fixture should contain a prunable worktree record"
+fi
+pass "worktree fixture reports one bare and one prunable record"
 
 # The fzf stub answers with FZF_TEST_SELECTION no matter what it is fed, so
-# nothing above this point can see the paste/awk half of wcd's pipeline. These
+# nothing above this point can see the awk half of wcd's pipeline. These
 # assertions read what wcd actually wrote to fzf's stdin.
-cd "$tmp_dir/worktree-main" || fail "could not reset to worktree main directory"
+cd "$tmp_dir/worktree-main" || fail "could not enter worktree main directory"
 export FZF_TEST_STDIN_LOG="$tmp_dir/wcd-fzf-stdin.log"
-export FZF_TEST_SELECTION="$tmp_dir/worktree selected"$'\t'"$worktree_display"
+export FZF_TEST_SELECTION=""
 wcd
 cd "$tmp_dir/worktree-main" || fail "could not reset to worktree main directory"
+unset FZF_TEST_STDIN_LOG
 
 typeset -a pipeline_lines
 # .zshrc aliases cat to bat, which is not on the stub PATH.
 pipeline_lines=("${(@f)$(command cat "$tmp_dir/wcd-fzf-stdin.log")}")
 
 if (( ${#pipeline_lines} != 3 )); then
-  fail "wcd should offer one row per worktree; got ${#pipeline_lines} for 3 worktrees"
+  fail "wcd should offer one row per ordinary worktree; got ${#pipeline_lines} for 3 ordinary, 1 bare and 1 prunable"
 fi
-pass "wcd offers one row per worktree"
+pass "wcd offers one row per ordinary worktree"
+
+# git reports resolved paths, and mktemp -d hands out a symlinked one on macOS.
+bare_path="${tmp_dir:A}/worktree-bare.git"
+pruned_path="${tmp_dir:A}/worktree pruned"
+selected_row=""
 
 typeset -a offered_paths
 offered_paths=()
@@ -306,30 +324,56 @@ for pipeline_line in "${pipeline_lines[@]}"; do
   worktree_path="${pipeline_line%%$'\t'*}"
   worktree_row="${pipeline_line#*$'\t'}"
 
+  if [[ "$worktree_path" == "$bare_path" ]]; then
+    fail "wcd should not offer the bare repository; got '$worktree_path'"
+  fi
+
+  if [[ "$worktree_path" == "$pruned_path" ]]; then
+    fail "wcd should not offer a prunable worktree; got '$worktree_path'"
+  fi
+
   if [[ ! -d "$worktree_path" ]]; then
     fail "wcd's first field should be a worktree directory; got '$worktree_path'"
   fi
 
-  # git worktree list prints the path first, so a row whose display half does
-  # not start with the porcelain half means paste mispaired its two inputs.
+  # The display half is built from the same porcelain record as the path, so
+  # it starts with that path just as `git worktree list` rows do.
   if [[ "$worktree_row" != "$worktree_path"* ]]; then
-    fail "wcd should pair each porcelain path with its own listing row; '$worktree_path' got '$worktree_row'"
+    fail "wcd should pair each path with its own display row; '$worktree_path' got '$worktree_row'"
+  fi
+
+  if [[ "$worktree_path" == "${tmp_dir:A}/worktree selected" ]]; then
+    selected_row="$pipeline_line"
   fi
 
   offered_paths+=("$worktree_path")
 done
+pass "wcd does not offer the bare repository"
+pass "wcd does not offer a prunable worktree"
 pass "wcd's first field is the worktree directory cd receives"
-pass "wcd pairs each porcelain path with its own listing row"
+pass "wcd pairs each path with its own display row"
 
-# git reports resolved paths, and mktemp -d hands out a symlinked one on macOS.
+# git lists worktrees in its own order, so both sides are sorted before the
+# comparison. Without the @, a nested ${(o)array} collapses to one unsorted word.
 typeset -a expected_paths
 expected_paths=("${tmp_dir:A}/worktree-main" "${tmp_dir:A}/worktree selected" "${tmp_dir:A}/worktree third")
-if [[ "${(j:\n:)${(o)offered_paths}}" != "${(j:\n:)${(o)expected_paths}}" ]]; then
-  fail "wcd should offer every worktree path verbatim; got ${(j:, :)offered_paths}"
+if [[ "${(j:\n:)${(@o)offered_paths}}" != "${(j:\n:)${(@o)expected_paths}}" ]]; then
+  fail "wcd should offer every ordinary worktree path verbatim; got ${(j:, :)offered_paths}"
 fi
-pass "wcd offers every worktree path verbatim, spaces included"
+pass "wcd offers every ordinary worktree path verbatim, spaces included"
 
-unset FZF_TEST_STDIN_LOG
+if [[ -z "$selected_row" ]]; then
+  fail "wcd should offer the worktree the selection test picks"
+fi
+assert_contains "${selected_row#*$'\t'}" "[feature/worktree]" "wcd's display row names the worktree's branch"
+
+# Selecting a row the pipeline really produced proves the field cd splits on
+# is the one wcd wrote, not one the test made up.
+cd "$tmp_dir/worktree-main" || fail "could not reset to worktree main directory"
+export FZF_TEST_SELECTION="$selected_row"
+wcd
+assert_pwd "$tmp_dir/worktree selected" "wcd should jump to the selected worktree path"
+pass "wcd changes directory to a selected worktree path containing spaces"
 
 cd "$tmp_dir/worktree-main" || fail "could not reset to worktree main directory"
 export FZF_TEST_SELECTION=""
