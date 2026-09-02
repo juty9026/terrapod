@@ -32,6 +32,10 @@ _Avoid_: core shell editor, mandatory editor config, default LazyVim setup
 The opt-in command-line AI tools that may be installed on selected **macOS Terminal Profile** development machines.
 _Avoid_: core shell tools, mandatory AI tools, cross-profile AI tools
 
+**Claude Code Installer**:
+The vendor-published install script at `https://claude.ai/install.sh` that owns Claude Code on the **macOS Terminal Profile**.
+_Avoid_: claude-code cask, Terrapod installer
+
 **Optional Development Workspace**:
 The opt-in full development stack bundle for machines that need rich editor configuration, AI tools, and an integrated terminal workspace together.
 _Avoid_: core terminal multiplexer config, default dev layout, mandatory workspace
@@ -179,10 +183,13 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - pnpm belongs to the **Development Runtime Stack** through Node.js Corepack, not as a mise-managed tool.
 - Rich Neovim configuration belongs to the **Optional Editor Stack**, not the **Core Shell Stack**, and is opt-in for every machine profile.
 - Antigravity CLI, Claude Code, and Codex belong to the **Optional AI Tool Stack**, not the **Core Shell Stack**.
-- The **Optional AI Tool Stack** installs Homebrew casks `antigravity-cli`, `claude-code`, and `codex` on the **macOS Terminal Profile** only; Homebrew publishes those three as casks, which Linux Homebrew does not install.
+- The **Optional AI Tool Stack** installs Homebrew casks `antigravity-cli` and `codex` and installs Claude Code through the **Claude Code Installer**, on the **macOS Terminal Profile** only; Homebrew publishes those two as casks, which Linux Homebrew does not install.
 - The **Optional AI Tool Stack** is not applicable on the **VPS Shell Profile**. Terrapod Setup does not offer it there, the development **Preset** writes it disabled there, and `tpod status` and `tpod doctor` report it as not applicable rather than missing.
-- `Brewfile.ai-cli-tools.tmpl` is the canonical declaration for Optional AI Tool Stack packages and renders empty outside the **macOS Terminal Profile**.
-- The **Modern CLI Provider** installs the 20 mandatory formulae declared in `Brewfile` on both supported profiles and owns the three Optional AI Tool Stack casks on macOS when that stack is enabled.
+- `Brewfile.ai-cli-tools.tmpl` is the canonical declaration for the **Optional AI Tool Stack**'s Homebrew packages and renders empty outside the **macOS Terminal Profile**.
+- The **Modern CLI Provider** installs the 20 mandatory formulae declared in `Brewfile` on both supported profiles and owns the two Optional AI Tool Stack casks on macOS when that stack is enabled.
+- The **Claude Code Installer** is the canonical provider for Claude Code; its canonical executable is `$HOME/.local/bin/claude`.
+- `tpod apply` runs the **Claude Code Installer** only when that canonical executable is absent. Claude Code's own updater owns version freshness, occupying the same place as the no-upgrade contract for Homebrew packages.
+- Claude Code stays scoped to the **macOS Terminal Profile** even though the **Claude Code Installer** supports Linux; stack applicability is a profile decision, not a consequence of the package source.
 - The **VPS Shell Profile** installs Homebrew at `/home/linuxbrew/.linuxbrew` for every **Preset** on supported `x86_64` and `aarch64` systems.
 - The **VPS Shell Profile** supports one non-root management user with initial sudo access; it does not manage multi-user Homebrew prefix ownership.
 - The recommended **VPS Shell Profile** floor is 1 vCPU, 1 GiB RAM, and 3 GiB free disk, with 2 GiB RAM comfortable; the installer warns below 3 GiB but does not make this recommendation a hard gate.
@@ -234,7 +241,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Terrapod install warnings do not include a retained installer log; recovery guidance should direct users to rerun the relevant apply path for fresh command output.
 - Terrapod install warning marker path resolution, atomic write, timestamp creation, and clear behavior should be implemented through shared shell helper logic rather than duplicated independently in each installer script.
 - Source-side installer scripts and installed `tpod` commands should share the same Terrapod install warning marker contract even if the helper file placement is decided during implementation.
-- The optional AI CLI tools warning marker keeps one category for the **Optional AI Tool Stack** but includes the failed tool names in its summary or guidance fields.
+- The optional AI CLI tools warning marker keeps one category for the **Optional AI Tool Stack** across both of its package sources but includes the failed tool names in its summary or guidance fields.
 - The Homebrew desktop app warning marker keeps one category for the **macOS Desktop App Stack** but includes failed cask names and, when available, their **macOS App Group** names in its summary or guidance fields.
 - The Homebrew core warning marker includes failed formula or cask names only when they can be identified reliably; otherwise it records the core bundle failure summary and points users to the visible installer output and rerun guidance.
 - Terrapod install warning marker detail should reflect reliable observations only; bulk installers may record bulk failure summaries when failed item names cannot be identified without brittle output parsing.

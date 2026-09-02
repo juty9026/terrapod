@@ -152,6 +152,8 @@ On Apple Silicon, Homebrew installs at `/opt/homebrew`; on Intel Macs, it instal
 - Bun, Node.js 24, Python 3.13, and uv/uvx through mise
 - pnpm through Node.js Corepack
 - Optional AI Tool Stack casks through Homebrew when that stack is enabled
+- Claude Code through the Claude Code Installer, the vendor-published script at
+  `https://claude.ai/install.sh`, when that stack is enabled
 
 Terrapod installs every TTF in that Jetendard release and verifies the asset digest published by GitHub. Terrapod checks the latest Jetendard release only when its managed font installer source changes or a failed install is retried. It sets only the font-family keys used by Ghostty, Zed buffers and terminals, and Orca terminals. Quit Orca before rerunning `tpod apply` when Jetendard settings are deferred. Terrapod does not uninstall existing JetBrains Mono Nerd Font or D2Coding copies. Restart Ghostty, Zed, or Orca if an existing window still uses a cached font.
 
@@ -211,10 +213,11 @@ On Ubuntu, the initial apply runs setup scripts for the VPS shell profile:
 The VPS Shell Profile is headless: macOS App Groups and other GUI applications
 remain in the optional macOS Desktop App Stack and are never installed on Ubuntu.
 The Optional AI Tool Stack is also macOS-only, because Homebrew publishes
-Antigravity CLI, Claude Code, and Codex as casks and Homebrew on Linux does not
-install casks. Setup does not offer the stack on a VPS, the `development` Preset
-writes it disabled there, and `tpod status` and `tpod doctor` report it as not
-applicable.
+Antigravity CLI and Codex as casks and Homebrew on Linux does not install
+casks. Claude Code stays macOS-only as a profile decision rather than a
+consequence of its package source. Setup does not offer the stack on a VPS,
+the `development` Preset writes it disabled there, and `tpod status` and
+`tpod doctor` report it as not applicable.
 Only configure GitHub authentication on a VPS if write access is needed later.
 
 If the login shell could not be changed automatically, switch it after the first apply and reconnect.
@@ -255,10 +258,11 @@ sudo apt upgrade
 Intentional CLI upgrades are explicit Homebrew operations. Upgrade all
 Homebrew-managed CLIs with `brew update` and `brew upgrade`, or target only the
 AI CLI casks when that is the intended scope.
+Claude Code updates itself and is not part of that command.
 
 ```sh
 brew update
-brew upgrade --cask claude-code codex antigravity-cli
+brew upgrade --cask codex antigravity-cli
 ```
 
 Use mise directly when intentionally updating development runtimes.
@@ -313,7 +317,7 @@ Optional stack profiles and macOS App Group settings are disabled by default.
 | --- | --- | --- |
 | `profile` | Detected by setup/configure | Records the active Terrapod machine profile. |
 | `enableEditorStack` | `false` | Enables the Optional Editor Stack, which manages the rich Neovim configuration. Plain Neovim remains in the Core Shell Stack either way. |
-| `enableAiCliTools` | `false` | Installs Antigravity CLI, Claude Code, and Codex through Homebrew casks `antigravity-cli`, `claude-code`, and `codex`. macOS Terminal Profile only; ignored on the VPS Shell Profile. |
+| `enableAiCliTools` | `false` | Installs Antigravity CLI, Claude Code, and Codex: Antigravity CLI and Codex through Homebrew casks `antigravity-cli` and `codex`, and Claude Code through its official installer. macOS Terminal Profile only; ignored on the VPS Shell Profile. |
 | `enableDevelopmentWorkspace` | `false` | Enables the Optional Development Workspace preset, including the Optional Editor Stack, the Optional AI Tool Stack where it applies, and development-specific Zellij workspace surfaces. |
 | `enableMacosAppGroupTerminalApps` | `false` | Installs the terminal-apps macOS App Group: Ghostty. |
 | `enableMacosAppGroupAutomation` | `false` | Installs the automation macOS App Group: Hammerspoon, Karabiner-Elements, and Scroll Reverser. |

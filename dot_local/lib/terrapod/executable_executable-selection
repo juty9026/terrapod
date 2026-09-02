@@ -75,7 +75,7 @@ optional_records() {
   if [ "$ai_enabled" = true ]; then
     printf '%s\n' \
       "homebrew-cask|antigravity-cli|agy" \
-      "homebrew-cask|claude-code|claude" \
+      "claude-installer|claude-code|claude" \
       "homebrew-cask|codex|codex"
   fi
 
@@ -135,6 +135,9 @@ provider_has_package() {
     homebrew-cask)
       line_list_contains "$homebrew_casks" "$package"
       ;;
+    claude-installer)
+      [ -x "$HOME/.local/bin/claude" ]
+      ;;
     mise)
       command -v mise >/dev/null 2>&1 &&
         mise where "$package" >/dev/null 2>&1
@@ -149,6 +152,7 @@ provider_label() {
   case "$1" in
     homebrew-formula) printf '%s\n' Homebrew ;;
     homebrew-cask) printf '%s\n' "Homebrew Cask" ;;
+    claude-installer) printf '%s\n' "the Claude Code installer" ;;
     mise) printf '%s\n' mise ;;
   esac
 }
@@ -161,6 +165,9 @@ expected_executable() {
     homebrew-formula|homebrew-cask)
       prefix="$(standard_homebrew_prefix)" || return 1
       printf '%s/bin/%s\n' "$prefix" "$command"
+      ;;
+    claude-installer)
+      printf '%s/.local/bin/%s\n' "$HOME" "$command"
       ;;
     mise)
       mise_shims_dir="${TERRAPOD_MISE_SHIMS_DIR:-${MISE_DATA_DIR:-$HOME/.local/share/mise}/shims}"

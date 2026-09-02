@@ -15,19 +15,33 @@ clear_install_warning "$AI_CLI_WARNING_CATEGORY"
 exit 0
 {{ else }}
 ai_cli_brewfile=
+claude_code_installer=
+failed_ai_cli_tools=
+
+CLAUDE_CODE_CANONICAL_EXECUTABLE="$HOME/.local/bin/claude"
+CLAUDE_CODE_INSTALLER_URL=https://claude.ai/install.sh
 
 cleanup_ai_cli_install() {
   [ -z "$ai_cli_brewfile" ] || rm -f "$ai_cli_brewfile"
+  [ -z "$claude_code_installer" ] || rm -f "$claude_code_installer"
 }
 
 trap cleanup_ai_cli_install EXIT HUP INT TERM
 
+append_failed_ai_cli_tool() {
+  if [ -z "$failed_ai_cli_tools" ]; then
+    failed_ai_cli_tools="$1"
+  else
+    failed_ai_cli_tools="$failed_ai_cli_tools, $1"
+  fi
+}
+
 finish_ai_cli_install() {
-  if [ "$1" -ne 0 ]; then
+  if [ -n "$failed_ai_cli_tools" ]; then
     mark_install_warning \
       "$AI_CLI_WARNING_CATEGORY" \
       "Optional AI CLI tool install needs attention" \
-      "Homebrew setup or the AI CLI bundle failed. Review Homebrew output and network access, then rerun tpod apply."
+      "Failed: $failed_ai_cli_tools. Review the installer output and network access, then rerun tpod apply."
 
     if ! install_warning_recorded; then
       echo "Failed to record Optional AI CLI tool install warning." >&2
@@ -64,10 +78,31 @@ BREWFILE
   HOMEBREW_NO_AUTO_UPDATE=1 "$brew_bin" bundle --no-upgrade --file="$ai_cli_brewfile"
 }
 
+install_claude_code() {
+  # The vendor installer always downloads the latest build, so running it on an
+  # existing install would upgrade Claude Code on every apply. Terrapod restores
+  # a missing install only; Claude Code's own updater owns version freshness.
+  [ ! -x "$CLAUDE_CODE_CANONICAL_EXECUTABLE" ] || return 0
+
+  echo "Installing Claude Code..."
+  claude_code_installer="$(mktemp "${TMPDIR:-/tmp}/terrapod-claude-code-installer.XXXXXX")" || return 1
+  curl -fsSL "$CLAUDE_CODE_INSTALLER_URL" -o "$claude_code_installer" || return 1
+
+  # bash, not sh: the vendor script declares #!/bin/bash and uses [[ =~ ]],
+  # BASH_REMATCH, and $'...' quoting.
+  # </dev/null: the vendor script ends by running `claude install`, which has no
+  # unattended flag and can wait on a terminal UI. First-run apply runs in an
+  # interactive terminal, so an install that prompts would stall it.
+  bash "$claude_code_installer" </dev/null || return 1
+
+  [ -x "$CLAUDE_CODE_CANONICAL_EXECUTABLE" ]
+}
+
 # Optional AI Tool Stack Brewfile checksum: {{ includeTemplate "Brewfile.ai-cli-tools.tmpl" . | sha256sum }}
-ai_cli_install_status=0
-install_ai_cli_bundle || ai_cli_install_status=$?
-if ! finish_ai_cli_install "$ai_cli_install_status"; then
+install_ai_cli_bundle || append_failed_ai_cli_tool "Homebrew bundle"
+install_claude_code || append_failed_ai_cli_tool "Claude Code"
+
+if ! finish_ai_cli_install; then
   exit 1
 fi
 exit 0

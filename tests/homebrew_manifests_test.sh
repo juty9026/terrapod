@@ -55,7 +55,6 @@ expected_ai_casks="$tmp_dir/expected-ai-casks"
 actual_ai_casks="$tmp_dir/actual-ai-casks"
 printf '%s\n' \
   'cask "antigravity-cli"' \
-  'cask "claude-code"' \
   'cask "codex"' >"$expected_ai_casks"
 
 chezmoi execute-template \
@@ -65,9 +64,9 @@ chezmoi execute-template \
 printf '\n' >>"$actual_ai_casks"
 if ! cmp -s "$expected_ai_casks" "$actual_ai_casks"; then
   diff -u "$expected_ai_casks" "$actual_ai_casks" >&2 || true
-  fail "Optional AI Tool Stack declares exactly the three macOS casks"
+  fail "Optional AI Tool Stack declares exactly the two macOS casks"
 fi
-pass "Optional AI Tool Stack declares exactly the three macOS casks"
+pass "Optional AI Tool Stack declares exactly the two macOS casks"
 
 linux_ai_casks="$tmp_dir/linux-ai-casks"
 chezmoi execute-template \

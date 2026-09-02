@@ -1936,7 +1936,7 @@ assert_not_contains_text "$ai_cli_tools_installer" "bootstrap_linux_homebrew" "A
 assert_not_contains_text "$ai_cli_tools_installer" "raw.githubusercontent.com/Homebrew/install" "AI installer never downloads Homebrew"
 assert_not_contains_text "$ai_cli_tools_installer" "HOMEBREW_NO_AUTO_UPDATE=1" "Ubuntu AI installer runs no Homebrew bundle"
 assert_not_contains_text "$ai_cli_tools_installer" "install_ai_cli_bundle" "Ubuntu AI installer renders no Homebrew bundle step"
-assert_not_contains_text "$ai_cli_tools_installer" 'cask "claude-code"' "Ubuntu AI installer renders no macOS-only casks"
+assert_not_contains_text "$ai_cli_tools_installer" 'cask "codex"' "Ubuntu AI installer renders no macOS-only casks"
 assert_contains_text "$ai_cli_tools_installer" 'clear_install_warning "$AI_CLI_WARNING_CATEGORY"' "Ubuntu AI installer only clears stale optional AI CLI markers"
 assert_contains_text "$macos_ai_cli_tools_installer" "/opt/homebrew/bin/brew" "macOS AI installer uses mandatory standard Homebrew"
 assert_contains_text "$macos_ai_cli_tools_installer" "HOMEBREW_NO_AUTO_UPDATE=1" "AI bundle disables Homebrew auto-update"
@@ -1944,8 +1944,8 @@ assert_contains_text "$macos_terminal_apps_bootstrap" "HOMEBREW_NO_AUTO_UPDATE=1
 
 for rendered_brewfile in "$macos_ai_cli_tools_brewfile" "$macos_development_workspace_ai_brewfile"; do
   assert_contains_text "$rendered_brewfile" 'cask "antigravity-cli"' "Optional AI Tool Stack declares Antigravity CLI cask"
-  assert_contains_text "$rendered_brewfile" 'cask "claude-code"' "Optional AI Tool Stack declares Claude Code cask"
   assert_contains_text "$rendered_brewfile" 'cask "codex"' "Optional AI Tool Stack declares Codex CLI cask"
+  assert_not_contains_text "$rendered_brewfile" 'cask "claude-code"' "Optional AI Tool Stack no longer declares a Claude Code cask"
 done
 assert_text_equals "$disabled_ai_cli_tools_brewfile" "" "disabled Optional AI Tool Stack renders no Homebrew casks"
 assert_text_equals "$ai_cli_tools_brewfile" "" "Ubuntu Optional AI Tool Stack renders no Homebrew casks"
@@ -2005,12 +2005,36 @@ write_ai_brew_stub() {
     '    for arg do case "$arg" in --file=*) bundle_file="$(printf "%s" "$arg" | cut -d= -f2-)" ;; esac; done' \
     '    [ -n "$bundle_file" ] || exit 64' \
     '    grep -Fx "cask \"antigravity-cli\"" "$bundle_file" >/dev/null || exit 65' \
-    '    grep -Fx "cask \"claude-code\"" "$bundle_file" >/dev/null || exit 66' \
-    '    grep -Fx "cask \"codex\"" "$bundle_file" >/dev/null || exit 67' \
+    '    grep -Fx "cask \"codex\"" "$bundle_file" >/dev/null || exit 66' \
     '    [ "$AI_BREW_FAIL" = "0" ] || exit 42' \
     '    ;;' \
     '  *) exit 64 ;;' \
     'esac'
+}
+
+write_claude_installer_stubs() {
+  stub_dir="$1"
+  write_stub "$stub_dir/curl" \
+    'log="${CLAUDE_INSTALLER_LOG:-/dev/null}"' \
+    'printf "%s\n" "curl args:$*" >>"$log"' \
+    '[ "${CLAUDE_INSTALLER_CURL_FAIL:-0}" = "0" ] || exit 4' \
+    'output=' \
+    'while [ "$#" -gt 0 ]; do' \
+    '  if [ "$1" = "-o" ]; then output="$2"; shift 2; else shift; fi' \
+    'done' \
+    '[ -n "$output" ] || exit 2' \
+    'printf "%s\n" "#!/bin/bash" "exit 0" >"$output"'
+  write_stub "$stub_dir/bash" \
+    'log="${CLAUDE_INSTALLER_LOG:-/dev/null}"' \
+    'printf "%s\n" "bash args:$*" >>"$log"' \
+    '[ "${CLAUDE_INSTALLER_FAIL:-0}" = "0" ] || exit 3' \
+    'if [ "${CLAUDE_INSTALLER_SKIP_BINARY:-0}" != "0" ]; then' \
+    '  printf "%s\n" "bash skipped binary" >>"$log"' \
+    '  exit 0' \
+    'fi' \
+    'mkdir -p "$HOME/.local/bin"' \
+    'printf "%s\n" "#!/bin/sh" "exit 0" >"$HOME/.local/bin/claude"' \
+    'chmod +x "$HOME/.local/bin/claude"'
 }
 
 macos_ai_brew_bin="$tmp_dir/macos-ai-brew-bin"
@@ -2019,6 +2043,7 @@ mkdir -p "$macos_ai_brew_bin" "$macos_intel_ai_brew_bin"
 write_ai_brew_stub "$macos_ai_brew_bin/brew"
 write_ai_brew_stub "$macos_intel_ai_brew_bin/brew"
 write_stub "$macos_ai_brew_bin/uname" 'printf "%s\n" "${AI_UNAME_ARCH:-arm64}"'
+write_claude_installer_stubs "$macos_ai_brew_bin"
 
 run_macos_ai_arch_case() {
   arch="$1"
@@ -2065,11 +2090,18 @@ pass "Optional AI Tool Stack records a warning and stops before bundle when Home
 
 for vendor_url in \
   "https://antigravity.google/cli/install.sh" \
-  "https://claude.ai/install.sh" \
   "https://chatgpt.com/codex/install.sh"
 do
   assert_not_contains_text "$ai_cli_tools_installer" "$vendor_url" "Optional AI Tool Stack no longer renders vendor installer URL: $vendor_url"
+  assert_not_contains_text "$macos_ai_cli_tools_installer" "$vendor_url" "macOS Optional AI Tool Stack no longer renders vendor installer URL: $vendor_url"
 done
+
+assert_contains_text "$macos_ai_cli_tools_installer" "https://claude.ai/install.sh" \
+  "macOS Optional AI Tool Stack renders the Claude Code installer URL"
+assert_not_contains_text "$ai_cli_tools_installer" "https://claude.ai/install.sh" \
+  "Ubuntu Optional AI Tool Stack renders no Claude Code installer URL"
+assert_contains_text "$macos_ai_cli_tools_installer" 'bash "$claude_code_installer" </dev/null' \
+  "Claude Code installer runs under bash with stdin detached"
 
 linux_ai_brew_bin="$tmp_dir/linux-ai-brew-bin"
 linux_ai_brew_home="$tmp_dir/linux-ai-brew-home"
@@ -2146,6 +2178,166 @@ if [ -e "$ai_cli_failure_marker" ]; then
   fail "successful Optional AI Tool Stack retry clears warning marker"
 fi
 pass "successful Optional AI Tool Stack retry clears warning marker"
+
+claude_fresh_home="$tmp_dir/claude-fresh-home"
+claude_fresh_state="$tmp_dir/claude-fresh-state"
+claude_fresh_brew_log="$tmp_dir/claude-fresh-brew.log"
+claude_fresh_installer_log="$tmp_dir/claude-fresh-installer.log"
+mkdir -p "$claude_fresh_home"
+HOME="$claude_fresh_home" XDG_STATE_HOME="$claude_fresh_state" \
+  AI_UNAME_ARCH=arm64 AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$claude_fresh_brew_log" AI_BREW_FAIL=0 \
+  CLAUDE_INSTALLER_LOG="$claude_fresh_installer_log" \
+  PATH="$macos_ai_brew_bin:/usr/bin:/bin" sh "$macos_ai_cli_tools_installer_script"
+assert_contains_text "$(cat "$claude_fresh_installer_log")" "curl args:" \
+  "Optional AI Tool Stack downloads the Claude Code installer when Claude Code is absent"
+assert_contains_text "$(cat "$claude_fresh_installer_log")" "bash args:" \
+  "Optional AI Tool Stack runs the Claude Code installer when Claude Code is absent"
+if [ ! -x "$claude_fresh_home/.local/bin/claude" ]; then
+  fail "Optional AI Tool Stack installs the canonical Claude Code executable"
+fi
+pass "Optional AI Tool Stack installs the canonical Claude Code executable"
+if [ -e "$claude_fresh_state/terrapod/install-warnings/optional-ai-cli-tools" ]; then
+  fail "a successful Optional AI Tool Stack apply records no warning"
+fi
+pass "a successful Optional AI Tool Stack apply records no warning"
+
+claude_present_home="$tmp_dir/claude-present-home"
+claude_present_state="$tmp_dir/claude-present-state"
+claude_present_brew_log="$tmp_dir/claude-present-brew.log"
+claude_present_installer_log="$tmp_dir/claude-present-installer.log"
+mkdir -p "$claude_present_home/.local/bin"
+write_stub "$claude_present_home/.local/bin/claude" 'exit 0'
+HOME="$claude_present_home" XDG_STATE_HOME="$claude_present_state" \
+  AI_UNAME_ARCH=arm64 AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$claude_present_brew_log" AI_BREW_FAIL=0 \
+  CLAUDE_INSTALLER_LOG="$claude_present_installer_log" \
+  PATH="$macos_ai_brew_bin:/usr/bin:/bin" sh "$macos_ai_cli_tools_installer_script"
+if [ -e "$claude_present_installer_log" ]; then
+  fail "an existing Claude Code install should not rerun the vendor installer"
+fi
+pass "an existing Claude Code install does not rerun the vendor installer"
+
+claude_failure_home="$tmp_dir/claude-failure-home"
+claude_failure_state="$tmp_dir/claude-failure-state"
+claude_failure_brew_log="$tmp_dir/claude-failure-brew.log"
+mkdir -p "$claude_failure_home"
+claude_failure_status=0
+HOME="$claude_failure_home" XDG_STATE_HOME="$claude_failure_state" \
+  AI_UNAME_ARCH=arm64 AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$claude_failure_brew_log" AI_BREW_FAIL=0 \
+  CLAUDE_INSTALLER_FAIL=1 \
+  PATH="$macos_ai_brew_bin:/usr/bin:/bin" sh "$macos_ai_cli_tools_installer_script" >/dev/null 2>&1 ||
+  claude_failure_status=$?
+if [ "$claude_failure_status" -ne 0 ]; then
+  fail "a Claude Code install failure should continue apply after recording a warning"
+fi
+claude_failure_marker="$claude_failure_state/terrapod/install-warnings/optional-ai-cli-tools"
+if [ ! -f "$claude_failure_marker" ]; then
+  fail "a Claude Code install failure records the optional-ai-cli-tools marker"
+fi
+assert_contains_text "$(cat "$claude_failure_marker")" "Claude Code" \
+  "a Claude Code install failure names Claude Code in its marker"
+assert_not_contains_text "$(cat "$claude_failure_marker")" "Homebrew bundle" \
+  "a Claude Code install failure does not name the Homebrew bundle in its marker"
+pass "a Claude Code install failure records a warning and exits zero"
+
+claude_skip_binary_home="$tmp_dir/claude-skip-binary-home"
+claude_skip_binary_state="$tmp_dir/claude-skip-binary-state"
+claude_skip_binary_brew_log="$tmp_dir/claude-skip-binary-brew.log"
+claude_skip_binary_installer_log="$tmp_dir/claude-skip-binary-installer.log"
+mkdir -p "$claude_skip_binary_home"
+claude_skip_binary_status=0
+HOME="$claude_skip_binary_home" XDG_STATE_HOME="$claude_skip_binary_state" \
+  AI_UNAME_ARCH=arm64 AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$claude_skip_binary_brew_log" AI_BREW_FAIL=0 \
+  CLAUDE_INSTALLER_LOG="$claude_skip_binary_installer_log" CLAUDE_INSTALLER_SKIP_BINARY=1 \
+  PATH="$macos_ai_brew_bin:/usr/bin:/bin" sh "$macos_ai_cli_tools_installer_script" >/dev/null 2>&1 ||
+  claude_skip_binary_status=$?
+if [ "$claude_skip_binary_status" -ne 0 ]; then
+  fail "a vendor installer that exits zero without installing the canonical executable should continue apply after recording a warning"
+fi
+if [ -x "$claude_skip_binary_home/.local/bin/claude" ]; then
+  fail "the CLAUDE_INSTALLER_SKIP_BINARY stub should not create the canonical executable"
+fi
+claude_skip_binary_marker="$claude_skip_binary_state/terrapod/install-warnings/optional-ai-cli-tools"
+if [ ! -f "$claude_skip_binary_marker" ]; then
+  fail "a vendor installer that exits zero without the canonical executable records the optional-ai-cli-tools marker"
+fi
+assert_contains_text "$(cat "$claude_skip_binary_marker")" "Claude Code" \
+  "a vendor installer that exits zero without the canonical executable names Claude Code in its marker"
+pass "a vendor installer that exits zero without installing the canonical executable records a warning and exits zero"
+
+claude_curl_failure_home="$tmp_dir/claude-curl-failure-home"
+claude_curl_failure_state="$tmp_dir/claude-curl-failure-state"
+claude_curl_failure_brew_log="$tmp_dir/claude-curl-failure-brew.log"
+claude_curl_failure_installer_log="$tmp_dir/claude-curl-failure-installer.log"
+mkdir -p "$claude_curl_failure_home"
+claude_curl_failure_status=0
+HOME="$claude_curl_failure_home" XDG_STATE_HOME="$claude_curl_failure_state" \
+  AI_UNAME_ARCH=arm64 AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$claude_curl_failure_brew_log" AI_BREW_FAIL=0 \
+  CLAUDE_INSTALLER_LOG="$claude_curl_failure_installer_log" CLAUDE_INSTALLER_CURL_FAIL=1 \
+  PATH="$macos_ai_brew_bin:/usr/bin:/bin" sh "$macos_ai_cli_tools_installer_script" >/dev/null 2>&1 ||
+  claude_curl_failure_status=$?
+if [ "$claude_curl_failure_status" -ne 0 ]; then
+  fail "a Claude Code installer download failure should continue apply after recording a warning"
+fi
+if grep -F "bash args:" "$claude_curl_failure_installer_log" >/dev/null 2>&1; then
+  fail "a Claude Code installer download failure should not run the downloaded script"
+fi
+claude_curl_failure_marker="$claude_curl_failure_state/terrapod/install-warnings/optional-ai-cli-tools"
+if [ ! -f "$claude_curl_failure_marker" ]; then
+  fail "a Claude Code installer download failure records the optional-ai-cli-tools marker"
+fi
+assert_contains_text "$(cat "$claude_curl_failure_marker")" "Claude Code" \
+  "a Claude Code installer download failure names Claude Code in its marker"
+pass "a Claude Code installer download failure records a warning and exits zero"
+
+claude_both_failure_home="$tmp_dir/claude-both-failure-home"
+claude_both_failure_state="$tmp_dir/claude-both-failure-state"
+claude_both_failure_brew_log="$tmp_dir/claude-both-failure-brew.log"
+mkdir -p "$claude_both_failure_home"
+claude_both_failure_status=0
+HOME="$claude_both_failure_home" XDG_STATE_HOME="$claude_both_failure_state" \
+  AI_UNAME_ARCH=arm64 AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$claude_both_failure_brew_log" AI_BREW_FAIL=1 \
+  CLAUDE_INSTALLER_FAIL=1 \
+  PATH="$macos_ai_brew_bin:/usr/bin:/bin" sh "$macos_ai_cli_tools_installer_script" >/dev/null 2>&1 ||
+  claude_both_failure_status=$?
+if [ "$claude_both_failure_status" -ne 0 ]; then
+  fail "a Homebrew bundle failure together with a Claude Code install failure should continue apply after recording a warning"
+fi
+claude_both_failure_marker="$claude_both_failure_state/terrapod/install-warnings/optional-ai-cli-tools"
+if [ ! -f "$claude_both_failure_marker" ]; then
+  fail "a Homebrew bundle failure together with a Claude Code install failure records the optional-ai-cli-tools marker"
+fi
+claude_both_failure_marker_text="$(cat "$claude_both_failure_marker")"
+assert_contains_text "$claude_both_failure_marker_text" "Homebrew bundle" \
+  "a combined install failure names the Homebrew bundle in its marker"
+assert_contains_text "$claude_both_failure_marker_text" "Claude Code" \
+  "a combined install failure names Claude Code in its marker"
+if ! grep -F "Failed: Homebrew bundle, Claude Code." "$claude_both_failure_marker" >/dev/null; then
+  fail "a combined install failure names both sources on a single line"
+fi
+pass "a combined install failure records both sources on a single-line marker"
+
+claude_bundle_failure_home="$tmp_dir/claude-bundle-failure-home"
+claude_bundle_failure_state="$tmp_dir/claude-bundle-failure-state"
+claude_bundle_failure_brew_log="$tmp_dir/claude-bundle-failure-brew.log"
+claude_bundle_failure_installer_log="$tmp_dir/claude-bundle-failure-installer.log"
+mkdir -p "$claude_bundle_failure_home"
+claude_bundle_failure_status=0
+HOME="$claude_bundle_failure_home" XDG_STATE_HOME="$claude_bundle_failure_state" \
+  AI_UNAME_ARCH=arm64 AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$claude_bundle_failure_brew_log" AI_BREW_FAIL=1 \
+  CLAUDE_INSTALLER_LOG="$claude_bundle_failure_installer_log" \
+  PATH="$macos_ai_brew_bin:/usr/bin:/bin" sh "$macos_ai_cli_tools_installer_script" >/dev/null 2>&1 ||
+  claude_bundle_failure_status=$?
+if [ "$claude_bundle_failure_status" -ne 0 ]; then
+  fail "a Homebrew bundle failure should continue apply after recording a warning"
+fi
+assert_contains_text "$(cat "$claude_bundle_failure_installer_log")" "bash args:" \
+  "a Homebrew bundle failure does not skip the Claude Code step"
+claude_bundle_failure_marker="$claude_bundle_failure_state/terrapod/install-warnings/optional-ai-cli-tools"
+if [ ! -f "$claude_bundle_failure_marker" ]; then
+  fail "a Homebrew bundle failure records the optional-ai-cli-tools marker"
+fi
+assert_contains_text "$(cat "$claude_bundle_failure_marker")" "Homebrew bundle" \
+  "a Homebrew bundle failure names the bundle in its marker"
 
 development_workspace_zellij_layout="$(render_managed_file "$development_workspace_data" ".config/zellij/layouts/dev.kdl")"
 

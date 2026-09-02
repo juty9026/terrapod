@@ -98,8 +98,10 @@ assert_contains '| `enableAiCliTools` | `false` |' \
   "README documents enableAiCliTools default"
 assert_key_row_contains '`enableAiCliTools`' 'Antigravity CLI, Claude Code, and Codex' \
   "README documents the new Optional AI Tool Stack membership"
-assert_key_row_contains '`enableAiCliTools`' 'Homebrew casks `antigravity-cli`, `claude-code`, and `codex`' \
-  "README documents Homebrew-owned Optional AI Tool Stack"
+assert_key_row_contains '`enableAiCliTools`' 'Homebrew casks `antigravity-cli` and `codex`' \
+  "README documents Homebrew-owned Optional AI Tool Stack members"
+assert_key_row_contains '`enableAiCliTools`' 'Claude Code through its official installer' \
+  "README documents the vendor-installed Optional AI Tool Stack member"
 assert_contains '| `enableDevelopmentWorkspace` | `false` |' \
   "README documents enableDevelopmentWorkspace default"
 assert_contains '| `profile` |' \
@@ -247,6 +249,8 @@ assert_ubuntu_setup_not_contains 'Optional AI Tool Stack casks through Homebrew'
   "README does not promise Optional AI Tool Stack casks on Ubuntu"
 assert_ubuntu_setup_contains 'The Optional AI Tool Stack is also macOS-only' \
   "README explains the Optional AI Tool Stack is macOS-only"
+assert_ubuntu_setup_contains 'Claude Code stays macOS-only as a profile decision rather than a' \
+  "README attributes Claude Code's macOS scope to a profile decision, not its package source"
 assert_key_row_contains '`enableAiCliTools`' 'ignored on the VPS Shell Profile' \
   "README documents that enableAiCliTools is ignored on the VPS Shell Profile"
 assert_contains 'When `enableDevelopmentWorkspace` is `true`' \
@@ -289,8 +293,10 @@ assert_raycast_restore_contains '`enableMacosAppGroupLauncher`' \
   "README Raycast restore procedure mentions launcher App Group"
 assert_contains 'Opting out of an optional stack excludes its files from chezmoi management; it does not remove files already present on a machine.' \
   "README documents non-destructive optional stack opt-out"
-assert_contains 'brew upgrade --cask claude-code codex antigravity-cli' \
+assert_contains 'brew upgrade --cask codex antigravity-cli' \
   "README documents targeted AI CLI upgrades"
+assert_contains 'Claude Code updates itself and is not part of that command.' \
+  "README documents who owns Claude Code freshness"
 assert_contains '`enableMacosAppGroupAiApps` is deprecated and is not treated as an alias' \
   "README documents explicit development-apps key migration"
 assert_contains 'If another executable is selected first, Terrapod' \

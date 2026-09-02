@@ -159,6 +159,8 @@ assert_contains "$korean_readme" '선택된 executable의 installer provenance�
   "README.ko.md documents provenance-neutral executable guidance"
 assert_not_contains "$korean_readme" 'Proceed with removing these legacy package installations? [y/N]' \
   "README.ko.md removes the package migration confirmation"
+assert_contains "$korean_readme" 'Claude Code는 package source의 결과가 아니라 profile 결정으로 macOS 전용을 유지합니다.' \
+  "README.ko.md attributes Claude Code's macOS scope to a profile decision, not its package source"
 assert_contains "$korean_readme" '`development-apps`: Zed, Orca ADE(`stablyai/orca/orca`), OrbStack.' \
   "README.ko.md documents Zed, Orca ADE, and OrbStack in the development-apps inventory"
 assert_contains "$korean_readme" '| `enableMacosAppGroupDevelopmentApps` | `false` | development-apps macOS App Group인 Zed, Orca ADE(`stablyai/orca/orca`), OrbStack을 설치합니다. |' \
@@ -189,8 +191,10 @@ assert_contains "$korean_readme" 'Terrapod은 기존에 설치된 JetBrains Mono
   "README.ko.md documents non-destructive legacy font migration"
 assert_contains "$korean_readme" 'Jetendard 설정 적용이 보류되면 Orca를 종료한 뒤 `tpod apply`를 다시 실행합니다.' \
   "README.ko.md documents Orca font-setting recovery"
-assert_contains "$korean_readme" 'brew upgrade --cask claude-code codex antigravity-cli' \
+assert_contains "$korean_readme" 'brew upgrade --cask codex antigravity-cli' \
   "README.ko.md documents targeted AI CLI upgrades"
+assert_contains "$korean_readme" 'Claude Code는 자체적으로 업데이트하며 이 명령의 대상이 아닙니다.' \
+  "README.ko.md documents who owns Claude Code freshness"
 assert_contains "$korean_readme" '`enableMacosAppGroupAiApps`는 deprecated key이며 alias로 해석하지 않습니다.' \
   "README.ko.md documents explicit development-apps key migration"
 

@@ -225,6 +225,44 @@ set -e
 pass "enabled Optional AI Tool Stack participates in readiness"
 assert_contains "$ai_enabled_output" "failure - antigravity-cli is not installed through Homebrew Cask" \
   "enabled Optional AI Tool Stack checks its declared casks"
+assert_contains "$ai_enabled_output" "failure - claude-code is not installed through the Claude Code installer" \
+  "enabled Optional AI Tool Stack checks Claude Code against its vendor installer"
+
+claude_home="$tmp_dir/claude-home"
+claude_path_dir="$tmp_dir/claude-path"
+mkdir -p "$claude_path_dir"
+printf '%s\n' claude-code >"$inventory/claude-installer"
+write_executable "$claude_home/.local/bin/claude"
+ln -s "$claude_home/.local/bin/claude" "$claude_path_dir/claude"
+
+run_claude_selection() {
+  HOME="$claude_home" \
+    TERRAPOD_EXECUTABLE_SELECTION_INVENTORY_DIR="$inventory" \
+    TERRAPOD_STANDARD_HOMEBREW_PREFIX="$prefix" \
+    TERRAPOD_MISE_SHIMS_DIR="$mise_shims" \
+    PATH="$claude_path_dir:/usr/bin:/bin" \
+    "$selection" doctor macos-terminal true false 2>&1 || true
+}
+
+claude_canonical_output="$(run_claude_selection)"
+assert_not_contains "$claude_canonical_output" "claude-code" \
+  "a canonical Claude Code install raises no executable selection concern"
+
+claude_shadow_dir="$tmp_dir/claude-shadow"
+mkdir -p "$claude_shadow_dir"
+write_executable "$claude_shadow_dir/claude"
+rm -f "$claude_path_dir/claude"
+ln -s "$claude_shadow_dir/claude" "$claude_path_dir/claude"
+claude_shadow_output="$(run_claude_selection)"
+assert_contains "$claude_shadow_output" "advisory - claude-code resolves to $claude_path_dir/claude" \
+  "a shadowed Claude Code install is advisory"
+assert_contains "$claude_shadow_output" "canonical: $claude_home/.local/bin/claude" \
+  "the Claude Code advisory names the vendor installer path"
+
+rm -f "$inventory/claude-installer"
+claude_missing_output="$(run_claude_selection)"
+assert_contains "$claude_missing_output" "failure - claude-code is not installed through the Claude Code installer" \
+  "an absent Claude Code install names the vendor installer"
 
 status_output="$(run_selection status)"
 assert_contains "$status_output" "Executable selection:" \

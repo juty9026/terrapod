@@ -147,6 +147,8 @@ Apple Silicon에서는 Homebrew를 `/opt/homebrew`에 설치하고, Intel Mac에
 - mise를 통한 Bun, Node.js 24, Python 3.13, uv/uvx
 - Node.js Corepack을 통한 pnpm
 - 해당 stack이 활성화된 경우 Homebrew를 통한 Optional AI Tool Stack cask
+- 해당 stack이 활성화된 경우 vendor-published script `https://claude.ai/install.sh`인
+  Claude Code Installer를 통한 Claude Code
 
 Terrapod은 해당 Jetendard release의 모든 TTF를 설치하고 GitHub에서 제공하는 asset digest를 검증합니다. Terrapod은 managed font installer source가 변경되거나 실패한 설치를 재시도할 때만 최신 Jetendard release를 확인합니다. Ghostty, Zed buffer와 terminal, Orca terminal에서 사용하는 font-family key만 설정합니다. Jetendard 설정 적용이 보류되면 Orca를 종료한 뒤 `tpod apply`를 다시 실행합니다. Terrapod은 기존에 설치된 JetBrains Mono Nerd Font 또는 D2Coding을 제거하지 않습니다. 기존 window가 cached font를 계속 사용하면 Ghostty, Zed 또는 Orca를 다시 시작해야 할 수 있습니다.
 
@@ -202,8 +204,10 @@ Ubuntu에서는 initial apply가 VPS shell profile을 위한 setup script를 실
 
 VPS Shell Profile은 headless입니다. macOS App Group과 다른 GUI application은 optional
 macOS Desktop App Stack에만 속하며 Ubuntu에는 설치되지 않습니다. Optional AI Tool Stack도
-macOS 전용입니다. Homebrew가 Antigravity CLI, Claude Code, Codex를 cask로 배포하는데
-Linux Homebrew는 cask를 설치하지 않기 때문입니다. VPS에서는 setup이 이 stack을 묻지 않고,
+macOS 전용입니다. Homebrew가 Antigravity CLI와 Codex를 cask로 배포하고 Linux Homebrew는
+cask를 설치하지 않기 때문입니다.
+Claude Code는 package source의 결과가 아니라 profile 결정으로 macOS 전용을 유지합니다.
+VPS에서는 setup이 이 stack을 묻지 않고,
 `development` Preset도 비활성 상태로 기록하며, `tpod status`와 `tpod doctor`는 not
 applicable로 보고합니다. VPS에서 write access가 나중에 필요할 때만 GitHub
 authentication을 설정하세요.
@@ -242,10 +246,11 @@ sudo apt upgrade
 CLI upgrade는 명시적인 Homebrew operation으로만 수행합니다. 모든 Homebrew-managed
 CLI를 올리려면 `brew update`와 `brew upgrade`를 사용하고, AI CLI cask만 의도한 경우
 대상을 지정합니다.
+Claude Code는 자체적으로 업데이트하며 이 명령의 대상이 아닙니다.
 
 ```sh
 brew update
-brew upgrade --cask claude-code codex antigravity-cli
+brew upgrade --cask codex antigravity-cli
 ```
 
 development runtime을 의도적으로 업데이트할 때는 mise를 직접 사용합니다.
@@ -291,7 +296,7 @@ Optional stack profile과 macOS App Group setting은 기본적으로 disabled입
 | --- | --- | --- |
 | `profile` | setup/configure가 감지 | 활성 Terrapod machine profile을 기록합니다. |
 | `enableEditorStack` | `false` | rich Neovim configuration을 관리하는 Optional Editor Stack을 활성화합니다. Plain Neovim은 어느 쪽이든 Core Shell Stack에 남아 있습니다. |
-| `enableAiCliTools` | `false` | Homebrew cask `antigravity-cli`, `claude-code`, `codex`를 통해 Antigravity CLI, Claude Code, Codex를 설치합니다. macOS Terminal Profile 전용이며 VPS Shell Profile에서는 무시됩니다. |
+| `enableAiCliTools` | `false` | Antigravity CLI, Claude Code, Codex를 설치합니다. Antigravity CLI와 Codex는 Homebrew cask `antigravity-cli`, `codex`로, Claude Code는 공식 installer로 설치합니다. macOS Terminal Profile 전용이며 VPS Shell Profile에서는 무시됩니다. |
 | `enableDevelopmentWorkspace` | `false` | Optional Editor Stack, 적용 가능한 경우의 Optional AI Tool Stack, development-specific Zellij workspace surface를 포함하는 Optional Development Workspace preset을 활성화합니다. |
 | `enableMacosAppGroupTerminalApps` | `false` | terminal-apps macOS App Group에 포함된 Ghostty를 설치합니다. |
 | `enableMacosAppGroupAutomation` | `false` | automation macOS App Group인 Hammerspoon, Karabiner-Elements, Scroll Reverser를 설치합니다. |
