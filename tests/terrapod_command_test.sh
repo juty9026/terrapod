@@ -862,6 +862,19 @@ if [ -n "$unsupported_override_output" ]; then
 fi
 pass "unsupported architecture does not print an overridden Homebrew prefix"
 
+test_hook_records_output="$(
+  TERRAPOD_PRINT_HOMEBREW_CLI_RECORDS=1 TERRAPOD_PROFILE=macos-terminal /bin/sh "$terrapod" status
+)"
+assert_line "$test_hook_records_output" "$(printf 'chezmoi\tchezmoi')" "the Homebrew CLI record hook answers ahead of any command"
+assert_not_contains "$test_hook_records_output" "Terrapod status" "the Homebrew CLI record hook does not also run the requested command"
+
+unset_hook_help_output="$(
+  TERRAPOD_PRINT_HOMEBREW_CLI_RECORDS=0 TERRAPOD_PRINT_STANDARD_HOMEBREW_PREFIX=0 \
+    TERRAPOD_PROFILE=macos-terminal /bin/sh "$terrapod" help
+)"
+assert_contains "$unset_hook_help_output" "Terrapod - a small landing pod for your dotfiles" "an unset test hook leaves normal command dispatch alone"
+assert_not_contains "$unset_hook_help_output" "$(printf 'chezmoi\tchezmoi')" "an unset test hook prints no Homebrew CLI records"
+
 managed_targets="$(
   chezmoi \
     --source "$repo_root" \
