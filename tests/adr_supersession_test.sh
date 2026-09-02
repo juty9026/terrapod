@@ -31,3 +31,14 @@ pass "ADR 0006 records the Claude Code vendor installer ADR 0017 restored"
 grep -F "ADR 0006's vendor-installer choice" "$adr_dir/0008-use-homebrew-for-optional-ai-cli-tools.md" >/dev/null ||
   fail "ADR 0008 still records the supersession ADR 0006 points back to"
 pass "ADR 0008 still records the supersession ADR 0006 points back to"
+
+# ADR 0017 moved Claude Code off the cask, so ADR 0008's upgrade guidance must
+# not name `claude-code` while still covering the two casks that remain.
+adr_0008="$adr_dir/0008-use-homebrew-for-optional-ai-cli-tools.md"
+adr_0008_upgrade="$(grep -F 'brew upgrade --cask' "$adr_0008")"
+assert_not_contains "$adr_0008_upgrade" 'claude-code' \
+  "ADR 0008's upgrade command does not name the claude-code cask"
+assert_contains "$adr_0008_upgrade" 'brew upgrade --cask codex antigravity-cli' \
+  "ADR 0008's upgrade command still covers the codex and antigravity-cli casks"
+assert_file_contains "$adr_0008" 'ADR 0017' \
+  "ADR 0008 points Claude Code upgrades at the vendor installer ADR 0017 records"
