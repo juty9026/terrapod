@@ -166,12 +166,31 @@ function wcd() {
     return 1
   fi
 
+  # One porcelain record per worktree, blank-line separated. Bare records have
+  # no checkout and prunable records point at a directory that is already
+  # gone, so neither is offered: cd would fail on both. The display column is
+  # built here rather than pasted from `git worktree list` so the two never
+  # drift out of step when records are dropped.
   local selected
   selected="$(
-    paste \
-      <(git worktree list --porcelain | awk '/^worktree / { print substr($0, 10) }') \
-      <(git worktree list) |
-      fzf --delimiter=$'\t' --with-nth=2.. --height=40% --reverse --ansi
+    git worktree list --porcelain | awk '
+      /^worktree / { path = substr($0, 10); head = ""; ref = ""; locked = ""; skip = 0; next }
+      /^HEAD /     { head = substr($0, 6, 7); next }
+      /^branch /   { ref = substr($0, 8); sub(/^refs\/heads\//, "", ref); ref = "[" ref "]"; next }
+      /^detached$/ { ref = "(detached HEAD)"; next }
+      /^locked/    { locked = " locked"; next }
+      /^bare$/ || /^prunable/ { skip = 1; next }
+      /^$/ {
+        if (path != "" && !skip) {
+          n++; paths[n] = path; rows[n] = head " " ref locked
+          if (length(path) > width) width = length(path)
+        }
+        path = ""
+      }
+      END {
+        for (i = 1; i <= n; i++) printf "%s\t%-" width "s  %s\n", paths[i], paths[i], rows[i]
+      }
+    ' | fzf --delimiter=$'\t' --with-nth=2.. --height=40% --reverse --ansi
   )"
 
   [ -n "$selected" ] || return 0
