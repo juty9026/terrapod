@@ -16,7 +16,10 @@ This repo uses a single-context domain docs layout. See `docs/agents/domain.md`.
 
 Run the whole suite from the repo root with `tests/run`. It executes every
 `tests/*_test.sh` and `tests/*_test.zsh` file, prints each file's assertions,
-and exits non-zero when any file fails.
+and exits non-zero when any file fails. Test files carry a shebang and the
+executable bit (mode 755) so each one also runs directly as
+`./tests/<name>_test.sh`; `tests/lib/harness.sh` is sourced, not executed,
+and stays 644.
 
 The suite needs `chezmoi`, `zsh`, `python3`, and `jq` on `PATH`.
 
