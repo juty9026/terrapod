@@ -38,6 +38,13 @@ if [[ -r "$zinit_script" ]]; then
   zinit light zdharma-continuum/fast-syntax-highlighting
   zinit light zsh-users/zsh-autosuggestions
   zinit light zsh-users/zsh-completions
+
+  # zsh-completions only extends fpath, and oh-my-zsh.sh already ran compinit
+  # against the shorter fpath above. Rebuild the table so the new completion
+  # directories actually register; sharing Oh My Zsh's dump keeps it to one
+  # cache file.
+  autoload -Uz compinit
+  compinit -d "${ZSH_COMPDUMP:-${ZDOTDIR:-$HOME}/.zcompdump}"
 fi
 unset zinit_script
 
