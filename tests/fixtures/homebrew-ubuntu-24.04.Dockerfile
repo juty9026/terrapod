@@ -31,11 +31,6 @@ RUN eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" \
        esac; \
      done <"$records"
 
-RUN eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" \
-  && chezmoi execute-template \
-       --source /workspace \
-       --override-data '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}}}' \
-       --file /workspace/dot_config/mise/config.toml.tmpl > /tmp/mise.toml \
-  && cat /tmp/mise.toml \
-  && ! grep -F 'aqua:' /tmp/mise.toml \
-  && grep -Fx 'node = "24"' /tmp/mise.toml
+RUN cat /workspace/dot_config/mise/config.toml \
+  && ! grep -F 'aqua:' /workspace/dot_config/mise/config.toml \
+  && grep -Fx 'node = "24"' /workspace/dot_config/mise/config.toml

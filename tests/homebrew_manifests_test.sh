@@ -108,18 +108,31 @@ if [ "$(wc -l <"$actual_bottle_brewfile")" -ne 20 ] ||
 fi
 pass "Ubuntu smoke bottle Brewfile preserves all formula names and closing quotes"
 
-if grep -F '| tee /tmp/mise.toml' "$ubuntu_smoke_fixture" >/dev/null ||
-   ! grep -F -- '--file /workspace/dot_config/mise/config.toml.tmpl > /tmp/mise.toml' "$ubuntu_smoke_fixture" >/dev/null ||
-   ! grep -F '&& cat /tmp/mise.toml' "$ubuntu_smoke_fixture" >/dev/null; then
-  fail "Ubuntu smoke template render fails before output and assertions"
+if grep -F 'execute-template' "$ubuntu_smoke_fixture" >/dev/null ||
+   ! grep -F '/workspace/dot_config/mise/config.toml' "$ubuntu_smoke_fixture" >/dev/null; then
+  fail "Ubuntu smoke reads the runtime config as a plain file"
 fi
-pass "Ubuntu smoke template render fails before output and assertions"
+pass "Ubuntu smoke reads the runtime config as a plain file"
 
-runtime_config="$tmp_dir/mise.toml"
-chezmoi execute-template \
-  --source "$repo_root" \
-  --override-data '{"chezmoi":{"os":"linux"}}' \
-  --file "$repo_root/dot_config/mise/config.toml.tmpl" >"$runtime_config"
+if ! grep -F "! grep -F 'aqua:'" "$ubuntu_smoke_fixture" >/dev/null ||
+   ! grep -F 'node = "24"' "$ubuntu_smoke_fixture" >/dev/null; then
+  fail "Ubuntu smoke still asserts the runtime declarations it read"
+fi
+pass "Ubuntu smoke still asserts the runtime declarations it read"
+
+# Read, not rendered: the runtime declarations are the same on every machine,
+# and the repository conventions reserve templates for machine-varying content.
+runtime_config="$repo_root/dot_config/mise/config.toml"
+
+if grep -F '{{' "$runtime_config" >/dev/null; then
+  fail "mise runtime config stays free of template actions"
+fi
+pass "mise runtime config stays free of template actions"
+
+if [ -e "$runtime_config.tmpl" ]; then
+  fail "mise runtime config is managed under one name"
+fi
+pass "mise runtime config is managed under one name"
 
 expected_runtimes="$tmp_dir/expected-runtimes"
 actual_runtimes="$tmp_dir/actual-runtimes"
