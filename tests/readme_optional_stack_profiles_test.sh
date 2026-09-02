@@ -97,12 +97,11 @@ assert_raycast_restore_contains() {
 # Derived from the command rather than restated here: a new managed key must
 # reach the Minimal VPS example, because routine commands call a config
 # complete only when every managed key is present, including disabled ones.
-managed_setup_keys="$(awk '
-  /^managed_setup_keys\(\) \{$/ { in_function = 1; next }
-  in_function && /^\}$/ { exit }
-  in_function && $1 == "printf" { next }
-  in_function { gsub(/\\/, ""); print $1 }
-' "$terrapod_command")"
+# The command answers through its own test hook, so the list stays correct
+# wherever managed_setup_keys() happens to live.
+managed_setup_keys="$(
+  TERRAPOD_PRINT_MANAGED_SETUP_KEYS=1 /bin/sh "$terrapod_command"
+)"
 
 printf '%s\n' "$managed_setup_keys" | grep -Fx profile >/dev/null ||
   fail "managed setup key list is readable from the Terrapod command"

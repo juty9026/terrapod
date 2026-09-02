@@ -2170,6 +2170,11 @@ run_configure() {
 # Test-only entry points, kept beside the command dispatch so no production
 # invocation walks past a mid-file exit on the way to its command.
 dispatch_test_hooks() {
+  if [ "${TERRAPOD_PRINT_MANAGED_SETUP_KEYS:-}" = "1" ]; then
+    managed_setup_keys
+    exit 0
+  fi
+
   if [ "${TERRAPOD_PRINT_HOMEBREW_CLI_RECORDS:-}" = "1" ]; then
     managed_homebrew_cli_records
     exit 0

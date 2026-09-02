@@ -880,12 +880,20 @@ test_hook_records_output="$(
 assert_line "$test_hook_records_output" "$(printf 'chezmoi\tchezmoi')" "the Homebrew CLI record hook answers ahead of any command"
 assert_not_contains "$test_hook_records_output" "Terrapod status" "the Homebrew CLI record hook does not also run the requested command"
 
+managed_keys_hook_output="$(
+  TERRAPOD_PRINT_MANAGED_SETUP_KEYS=1 TERRAPOD_PROFILE=macos-terminal /bin/sh "$terrapod" status
+)"
+assert_line "$managed_keys_hook_output" "profile" "the managed setup key hook answers ahead of any command"
+assert_not_contains "$managed_keys_hook_output" "Terrapod status" "the managed setup key hook does not also run the requested command"
+
 unset_hook_help_output="$(
-  TERRAPOD_PRINT_HOMEBREW_CLI_RECORDS=0 TERRAPOD_PRINT_STANDARD_HOMEBREW_PREFIX=0 \
+  TERRAPOD_PRINT_MANAGED_SETUP_KEYS=0 TERRAPOD_PRINT_HOMEBREW_CLI_RECORDS=0 \
+    TERRAPOD_PRINT_STANDARD_HOMEBREW_PREFIX=0 \
     TERRAPOD_PROFILE=macos-terminal /bin/sh "$terrapod" help
 )"
 assert_contains "$unset_hook_help_output" "Terrapod - a small landing pod for your dotfiles" "an unset test hook leaves normal command dispatch alone"
 assert_not_contains "$unset_hook_help_output" "$(printf 'chezmoi\tchezmoi')" "an unset test hook prints no Homebrew CLI records"
+assert_not_contains "$unset_hook_help_output" "enableMacosAppGroupMobileDev" "an unset test hook prints no managed setup keys"
 
 managed_targets="$(
   chezmoi \
