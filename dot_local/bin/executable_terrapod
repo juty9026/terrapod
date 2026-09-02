@@ -941,31 +941,22 @@ config_bool_state_label() {
   bool_state_label "$(config_data_bool "$1" "$2")"
 }
 
-effective_optional_stack_state_label() {
+# The Optional Development Workspace turns on the optional stacks it bundles,
+# so every optional stack answers the same "own key or the workspace key" rule.
+effective_optional_stack_enabled() {
   config_file="$1"
   key="$2"
 
   if [ "$(config_data_bool "$config_file" "$key")" = "true" ] ||
     [ "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" = "true" ]; then
-    bool_state_label true
+    printf '%s\n' "true"
   else
-    bool_state_label false
+    printf '%s\n' "false"
   fi
 }
 
 is_enabled() {
   [ "$1" = "true" ]
-}
-
-effective_editor_stack_enabled() {
-  config_file="$1"
-
-  if [ "$(config_data_bool "$config_file" enableEditorStack)" = "true" ] ||
-    [ "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" = "true" ]; then
-    printf '%s\n' "true"
-  else
-    printf '%s\n' "false"
-  fi
 }
 
 ai_cli_tools_supported_profile() {
@@ -981,12 +972,7 @@ effective_ai_cli_tools_enabled() {
     return
   fi
 
-  if [ "$(config_data_bool "$config_file" enableAiCliTools)" = "true" ] ||
-    [ "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" = "true" ]; then
-    printf '%s\n' "true"
-  else
-    printf '%s\n' "false"
-  fi
+  effective_optional_stack_enabled "$config_file" enableAiCliTools
 }
 
 executable_selection_helper_available() {
@@ -1118,6 +1104,18 @@ print_optional_setting_status() {
   fi
 }
 
+# One row per macOS App Group as 'key|label|apps', read by every command that
+# reports App Group state so the list is edited in one place.
+macos_app_group_table() {
+  printf '%s\n' \
+    'enableMacosAppGroupTerminalApps|terminal-apps|Ghostty' \
+    'enableMacosAppGroupAutomation|automation|Hammerspoon, Karabiner-Elements, and Scroll Reverser' \
+    'enableMacosAppGroupLauncher|launcher|Raycast and 1Password CLI' \
+    'enableMacosAppGroupMonitoring|monitoring|iStat Menus' \
+    'enableMacosAppGroupDevelopmentApps|development-apps|Zed, Orca ADE, and OrbStack' \
+    'enableMacosAppGroupMobileDev|mobile-dev|Android Studio and Maestro'
+}
+
 print_macos_app_group_status() {
   config_file="$1"
   profile="$2"
@@ -1128,36 +1126,12 @@ print_macos_app_group_status() {
   fi
 
   print_section "macOS App Groups:"
-  if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupTerminalApps)"; then
-    print_indented_colon_state_line "terminal-apps" "enabled" "(Ghostty)"
-  else
-    print_indented_colon_state_line "terminal-apps" "disabled"
-  fi
-  if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupAutomation)"; then
-    print_indented_colon_state_line "automation" "enabled" "(Hammerspoon, Karabiner-Elements, and Scroll Reverser)"
-  else
-    print_indented_colon_state_line "automation" "disabled"
-  fi
-  if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupLauncher)"; then
-    print_indented_colon_state_line "launcher" "enabled" "(Raycast and 1Password CLI)"
-  else
-    print_indented_colon_state_line "launcher" "disabled"
-  fi
-  if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupMonitoring)"; then
-    print_indented_colon_state_line "monitoring" "enabled" "(iStat Menus)"
-  else
-    print_indented_colon_state_line "monitoring" "disabled"
-  fi
-  if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupDevelopmentApps)"; then
-    print_indented_colon_state_line "development-apps" "enabled" "(Zed, Orca ADE, and OrbStack)"
-  else
-    print_indented_colon_state_line "development-apps" "disabled"
-  fi
-  if is_enabled "$(config_data_bool "$config_file" enableMacosAppGroupMobileDev)"; then
-    print_indented_colon_state_line "mobile-dev" "enabled" "(Android Studio and Maestro)"
-  else
-    print_indented_colon_state_line "mobile-dev" "disabled"
-  fi
+  macos_app_group_table | while IFS='|' read -r group_key group_label group_apps; do
+    print_optional_setting_status \
+      "$group_label" \
+      "$(config_data_bool "$config_file" "$group_key")" \
+      "$group_apps"
+  done
 }
 
 print_key_tool_status() {
@@ -1316,7 +1290,7 @@ run_status() {
     print_warning_line "executable selection helper failed"
   fi
   print_section "Optional stacks:"
-  print_optional_setting_status "Optional Editor Stack" "$(effective_editor_stack_enabled "$config_file")" "rich Neovim configuration"
+  print_optional_setting_status "Optional Editor Stack" "$(effective_optional_stack_enabled "$config_file" enableEditorStack)" "rich Neovim configuration"
   if ai_cli_tools_supported_profile "$profile"; then
     print_stack_status "Optional AI Tool Stack" "$(effective_ai_cli_tools_enabled "$config_file" "$profile")" agy claude codex
   else
@@ -1379,11 +1353,11 @@ show_stack_context() {
   profile="$2"
 
   print_section "Optional stacks:"
-  editor_state="$(effective_optional_stack_state_label "$config_file" enableEditorStack)"
+  editor_state="$(bool_state_label "$(effective_optional_stack_enabled "$config_file" enableEditorStack)")"
   workspace_state="$(config_bool_state_label "$config_file" enableDevelopmentWorkspace)"
   print_named_state_line "Optional Editor Stack" "$editor_state"
   if ai_cli_tools_supported_profile "$profile"; then
-    ai_state="$(effective_optional_stack_state_label "$config_file" enableAiCliTools)"
+    ai_state="$(bool_state_label "$(effective_ai_cli_tools_enabled "$config_file" "$profile")")"
     print_named_state_line "Optional AI Tool Stack" "$ai_state"
   else
     print_colon_state_line "Optional AI Tool Stack" "not applicable" "($(profile_context_label))"
@@ -1396,18 +1370,9 @@ show_stack_context() {
   fi
 
   print_section "macOS App Groups:"
-  terminal_apps_state="$(config_bool_state_label "$config_file" enableMacosAppGroupTerminalApps)"
-  automation_state="$(config_bool_state_label "$config_file" enableMacosAppGroupAutomation)"
-  launcher_state="$(config_bool_state_label "$config_file" enableMacosAppGroupLauncher)"
-  monitoring_state="$(config_bool_state_label "$config_file" enableMacosAppGroupMonitoring)"
-  development_apps_state="$(config_bool_state_label "$config_file" enableMacosAppGroupDevelopmentApps)"
-  mobile_dev_state="$(config_bool_state_label "$config_file" enableMacosAppGroupMobileDev)"
-  print_named_state_line "terminal-apps" "$terminal_apps_state"
-  print_named_state_line "automation" "$automation_state"
-  print_named_state_line "launcher" "$launcher_state"
-  print_named_state_line "monitoring" "$monitoring_state"
-  print_named_state_line "development-apps" "$development_apps_state"
-  print_named_state_line "mobile-dev" "$mobile_dev_state"
+  macos_app_group_table | while IFS='|' read -r group_key group_label group_apps; do
+    print_named_state_line "$group_label" "$(config_bool_state_label "$config_file" "$group_key")"
+  done
 }
 
 render_chezmoi_command() {
@@ -1800,7 +1765,7 @@ run_doctor() {
 
   doctor_check_optional_setting \
     "Optional Editor Stack" \
-    "$(effective_editor_stack_enabled "$config_file")" \
+    "$(effective_optional_stack_enabled "$config_file" enableEditorStack)" \
     "rich Neovim configuration"
 
   if ai_cli_tools_supported_profile "$profile"; then

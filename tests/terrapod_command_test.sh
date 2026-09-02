@@ -424,6 +424,26 @@ assert_line() {
   pass "$message"
 }
 
+macos_app_group_labels() {
+  printf '%s\n' "$1" |
+    awk '
+      /^ *macOS App Groups:/ {
+        in_group = 1
+        next
+      }
+
+      in_group {
+        line = $0
+        sub(/^ +/, "", line)
+        if (line !~ /^[A-Za-z][A-Za-z0-9-]* +: /) {
+          exit
+        }
+        sub(/ +:.*$/, "", line)
+        print line
+      }
+    '
+}
+
 assert_first_occurrence_before() {
   haystack="$1"
   earlier="$2"
@@ -3225,6 +3245,32 @@ assert_contains \
   "$diff_output" \
   "development-apps              : enabled" \
   "Terrapod diff prints enabled development-apps macOS App Group state"
+
+expected_macos_app_group_labels="terminal-apps
+automation
+launcher
+monitoring
+development-apps
+mobile-dev"
+
+status_macos_app_group_labels="$(macos_app_group_labels "$macos_status_output")"
+diff_macos_app_group_labels="$(macos_app_group_labels "$diff_output")"
+
+if [ "$status_macos_app_group_labels" != "$expected_macos_app_group_labels" ]; then
+  printf '%s\n' "Terrapod status macOS App Group labels:" >&2
+  printf '%s\n' "$status_macos_app_group_labels" | sed 's/^/  /' >&2
+  fail "Terrapod status reports every macOS App Group in table order"
+fi
+pass "Terrapod status reports every macOS App Group in table order"
+
+if [ "$diff_macos_app_group_labels" != "$status_macos_app_group_labels" ]; then
+  printf '%s\n' "Terrapod diff macOS App Group labels:" >&2
+  printf '%s\n' "$diff_macos_app_group_labels" | sed 's/^/  /' >&2
+  printf '%s\n' "Terrapod status macOS App Group labels:" >&2
+  printf '%s\n' "$status_macos_app_group_labels" | sed 's/^/  /' >&2
+  fail "Terrapod diff reports the same macOS App Groups as status"
+fi
+pass "Terrapod diff reports the same macOS App Groups as status"
 
 assert_contains \
   "$diff_output" \
