@@ -8,7 +8,10 @@ if command -v mise &>/dev/null; then
 fi
 
 # Fastfetch
-if command -v fastfetch &>/dev/null; then
+# The greeting belongs to the first shell of a session. Zellij panes and nested
+# shells run this file too, and the dev layout opens five panes at once; `c`
+# reprints it on demand.
+if [[ -z "${ZELLIJ:-}" && "${SHLVL:-1}" -le 1 ]] && command -v fastfetch &>/dev/null; then
   fastfetch
 fi
 
