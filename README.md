@@ -255,10 +255,11 @@ sudo apt upgrade
 Intentional CLI upgrades are explicit Homebrew operations. Upgrade all
 Homebrew-managed CLIs with `brew update` and `brew upgrade`, or target only the
 AI CLI casks when that is the intended scope.
+Claude Code updates itself and is not part of that command.
 
 ```sh
 brew update
-brew upgrade --cask claude-code codex antigravity-cli
+brew upgrade --cask codex antigravity-cli
 ```
 
 Use mise directly when intentionally updating development runtimes.
@@ -313,7 +314,7 @@ Optional stack profiles and macOS App Group settings are disabled by default.
 | --- | --- | --- |
 | `profile` | Detected by setup/configure | Records the active Terrapod machine profile. |
 | `enableEditorStack` | `false` | Enables the Optional Editor Stack, which manages the rich Neovim configuration. Plain Neovim remains in the Core Shell Stack either way. |
-| `enableAiCliTools` | `false` | Installs Antigravity CLI, Claude Code, and Codex through Homebrew casks `antigravity-cli`, `claude-code`, and `codex`. macOS Terminal Profile only; ignored on the VPS Shell Profile. |
+| `enableAiCliTools` | `false` | Installs Antigravity CLI, Claude Code, and Codex: Antigravity CLI and Codex through Homebrew casks `antigravity-cli` and `codex`, and Claude Code through its official installer. macOS Terminal Profile only; ignored on the VPS Shell Profile. |
 | `enableDevelopmentWorkspace` | `false` | Enables the Optional Development Workspace preset, including the Optional Editor Stack, the Optional AI Tool Stack where it applies, and development-specific Zellij workspace surfaces. |
 | `enableMacosAppGroupTerminalApps` | `false` | Installs the terminal-apps macOS App Group: Ghostty. |
 | `enableMacosAppGroupAutomation` | `false` | Installs the automation macOS App Group: Hammerspoon, Karabiner-Elements, and Scroll Reverser. |
