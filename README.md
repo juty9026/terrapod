@@ -384,6 +384,7 @@ enableMacosAppGroupAutomation = false
 enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
+enableMacosAppGroupMobileDev = false
 ```
 
 Editor-only machine:

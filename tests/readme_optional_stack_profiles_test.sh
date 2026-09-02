@@ -3,6 +3,8 @@ set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 readme="$repo_root/README.md"
+korean_readme="$repo_root/README.ko.md"
+terrapod_command="$repo_root/dot_local/bin/executable_terrapod"
 
 fail() {
   printf '%s\n' "not ok - $1" >&2
@@ -91,6 +93,54 @@ assert_raycast_restore_contains() {
 
   pass "$message"
 }
+
+# Derived from the command rather than restated here: a new managed key must
+# reach the Minimal VPS example, because routine commands call a config
+# complete only when every managed key is present, including disabled ones.
+managed_setup_keys="$(awk '
+  /^managed_setup_keys\(\) \{$/ { in_function = 1; next }
+  in_function && /^\}$/ { exit }
+  in_function && $1 == "printf" { next }
+  in_function { gsub(/\\/, ""); print $1 }
+' "$terrapod_command")"
+
+printf '%s\n' "$managed_setup_keys" | grep -Fx profile >/dev/null ||
+  fail "managed setup key list is readable from the Terrapod command"
+pass "managed setup key list is readable from the Terrapod command"
+
+minimal_vps_example() {
+  awk '
+    /^Minimal VPS:$/ { pending = 1; next }
+    pending && /^```toml$/ { in_fence = 1; pending = 0; next }
+    in_fence && /^```$/ { exit }
+    in_fence { print }
+  ' "$1"
+}
+
+assert_minimal_vps_is_complete() {
+  file="$1"
+  label="$2"
+
+  example="$(minimal_vps_example "$file")"
+  [ -n "$example" ] || fail "$label has a Minimal VPS toml example"
+
+  for managed_key in $managed_setup_keys; do
+    printf '%s\n' "$example" | grep -E "^$managed_key = " >/dev/null ||
+      fail "$label Minimal VPS example sets every managed setup key (missing: $managed_key)"
+  done
+  pass "$label Minimal VPS example sets every managed setup key"
+
+  # A for loop, not a "| while read" pipeline: fail exits, and in a pipeline
+  # subshell that exit would not stop the suite.
+  for example_key in $(printf '%s\n' "$example" | sed -n 's/^\([A-Za-z0-9_]*\) = .*/\1/p'); do
+    printf '%s\n' "$managed_setup_keys" | grep -Fx "$example_key" >/dev/null ||
+      fail "$label Minimal VPS example sets only managed setup keys (unexpected: $example_key)"
+  done
+  pass "$label Minimal VPS example sets only managed setup keys"
+}
+
+assert_minimal_vps_is_complete "$readme" "README.md"
+assert_minimal_vps_is_complete "$korean_readme" "README.ko.md"
 
 assert_contains '| `enableEditorStack` | `false` |' \
   "README documents enableEditorStack default"
