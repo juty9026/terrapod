@@ -558,5 +558,47 @@ metadata = json.loads((recovery / "transaction.json").read_text())
 assert metadata["status"] == "rollback_failed"
 assert "manifest.json" in metadata["rollback_errors"][0]
 assert (fonts / "Jetendard-Manual.ttf").read_text() == "manual\n"
+
+home, state = scenario("cleanup-success")
+real_rmtree = module.shutil.rmtree
+cleanup_targets = []
+def fail_transaction_cleanup(path, *args, **kwargs):
+    target = Path(path)
+    if target.name.startswith("rollback-"):
+        cleanup_targets.append(target)
+        raise OSError("injected transaction cleanup failure")
+    return real_rmtree(path, *args, **kwargs)
+module.shutil.rmtree = fail_transaction_cleanup
+try:
+    result, stdout, stderr = cli_install(home)
+finally:
+    module.shutil.rmtree = real_rmtree
+assert cleanup_targets, "transaction cleanup failure was not injected"
+assert result == 0, stderr
+assert not stderr
+assert "Installed Jetendard" in stdout
+assert (home / "Library" / "Fonts" / "Jetendard-Regular.ttf").read_text() == "replacement:Regular\n"
+module.check(home, str(state))
+assert cleanup_targets[0].exists()
+
+home, state = scenario("cleanup-after-rollback")
+before = snapshot(home, state)
+replacement_count = 0
+failed = False
+cleanup_targets = []
+module.os.replace = fail_late_replace
+module.shutil.rmtree = fail_transaction_cleanup
+try:
+    result, stdout, stderr = cli_install(home)
+finally:
+    module.os.replace = real_replace
+    module.shutil.rmtree = real_rmtree
+assert cleanup_targets, "transaction cleanup failure was not injected"
+assert result == 1 and not stdout
+assert stderr.count("\n") == 1
+assert "injected late font replacement failure" in stderr, stderr
+assert "injected transaction cleanup failure" not in stderr, stderr
+assert_snapshot(home, state, before)
 PY
 pass "installer rolls back failures and preserves backups when restore fails"
+pass "recovery cleanup failures never change the reported install outcome"

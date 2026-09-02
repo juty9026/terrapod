@@ -106,7 +106,9 @@ run_desktop_app_bundle() {
   fi
 
   tab="$(printf '\t')"
-  while IFS="$tab" read -r app_group token declaration; do
+  # Keep the record list on fd 3 so a cask post-install step that reads stdin
+  # cannot consume the remaining packages and silently skip them.
+  while IFS="$tab" read -r app_group token declaration <&3; do
     single_package_brewfile="$(mktemp "${TMPDIR:-/tmp}/terrapod-macos-desktop-package.XXXXXX")" || {
       cleanup_desktop_app_bundle_temps
       return 1
@@ -131,7 +133,7 @@ run_desktop_app_bundle() {
 
     rm -f "$single_package_brewfile"
     single_package_brewfile=
-  done <"$records_file"
+  done 3<"$records_file"
 
   if [ -s "$failed_casks_file" ]; then
     if ! failed_casks="$(join_lines_with_commas "$failed_casks_file")"; then

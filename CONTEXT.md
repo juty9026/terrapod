@@ -248,12 +248,14 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - `tpod status` summarizes whether Terrapod install warnings are present and points to `tpod doctor`; `tpod doctor` prints category-level warning summary and guidance.
 - `tpod apply` should surface remaining Terrapod install warnings after apply, while `tpod help` stays free of install warning state.
 - `tpod apply` exit status reflects whether the declared-state apply command itself succeeded; unresolved install warning markers after apply are surfaced in output but do not make apply fail.
+- `tpod apply` treats a missing or failing executable selection helper as a broken Terrapod command surface and exits non-zero, while executable selection advisories from a successful helper run do not change exit status.
 - `tpod doctor` recovery guidance points to `tpod apply` as the general retry path; category-specific retry commands are outside the current command surface.
 - `mise-tools` install warning guidance covers failures while the **Development Runtime Manager** installs the declared runtime versions.
 - First-run initial apply runs a forced recovery-core apply for managed shell startup files and the **Terrapod** command surface before the full declared-state apply.
 - First-run recovery-core apply failure is a hard installer failure because users do not yet have a reliable `tpod` command surface for recovery.
 - First-run recovery-core validation requires the installed `terrapod` executable, the installed `tpod` alias, and a successful `~/.local/bin/tpod help` invocation; file presence alone is not enough to mark the installer recoverable.
 - First-run recovery-core command surface overwrite is allowed for existing Terrapod-managed or broken Terrapod command files, but non-Terrapod executables at `~/.local/bin/terrapod` or `~/.local/bin/tpod` stop installation with guidance instead of being backed up and overwritten.
+- First-run recovery-core command surface replacement is staged next to each target and moved into place, so a failed or interrupted repair leaves the previous `terrapod` command and `tpod` alias reachable instead of removing them first.
 - Terrapod command surface ownership detection is conservative: command files are Terrapod-owned only when they validate as Terrapod help output or clearly point to the **Terrapod Source Repository** command; ambiguous existing command files are treated as non-Terrapod conflicts.
 - Terrapod command surface conflict guidance identifies the conflicting path and asks the user to move or remove it before rerunning the installer; Terrapod does not automatically rename non-Terrapod executables.
 - Shell integration installation is outside the recovery core; shell integration failures may degrade prompt or plugin readiness but must not prevent the installed `tpod` command surface from working.

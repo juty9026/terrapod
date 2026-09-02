@@ -316,9 +316,16 @@ cat >"$integration_bin/executable-selection" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >>"$TERRAPOD_EXECUTABLE_SELECTION_LOG"
 printf '%s\n' "  advisory - bat resolves to /legacy/bin/bat"
-exit 1
+exit 0
 EOF
 chmod +x "$integration_bin/executable-selection"
+
+cat >"$integration_bin/executable-selection-failing" <<'EOF'
+#!/bin/sh
+printf '%s\n' "  failure - Homebrew prefix library is unavailable" >&2
+exit 1
+EOF
+chmod +x "$integration_bin/executable-selection-failing"
 
 integration_output="$(
   HOME="$tmp_dir/integration-home" \
@@ -333,3 +340,81 @@ assert_contains "$integration_output" "advisory - bat resolves to /legacy/bin/ba
   "tpod apply prints executable selection advisories after installation"
 assert_contains "$(cat "$selection_log")" "apply macos-terminal false false" \
   "tpod apply invokes executable selection with effective stack state"
+
+run_integration_terrapod() {
+  helper="$1"
+  command_path="$2"
+  shift 2
+  HOME="$tmp_dir/integration-home" \
+    TERRAPOD_PROFILE=macos-terminal \
+    TERRAPOD_CHEZMOI_CONFIG="$integration_config" \
+    TERRAPOD_EXECUTABLE_SELECTION_HELPER="$helper" \
+    TERRAPOD_EXECUTABLE_SELECTION_LOG="$selection_log" \
+    PATH="$integration_bin:/usr/bin:/bin" \
+    "$command_path" "$@" 2>&1
+}
+
+run_integration_command() {
+  helper="$1"
+  shift
+  run_integration_terrapod "$helper" "$repo_root/dot_local/bin/executable_terrapod" "$@"
+}
+
+run_absent_helper_command() {
+  run_integration_command "$absent_helper" "$@"
+}
+
+failing_helper="$integration_bin/executable-selection-failing"
+absent_helper="$integration_bin/executable-selection-absent"
+
+set +e
+failing_apply_output="$(run_integration_command "$failing_helper" apply)"
+failing_apply_status="$?"
+set -e
+assert_contains "$failing_apply_output" "Warning: executable selection helper failed" \
+  "tpod apply distinguishes a helper that ran and failed"
+assert_not_contains "$failing_apply_output" "executable selection helper is missing" \
+  "tpod apply does not report a failing helper as missing"
+[ "$failing_apply_status" -ne 0 ] ||
+  fail "tpod apply exits non-zero when the executable selection helper fails"
+pass "tpod apply exits non-zero when the executable selection helper fails"
+
+set +e
+absent_apply_output="$(run_absent_helper_command apply)"
+absent_apply_status="$?"
+set -e
+assert_contains "$absent_apply_output" "Warning: executable selection helper is missing" \
+  "tpod apply reports an absent helper as missing"
+[ "$absent_apply_status" -ne 0 ] ||
+  fail "tpod apply exits non-zero when the executable selection helper is missing"
+pass "tpod apply exits non-zero when the executable selection helper is missing"
+
+set +e
+ready_apply_output="$(run_integration_command "$integration_bin/executable-selection" apply)"
+ready_apply_status="$?"
+set -e
+assert_not_contains "$ready_apply_output" "executable selection helper" \
+  "tpod apply stays quiet when the executable selection helper succeeds"
+[ "$ready_apply_status" -eq 0 ] ||
+  fail "tpod apply succeeds when the executable selection helper succeeds"
+pass "tpod apply succeeds when the executable selection helper succeeds"
+
+set +e
+failing_status_output="$(run_integration_command "$failing_helper" status)"
+failing_status_status="$?"
+set -e
+assert_contains "$failing_status_output" "Warning: executable selection helper failed" \
+  "tpod status distinguishes a helper that ran and failed"
+[ "$failing_status_status" -eq 0 ] ||
+  fail "tpod status stays informational when the executable selection helper fails"
+pass "tpod status stays informational when the executable selection helper fails"
+
+set +e
+absent_status_output="$(run_absent_helper_command status)"
+absent_status_status="$?"
+set -e
+assert_contains "$absent_status_output" "Warning: executable selection helper is missing" \
+  "tpod status reports an absent helper as missing"
+[ "$absent_status_status" -eq 0 ] ||
+  fail "tpod status stays informational when the executable selection helper is missing"
+pass "tpod status stays informational when the executable selection helper is missing"

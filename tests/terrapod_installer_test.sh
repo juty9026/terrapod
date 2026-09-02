@@ -214,6 +214,18 @@ assert_failure() {
   pass "$message"
 }
 
+assert_no_staged_command_surface_files() {
+  local_bin_dir="$1"
+  message="$2"
+
+  for staged_candidate in "$local_bin_dir"/*.terrapod-new*; do
+    [ -e "$staged_candidate" ] || continue
+    fail "$message"
+  done
+
+  pass "$message"
+}
+
 assert_no_stub_calls() {
   log_file="$1"
   message="$2"
@@ -878,6 +890,38 @@ write_non_terrapod_command_stub() {
   chmod +x "$path"
 }
 
+write_failing_terrapod_copy_stub() {
+  case_dir="$1"
+  real_cp="$(command -v cp)"
+
+  {
+    printf '%s\n' '#!/bin/sh'
+    printf '%s\n' 'set -eu'
+    printf '%s\n' 'for copy_arg do'
+    printf '%s\n' '  case "$copy_arg" in'
+    printf '%s\n' '    */dot_local/bin/executable_terrapod)'
+    printf '%s\n' '      printf "%s\n" "cp refused:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"'
+    printf '%s\n' '      exit 1'
+    printf '%s\n' '      ;;'
+    printf '%s\n' '  esac'
+    printf '%s\n' 'done'
+    printf '%s\n' "exec '$real_cp' \"\$@\""
+  } >"$case_dir/bin/cp"
+  chmod +x "$case_dir/bin/cp"
+}
+
+write_failing_symlink_stub() {
+  case_dir="$1"
+
+  {
+    printf '%s\n' '#!/bin/sh'
+    printf '%s\n' 'set -eu'
+    printf '%s\n' 'printf "%s\n" "ln refused:$*" >>"${TERRAPOD_STUB_CALL_LOG:?}"'
+    printf '%s\n' 'exit 1'
+  } >"$case_dir/bin/ln"
+  chmod +x "$case_dir/bin/ln"
+}
+
 write_source_pointer_command_file() {
   path="$1"
   source_dir="$2"
@@ -1479,6 +1523,47 @@ run_installer_case "$nonstandard_prefix_case"
 unset TERRAPOD_HOMEBREW_CANDIDATE_PATHS TERRAPOD_EXPECTED_HOMEBREW_PATH TERRAPOD_TEST_BREW_ABSENT
 assert_failure "$installer_status" "nonstandard Homebrew prefix is rejected"
 assert_contains "$(cat "$nonstandard_prefix_case/stderr")" "Homebrew exists outside the supported prefix" "nonstandard prefix guidance is explicit"
+
+candidate_paths_case="$(make_case_dir homebrew-candidate-paths)"
+candidate_installer_functions="$candidate_paths_case/install-functions.sh"
+sed '$d' "$repo_root/install.sh" >"$candidate_installer_functions"
+candidate_missing_brew="$candidate_paths_case/opt/missing/bin/brew"
+candidate_present_brew="$candidate_paths_case/opt/custom/bin/brew"
+mkdir -p "${candidate_present_brew%/brew}"
+write_stub "$candidate_present_brew" '#!/bin/sh' 'exit 0'
+
+candidate_found_brew="$(
+  PATH="$safe_path_dir:/usr/bin:/bin" \
+    TERRAPOD_HOMEBREW_CANDIDATE_PATHS="$candidate_missing_brew:$candidate_present_brew" \
+    sh -c '. "$1"; find_homebrew || true' sh "$candidate_installer_functions"
+)"
+if [ "$candidate_found_brew" != "$candidate_present_brew" ]; then
+  fail "find_homebrew splits candidate paths on colons"
+fi
+pass "find_homebrew splits candidate paths on colons"
+
+default_candidate_brew="$(
+  PATH="$safe_path_dir:/usr/bin:/bin" sh -c '. "$1"; find_homebrew || true' sh "$candidate_installer_functions"
+)"
+case "$default_candidate_brew" in
+  ''|/opt/homebrew/bin/brew|/usr/local/bin/brew)
+    pass "find_homebrew keeps its default candidate list separable"
+    ;;
+  *)
+    fail "find_homebrew keeps its default candidate list separable"
+    ;;
+esac
+
+candidate_reject_stderr="$candidate_paths_case/reject-stderr"
+if PATH="$safe_path_dir:/usr/bin:/bin" \
+  TERRAPOD_HOMEBREW_CANDIDATE_PATHS="$candidate_missing_brew:$candidate_present_brew" \
+  sh -c '. "$1"; reject_nonstandard_homebrew "$2"' sh \
+    "$candidate_installer_functions" "$candidate_paths_case/opt/homebrew/bin/brew" \
+    2>"$candidate_reject_stderr"; then
+  fail "reject_nonstandard_homebrew splits candidate paths on colons"
+fi
+pass "reject_nonstandard_homebrew splits candidate paths on colons"
+assert_contains "$(cat "$candidate_reject_stderr")" "Homebrew exists outside the supported prefix" "colon-separated candidate rejection explains the unsupported prefix"
 
 low_disk_case="$(make_case_dir low-linuxbrew-disk)"
 write_uname_stub "$low_disk_case" "Linux"
@@ -2397,6 +2482,45 @@ missing_command_surface_log_text="$(cat "$missing_command_surface_log")"
 assert_first_occurrence_before "$missing_command_surface_log_text" "terrapod args:help" "chezmoi args:apply" "recovery-core validation happens before full apply"
 assert_contains "$missing_command_surface_log_text" "tpod args:help" "installed command surface is validated with tpod help"
 assert_contains "$missing_command_surface_log_text" "chezmoi args:apply" "missing command surface still continues to full apply after recovery-core validation"
+
+copy_failure_surface_case="$(make_case_dir command-surface-copy-failure)"
+prepare_resumable_macos_case "$copy_failure_surface_case"
+write_complete_setup_config "$copy_failure_surface_case/xdg-config/chezmoi/chezmoi.toml"
+write_installed_terrapod_command_stub "$copy_failure_surface_case/home/.local/bin/terrapod" 0
+write_failing_terrapod_copy_stub "$copy_failure_surface_case"
+copy_failure_surface_log="$copy_failure_surface_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$copy_failure_surface_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$copy_failure_surface_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "failed Terrapod command copy stops installation"
+if ! surviving_terrapod_help="$(TERRAPOD_STUB_CALL_LOG="$copy_failure_surface_log" TERRAPOD_PROFILE=macos-terminal \
+  "$copy_failure_surface_case/home/.local/bin/terrapod" help 2>/dev/null)"; then
+  fail "failed Terrapod command copy keeps the previous terrapod command runnable"
+fi
+pass "failed Terrapod command copy keeps the previous terrapod command runnable"
+assert_contains "$surviving_terrapod_help" "Terrapod - a small landing pod for your dotfiles" "surviving terrapod command still answers help"
+assert_no_staged_command_surface_files "$copy_failure_surface_case/home/.local/bin" "failed Terrapod command copy leaves no staged command file behind"
+
+alias_failure_surface_case="$(make_case_dir command-surface-alias-failure)"
+prepare_resumable_macos_case "$alias_failure_surface_case"
+write_complete_setup_config "$alias_failure_surface_case/xdg-config/chezmoi/chezmoi.toml"
+ln -s "$alias_failure_surface_case/xdg-data/chezmoi/dot_local/bin/executable_terrapod" \
+  "$alias_failure_surface_case/home/.local/bin/tpod"
+write_failing_symlink_stub "$alias_failure_surface_case"
+alias_failure_surface_log="$alias_failure_surface_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$alias_failure_surface_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$alias_failure_surface_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "failed tpod alias link stops installation"
+if ! surviving_tpod_help="$(TERRAPOD_STUB_CALL_LOG="$alias_failure_surface_log" TERRAPOD_PROFILE=macos-terminal \
+  "$alias_failure_surface_case/home/.local/bin/tpod" help 2>/dev/null)"; then
+  fail "failed tpod alias link keeps the previous tpod alias runnable"
+fi
+pass "failed tpod alias link keeps the previous tpod alias runnable"
+assert_contains "$surviving_tpod_help" "Terrapod - a small landing pod for your dotfiles" "surviving tpod alias still answers help"
+assert_no_staged_command_surface_files "$alias_failure_surface_case/home/.local/bin" "failed tpod alias link leaves no staged command file behind"
 
 dangling_symlink_conflict_case="$(make_case_dir dangling-symlink-command-conflict)"
 prepare_resumable_macos_case "$dangling_symlink_conflict_case"

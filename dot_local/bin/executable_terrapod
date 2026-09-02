@@ -15,13 +15,29 @@ command_dir="${command_path%/*}"
 command_dir="$(CDPATH= cd -- "$command_dir" 2>/dev/null && pwd || printf '%s\n' ".")"
 install_warnings_lib="${TERRAPOD_INSTALL_WARNINGS_LIB:-$command_dir/../lib/terrapod/install-warnings.sh}"
 homebrew_prefix_lib="${TERRAPOD_HOMEBREW_PREFIX_LIB:-$command_dir/../lib/terrapod/homebrew-prefix.sh}"
-executable_selection_helper="${TERRAPOD_EXECUTABLE_SELECTION_HELPER:-$command_dir/../lib/terrapod/executable-selection}"
-if [ ! -e "$executable_selection_helper" ] &&
-  [ -e "$command_dir/../lib/terrapod/executable_executable-selection" ]; then
-  executable_selection_helper="$command_dir/../lib/terrapod/executable_executable-selection"
-fi
-jetendard_font_helper="${TERRAPOD_JETENDARD_FONT_HELPER:-$command_dir/../lib/terrapod/jetendard-font}"
-jetendard_settings_helper="${TERRAPOD_JETENDARD_SETTINGS_HELPER:-$command_dir/../lib/terrapod/jetendard-settings}"
+# Helpers ship as 'lib/terrapod/<name>' but are tracked under the chezmoi
+# source name 'executable_<name>', so a command run straight from the checkout
+# resolves the source name. An explicit override is used as given.
+resolve_helper() {
+  override="$1"
+  name="$2"
+
+  if [ -n "$override" ]; then
+    printf '%s\n' "$override"
+    return 0
+  fi
+
+  helper_path="$command_dir/../lib/terrapod/$name"
+  if [ ! -e "$helper_path" ] &&
+    [ -e "$command_dir/../lib/terrapod/executable_$name" ]; then
+    helper_path="$command_dir/../lib/terrapod/executable_$name"
+  fi
+  printf '%s\n' "$helper_path"
+}
+
+executable_selection_helper="$(resolve_helper "${TERRAPOD_EXECUTABLE_SELECTION_HELPER:-}" executable-selection)"
+jetendard_font_helper="$(resolve_helper "${TERRAPOD_JETENDARD_FONT_HELPER:-}" jetendard-font)"
+jetendard_settings_helper="$(resolve_helper "${TERRAPOD_JETENDARD_SETTINGS_HELPER:-}" jetendard-settings)"
 TERRAPOD_HOMEBREW_PREFIX_LOADED=
 if [ -f "$homebrew_prefix_lib" ]; then
   . "$homebrew_prefix_lib"
@@ -966,14 +982,14 @@ effective_ai_cli_tools_enabled() {
   fi
 }
 
+executable_selection_helper_available() {
+  [ -x "$executable_selection_helper" ]
+}
+
 run_executable_selection() {
   mode="$1"
   config_file="$2"
   profile="$3"
-
-  if [ ! -x "$executable_selection_helper" ]; then
-    return 1
-  fi
 
   canonical_homebrew_prefix="$(standard_homebrew_prefix "$profile" 2>/dev/null || true)"
   TERRAPOD_STANDARD_HOMEBREW_PREFIX="$canonical_homebrew_prefix" \
@@ -1287,8 +1303,10 @@ run_status() {
   print_section_value "Profile:" "$(profile_context_label)"
   show_config_context "$config_file"
   printf '%s\n' "Core Shell Stack source: Homebrew"
-  if ! run_executable_selection status "$config_file" "$profile"; then
+  if ! executable_selection_helper_available; then
     print_warning_line "executable selection helper is missing"
+  elif ! run_executable_selection status "$config_file" "$profile"; then
+    print_warning_line "executable selection helper failed"
   fi
   print_section "Optional stacks:"
   print_optional_setting_status "Optional Editor Stack" "$(effective_editor_stack_enabled "$config_file")" "rich Neovim configuration"
@@ -1559,14 +1577,24 @@ run_apply() {
     return 1
   fi
 
-  if ! run_executable_selection apply "$config_file" "$(current_profile)"; then
+  executable_selection_status=0
+  if ! executable_selection_helper_available; then
     print_warning_line "executable selection helper is missing"
+    executable_selection_status=1
+  elif ! run_executable_selection apply "$config_file" "$(current_profile)"; then
+    print_warning_line "executable selection helper failed"
+    executable_selection_status=1
   fi
 
   validation_status=0
   run_post_apply_validation || validation_status="$?"
   print_remaining_install_warnings
-  return "$validation_status"
+
+  if [ "$validation_status" -ne 0 ]; then
+    return "$validation_status"
+  fi
+
+  return "$executable_selection_status"
 }
 
 doctor_failed=0
@@ -1784,7 +1812,7 @@ run_doctor() {
 
   doctor_check_install_warnings
 
-  if [ -x "$executable_selection_helper" ]; then
+  if executable_selection_helper_available; then
     executable_selection_status=0
     executable_selection_output="$(
       run_executable_selection doctor "$config_file" "$profile"
