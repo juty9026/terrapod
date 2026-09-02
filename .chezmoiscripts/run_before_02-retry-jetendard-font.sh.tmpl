@@ -1,10 +1,10 @@
 {{ if eq .chezmoi.os "darwin" -}}
 #!/bin/sh
-set -u
+set -eu
 
-warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
+{{ include "dot_local/lib/terrapod/install-warnings.sh" }}
+
 font_helper="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/executable_jetendard-font"
-. "$warnings_lib"
 
 if ! terrapod_install_warning_existing_path jetendard-font >/dev/null 2>&1; then
   exit 0

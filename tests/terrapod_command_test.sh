@@ -572,6 +572,8 @@ copy_desktop_apply_source_fixture() {
     "$repo_root/dot_local/lib/terrapod/homebrew-prefix.sh" \
     >"$source_dir/dot_local/lib/terrapod/homebrew-prefix.sh"
   cp "$install_warnings_lib" "$source_dir/dot_local/lib/terrapod/install-warnings.sh"
+  cp "$repo_root/dot_local/lib/terrapod/install-warning-script.sh" \
+    "$source_dir/dot_local/lib/terrapod/install-warning-script.sh"
 }
 
 write_desktop_apply_config() {
@@ -850,6 +852,11 @@ assert_line \
 
 assert_line \
   "$managed_targets" \
+  ".local/lib/terrapod/install-warning-script.sh" \
+  "chezmoi manages the shared install warning script helper library"
+
+assert_line \
+  "$managed_targets" \
   ".local/lib/terrapod/executable-selection" \
   "chezmoi manages the executable selection helper"
 
@@ -915,6 +922,16 @@ pass "shared install warning marker library source exists"
 
 sh -n "$install_warnings_lib" || fail "shared install warning marker library is valid POSIX shell"
 pass "shared install warning marker library is valid POSIX shell"
+
+install_warning_script_lib="$repo_root/dot_local/lib/terrapod/install-warning-script.sh"
+
+if [ ! -f "$install_warning_script_lib" ]; then
+  fail "shared install warning script helper library exists"
+fi
+pass "shared install warning script helper library exists"
+
+sh -n "$install_warning_script_lib" || fail "shared install warning script helper library is valid POSIX shell"
+pass "shared install warning script helper library is valid POSIX shell"
 
 sh -n "$executable_selection_helper" || fail "executable selection helper is valid POSIX shell"
 pass "executable selection helper is valid POSIX shell"
@@ -1260,57 +1277,32 @@ write_stub "$fake_warning_bin/brew" \
 fake_ai_cli_installer="$tmp_dir/fake-ai-cli-installer.sh"
 chezmoi execute-template \
   --source "$repo_root" \
-  --override-data '{"chezmoi":{"os":"darwin","sourceDir":"/missing-terrapod-source"},"enableAiCliTools":true}' \
+  --override-data "{\"chezmoi\":{\"os\":\"darwin\",\"sourceDir\":\"$repo_root\"},\"enableAiCliTools\":true}" \
   --file "$repo_root/.chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl" \
   | sed "s#/opt/homebrew/bin/brew#$fake_warning_bin/brew#g" \
   >"$fake_ai_cli_installer"
 
 if ! HOME="$fake_ai_cli_home" FAKE_INSTALL_WARNING_CALLS="$fake_warning_calls" TERRAPOD_MACHINE_ARCH=aarch64 PATH="$fake_warning_bin:/usr/bin:/bin" /bin/sh "$fake_ai_cli_installer" >"$tmp_dir/fake-ai-cli-installer.out" 2>"$tmp_dir/fake-ai-cli-installer.err"; then
-  fail "rendered installer fixture succeeds when the Homebrew AI CLI bundle succeeds and the shared library is missing"
+  fail "rendered installer fixture succeeds when the Homebrew AI CLI bundle succeeds"
 fi
 
 if [ -e "$fake_warning_calls" ]; then
-  fail "installer scripts ignore PATH fake install warning helpers when the shared library is not loaded"
+  fail "installer scripts ignore PATH fake install warning helpers"
 fi
-pass "installer scripts ignore PATH fake install warning helpers when the shared library is not loaded"
+pass "installer scripts ignore PATH fake install warning helpers"
 
-fake_ai_cli_failure_home="$tmp_dir/fake-ai-cli-failure-home"
-mkdir -p "$fake_ai_cli_failure_home/.local/bin"
-write_stub "$fake_ai_cli_failure_home/.local/bin/brew" \
-  'case "$1" in' \
-  '  shellenv) printf "%s\n" ":" ;;' \
-  '  bundle) exit 42 ;;' \
-  '  *) exit 64 ;;' \
-  'esac'
-
-fake_ai_cli_failure_installer="$tmp_dir/fake-ai-cli-failure-installer.sh"
-chezmoi execute-template \
-  --source "$repo_root" \
-  --override-data '{"chezmoi":{"os":"darwin","sourceDir":"/missing-terrapod-source"},"enableAiCliTools":true}' \
-  --file "$repo_root/.chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl" \
-  | sed "s#/opt/homebrew/bin/brew#$fake_ai_cli_failure_home/.local/bin/brew#g" \
-  >"$fake_ai_cli_failure_installer"
-
-fake_ai_cli_failure_status=0
-HOME="$fake_ai_cli_failure_home" TERRAPOD_MACHINE_ARCH=aarch64 PATH="$fake_ai_cli_failure_home/.local/bin:/usr/bin:/bin" /bin/sh "$fake_ai_cli_failure_installer" >"$tmp_dir/fake-ai-cli-failure.out" 2>"$tmp_dir/fake-ai-cli-failure.err" || fake_ai_cli_failure_status=$?
-if [ "$fake_ai_cli_failure_status" -eq 0 ]; then
-  fail "rendered installer fixture fails when optional AI CLI failures cannot be recorded without the shared library"
-fi
-pass "rendered installer fixture fails when optional AI CLI failures cannot be recorded without the shared library"
-
-fake_ai_cli_warning_source="$tmp_dir/fake-ai-cli-warning-source"
 fake_ai_cli_write_failure_home="$tmp_dir/fake-ai-cli-write-failure-home"
-mkdir -p "$fake_ai_cli_warning_source/dot_local/lib/terrapod" "$fake_ai_cli_write_failure_home/.local/bin"
-printf '%s\n' \
-  'TERRAPOD_INSTALL_WARNINGS_LOADED=1' \
-  'terrapod_install_warning_write() {' \
-  '  printf "%s\n" "write failed:$*" >&2' \
-  '  return 1' \
-  '}' \
-  'terrapod_install_warning_clear() {' \
-  '  return 0' \
-  '}' \
-  >"$fake_ai_cli_warning_source/dot_local/lib/terrapod/install-warnings.sh"
+fake_ai_cli_warning_stub="$tmp_dir/fake-ai-cli-warning-stub.sh"
+mkdir -p "$fake_ai_cli_write_failure_home/.local/bin"
+cat >"$fake_ai_cli_warning_stub" <<'STUB'
+terrapod_install_warning_write() {
+  printf "%s\n" "write failed:$*" >&2
+  return 1
+}
+terrapod_install_warning_clear() {
+  return 0
+}
+STUB
 write_stub "$fake_ai_cli_write_failure_home/.local/bin/brew" \
   'case "$1" in' \
   '  shellenv) printf "%s\n" ":" ;;' \
@@ -1318,12 +1310,16 @@ write_stub "$fake_ai_cli_write_failure_home/.local/bin/brew" \
   '  *) exit 64 ;;' \
   'esac'
 
+# The script inlines install-warnings.sh, so the stub is appended after the
+# category assignment to override the real definitions.
 fake_ai_cli_write_failure_installer="$tmp_dir/fake-ai-cli-write-failure-installer.sh"
 chezmoi execute-template \
   --source "$repo_root" \
-  --override-data "{\"chezmoi\":{\"os\":\"darwin\",\"sourceDir\":\"$fake_ai_cli_warning_source\"},\"enableAiCliTools\":true}" \
+  --override-data '{"chezmoi":{"os":"darwin"},"enableAiCliTools":true}' \
   --file "$repo_root/.chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl" \
-  | sed "s#/opt/homebrew/bin/brew#$fake_ai_cli_write_failure_home/.local/bin/brew#g" \
+  | sed \
+    -e "s#/opt/homebrew/bin/brew#$fake_ai_cli_write_failure_home/.local/bin/brew#g" \
+    -e "/^AI_CLI_WARNING_CATEGORY=/r $fake_ai_cli_warning_stub" \
   >"$fake_ai_cli_write_failure_installer"
 
 fake_ai_cli_write_failure_status=0
@@ -3869,3 +3865,71 @@ assert_not_contains \
   "$apply_override_validation_error" \
   "Run 'terrapod chezmoi -- --config $diff_config managed'" \
   "Terrapod apply avoids old config-aware post-apply validation command"
+
+lazy_home="$tmp_dir/lazy-lib-home"
+lazy_state="$lazy_home/.local/state"
+lazy_lib="$tmp_dir/lazy-lib/install-warnings.sh"
+lazy_bin="$tmp_dir/lazy-lib-bin"
+lazy_config="$tmp_dir/lazy-lib-chezmoi.toml"
+mkdir -p "$lazy_home" "$lazy_state" "$lazy_bin" "$tmp_dir/lazy-lib"
+# A complete managed setup config, so the run reaches the delegated chezmoi
+# apply instead of failing preflight on missing managed setup keys.
+cat >"$lazy_config" <<'TOML'
+[data]
+profile = "macos-terminal"
+enableEditorStack = true
+enableAiCliTools = true
+enableDevelopmentWorkspace = true
+enableMacosAppGroupTerminalApps = true
+enableMacosAppGroupAutomation = true
+enableMacosAppGroupLauncher = true
+enableMacosAppGroupMonitoring = false
+enableMacosAppGroupDevelopmentApps = true
+enableMacosAppGroupMobileDev = true
+TOML
+
+if [ -e "$lazy_lib" ]; then
+  fail "lazy library fixture starts without the install warning library"
+fi
+
+# The stub apply creates the library mid-run, exactly as the first real apply does.
+# Scan all args (not just $1): run_chezmoi_command prepends "--config <path>"
+# ahead of the "apply" subcommand whenever TERRAPOD_CHEZMOI_CONFIG is set.
+write_stub "$lazy_bin/chezmoi" \
+  'is_apply=' \
+  'for arg do' \
+  '  if [ "$arg" = "apply" ]; then' \
+  '    is_apply=1' \
+  '  fi' \
+  'done' \
+  'if [ "$is_apply" = "1" ]; then' \
+  '  mkdir -p "$(dirname "$LAZY_LIB_TARGET")"' \
+  '  cp "$LAZY_LIB_SOURCE" "$LAZY_LIB_TARGET"' \
+  '  HOME="$LAZY_HOME" XDG_STATE_HOME="$LAZY_STATE" sh -c '"'"'. "$1"; terrapod_install_warning_write mise-tools "mise tool install needs attention" "Rerun tpod apply."'"'"' sh "$LAZY_LIB_TARGET"' \
+  '  printf "%s\n" "stub apply output"' \
+  'fi' \
+  'exit 0'
+
+lazy_output="$(
+  LAZY_LIB_TARGET="$lazy_lib" \
+  LAZY_LIB_SOURCE="$repo_root/dot_local/lib/terrapod/install-warnings.sh" \
+  LAZY_HOME="$lazy_home" \
+  LAZY_STATE="$lazy_state" \
+  HOME="$lazy_home" \
+  XDG_STATE_HOME="$lazy_state" \
+  TERRAPOD_INSTALL_WARNINGS_LIB="$lazy_lib" \
+  TERRAPOD_PROFILE=macos-terminal \
+  TERRAPOD_CHEZMOI_CONFIG="$lazy_config" \
+  PATH="$lazy_bin:$PATH" \
+    "$terrapod" apply 2>&1
+)" || true
+
+assert_contains \
+  "$lazy_output" \
+  "Remaining install warnings:" \
+  "Terrapod apply reports warnings written by an apply that also installed the marker library"
+
+assert_contains \
+  "$lazy_output" \
+  "mise-tools: mise tool install needs attention" \
+  "Terrapod apply reads the marker library that appeared during the delegated apply"

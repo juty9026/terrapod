@@ -979,48 +979,13 @@ find_homebrew() {
   printf '%s\n' "$brew_path"
 }
 
-mark_install_warning_from_source() {
-  source_dir="$1"
-  category="$2"
-  summary="$3"
-  guidance="$4"
-  install_warnings_lib="$source_dir/dot_local/lib/terrapod/install-warnings.sh"
-  TERRAPOD_INSTALL_WARNINGS_LOADED=
-
-  if [ -f "$install_warnings_lib" ]; then
-    . "$install_warnings_lib"
-  fi
-
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
-    terrapod_install_warning_write "$category" "$summary" "$guidance" || true
-  fi
-}
-
-clear_install_warning_from_source() {
-  source_dir="$1"
-  category="$2"
-  install_warnings_lib="$source_dir/dot_local/lib/terrapod/install-warnings.sh"
-  TERRAPOD_INSTALL_WARNINGS_LOADED=
-
-  if [ -f "$install_warnings_lib" ]; then
-    . "$install_warnings_lib"
-  fi
-
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
-    terrapod_install_warning_clear "$category" || true
-  fi
-}
-
 load_install_warnings_from_source() {
   source_dir="$1"
   install_warnings_lib="$source_dir/dot_local/lib/terrapod/install-warnings.sh"
-  TERRAPOD_INSTALL_WARNINGS_LOADED=
 
-  if [ -f "$install_warnings_lib" ]; then
-    . "$install_warnings_lib"
-  fi
+  [ -f "$install_warnings_lib" ] || return 1
 
-  [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]
+  . "$install_warnings_lib"
 }
 
 snapshot_install_warnings_from_source() {
@@ -1028,7 +993,6 @@ snapshot_install_warnings_from_source() {
   snapshot_dir="$2"
 
   mkdir -p "$snapshot_dir" || return 1
-  load_install_warnings_from_source "$source_dir" || return 0
 
   for category in $(terrapod_install_warning_categories); do
     if terrapod_install_warning_read "$category" >"$snapshot_dir/$category" 2>/dev/null; then
@@ -1044,8 +1008,6 @@ install_warning_markers_changed_since_snapshot() {
   source_dir="$1"
   snapshot_dir="$2"
   changed=false
-
-  load_install_warnings_from_source "$source_dir" || return 1
 
   for category in $(terrapod_install_warning_categories); do
     current_file="$snapshot_dir/current-$category"
@@ -1361,6 +1323,8 @@ main() {
     initialize_source_repository "$chezmoi_bin"
   fi
   ensure_first_run_setup "$profile" "$source_dir" "$chezmoi_bin"
+  load_install_warnings_from_source "$source_dir" ||
+    fatal "failed to load the install warning library from $source_dir"
   apply_recovery_core_command_surface "$profile" "$source_dir" "$local_bin_dir"
   apply_recovery_core_shell_startup_files "$profile" "$chezmoi_bin"
   initial_apply_status=0

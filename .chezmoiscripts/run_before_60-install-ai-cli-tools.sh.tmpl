@@ -4,32 +4,11 @@ set -eu
 
 {{ include "dot_local/lib/terrapod/homebrew-prefix.sh" }}
 
+{{ include "dot_local/lib/terrapod/install-warnings.sh" }}
+
+{{ include "dot_local/lib/terrapod/install-warning-script.sh" }}
+
 AI_CLI_WARNING_CATEGORY=optional-ai-cli-tools
-install_warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
-TERRAPOD_INSTALL_WARNINGS_LOADED=
-if [ -f "$install_warnings_lib" ]; then
-  . "$install_warnings_lib"
-fi
-
-mark_install_warning() {
-  category="$1"
-  summary="$2"
-  guidance="$3"
-
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
-    return 1
-  fi
-
-  terrapod_install_warning_write "$category" "$summary" "$guidance"
-}
-
-clear_install_warning() {
-  category="$1"
-
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
-    terrapod_install_warning_clear "$category" || true
-  fi
-}
 
 {{ if not (and (eq .chezmoi.os "darwin") (or (default false (get . "enableAiCliTools")) (default false (get . "enableDevelopmentWorkspace")))) }}
 clear_install_warning "$AI_CLI_WARNING_CATEGORY"
@@ -45,10 +24,12 @@ trap cleanup_ai_cli_install EXIT HUP INT TERM
 
 finish_ai_cli_install() {
   if [ "$1" -ne 0 ]; then
-    if ! mark_install_warning \
+    mark_install_warning \
       "$AI_CLI_WARNING_CATEGORY" \
       "Optional AI CLI tool install needs attention" \
-      "Homebrew setup or the AI CLI bundle failed. Review Homebrew output and network access, then rerun tpod apply."; then
+      "Homebrew setup or the AI CLI bundle failed. Review Homebrew output and network access, then rerun tpod apply."
+
+    if ! install_warning_recorded; then
       echo "Failed to record Optional AI CLI tool install warning." >&2
       return 1
     fi

@@ -5,41 +5,9 @@ set -eu
 
 {{ include "dot_local/lib/terrapod/homebrew-prefix.sh" }}
 
-install_warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
-TERRAPOD_INSTALL_WARNINGS_LOADED=
-if [ -f "$install_warnings_lib" ]; then
-  . "$install_warnings_lib"
-fi
+{{ include "dot_local/lib/terrapod/install-warnings.sh" }}
 
-INSTALL_WARNING_RECORDED=0
-
-mark_install_warning() {
-  category="$1"
-  summary="$2"
-  guidance="$3"
-  INSTALL_WARNING_RECORDED=0
-
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ] &&
-    terrapod_install_warning_write "$category" "$summary" "$guidance"; then
-    INSTALL_WARNING_RECORDED=1
-  fi
-}
-
-exit_after_install_warning() {
-  if [ "$INSTALL_WARNING_RECORDED" -eq 1 ]; then
-    exit 0
-  fi
-
-  exit 1
-}
-
-clear_install_warning() {
-  category="$1"
-
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
-    terrapod_install_warning_clear "$category" || true
-  fi
-}
+{{ include "dot_local/lib/terrapod/install-warning-script.sh" }}
 
 failed_mise_steps=
 

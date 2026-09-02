@@ -14,58 +14,11 @@ set -eu
 
 {{ include "dot_local/lib/terrapod/homebrew-prefix.sh" }}
 
-install_warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
-TERRAPOD_INSTALL_WARNINGS_LOADED=
-if [ -f "$install_warnings_lib" ]; then
-  . "$install_warnings_lib"
-fi
+{{ include "dot_local/lib/terrapod/install-warnings.sh" }}
 
-homebrew_core_bundle_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/homebrew-core-bundle.sh"
-TERRAPOD_HOMEBREW_CORE_BUNDLE_LOADED=
-if [ -f "$homebrew_core_bundle_lib" ]; then
-  . "$homebrew_core_bundle_lib"
-fi
+{{ include "dot_local/lib/terrapod/install-warning-script.sh" }}
 
-INSTALL_WARNING_RECORDED=0
-
-mark_install_warning() {
-  category="$1"
-  summary="$2"
-  guidance="$3"
-  INSTALL_WARNING_RECORDED=0
-
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ] &&
-    terrapod_install_warning_write "$category" "$summary" "$guidance"; then
-    INSTALL_WARNING_RECORDED=1
-    return 0
-  fi
-
-  return 1
-}
-
-exit_after_install_warning() {
-  if [ "$INSTALL_WARNING_RECORDED" -eq 1 ]; then
-    exit 0
-  fi
-
-  exit 1
-}
-
-continue_after_core_install_warning() {
-  if [ "$INSTALL_WARNING_RECORDED" -ne 1 ]; then
-    exit 1
-  fi
-
-  return 0
-}
-
-clear_install_warning() {
-  category="$1"
-
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" = "1" ]; then
-    terrapod_install_warning_clear "$category" || true
-  fi
-}
+{{ include "dot_local/lib/terrapod/homebrew-core-bundle.sh" }}
 
 join_lines_with_commas() {
   awk '
@@ -300,29 +253,17 @@ core_brewfile="{{ .chezmoi.sourceDir }}/Brewfile"
 
 # Core Brewfile checksum: {{ include "Brewfile" | sha256sum }}
 if [ -f "$core_brewfile" ]; then
-  if [ "${TERRAPOD_HOMEBREW_CORE_BUNDLE_LOADED:-}" = "1" ]; then
-    if terrapod_homebrew_core_run_bundle "$core_brewfile"; then
-      clear_install_warning homebrew-core
-    else
-      if [ -z "${TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT:-}" ]; then
-        TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT="Review Homebrew core bundle output, fix package access, then rerun tpod apply."
-      fi
-      mark_install_warning \
-        homebrew-core \
-        "Homebrew core install needs attention" \
-        "$TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT"
-      continue_after_core_install_warning
-    fi
+  if terrapod_homebrew_core_run_bundle "$core_brewfile"; then
+    clear_install_warning homebrew-core
   else
-    if HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="$core_brewfile"; then
-      clear_install_warning homebrew-core
-    else
-      mark_install_warning \
-        homebrew-core \
-        "Homebrew core install needs attention" \
-        "Review Homebrew core bundle output, fix package access, then rerun tpod apply."
-      continue_after_core_install_warning
+    if [ -z "${TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT:-}" ]; then
+      TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT="Review Homebrew core bundle output, fix package access, then rerun tpod apply."
     fi
+    mark_install_warning \
+      homebrew-core \
+      "Homebrew core install needs attention" \
+      "$TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT"
+    continue_after_core_install_warning
   fi
 fi
 
@@ -345,9 +286,8 @@ if [ -s "$desktop_brewfile" ]; then
     mark_install_warning \
       homebrew-desktop-apps \
       "Homebrew desktop app install needs attention" \
-      "$desktop_app_failure_guidance_text" ||
-      exit 1
-    exit 0
+      "$desktop_app_failure_guidance_text"
+    exit_after_install_warning
   fi
 fi
 {{ else -}}

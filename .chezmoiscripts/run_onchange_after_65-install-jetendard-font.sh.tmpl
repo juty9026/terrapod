@@ -1,7 +1,9 @@
 {{ if eq .chezmoi.os "darwin" -}}
 #!/bin/sh
-set -u
+set -eu
 
+# Sourced by path rather than inlined: inlining would put this library into the
+# run_onchange_ content hash, re-downloading the font on every library edit.
 warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
 font_helper="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/executable_jetendard-font"
 # Jetendard font helper checksum: {{ include "dot_local/lib/terrapod/executable_jetendard-font" | sha256sum }}
