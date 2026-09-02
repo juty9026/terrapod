@@ -122,3 +122,52 @@ assert_contains "$readme" 'git config set --global user.signingKey "ssh-ed25519 
   "README documents optional SSH signing setup"
 assert_not_contains "$readme" "gitAllowedSigners" \
   "README removes the managed Git signer option"
+
+# The configured diff tool has to be one Terrapod actually installs; `vimdiff`
+# was not, so `git difftool` failed on the VPS Shell Profile and fell back to
+# the system vim on macOS.
+assert_contains "$managed_config" "tool = nvimdiff" "shared Git config drives diffs through nvim"
+assert_not_contains "$managed_config" "tool = vimdiff" "shared Git config no longer names an uninstalled diff tool"
+assert_contains "$repo_root/Brewfile" 'brew "neovim"' "the configured diff tool comes from a declared package"
+
+difftool_repo="$tmp_dir/difftool-repo"
+difftool_bin="$tmp_dir/difftool-bin"
+mkdir -p "$difftool_repo" "$difftool_bin"
+
+cat >"$difftool_bin/nvim" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" >>"$NVIM_STUB_LOG"
+STUB
+chmod +x "$difftool_bin/nvim"
+
+git -C "$difftool_repo" init -q -b main
+git -C "$difftool_repo" config user.email "test@example.com"
+git -C "$difftool_repo" config user.name "Test User"
+printf 'one\n' >"$difftool_repo/tracked.txt"
+git -C "$difftool_repo" add tracked.txt
+git -C "$difftool_repo" commit -q -m "initial commit"
+printf 'two\n' >"$difftool_repo/tracked.txt"
+
+NVIM_STUB_LOG="$tmp_dir/nvim.log"
+: >"$NVIM_STUB_LOG"
+
+if ! HOME="$test_home" XDG_CONFIG_HOME="$test_xdg" NVIM_STUB_LOG="$NVIM_STUB_LOG" \
+  PATH="$difftool_bin:$PATH" \
+  git -C "$difftool_repo" difftool --no-prompt </dev/null >"$tmp_dir/difftool.out" 2>&1; then
+  fail "git difftool should succeed with the shared Terrapod config: $(cat "$tmp_dir/difftool.out")"
+fi
+
+if [ ! -s "$NVIM_STUB_LOG" ]; then
+  fail "git difftool should open the diff with nvim: $(cat "$tmp_dir/difftool.out")"
+fi
+pass "git difftool opens the diff with nvim"
+
+if ! grep -F -- "-d " "$NVIM_STUB_LOG" >/dev/null; then
+  fail "git difftool should open nvim in diff mode; got '$(cat "$NVIM_STUB_LOG")'"
+fi
+pass "git difftool opens nvim in diff mode"
+
+if ! grep -F -- "tracked.txt" "$NVIM_STUB_LOG" >/dev/null; then
+  fail "git difftool should pass the changed file to nvim; got '$(cat "$NVIM_STUB_LOG")'"
+fi
+pass "git difftool passes the changed file to nvim"

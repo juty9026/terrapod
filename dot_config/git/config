@@ -7,7 +7,9 @@
 [rebase]
 	autoStash = true
 [diff]
-	tool = vimdiff
+	tool = nvimdiff
+[difftool "nvimdiff"]
+	cmd = nvim -d "$LOCAL" "$REMOTE"
 [fetch]
 	prune = true
 [core]
