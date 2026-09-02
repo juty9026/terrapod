@@ -1890,7 +1890,7 @@ assert_managed_paths_include_prefix \
   ".chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl" \
   "enableDevelopmentWorkspace includes Optional AI Tool Stack installer"
 
-ubuntu_mise_config="$(render_template "$ubuntu_data" "dot_config/mise/config.toml.tmpl")"
+ubuntu_mise_config="$(cat "$repo_root/dot_config/mise/config.toml")"
 
 if printf '%s\n' "$ubuntu_mise_config" | grep -F '"aqua:neovim/neovim" = "latest"' >/dev/null; then
   fail "Ubuntu VPS removes duplicate mise-managed Neovim"
