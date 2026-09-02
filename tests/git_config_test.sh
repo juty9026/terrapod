@@ -52,23 +52,25 @@ cp "$managed_config" "$tmp_dir/shared-config-before"
 
 HOME="$test_home" XDG_CONFIG_HOME="$test_xdg" \
   chezmoi --source "$repo_root" --destination "$test_home" apply "$test_home/.gitconfig"
+# Spelled the pre-2.46 way on purpose: `git config set` / `git config get`
+# are usage errors on the git 2.43 that Ubuntu 24.04 ships.
 HOME="$test_home" XDG_CONFIG_HOME="$test_xdg" \
-  git config set --global user.name "Test User"
+  git config --global user.name "Test User"
 HOME="$test_home" XDG_CONFIG_HOME="$test_xdg" \
-  git config set --global user.email "test@example.com"
+  git config --global user.email "test@example.com"
 
 if ! cmp -s "$tmp_dir/shared-config-before" "$test_xdg/git/config"; then
   fail "setting user-level Git identity leaves shared Terrapod config unchanged"
 fi
 pass "setting user-level Git identity leaves shared Terrapod config unchanged"
 
-if [ "$(HOME="$test_home" XDG_CONFIG_HOME="$test_xdg" git config get user.name)" != "Test User" ] ||
-   [ "$(HOME="$test_home" XDG_CONFIG_HOME="$test_xdg" git config get user.email)" != "test@example.com" ]; then
+if [ "$(HOME="$test_home" XDG_CONFIG_HOME="$test_xdg" git config --get user.name)" != "Test User" ] ||
+   [ "$(HOME="$test_home" XDG_CONFIG_HOME="$test_xdg" git config --get user.email)" != "test@example.com" ]; then
   fail "user-level Git identity overrides shared Terrapod settings"
 fi
 pass "user-level Git identity overrides shared Terrapod settings"
 
-if [ "$(HOME="$test_home" XDG_CONFIG_HOME="$test_xdg" git config get merge.ff)" != "false" ]; then
+if [ "$(HOME="$test_home" XDG_CONFIG_HOME="$test_xdg" git config --get merge.ff)" != "false" ]; then
   fail "setting user-level Git identity preserves shared Terrapod settings"
 fi
 pass "setting user-level Git identity preserves shared Terrapod settings"
@@ -80,6 +82,16 @@ if ! cmp -s "$tmp_dir/user-config-before" "$test_home/.gitconfig"; then
   fail "Terrapod preserves user changes in ~/.gitconfig on later applies"
 fi
 pass "Terrapod preserves user changes in ~/.gitconfig on later applies"
+
+# The README's `git config set` guidance is fine: it runs after Terrapod has
+# installed Homebrew's git. The tests themselves have no such guarantee, so no
+# test file may drive git config through the 2.46-only subcommands.
+for test_file in "$repo_root"/tests/*_test.sh "$repo_root"/tests/*_test.zsh; do
+  if grep -E '[[:space:]]git config (set|get) ' "$test_file" >/dev/null; then
+    fail "${test_file##*/} drives git config with a subcommand git 2.43 rejects"
+  fi
+done
+pass "test files spell git config the way the supported Ubuntu git accepts"
 
 assert_file_contains "$readme" 'git config set --global user.name "Your Name"' \
   "README documents user-level Git name setup"
