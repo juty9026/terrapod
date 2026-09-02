@@ -164,7 +164,7 @@ show_help() {
   print_section "Usage:"
   printf '%s\n' "  tpod [help|--help|-h]"
   printf '%s\n' "  tpod setup"
-  printf '%s\n' "  tpod configure <$preset_args>"
+  printf '%s\n' "  tpod configure [--yes] <$preset_args>"
   printf '%s\n' "  tpod status"
   printf '%s\n' "  tpod doctor"
   printf '%s\n' "  tpod diff"
@@ -184,9 +184,16 @@ show_help() {
   printf '%s\n' "  update                                Refresh source, then hand off to the refreshed tpod apply."
   printf '%s\n' "  chezmoi -- <args...>                  Run raw chezmoi for advanced maintenance."
   printf '\n'
+  print_section "Options:"
+  printf '%s\n' "  --yes                                 Let configure overwrite Terrapod-managed data keys in an"
+  printf '%s\n' "                                        existing config without the confirmation prompt."
+  printf '%s\n' "                                        Set TERRAPOD_ASSUME_YES=1 for the same effect."
+  printf '%s\n' "                                        Required when configure runs without a terminal."
+  printf '\n'
   print_section "Examples:"
   printf '%s\n' "  tpod setup"
   printf '%s\n' "  tpod configure development"
+  printf '%s\n' "  tpod configure --yes development"
   printf '%s\n' "  tpod status"
   printf '%s\n' "  tpod doctor"
   printf '%s\n' "  tpod diff"
@@ -2003,11 +2010,29 @@ validate_preset_for_profile() {
   fi
 }
 
+assume_yes_requested() {
+  requested="$1"
+
+  [ "$requested" = "true" ] || [ "${TERRAPOD_ASSUME_YES:-}" = "1" ]
+}
+
 confirm_existing_config_update() {
   config_file="$1"
+  assume_yes="$2"
 
   if [ ! -f "$config_file" ]; then
     return 0
+  fi
+
+  if assume_yes_requested "$assume_yes"; then
+    return 0
+  fi
+
+  # Without a tty there is nobody to answer the prompt, and silently
+  # overwriting managed keys is the one outcome a script must never get by
+  # accident, so the confirmation has to be stated up front instead.
+  if [ ! -t 0 ]; then
+    fatal "$config_file already holds Terrapod-managed data keys; rerun with 'tpod configure --yes' or set TERRAPOD_ASSUME_YES=1 to overwrite them without a prompt"
   fi
 
   printf 'Update Terrapod-managed data keys in %s? [y/N] ' "$config_file" >&2
@@ -2476,10 +2501,11 @@ write_preset_settings() {
   config_file="$1"
   preset="$2"
   profile="$3"
+  assume_yes="$4"
 
   validate_preset "$preset"
   reject_unsupported_managed_config "$config_file"
-  confirm_existing_config_update "$config_file"
+  confirm_existing_config_update "$config_file" "$assume_yes"
   write_managed_config "$config_file" "$preset" "$profile"
 }
 
@@ -2516,16 +2542,31 @@ run_setup() {
 }
 
 run_configure() {
-  if [ "$#" -eq 0 ]; then
-    fail_usage "Preset is required"
-  fi
+  preset=
+  preset_given=false
+  assume_yes=false
 
-  if [ "$#" -gt 1 ]; then
-    fail_usage "configure accepts exactly one Preset"
-  fi
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --yes)
+        assume_yes=true
+        ;;
+      -*)
+        fail_usage "unknown configure option: $1"
+        ;;
+      *)
+        if [ "$preset_given" = "true" ]; then
+          fail_usage "configure accepts exactly one Preset"
+        fi
 
-  preset="$1"
-  if [ -z "$preset" ]; then
+        preset_given=true
+        preset="$1"
+        ;;
+    esac
+    shift
+  done
+
+  if [ "$preset_given" != "true" ] || [ -z "$preset" ]; then
     fail_usage "Preset is required"
   fi
 
@@ -2533,7 +2574,7 @@ run_configure() {
   config_file="$(chezmoi_config_file)"
 
   validate_preset_for_profile "$preset" "$profile"
-  write_preset_settings "$config_file" "$preset" "$profile"
+  write_preset_settings "$config_file" "$preset" "$profile" "$assume_yes"
   printf '%s\n' "Configured Terrapod Preset '$preset' in $config_file"
   printf '%s\n' "Run 'tpod apply' to apply these changes."
 }

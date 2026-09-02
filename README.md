@@ -74,8 +74,12 @@ The `workstation` Preset is available only for the macOS Terminal Profile.
 
 `terrapod configure <Preset>` is the script-friendly Preset configuration
 command. It writes concrete settings for exactly one supported Preset, does not
-require `gum`, and has no interactive customization. `terrapod configure
-<Preset>` is not a plain fallback for Terrapod Setup. Terrapod Setup and
+require `gum`, and has no interactive customization. When the config already
+holds Terrapod-managed data keys, it asks before overwriting them; pass `--yes`
+or set `TERRAPOD_ASSUME_YES=1` to skip that prompt. Scripts and CI have no
+terminal to answer on, so `terrapod configure <Preset>` fails there with that
+guidance rather than overwriting the existing settings silently. `terrapod
+configure <Preset>` is not a plain fallback for Terrapod Setup. Terrapod Setup and
 `terrapod configure <Preset>` are intentionally separate. The latter writes
 settings without the setup UI. If Terrapod Setup cannot run because `gum` or an
 interactive terminal is unavailable, fix the `gum` or

@@ -420,16 +420,39 @@ assert_no_shell_startup_backups_under() {
 
 run_terrapod_configure() {
   preset="$1"
-  input="${2:-}"
+  home_dir="$2"
+  xdg_config_home="$3"
+  profile="${4:-vps-shell}"
+
+  TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" \
+    sh "$terrapod" configure "$preset" </dev/null
+}
+
+run_terrapod_configure_yes() {
+  preset="$1"
+  home_dir="$2"
+  xdg_config_home="$3"
+  profile="${4:-vps-shell}"
+
+  TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" \
+    sh "$terrapod" configure --yes "$preset" </dev/null
+}
+
+# The confirmation prompt only runs on a tty, so the answer is typed into a
+# pty. The trailing sleep keeps the pipe open until the prompt has read it.
+run_terrapod_configure_in_pty() {
+  preset="$1"
+  answer="$2"
   home_dir="$3"
   xdg_config_home="$4"
   profile="${5:-vps-shell}"
 
-  if [ -n "$input" ]; then
-    printf '%s\n' "$input" |
-      TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" configure "$preset"
+  if script --version >/dev/null 2>&1; then
+    command_text="env TERM=xterm TERRAPOD_PROFILE=$(shell_quote "$profile") TERRAPOD_CHEZMOI_CONFIG= HOME=$(shell_quote "$home_dir") XDG_CONFIG_HOME=$(shell_quote "$xdg_config_home") sh $(shell_quote "$terrapod") configure $(shell_quote "$preset")"
+    { printf '%s\n' "$answer"; sleep 2; } | script -q -e -c "$command_text" /dev/null
   else
-    TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" configure "$preset" </dev/null
+    { printf '%s\n' "$answer"; sleep 2; } |
+      script -q /dev/null env TERM=xterm TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" configure "$preset"
   fi
 }
 
@@ -470,7 +493,7 @@ new_xdg="$tmp_dir/new-xdg"
 new_config="$new_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$new_home"
 
-run_terrapod_configure minimal "" "$new_home" "$new_xdg" >"$tmp_dir/new-configure.out"
+run_terrapod_configure minimal "$new_home" "$new_xdg" >"$tmp_dir/new-configure.out"
 
 if [ ! -f "$new_config" ]; then
   fail "minimal Preset creates a chezmoi config file"
@@ -500,7 +523,7 @@ development_xdg="$tmp_dir/development-xdg"
 development_config="$development_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$development_home"
 
-run_terrapod_configure development "" "$development_home" "$development_xdg"
+run_terrapod_configure development "$development_home" "$development_xdg"
 
 if [ ! -f "$development_config" ]; then
   fail "development Preset creates a chezmoi config file"
@@ -526,7 +549,7 @@ macos_development_xdg="$tmp_dir/macos-development-xdg"
 macos_development_config="$macos_development_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$macos_development_home"
 
-run_terrapod_configure development "" "$macos_development_home" "$macos_development_xdg" macos-terminal
+run_terrapod_configure development "$macos_development_home" "$macos_development_xdg" macos-terminal
 
 if [ ! -f "$macos_development_config" ]; then
   fail "macOS development Preset creates a chezmoi config file"
@@ -542,7 +565,7 @@ workstation_xdg="$tmp_dir/workstation-xdg"
 workstation_config="$workstation_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$workstation_home"
 
-run_terrapod_configure workstation "" "$workstation_home" "$workstation_xdg" macos-terminal
+run_terrapod_configure workstation "$workstation_home" "$workstation_xdg" macos-terminal
 
 if [ ! -f "$workstation_config" ]; then
   fail "workstation Preset creates a chezmoi config file"
@@ -1081,7 +1104,7 @@ escape_config="$tmp_dir/escape.toml"
 mkdir -p "$default_env_home"
 
 export TERRAPOD_CHEZMOI_CONFIG="$escape_config"
-run_terrapod_configure minimal "" "$default_env_home" "$default_env_xdg"
+run_terrapod_configure minimal "$default_env_home" "$default_env_xdg"
 unset TERRAPOD_CHEZMOI_CONFIG
 
 if [ ! -f "$default_env_config" ]; then
@@ -1118,7 +1141,7 @@ command = "nvim"
 TOML
 cp "$existing_config" "$tmp_dir/existing-before.toml"
 
-run_terrapod_configure development "y" "$existing_home" "$existing_xdg"
+run_terrapod_configure_yes development "$existing_home" "$existing_xdg"
 
 assert_contains "$existing_config" "branch = \"main\"" "existing update preserves unrelated sourceState values"
 assert_contains "$existing_config" "email = \"minu@example.com\"" "existing update preserves unrelated data values"
@@ -1155,7 +1178,7 @@ terrapodPreset = "minimal"
 branch = "main"
 TOML
 
-run_terrapod_configure development "y" "$quoted_table_home" "$quoted_table_xdg" macos-terminal
+run_terrapod_configure_yes development "$quoted_table_home" "$quoted_table_xdg" macos-terminal
 
 assert_contains "$quoted_table_config" "[\"data\"]" "quoted data table header is preserved"
 assert_not_contains "$quoted_table_config" "[data]" "quoted data table update does not append a duplicate bare data table"
@@ -1187,7 +1210,7 @@ terrapodPreset = "minimal"
 branch = "main"
 TOML
 
-run_terrapod_configure development "y" "$spaced_table_home" "$spaced_table_xdg" macos-terminal
+run_terrapod_configure_yes development "$spaced_table_home" "$spaced_table_xdg" macos-terminal
 
 assert_contains "$spaced_table_config" "[ data ]" "spaced data table header is preserved"
 assert_not_contains "$spaced_table_config" "[data]" "spaced data table update does not append a duplicate bare data table"
@@ -1220,7 +1243,7 @@ data.terrapodPreset = "minimal"
 branch = "main"
 TOML
 
-run_terrapod_configure development "y" "$dotted_home" "$dotted_xdg"
+run_terrapod_configure_yes development "$dotted_home" "$dotted_xdg"
 
 assert_not_contains "$dotted_config" "[data]" "dotted data update does not append a duplicate data table"
 assert_contains "$dotted_config" "data.email = \"minu@example.com\"" "dotted data update preserves unrelated data values"
@@ -1258,7 +1281,7 @@ cat >"$quoted_config" <<'TOML'
 keepLiteral = "preserve"
 TOML
 
-run_terrapod_configure development "y" "$quoted_home" "$quoted_xdg" macos-terminal
+run_terrapod_configure_yes development "$quoted_home" "$quoted_xdg" macos-terminal
 
 assert_data_key_once_with_value "$quoted_config" "enableEditorStack" "true" "quoted managed key update writes one Editor Stack value in data"
 assert_data_key_once_with_value "$quoted_config" "enableAiCliTools" "true" "quoted managed key update writes one AI Tool Stack value in data"
@@ -1294,7 +1317,7 @@ enableEditorStack = "do-not-touch"
 TOML
 chmod 600 "$array_config"
 
-run_terrapod_configure development "y" "$array_home" "$array_xdg" macos-terminal
+run_terrapod_configure_yes development "$array_home" "$array_xdg" macos-terminal
 
 assert_contains "$array_config" "keepMe = \"yes\"" "array-table update preserves unrelated data values"
 assert_data_key_once_with_value "$array_config" "enableEditorStack" "true" "array-table update writes Editor Stack only in data"
@@ -1338,7 +1361,7 @@ enableAiCliTools = false
 branch = "main"
 TOML
 
-run_terrapod_configure development "y" "$custom_array_home" "$custom_array_xdg" macos-terminal
+run_terrapod_configure_yes development "$custom_array_home" "$custom_array_xdg" macos-terminal
 
 assert_contains "$custom_array_config" "customValues = [" "custom array update preserves array header"
 assert_contains "$custom_array_config" "preserve-me" "custom array update preserves array value"
@@ -1418,8 +1441,8 @@ exit 2
 SH
 chmod +x "$fake_stat_bin/stat"
 
-if ! printf '%s\n' "y" |
-  PATH="$fake_stat_bin:$PATH" HOME="$fake_stat_home" XDG_CONFIG_HOME="$fake_stat_xdg" sh "$terrapod" configure development >"$tmp_dir/fake-stat.out" 2>"$tmp_dir/fake-stat.err"; then
+if ! PATH="$fake_stat_bin:$PATH" HOME="$fake_stat_home" XDG_CONFIG_HOME="$fake_stat_xdg" \
+  sh "$terrapod" configure --yes development >"$tmp_dir/fake-stat.out" 2>"$tmp_dir/fake-stat.err" </dev/null; then
   printf '%s\n' "stdout:" >&2
   sed 's/^/  /' "$tmp_dir/fake-stat.out" >&2
   printf '%s\n' "stderr:" >&2
@@ -1583,7 +1606,7 @@ keepMe = "yes"
 TOML
 cp "$decline_config" "$tmp_dir/decline-before.toml"
 
-if run_terrapod_configure development "n" "$decline_home" "$decline_xdg" >"$tmp_dir/decline.out" 2>"$tmp_dir/decline.err"; then
+if run_terrapod_configure_in_pty development "n" "$decline_home" "$decline_xdg" >"$tmp_dir/decline.out" 2>&1; then
   fail "existing config update can be declined"
 fi
 pass "existing config update can be declined"
@@ -1593,8 +1616,127 @@ if ! cmp -s "$decline_config" "$tmp_dir/decline-before.toml"; then
 fi
 pass "declined config update leaves existing config unchanged"
 
-assert_contains "$tmp_dir/decline.err" "Update Terrapod-managed data keys" "existing config update asks before writing"
+assert_contains "$tmp_dir/decline.out" "Update Terrapod-managed data keys" "existing config update asks before writing"
+assert_contains "$tmp_dir/decline.out" "config update cancelled" "declined config update explains the cancellation"
 assert_backup_count "$decline_config" 0 "declined config update does not create a backup"
+
+accept_home="$tmp_dir/accept-home"
+accept_xdg="$tmp_dir/accept-xdg"
+accept_config="$accept_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$accept_home" "$(dirname "$accept_config")"
+
+cat >"$accept_config" <<'TOML'
+[data]
+enableEditorStack = false
+keepMe = "yes"
+TOML
+
+run_terrapod_configure_in_pty development "y" "$accept_home" "$accept_xdg" >"$tmp_dir/accept.out" 2>&1
+
+assert_contains "$tmp_dir/accept.out" "Update Terrapod-managed data keys" "accepted config update asks before writing"
+assert_data_key_once_with_value "$accept_config" "enableEditorStack" "true" "accepted config update writes the Preset settings"
+assert_contains "$accept_config" "keepMe = \"yes\"" "accepted config update preserves unrelated data values"
+
+no_tty_home="$tmp_dir/no-tty-home"
+no_tty_xdg="$tmp_dir/no-tty-xdg"
+no_tty_config="$no_tty_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$no_tty_home" "$(dirname "$no_tty_config")"
+
+cat >"$no_tty_config" <<'TOML'
+[data]
+enableEditorStack = false
+keepMe = "yes"
+TOML
+cp "$no_tty_config" "$tmp_dir/no-tty-before.toml"
+
+if run_terrapod_configure development "$no_tty_home" "$no_tty_xdg" >"$tmp_dir/no-tty.out" 2>"$tmp_dir/no-tty.err"; then
+  fail "configure without a terminal refuses to overwrite an existing config"
+fi
+pass "configure without a terminal refuses to overwrite an existing config"
+
+if ! cmp -s "$no_tty_config" "$tmp_dir/no-tty-before.toml"; then
+  fail "refused config update leaves existing config unchanged"
+fi
+pass "refused config update leaves existing config unchanged"
+
+assert_not_contains "$tmp_dir/no-tty.err" "Update Terrapod-managed data keys" "configure without a terminal does not print an unanswerable prompt"
+assert_contains "$tmp_dir/no-tty.err" "tpod configure --yes" "configure without a terminal names the flag that allows the overwrite"
+assert_contains "$tmp_dir/no-tty.err" "TERRAPOD_ASSUME_YES=1" "configure without a terminal names the environment variable that allows the overwrite"
+assert_not_contains "$tmp_dir/no-tty.out" "Configured Terrapod Preset" "configure without a terminal does not report success"
+assert_backup_count "$no_tty_config" 0 "refused config update does not create a backup"
+assert_no_terrapod_temp_files "$no_tty_config" "refused config update leaves no Terrapod temp files"
+
+piped_answer_home="$tmp_dir/piped-answer-home"
+piped_answer_xdg="$tmp_dir/piped-answer-xdg"
+piped_answer_config="$piped_answer_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$piped_answer_home" "$(dirname "$piped_answer_config")"
+
+cat >"$piped_answer_config" <<'TOML'
+[data]
+enableEditorStack = false
+keepMe = "yes"
+TOML
+cp "$piped_answer_config" "$tmp_dir/piped-answer-before.toml"
+
+if printf '%s\n' "y" |
+  TERRAPOD_PROFILE=vps-shell TERRAPOD_CHEZMOI_CONFIG= HOME="$piped_answer_home" XDG_CONFIG_HOME="$piped_answer_xdg" \
+    sh "$terrapod" configure development >"$tmp_dir/piped-answer.out" 2>"$tmp_dir/piped-answer.err"; then
+  fail "a piped confirmation answer does not stand in for the overwrite flag"
+fi
+pass "a piped confirmation answer does not stand in for the overwrite flag"
+
+if ! cmp -s "$piped_answer_config" "$tmp_dir/piped-answer-before.toml"; then
+  fail "a piped confirmation answer leaves the existing config unchanged"
+fi
+pass "a piped confirmation answer leaves the existing config unchanged"
+
+assume_yes_home="$tmp_dir/assume-yes-home"
+assume_yes_xdg="$tmp_dir/assume-yes-xdg"
+assume_yes_config="$assume_yes_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$assume_yes_home" "$(dirname "$assume_yes_config")"
+
+cat >"$assume_yes_config" <<'TOML'
+[data]
+enableEditorStack = false
+keepMe = "yes"
+TOML
+cp "$assume_yes_config" "$tmp_dir/assume-yes-before.toml"
+
+TERRAPOD_ASSUME_YES=1 TERRAPOD_PROFILE=vps-shell TERRAPOD_CHEZMOI_CONFIG= \
+  HOME="$assume_yes_home" XDG_CONFIG_HOME="$assume_yes_xdg" \
+  sh "$terrapod" configure development >"$tmp_dir/assume-yes.out" 2>&1 </dev/null
+
+assert_contains "$tmp_dir/assume-yes.out" "Configured Terrapod Preset 'development'" "TERRAPOD_ASSUME_YES=1 lets configure overwrite an existing config"
+assert_not_contains "$tmp_dir/assume-yes.out" "Update Terrapod-managed data keys" "TERRAPOD_ASSUME_YES=1 skips the confirmation prompt"
+assert_data_key_once_with_value "$assume_yes_config" "enableEditorStack" "true" "TERRAPOD_ASSUME_YES=1 writes the Preset settings"
+assert_contains "$assume_yes_config" "keepMe = \"yes\"" "TERRAPOD_ASSUME_YES=1 preserves unrelated data values"
+assert_single_backup_matches "$assume_yes_config" "$tmp_dir/assume-yes-before.toml" "TERRAPOD_ASSUME_YES=1 still backs up the config before changing managed keys"
+
+flag_new_home="$tmp_dir/flag-new-home"
+flag_new_xdg="$tmp_dir/flag-new-xdg"
+flag_new_config="$flag_new_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$flag_new_home"
+
+run_terrapod_configure_yes minimal "$flag_new_home" "$flag_new_xdg" >"$tmp_dir/flag-new.out"
+
+assert_contains "$tmp_dir/flag-new.out" "Configured Terrapod Preset 'minimal' in $flag_new_config" "--yes writes a new config the same way as a bare configure"
+assert_backup_count "$flag_new_config" 0 "--yes new config creation does not create a backup"
+
+if TERRAPOD_PROFILE=vps-shell TERRAPOD_CHEZMOI_CONFIG= HOME="$tmp_dir/unknown-option-home" XDG_CONFIG_HOME="$tmp_dir/unknown-option-xdg" \
+  sh "$terrapod" configure --force minimal >"$tmp_dir/unknown-option.out" 2>"$tmp_dir/unknown-option.err" </dev/null; then
+  fail "configure rejects an unknown option"
+fi
+pass "configure rejects an unknown option"
+
+assert_contains "$tmp_dir/unknown-option.err" "unknown configure option: --force" "configure names the unknown option it rejected"
+
+if TERRAPOD_PROFILE=vps-shell TERRAPOD_CHEZMOI_CONFIG= HOME="$tmp_dir/flag-only-home" XDG_CONFIG_HOME="$tmp_dir/flag-only-xdg" \
+  sh "$terrapod" configure --yes >"$tmp_dir/flag-only.out" 2>"$tmp_dir/flag-only.err" </dev/null; then
+  fail "configure still requires a Preset when only the overwrite flag is given"
+fi
+pass "configure still requires a Preset when only the overwrite flag is given"
+
+assert_contains "$tmp_dir/flag-only.err" "Preset is required" "configure with only the overwrite flag reports the missing Preset"
 
 directory_home="$tmp_dir/directory-home"
 directory_xdg="$tmp_dir/directory-xdg"

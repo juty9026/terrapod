@@ -1428,7 +1428,7 @@ assert_contains \
 
 assert_contains \
   "$help_output" \
-  "tpod configure <minimal|development|workstation>" \
+  "tpod configure [--yes] <minimal|development|workstation>" \
   "Terrapod help documents short Preset configuration"
 
 assert_contains \
@@ -1460,6 +1460,21 @@ assert_contains \
   "$help_output" \
   "tpod chezmoi -- <args...>" \
   "Terrapod help documents the raw chezmoi escape hatch"
+
+assert_contains \
+  "$help_output" \
+  "tpod configure --yes development" \
+  "Terrapod help shows a non-interactive configure example"
+
+assert_contains \
+  "$help_output" \
+  "Set TERRAPOD_ASSUME_YES=1 for the same effect." \
+  "Terrapod help documents the configure confirmation environment variable"
+
+assert_contains \
+  "$help_output" \
+  "Required when configure runs without a terminal." \
+  "Terrapod help states that configure needs the flag without a terminal"
 
 assert_contains \
   "$help_output" \
@@ -1551,14 +1566,14 @@ macos_help_output="$(TERRAPOD_PROFILE=macos-terminal sh "$terrapod" help)"
 
 assert_contains \
   "$macos_help_output" \
-  "tpod configure <minimal|development|workstation>" \
+  "tpod configure [--yes] <minimal|development|workstation>" \
   "macOS Terminal Profile help exposes workstation Preset"
 
 vps_help_output="$(TERRAPOD_PROFILE=vps-shell sh "$terrapod" help)"
 
 assert_contains \
   "$vps_help_output" \
-  "tpod configure <minimal|development>" \
+  "tpod configure [--yes] <minimal|development>" \
   "VPS Shell Profile help hides workstation Preset"
 
 assert_not_contains \
