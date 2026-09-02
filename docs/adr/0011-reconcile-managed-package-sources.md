@@ -8,6 +8,8 @@ Every active effective Terrapod package declaration is a Managed Package. Terrap
 
 This decision supersedes ADR 0010's non-destructive apply consequence and its choice to leave all legacy payloads unmanaged. It also supersedes the source-only `tpod update` decision recorded in the domain context. ADR 0010's canonical Homebrew and mise ownership assignments and its `brew bundle --no-upgrade` contract remain in force.
 
+ADR 0012 supersedes this decision's ownership registry, deep alternate-provider scan, removal plan, confirmation, lock, and migration warning state. It restores ADR 0010's non-destructive apply contract. This decision's `tpod update` handoff to the refreshed `tpod apply` and the first-run installer's use of the installed `tpod apply` remain in force.
+
 ## Considered Options
 
 - Keep warning-only legacy detection: rejected because canonical installation alone does not resolve secondary duplicates or safely converge package ownership.

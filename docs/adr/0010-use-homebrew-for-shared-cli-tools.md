@@ -4,6 +4,8 @@ The macOS Terminal Profile and VPS Shell Profile use Homebrew as the Modern CLI 
 
 This decision supersedes ADR 0001's assignment of modern CLI tools to mise/aqua and its rejection of Linuxbrew, and ADR 0008's restriction of Linuxbrew to the Optional AI Tool Stack. It does not change the macOS Desktop App Stack, the Jetendard release installer, optional-stack semantics, or Terrapod's non-destructive apply contract.
 
+ADR 0011 supersedes this decision's non-destructive apply consequence and its choice to leave all legacy payloads unmanaged. ADR 0012 then restores the non-destructive apply contract and keeps package source migration advisory-only. This decision's canonical Homebrew and mise ownership assignments and its `brew bundle --no-upgrade` contract remain in force.
+
 ## Considered Options
 
 - Keep mise/aqua for shared CLI tools: rejected because GUI apps, AI CLIs, and ordinary CLIs would retain separate installation and recovery owners.
