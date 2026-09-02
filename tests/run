@@ -6,6 +6,24 @@
 set -u
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+
+# A mise shim for python3 does not run once a test overrides HOME: the shim
+# re-resolves its tool versions under that empty HOME and blocks on a
+# download, so the suite looks hung and an unrelated test reports the
+# failure. Refuse up front instead. The shim directory is resolved the same
+# way the executable-selection library resolves it; where mise is absent the
+# directory does not exist and the check passes without a word.
+python3_bin="$(command -v python3 2>/dev/null || true)"
+mise_shims_dir="${TERRAPOD_MISE_SHIMS_DIR:-${MISE_DATA_DIR:-${HOME:-}/.local/share/mise}/shims}"
+case "$python3_bin" in
+  "$mise_shims_dir"/*)
+    printf 'tests/run: python3 resolves to the mise shim %s\n' "$python3_bin" >&2
+    printf 'The tests override HOME, and a shim blocks on a download there instead of running.\n' >&2
+    printf 'Put the real interpreter ahead of the shims: PATH="$(mise where python)/bin:$PATH" tests/run\n' >&2
+    exit 2
+    ;;
+esac
+
 work_dir="$(mktemp -d)"
 
 cleanup() {
