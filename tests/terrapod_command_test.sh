@@ -1230,6 +1230,43 @@ if [ "$prune_remaining_list" != "$expected_prune_remaining_list" ]; then
 fi
 pass "install warning marker prune leaves current and legacy categories readable"
 
+staging_prune_home="$tmp_dir/staging-prune-home"
+staging_prune_state="$tmp_dir/staging-prune-state"
+staging_prune_dir="$staging_prune_state/terrapod/install-warnings"
+mkdir -p "$staging_prune_home" "$staging_prune_dir"
+
+printf '%s\n' "category='homebrew-core'" >"$staging_prune_dir/homebrew-core"
+printf '%s\n' "category='homebrew-core'" >"$staging_prune_dir/.homebrew-core.fresh1"
+printf '%s\n' "category='mise-tools'" >"$staging_prune_dir/.mise-tools.aB3xY9"
+touch -t 202001010000 "$staging_prune_dir/.mise-tools.aB3xY9"
+
+staging_prune_removed="$(
+  HOME="$staging_prune_home" XDG_STATE_HOME="$staging_prune_state" sh -c '. "$1"; terrapod_install_warning_prune' sh "$install_warnings_lib"
+)"
+
+if [ "$staging_prune_removed" != ".mise-tools.aB3xY9" ]; then
+  printf '%s\n' "expected pruned names: .mise-tools.aB3xY9" >&2
+  printf '%s\n' "actual pruned names:" >&2
+  printf '%s\n' "$staging_prune_removed" | sed 's/^/  /' >&2
+  fail "install warning marker prune reports reclaimed staging files"
+fi
+pass "install warning marker prune reports reclaimed staging files"
+
+if [ -e "$staging_prune_dir/.mise-tools.aB3xY9" ]; then
+  fail "install warning marker prune reclaims abandoned mktemp staging files"
+fi
+pass "install warning marker prune reclaims abandoned mktemp staging files"
+
+if [ ! -f "$staging_prune_dir/.homebrew-core.fresh1" ]; then
+  fail "install warning marker prune keeps staging files a live write may still own"
+fi
+pass "install warning marker prune keeps staging files a live write may still own"
+
+if [ ! -f "$staging_prune_dir/homebrew-core" ]; then
+  fail "install warning marker prune keeps category marker files while reclaiming staging files"
+fi
+pass "install warning marker prune keeps category marker files while reclaiming staging files"
+
 prune_missing_state="$tmp_dir/prune-missing-state"
 if ! HOME="$prune_marker_home" XDG_STATE_HOME="$prune_missing_state" \
   sh -c '. "$1"; terrapod_install_warning_prune' sh "$install_warnings_lib" >"$tmp_dir/prune-missing.out"; then
