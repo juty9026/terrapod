@@ -38,6 +38,22 @@ if [[ -r "$zinit_script" ]]; then
   zinit light zdharma-continuum/fast-syntax-highlighting
   zinit light zsh-users/zsh-autosuggestions
   zinit light zsh-users/zsh-completions
+
+  # zsh-completions only extends fpath, and oh-my-zsh.sh already ran compinit
+  # against the shorter fpath above. Rebuild the table so the new completion
+  # directories actually register; sharing Oh My Zsh's dump keeps it to one
+  # cache file.
+  #
+  # The security flag matches the one oh-my-zsh.sh just used, so the rebuilt
+  # table holds the same directories as the one it replaces. It also has to be
+  # there at all: bare `compinit` asks what to do about an insecure directory,
+  # and a shell that cannot answer aborts compinit and loses the whole table.
+  autoload -Uz compinit
+  if [[ "${ZSH_DISABLE_COMPFIX:-}" == true ]]; then
+    compinit -u -d "${ZSH_COMPDUMP:-${ZDOTDIR:-$HOME}/.zcompdump}"
+  else
+    compinit -i -d "${ZSH_COMPDUMP:-${ZDOTDIR:-$HOME}/.zcompdump}"
+  fi
 fi
 unset zinit_script
 
