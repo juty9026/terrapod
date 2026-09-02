@@ -1936,7 +1936,7 @@ assert_not_contains_text "$ai_cli_tools_installer" "bootstrap_linux_homebrew" "A
 assert_not_contains_text "$ai_cli_tools_installer" "raw.githubusercontent.com/Homebrew/install" "AI installer never downloads Homebrew"
 assert_not_contains_text "$ai_cli_tools_installer" "HOMEBREW_NO_AUTO_UPDATE=1" "Ubuntu AI installer runs no Homebrew bundle"
 assert_not_contains_text "$ai_cli_tools_installer" "install_ai_cli_bundle" "Ubuntu AI installer renders no Homebrew bundle step"
-assert_not_contains_text "$ai_cli_tools_installer" 'cask "claude-code"' "Ubuntu AI installer renders no macOS-only casks"
+assert_not_contains_text "$ai_cli_tools_installer" 'cask "codex"' "Ubuntu AI installer renders no macOS-only casks"
 assert_contains_text "$ai_cli_tools_installer" 'clear_install_warning "$AI_CLI_WARNING_CATEGORY"' "Ubuntu AI installer only clears stale optional AI CLI markers"
 assert_contains_text "$macos_ai_cli_tools_installer" "/opt/homebrew/bin/brew" "macOS AI installer uses mandatory standard Homebrew"
 assert_contains_text "$macos_ai_cli_tools_installer" "HOMEBREW_NO_AUTO_UPDATE=1" "AI bundle disables Homebrew auto-update"
@@ -1944,8 +1944,8 @@ assert_contains_text "$macos_terminal_apps_bootstrap" "HOMEBREW_NO_AUTO_UPDATE=1
 
 for rendered_brewfile in "$macos_ai_cli_tools_brewfile" "$macos_development_workspace_ai_brewfile"; do
   assert_contains_text "$rendered_brewfile" 'cask "antigravity-cli"' "Optional AI Tool Stack declares Antigravity CLI cask"
-  assert_contains_text "$rendered_brewfile" 'cask "claude-code"' "Optional AI Tool Stack declares Claude Code cask"
   assert_contains_text "$rendered_brewfile" 'cask "codex"' "Optional AI Tool Stack declares Codex CLI cask"
+  assert_not_contains_text "$rendered_brewfile" 'cask "claude-code"' "Optional AI Tool Stack no longer declares a Claude Code cask"
 done
 assert_text_equals "$disabled_ai_cli_tools_brewfile" "" "disabled Optional AI Tool Stack renders no Homebrew casks"
 assert_text_equals "$ai_cli_tools_brewfile" "" "Ubuntu Optional AI Tool Stack renders no Homebrew casks"
@@ -2005,8 +2005,7 @@ write_ai_brew_stub() {
     '    for arg do case "$arg" in --file=*) bundle_file="$(printf "%s" "$arg" | cut -d= -f2-)" ;; esac; done' \
     '    [ -n "$bundle_file" ] || exit 64' \
     '    grep -Fx "cask \"antigravity-cli\"" "$bundle_file" >/dev/null || exit 65' \
-    '    grep -Fx "cask \"claude-code\"" "$bundle_file" >/dev/null || exit 66' \
-    '    grep -Fx "cask \"codex\"" "$bundle_file" >/dev/null || exit 67' \
+    '    grep -Fx "cask \"codex\"" "$bundle_file" >/dev/null || exit 66' \
     '    [ "$AI_BREW_FAIL" = "0" ] || exit 42' \
     '    ;;' \
     '  *) exit 64 ;;' \
