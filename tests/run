@@ -1,0 +1,85 @@
+#!/bin/sh
+# Runs every Terrapod test file and aggregates their exit statuses.
+#
+# tests/homebrew_ubuntu_smoke.sh is deliberately not part of the glob: it
+# builds a container image and is not named *_test.sh for that reason.
+set -u
+
+repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+work_dir="$(mktemp -d)"
+
+cleanup() {
+  rm -rf "$work_dir"
+}
+trap cleanup EXIT INT TERM
+
+passed_files=0
+failed_files=""
+
+report_failure() {
+  failed_files="$failed_files
+$1"
+}
+
+run_test_file() {
+  interpreter="$1"
+  test_file="$2"
+  test_name="${test_file##*/}"
+
+  printf '\n=== %s ===\n' "$test_name"
+
+  # Output is streamed and copied at once: the copy is only read afterwards to
+  # tally skips, and a long file should not go quiet while it runs.
+  ( "$interpreter" "$test_file"; printf '%s\n' "$?" >"$work_dir/status" ) 2>&1 |
+    tee -a "$work_dir/output"
+
+  if [ "$(cat "$work_dir/status")" = 0 ]; then
+    passed_files=$((passed_files + 1))
+  else
+    exit_status="$(cat "$work_dir/status")"
+    printf 'not ok - %s exited %s\n' "$test_name" "$exit_status" >&2
+    report_failure "$test_name (exit $exit_status)"
+  fi
+}
+
+: >"$work_dir/output"
+
+for test_file in "$repo_root"/tests/*_test.sh; do
+  [ -f "$test_file" ] || continue
+  run_test_file sh "$test_file"
+done
+
+# zsh test files exercise interactive shell configuration that no POSIX shell
+# can source, so a missing zsh is a failure rather than a silent skip.
+zsh_bin="$(command -v zsh 2>/dev/null || true)"
+for test_file in "$repo_root"/tests/*_test.zsh; do
+  [ -f "$test_file" ] || continue
+  if [ -z "$zsh_bin" ]; then
+    test_name="${test_file##*/}"
+    printf '\n=== %s ===\n' "$test_name"
+    printf 'not ok - %s needs zsh, which is not on PATH\n' "$test_name" >&2
+    report_failure "$test_name (zsh not found)"
+    continue
+  fi
+  run_test_file "$zsh_bin" "$test_file"
+done
+
+# A case a test file reported as unreachable on this host. Counted so a green
+# run never reads as full coverage on a platform that skipped something.
+skipped_cases="$(grep -c '^skip - ' "$work_dir/output" || true)"
+
+printf '\n=== summary ===\n'
+if [ "$skipped_cases" -gt 0 ]; then
+  printf '%d cases skipped on this platform:\n' "$skipped_cases"
+  grep '^skip - ' "$work_dir/output" | sed 's/^skip - /  - /'
+fi
+
+if [ -z "$failed_files" ]; then
+  printf '%d test files passed\n' "$passed_files"
+  exit 0
+fi
+
+failed_count="$(printf '%s' "$failed_files" | grep -c .)"
+printf '%d test files passed, %d failed:\n' "$passed_files" "$failed_count"
+printf '%s\n' "$failed_files" | grep . | sed 's/^/  - /'
+exit 1

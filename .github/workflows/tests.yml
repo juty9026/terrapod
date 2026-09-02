@@ -1,0 +1,50 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  run:
+    name: tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install zsh
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes zsh
+
+      - name: Install chezmoi
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin"
+          printf '%s\n' "$HOME/.local/bin" >>"$GITHUB_PATH"
+
+      - name: Report test dependencies
+        run: |
+          chezmoi --version
+          zsh --version
+          python3 --version
+          jq --version
+
+      # Terrapod Setup refuses to run whenever CI is set, and the setup tests
+      # drive it through a PTY. That guard is itself product behavior the same
+      # test file asserts, so the runner gets a CI-free environment rather than
+      # the tests learning which CI they are under.
+      - name: Run the test suite
+        run: env -u CI tests/run
