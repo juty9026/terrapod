@@ -26,6 +26,16 @@ assert_contains() {
   pass "$message"
 }
 
+assert_not_contains() {
+  haystack="$1"
+  needle="$2"
+  message="$3"
+  if printf '%s\n' "$haystack" | grep -F "$needle" >/dev/null; then
+    fail "$message"
+  fi
+  pass "$message"
+}
+
 assert_order() {
   haystack="$1"
   first="$2"
@@ -133,6 +143,83 @@ assert_linuxbrew_shellenv_rendering() {
   pass "$message"
 }
 
+# The Homebrew prefixes are absolute paths a test cannot create, so the rendered
+# file is redirected at stub prefixes before it is exercised.
+render_zshenv_with_stub_prefixes() {
+  data="$1"
+
+  render_zshenv "$data"
+  sed \
+    -e "s|/opt/homebrew/bin/brew|$tmp_dir/apple-silicon/bin/brew|g" \
+    -e "s|/usr/local/bin/brew|$tmp_dir/intel/bin/brew|g" \
+    -e "s|/home/linuxbrew/.linuxbrew/bin/brew|$tmp_dir/linuxbrew/bin/brew|g" \
+    "$tmp_dir/home/.zshenv" >"$tmp_dir/zshenv.stubbed"
+  mv "$tmp_dir/zshenv.stubbed" "$tmp_dir/home/.zshenv"
+}
+
+write_brew_stub() {
+  prefix="$1"
+
+  mkdir -p "$prefix/bin"
+  cat >"$prefix/bin/brew" <<STUB
+#!/bin/sh
+printf '%s\n' "$prefix" >>"\$BREW_STUB_LOG"
+printf '%s\n' 'export HOMEBREW_PREFIX="$prefix"'
+printf '%s\n' 'export PATH="$prefix/bin:\$PATH"'
+STUB
+  chmod +x "$prefix/bin/brew"
+}
+
+remove_brew_stub() {
+  rm -rf "$1"
+}
+
+# Runs a fresh zsh, which reads the rendered .zshenv. An empty first argument
+# leaves HOMEBREW_PREFIX unset.
+run_zshenv() {
+  inherited_prefix="$1"
+
+  : >"$tmp_dir/brew.log"
+
+  if [ -n "$inherited_prefix" ]; then
+    env -i \
+      HOME="$tmp_dir/home" \
+      PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+      BREW_STUB_LOG="$tmp_dir/brew.log" \
+      HOMEBREW_PREFIX="$inherited_prefix" \
+      zsh -c 'printf "%s\n" "$PATH"' >"$tmp_dir/zshenv.path"
+  else
+    env -i \
+      HOME="$tmp_dir/home" \
+      PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+      BREW_STUB_LOG="$tmp_dir/brew.log" \
+      zsh -c 'printf "%s\n" "$PATH"' >"$tmp_dir/zshenv.path"
+  fi
+}
+
+assert_path_contains() {
+  needle="$1"
+  message="$2"
+
+  if ! grep -F "$needle" "$tmp_dir/zshenv.path" >/dev/null; then
+    fail "$message; expected PATH to contain '$needle', got $(cat "$tmp_dir/zshenv.path")"
+  fi
+
+  pass "$message"
+}
+
+assert_brew_stub_log() {
+  expected="$1"
+  message="$2"
+
+  actual="$(cat "$tmp_dir/brew.log")"
+  if [ "$actual" != "$expected" ]; then
+    fail "$message; expected shellenv from '$expected', got '$actual'"
+  fi
+
+  pass "$message"
+}
+
 chezmoi_bin="$(command -v chezmoi)" || fail "chezmoi is required to render templates"
 
 mkdir -p "$tmp_dir/home/.local/bin"
@@ -202,3 +289,50 @@ if printf '%s\n' "$rendered_macos_zshenv" | grep -F 'export ANDROID_HOME="$HOME/
   fail "macOS zshenv omits the Android SDK block when the mobile-dev App Group is disabled"
 fi
 pass "macOS zshenv omits the Android SDK block when the mobile-dev App Group is disabled"
+
+# .zshenv runs for every zsh process, including the non-interactive ones scripts
+# and editors spawn, so the Homebrew probe has to be free once the environment
+# already carries a prefix — and it has to find whichever prefix is installed,
+# not the one the architecture predicts.
+assert_not_contains "$rendered_macos_zshenv" 'uname -m' \
+  "macOS zshenv does not spawn uname to choose a Homebrew prefix"
+assert_not_contains "$rendered_macos_zshenv" 'sysctl.proc_translated' \
+  "macOS zshenv does not spawn sysctl to detect Rosetta"
+assert_order "$rendered_macos_zshenv" '/opt/homebrew/bin/brew shellenv' '/usr/local/bin/brew shellenv' \
+  "macOS zshenv prefers the Apple Silicon prefix over the Intel one"
+
+render_zshenv_with_stub_prefixes '{"chezmoi":{"os":"darwin"}}'
+
+write_brew_stub "$tmp_dir/intel"
+run_zshenv ""
+assert_path_contains "$tmp_dir/intel/bin" \
+  "macOS zshenv finds an Intel-only Homebrew regardless of the reported architecture"
+assert_brew_stub_log "$tmp_dir/intel" \
+  "macOS zshenv evaluates the Intel shellenv once when it is the only prefix"
+
+write_brew_stub "$tmp_dir/apple-silicon"
+run_zshenv ""
+assert_path_contains "$tmp_dir/apple-silicon/bin" \
+  "macOS zshenv prefers the Apple Silicon prefix when both are installed"
+assert_brew_stub_log "$tmp_dir/apple-silicon" \
+  "macOS zshenv evaluates only one shellenv when both prefixes are installed"
+
+run_zshenv "$tmp_dir/apple-silicon"
+assert_brew_stub_log "" \
+  "macOS zshenv skips the Homebrew probe when the environment already carries a prefix"
+
+remove_brew_stub "$tmp_dir/intel"
+remove_brew_stub "$tmp_dir/apple-silicon"
+
+render_zshenv_with_stub_prefixes '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}}}'
+
+write_brew_stub "$tmp_dir/linuxbrew"
+run_zshenv ""
+assert_path_contains "$tmp_dir/linuxbrew/bin" \
+  "Ubuntu zshenv still puts Linuxbrew on PATH"
+assert_brew_stub_log "$tmp_dir/linuxbrew" \
+  "Ubuntu zshenv evaluates the Linuxbrew shellenv"
+
+run_zshenv "$tmp_dir/linuxbrew"
+assert_brew_stub_log "" \
+  "Ubuntu zshenv skips the Homebrew probe when the environment already carries a prefix"

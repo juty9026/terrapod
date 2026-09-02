@@ -6,17 +6,22 @@ if [[ -d "$HOME/.local/bin" ]]; then
   path=("$HOME/.local/bin" $path)
 fi
 
+# Every zsh process reads this file, non-interactive `zsh -c` included, so the
+# probe short-circuits once the environment already carries a Homebrew prefix.
 {{ if eq .chezmoi.os "linux" -}}
-if [[ -x /home/linuxbrew/.linuxbrew/bin/brew ]]; then
+if [[ -z "${HOMEBREW_PREFIX:-}" && -x /home/linuxbrew/.linuxbrew/bin/brew ]]; then
   eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 fi
 {{ else if eq .chezmoi.os "darwin" -}}
-if [[ "$(uname -m)" == arm64 || "$(sysctl -in sysctl.proc_translated 2>/dev/null)" == 1 ]]; then
+# Both prefixes are probed regardless of the reported architecture: a translated
+# shell on a machine that only carries an Intel Homebrew still needs it on PATH.
+# Apple Silicon wins when both are installed.
+if [[ -z "${HOMEBREW_PREFIX:-}" ]]; then
   if [[ -x /opt/homebrew/bin/brew ]]; then
     eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [[ -x /usr/local/bin/brew ]]; then
+    eval "$(/usr/local/bin/brew shellenv)"
   fi
-elif [[ -x /usr/local/bin/brew ]]; then
-  eval "$(/usr/local/bin/brew shellenv)"
 fi
 {{ end -}}
 
