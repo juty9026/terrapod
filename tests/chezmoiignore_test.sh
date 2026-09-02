@@ -1238,6 +1238,25 @@ assert_text_equals \
   "$expected_package_records" \
   "desktop app package records carry group, token, and the verbatim declaration for casks and tap formulae"
 
+headerless_records_brewfile="$tmp_dir/package-records-headerless-brewfile"
+cat >"$headerless_records_brewfile" <<'PROBE_BREWFILE'
+# Rendered opt-in macOS Desktop App Stack.
+cask "ghostty"
+# launcher macOS App Group
+cask "raycast"
+PROBE_BREWFILE
+
+headerless_records_output="$(sh "$package_records_probe" "$headerless_records_brewfile")"
+
+expected_headerless_records="$(printf '%s\n' \
+  '-	ghostty	cask "ghostty"' \
+  'launcher	raycast	cask "raycast"')"
+
+assert_text_equals \
+  "$headerless_records_output" \
+  "$expected_headerless_records" \
+  "a declaration before the first macOS App Group header keeps a non-empty group field"
+
 assert_contains_text \
   "$macos_development_apps_bootstrap" \
   'read -r app_group token declaration' \
@@ -1493,6 +1512,58 @@ fallback_marker_text="$(cat "$fallback_state/terrapod/install-warnings/homebrew-
 assert_contains_text "$fallback_marker_text" "Review Homebrew desktop app bundle output" "desktop app marker falls back to bulk bundle guidance when casks are not reliable"
 assert_not_contains_text "$fallback_marker_text" "failed casks:" "desktop app fallback marker avoids invented cask detail"
 assert_not_contains_text "$fallback_marker_text" "App Groups:" "desktop app fallback marker avoids invented App Group detail"
+
+headerless_bootstrap_script="$tmp_dir/macos-desktop-headerless-bootstrap.sh"
+awk '
+  $0 == "BREWFILE" && in_brewfile == 1 {
+    print "# Rendered opt-in macOS Desktop App Stack."
+    print "cask \"ghostty\""
+    print "# launcher macOS App Group"
+    print "cask \"raycast\""
+    print "BREWFILE"
+    in_brewfile = 0
+    next
+  }
+  in_brewfile == 1 { next }
+  $0 == "cat >\"$desktop_brewfile\" <<'\''BREWFILE'\''" {
+    print
+    in_brewfile = 1
+    next
+  }
+  { print }
+' "$terminal_launcher_bootstrap_script" |
+  sed "s#$tmp_dir/terminal-launcher-bin/brew#$tmp_dir/headerless-bin/brew#g" >"$headerless_bootstrap_script"
+sh -n "$headerless_bootstrap_script" || fail "headerless desktop bootstrap script should be valid sh"
+pass "headerless desktop bootstrap script is valid sh"
+
+headerless_bin="$tmp_dir/headerless-bin"
+headerless_state="$tmp_dir/headerless-state"
+headerless_home="$tmp_dir/headerless-home"
+headerless_log="$tmp_dir/headerless-brew.log"
+mkdir -p "$headerless_bin" "$headerless_home"
+write_brew_bundle_stub "$headerless_bin/brew"
+
+# The stub fails a cask by grepping the single-package Brewfile it is handed, so
+# a collapsed record that writes an empty Brewfile makes the cask trivially
+# "succeed" and hides the failure entirely.
+if ! HOME="$headerless_home" XDG_STATE_HOME="$headerless_state" MACOS_BREW_LOG="$headerless_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty" PATH="$headerless_bin:/usr/bin:/bin" \
+  sh "$headerless_bootstrap_script" >"$tmp_dir/headerless.out" 2>"$tmp_dir/headerless.err"; then
+  fail "headerless desktop app bundle failure does not block bootstrap script"
+fi
+
+headerless_marker="$headerless_state/terrapod/install-warnings/homebrew-desktop-apps"
+if [ ! -f "$headerless_marker" ]; then
+  fail "headerless desktop app bundle failure records a homebrew-desktop-apps marker"
+fi
+pass "headerless desktop app bundle failure records a homebrew-desktop-apps marker"
+
+headerless_marker_text="$(cat "$headerless_marker")"
+assert_contains_text "$headerless_marker_text" "failed casks: ghostty" \
+  "a cask declared before the first macOS App Group header is still retried and attributed"
+assert_not_contains_text "$headerless_marker_text" "App Groups:" \
+  "a cask with no macOS App Group contributes no App Group detail"
+assert_not_contains_text "$headerless_marker_text" "raycast" \
+  "a grouped cask whose single-cask bundle succeeds stays out of the marker"
 
 terminal_only_bootstrap_script="$tmp_dir/macos-terminal-only-bootstrap.sh"
 printf '%s\n' "$macos_terminal_apps_bootstrap" | sed \
