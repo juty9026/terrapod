@@ -1,6 +1,35 @@
 #!/bin/sh
 
+# Terrapod install warning markers.
+#
+# The install warning directory is Terrapod-owned. Its only valid contents are
+# one regular file per current category, the legacy aliases Terrapod still
+# reads, and the staging files described below. Everything else is reclaimed by
+# `terrapod_install_warning_prune`.
+#
+# Staging file lifecycle:
+#
+#   1. `terrapod_install_warning_write` creates `.<category>.XXXXXX` with
+#      `mktemp`, fills it, and renames it over `<category>`. That rename is what
+#      makes a marker write atomic at the category file level.
+#   2. Between the `mktemp` and the `mv` the staging file is *in flight*. The
+#      prune glob `"$marker_dir"/*` cannot match a leading dot, so a concurrent
+#      prune leaves it alone.
+#   3. A write that dies inside that window - the installers this runs inside
+#      are routinely interrupted - leaves the staging file behind with no owner.
+#      `terrapod_install_warning_prune` reclaims dot-prefixed staging files that
+#      no `mv` can still be waiting on, meaning a modification time older than
+#      `TERRAPOD_INSTALL_WARNING_STAGING_MAX_AGE_DAYS` day. Younger ones stay,
+#      because a live write may still own them.
+#
+# No staging file therefore outlives the day it was created, and no in-flight
+# write can be pruned out from under itself.
+
 TERRAPOD_INSTALL_WARNINGS_LOADED=1
+
+# `find -mtime +N` selects modification times older than N + 1 days, so the
+# threshold below is expressed as the exclusive day count the reclaim uses.
+TERRAPOD_INSTALL_WARNING_STAGING_MAX_AGE_DAYS=1
 
 terrapod_install_warning_categories() {
   printf '%s\n' \
@@ -164,6 +193,12 @@ terrapod_install_warning_known_names() {
   done
 }
 
+terrapod_install_warning_staging_is_abandoned() {
+  staging_path="$1"
+
+  [ -n "$(find "$staging_path" -mtime "+$((TERRAPOD_INSTALL_WARNING_STAGING_MAX_AGE_DAYS - 1))" 2>/dev/null)" ]
+}
+
 terrapod_install_warning_prune() {
   marker_dir="$(terrapod_install_warning_dir)"
   [ -d "$marker_dir" ] || return 0
@@ -181,6 +216,18 @@ terrapod_install_warning_prune() {
 
     if rm -f "$marker_path"; then
       printf '%s\n' "$marker_name"
+    else
+      prune_status=1
+    fi
+  done
+
+  for staging_path in "$marker_dir"/.*.??????; do
+    [ -f "$staging_path" ] || continue
+    terrapod_install_warning_staging_is_abandoned "$staging_path" || continue
+
+    staging_name="${staging_path##*/}"
+    if rm -f "$staging_path"; then
+      printf '%s\n' "$staging_name"
     else
       prune_status=1
     fi

@@ -236,6 +236,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Terrapod install warning marker `updated_at` values use UTC ISO 8601 timestamps such as `2026-06-02T03:12:45Z`.
 - Terrapod install warning marker writes should be atomic at the category file level, and `terrapod_install_warning_clear()` removes only the matching category file.
 - The Terrapod install warning directory is Terrapod-owned; its only valid filenames are current categories, the legacy aliases Terrapod still reads, and in-flight staging files.
+- An install warning staging file is in flight only between the `mktemp` that creates it and the rename that publishes it; one that outlives that window is abandoned, and `tpod apply` reclaims abandoned staging files once they are older than a day.
 - `tpod apply` removes install warning marker files whose names are not valid and prints one line per removal; `tpod status` and `tpod doctor` stay read-only.
 - Install warning marker prune failures print a warning and do not change the exit status of `tpod apply`.
 - Terrapod install warnings do not include a retained installer log; recovery guidance should direct users to rerun the relevant apply path for fresh command output.
