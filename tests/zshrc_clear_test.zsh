@@ -30,6 +30,24 @@ assert_log_contains() {
   pass "$message"
 }
 
+assert_startup_fastfetch() {
+  local expected="$1"
+  local message="$2"
+
+  : >"$CLEAR_TEST_LOG"
+  source "$tmp_dir/home/.zshrc"
+
+  if command grep -F "fastfetch" "$CLEAR_TEST_LOG" >/dev/null 2>&1; then
+    if [[ "$expected" != ran ]]; then
+      fail "$message; fastfetch should not have run at startup"
+    fi
+  elif [[ "$expected" != skipped ]]; then
+    fail "$message; expected fastfetch to run at startup"
+  fi
+
+  pass "$message"
+}
+
 render_zshrc() {
   local data="$1"
 
@@ -139,3 +157,24 @@ if ! whence -w git_index >/dev/null 2>&1; then
 fi
 
 pass "SCM Breeze keeps its repo index under its full command name"
+
+# The greeting belongs to the first shell of a session. Zellij panes and nested
+# shells inherit .zshrc too, and the dev layout opens five panes at once.
+original_shlvl="$SHLVL"
+
+SHLVL=1
+unset ZELLIJ
+assert_startup_fastfetch ran "the first shell greets with system information"
+
+export ZELLIJ="0"
+assert_startup_fastfetch skipped "a Zellij pane does not repeat the greeting"
+
+: >"$CLEAR_TEST_LOG"
+c
+assert_log_contains "fastfetch" "c still prints system information inside a Zellij pane"
+
+unset ZELLIJ
+SHLVL=2
+assert_startup_fastfetch skipped "a nested shell does not repeat the greeting"
+
+SHLVL="$original_shlvl"
