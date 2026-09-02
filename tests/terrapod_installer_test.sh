@@ -4,6 +4,8 @@ set -eu
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 install_warnings_lib_template="$repo_root/dot_local/lib/terrapod/install-warnings.sh"
 export TERRAPOD_INSTALL_WARNINGS_LIB_TEMPLATE="$install_warnings_lib_template"
+config_toml_lib_template="$repo_root/dot_local/lib/terrapod/config-toml.sh"
+export TERRAPOD_CONFIG_TOML_LIB_TEMPLATE="$config_toml_lib_template"
 tmp_dir="$(mktemp -d)"
 safe_path_dir="$tmp_dir/safe-bin"
 
@@ -651,6 +653,10 @@ TERRAPOD_STUB
       mkdir -p "$source_dir/dot_local/lib/terrapod"
       cp "$TERRAPOD_INSTALL_WARNINGS_LIB_TEMPLATE" "$source_dir/dot_local/lib/terrapod/install-warnings.sh"
     fi
+    if [ -f "${TERRAPOD_CONFIG_TOML_LIB_TEMPLATE:-}" ]; then
+      mkdir -p "$source_dir/dot_local/lib/terrapod"
+      cp "$TERRAPOD_CONFIG_TOML_LIB_TEMPLATE" "$source_dir/dot_local/lib/terrapod/config-toml.sh"
+    fi
     ;;
   cat)
     target="${2-}"
@@ -826,6 +832,7 @@ GITCONFIG
   chmod +x "$source_dir/dot_local/bin/executable_terrapod"
   mkdir -p "$source_dir/dot_local/lib/terrapod"
   cp "$repo_root/dot_local/lib/terrapod/install-warnings.sh" "$source_dir/dot_local/lib/terrapod/install-warnings.sh"
+  cp "$repo_root/dot_local/lib/terrapod/config-toml.sh" "$source_dir/dot_local/lib/terrapod/config-toml.sh"
   : >"$source_dir/dot_local/bin/symlink_tpod"
   : >"$source_dir/dot_zshenv.tmpl"
   : >"$source_dir/dot_zprofile.tmpl"
@@ -2128,6 +2135,22 @@ missing_recovery_core_stderr="$(cat "$missing_recovery_core_case/stderr")"
 assert_contains "$missing_recovery_core_stderr" "not a resumable Terrapod Source Repository checkout" "near-miss source rejection explains missing resumable state"
 assert_no_stub_calls "$missing_recovery_core_log" "near-miss source guard runs before network or chezmoi commands"
 
+missing_config_reader_case="$(make_case_dir missing-config-reader-recovery-core)"
+write_uname_stub "$missing_config_reader_case" "Darwin"
+write_command_call_stubs "$missing_config_reader_case" "curl" "wget" "git" "chezmoi" "sh"
+write_terrapod_command_stub "$missing_config_reader_case/terrapod-template"
+write_terrapod_source_checkout "$missing_config_reader_case/xdg-data/chezmoi" "$missing_config_reader_case/terrapod-template"
+rm -f "$missing_config_reader_case/xdg-data/chezmoi/dot_local/lib/terrapod/config-toml.sh"
+missing_config_reader_log="$missing_config_reader_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$missing_config_reader_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$missing_config_reader_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "checkout without the managed config reader is rejected"
+missing_config_reader_stderr="$(cat "$missing_config_reader_case/stderr")"
+assert_contains "$missing_config_reader_stderr" "not a resumable Terrapod Source Repository checkout" "missing config reader rejection explains missing resumable state"
+assert_no_stub_calls "$missing_config_reader_log" "missing config reader guard runs before network or chezmoi commands"
+
 missing_zprofile_case="$(make_case_dir missing-zprofile-recovery-core)"
 write_uname_stub "$missing_zprofile_case" "Darwin"
 write_command_call_stubs "$missing_zprofile_case" "curl" "wget" "git" "chezmoi" "sh"
@@ -2878,6 +2901,73 @@ assert_failure "$installer_status" "installer fails when the checked-out source 
 assert_contains "$(cat "$missing_install_warnings_library_case/stderr")" \
   "failed to load the install warning library" \
   "missing install warning library failure is explicit"
+
+recovery_core_reader_case="$(make_case_dir recovery-core-config-reader)"
+prepare_resumable_macos_case "$recovery_core_reader_case"
+write_complete_setup_config "$recovery_core_reader_case/xdg-config/chezmoi/chezmoi.toml"
+recovery_core_reader_log="$recovery_core_reader_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$recovery_core_reader_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$recovery_core_reader_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_status "$installer_status" 0 "first-run install succeeds while installing the managed config reader"
+
+recovery_core_reader_target="$recovery_core_reader_case/home/.local/lib/terrapod/config-toml.sh"
+if [ ! -f "$recovery_core_reader_target" ]; then
+  fail "recovery-core apply installs the managed config reader beside the command"
+fi
+pass "recovery-core apply installs the managed config reader beside the command"
+
+if ! cmp -s "$recovery_core_reader_target" "$config_toml_lib_template"; then
+  fail "the installed managed config reader matches the checked-out source"
+fi
+pass "the installed managed config reader matches the checked-out source"
+
+if find "$recovery_core_reader_case/home/.local/lib/terrapod" -name '*.terrapod-new' -print | grep -q .; then
+  fail "recovery-core apply leaves no staged managed config reader behind"
+fi
+pass "recovery-core apply leaves no staged managed config reader behind"
+
+override_config_reader_case="$(make_case_dir installer-config-override)"
+prepare_resumable_macos_case "$override_config_reader_case"
+write_complete_setup_config "$override_config_reader_case/xdg-config/chezmoi/chezmoi.toml"
+override_config_reader_path="$override_config_reader_case/override-chezmoi.toml"
+printf '%s\n' "[data]" >"$override_config_reader_path"
+override_config_reader_log="$override_config_reader_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$override_config_reader_log"
+export TERRAPOD_STUB_CALL_LOG
+TERRAPOD_CHEZMOI_CONFIG="$override_config_reader_path"
+export TERRAPOD_CHEZMOI_CONFIG
+run_installer_case "$override_config_reader_case"
+unset TERRAPOD_STUB_CALL_LOG
+unset TERRAPOD_CHEZMOI_CONFIG
+assert_status "$installer_status" 0 "an exported chezmoi config override does not break first-run install"
+override_config_reader_stdout="$(cat "$override_config_reader_case/stdout")"
+assert_contains "$override_config_reader_stdout" \
+  "Reusing complete managed Terrapod Setup config: $override_config_reader_case/xdg-config/chezmoi/chezmoi.toml" \
+  "the installer resumes from the default config path, not an exported override"
+assert_not_contains "$override_config_reader_stdout" "$override_config_reader_path" \
+  "the installer does not report the exported chezmoi config override"
+
+missing_config_reader_library_case="$(make_case_dir missing-config-reader-library)"
+write_uname_stub "$missing_config_reader_library_case" "Darwin"
+write_command_call_stubs "$missing_config_reader_library_case" "curl" "wget" "git" "sh"
+write_gum_command_stub "$missing_config_reader_library_case"
+mkdir -p "$missing_config_reader_library_case/home/.local/bin"
+write_chezmoi_flow_stub "$missing_config_reader_library_case/home/.local/bin/chezmoi"
+TERRAPOD_STUB_CALL_LOG="$missing_config_reader_library_case/command-calls"
+export TERRAPOD_STUB_CALL_LOG
+TERRAPOD_CONFIG_TOML_LIB_TEMPLATE=
+export TERRAPOD_CONFIG_TOML_LIB_TEMPLATE
+run_installer_case "$missing_config_reader_library_case" 'minimal
+'
+TERRAPOD_CONFIG_TOML_LIB_TEMPLATE="$config_toml_lib_template"
+export TERRAPOD_CONFIG_TOML_LIB_TEMPLATE
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "installer fails when the checked-out source is missing the managed config reader"
+assert_contains "$(cat "$missing_config_reader_library_case/stderr")" \
+  "failed to load the managed config reader" \
+  "missing managed config reader failure is explicit"
 
 unreadable_marker_case="$(make_case_dir unreadable-marker)"
 prepare_resumable_macos_case "$unreadable_marker_case"
