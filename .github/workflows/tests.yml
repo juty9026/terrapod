@@ -29,6 +29,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes zsh
 
+      # tests/hammerspoon_runtime_test.sh skips without a Lua interpreter.
+      # Both runners get one so the skip never hides a regression in CI.
+      - name: Install Lua
+        if: runner.os == 'Linux'
+        run: sudo apt-get install --yes lua5.4
+
+      - name: Install Lua
+        if: runner.os == 'macOS'
+        run: brew install lua
+
       - name: Install chezmoi
         run: |
           mkdir -p "$HOME/.local/bin"
@@ -41,6 +51,7 @@ jobs:
           zsh --version
           python3 --version
           jq --version
+          if command -v lua5.4 >/dev/null 2>&1; then lua5.4 -v; else lua -v; fi
 
       # Terrapod Setup refuses to run whenever CI is set, and the setup tests
       # drive it through a PTY. That guard is itself product behavior the same
