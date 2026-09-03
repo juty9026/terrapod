@@ -2,6 +2,8 @@
 
 Terrapod installs active package declarations through their canonical providers but does not remove alternate installations. After installation, Terrapod performs a read-only check of canonical provider presence, the expected executable, and the executable selected first on PATH. If the canonical executable exists but another file is primary, `tpod apply`, `tpod status`, and `tpod doctor` report the actual and canonical paths as an advisory.
 
+ADR 0020 supersedes this decision's definition of the compared executable as the one selected first on the ambient PATH, its singular expected executable, and its rule that only exact path matches and symlinks resolving to the same file count as canonical. It narrows this decision's prohibition on suggesting provider-specific uninstall commands to inferred providers. This decision's non-destructive apply contract, advisory-only treatment of a non-canonical primary executable, and refusal to scan secondary PATH copies remain in force.
+
 This decision supersedes ADR 0011's ownership registry, deep alternate-provider scan, removal plan, confirmation, lock, and migration warning state. It restores ADR 0010's non-destructive apply contract. ADR 0011's `tpod update` handoff to the refreshed `tpod apply` and the first-run installer's use of the installed `tpod apply` remain in force.
 
 ## Considered Options

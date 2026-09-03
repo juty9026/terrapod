@@ -56,6 +56,14 @@ _Avoid_: mise CLI provider, aqua provider, platform-specific CLI source
 mise, which installs and selects Bun, Node.js, Python, and uv independently from Homebrew-managed user-facing CLI tools.
 _Avoid_: Modern CLI Provider, Homebrew runtime manager, aqua tool provider
 
+**Managed Default PATH**:
+The PATH Terrapod computes for executable selection: a zsh login shell's PATH from a reset environment, with the Development Runtime Manager's active bin directories ahead of it. Terrapod computes it rather than inheriting the caller's PATH.
+_Avoid_: ambient PATH, inherited PATH, current PATH
+
+**Effective Executable**:
+The file that actually executes when a command is typed in the Managed Default PATH, after shim forwarding is followed to its target.
+_Avoid_: primary executable, first match on PATH, resolved path
+
 **macOS Desktop App Stack**:
 The opt-in macOS package set for GUI apps, system-style desktop apps, cask-delivered desktop support tools, and tap-delivered companion CLIs that ship with those apps.
 _Avoid_: Homebrew bootstrap, shared CLI formula, Core Shell Stack
@@ -211,13 +219,17 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - **Terrapod** applies this repository's declared dotfiles state; it does not act as the package manager for OS packages or mise-managed tool upgrades.
 - **Terrapod** may install declared dependencies needed to reach the target state, but it does not run broad version upgrade commands such as `brew upgrade`, `apt upgrade`, or `mise upgrade`.
 - Active command-bearing declarations include the Core Shell Stack, Development Runtime Stack, enabled Optional AI Tool Stack, and executable-providing enabled macOS App Groups.
-- Terrapod checks only the declared canonical provider, expected executable path, and current primary executable. It does not scan secondary PATH copies or infer alternate installer provenance.
+- Terrapod checks the declared canonical provider, the canonical executable locations, and the **Effective Executable**. It does not scan secondary PATH copies or infer alternate installer provenance.
 - `tpod apply` and `tpod update` install declared state and then print executable selection advisories without removing alternate payloads.
-- `tpod status` remains informational. `tpod doctor` fails when a declared provider package or canonical executable is missing or when an enabled command is unavailable on PATH.
+- `tpod status` remains informational. `tpod doctor` fails when a declared provider package or canonical executable is missing or when an enabled command is unavailable on the **Managed Default PATH**.
 - When the canonical executable exists but another file is primary, `tpod apply`, `tpod status`, and `tpod doctor` report actual and canonical paths as an advisory without changing exit status.
-- Exact path matches and different symlink paths that resolve to the same file both count as canonical selection.
+- Executable selection is judged in the **Managed Default PATH**, which Terrapod computes rather than inherits, so the verdict does not depend on how `tpod` was invoked.
+- A command resolving through a **Development Runtime Manager** shim is judged by what the shim actually executes, including the case where the manager reports the tool is not currently active and the shim falls through.
+- Canonical selection is a set of accepted locations. **Development Runtime Stack** commands are canonical under both `mise activate` and `mise activate --shims`; other providers keep one canonical location.
+- Advisories group by the directory a command resolved through and repeat invariant guidance once per advisory block, while keeping per-package actual and canonical paths.
 - Nonstandard Homebrew prefixes and files under `~/.config/zsh/path.d` remain user-managed and advisory-only.
-- Executable selection checks are read-only, do not persist pending state, and never suggest provider-specific uninstall commands.
+- Executable selection checks are read-only and do not persist pending state. They name a recovery command only when the provider is established by location, such as a payload inside the **Development Runtime Manager**'s own data directory, and never when the provider would have to be inferred.
+- **Development Runtime Manager** payloads that no active declaration can reach are reported as one advisory line, do not affect `tpod status` readiness, and are never removed by Terrapod.
 - After **Terrapod Setup** writes concrete settings, first-run declared-state apply should prioritize installing the **Terrapod** command surface and managed dotfiles so the machine reaches a recoverable state.
 - First-run completion separates **Terrapod** installation from machine profile readiness: installing the command surface and managed dotfiles can succeed while the **Core Shell Stack** or **Development Runtime Stack** remains incomplete.
 - Ubuntu package bootstrap failures can leave the **VPS Shell Profile** shell experience incomplete while **Terrapod** itself is installed; this is a machine profile readiness warning, not a first-run installer hard failure after **Terrapod Setup** succeeds.
