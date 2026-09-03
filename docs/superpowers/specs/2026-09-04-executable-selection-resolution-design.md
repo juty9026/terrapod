@@ -174,6 +174,13 @@ This is advisory, never a failure, and the whole check is skipped when mise is
 absent or the installs directory does not exist. Terrapod does not run
 `mise uninstall` and does not choose which payloads to remove.
 
+The leftover advisory is a separate finding from executable selection, so it
+prints after the selection advisory block and carries its own second line rather
+than sharing that block's trailing guidance sentence. It does not set the
+issue flag: `tpod status` stays `ready` on a machine whose only finding is
+leftover payloads, because disk a user chose to keep is not a readiness problem.
+`tpod apply` and `tpod doctor` print it.
+
 ADR 0012 and `CONTEXT.md` currently forbid suggesting provider-specific uninstall
 commands. That rule exists to stop Terrapod from *inferring* an alternate
 installer. Here the provider is not inferred: the payloads are inside mise's own
