@@ -5,11 +5,12 @@ mode="${1:-}"
 profile="${2:-}"
 ai_enabled="${3:-false}"
 launcher_enabled="${4:-false}"
+show_payloads="${5:-false}"
 
 case "$mode" in
   apply|status|doctor) ;;
   *)
-    printf '%s\n' "usage: executable-selection {apply|status|doctor} <profile> <ai-enabled> <launcher-enabled>" >&2
+    printf '%s\n' "usage: executable-selection {apply|status|doctor} <profile> <ai-enabled> <launcher-enabled> [show-payloads]" >&2
     exit 2
     ;;
 esac
@@ -509,72 +510,137 @@ render_advisories() {
 }
 
 # Payloads under the Development Runtime Manager's own install directory that
-# no declaration can reach. ADR 0010 moved the Core Shell Stack to Homebrew and
-# ADR 0012 kept apply non-destructive, so every install made before that
-# migration stays on disk: no config selects it, 'mise which' reports it is not
-# active, and mise keeps generating a shim for it. Those shims used to be
-# (over)reported as one selection advisory per tool; silencing them correctly
-# left the disk they occupy with nothing to report it at all, which is what
-# this count restores.
+# no configuration it has tracked can reach. ADR 0010 moved the Core Shell
+# Stack to Homebrew and ADR 0012 kept apply non-destructive, so every install
+# made before that migration stays on disk with nothing selecting it.
 #
-# A payload is reachable when a 'mise bin-paths' entry lies beneath it. The
-# comparison respects the path boundary rather than comparing strings: one
-# payload name can extend another -- 'installs/node' and 'installs/node-canary'
-# -- and a prefix test would let either hide the other.
-leftover_payload_count() {
+# The manager owns this computation (ADR 0021). It judges per installed
+# version rather than per install directory, against every config it has
+# tracked rather than the one resolved from the current directory, and it
+# reports the tool's real name -- 'npm:pnpm', not the install directory slug
+# 'npm-pnpm' -- which is what the recovery command has to be spelled with.
+#
+# Terrapod computed this itself until ADR 0021, by comparing install
+# directories against 'mise bin-paths'. That reports only the toolset resolved
+# from the directory tpod runs in, so every version a project declared counted
+# as unreachable: 426 MB of the 620 MB reported on the workstation in #246 was
+# in active use.
+#
+# '-C "$HOME"' pins the invocation, on ADR 0020's rule that a verdict must not
+# depend on how tpod was called. It follows the subcommand because the manager
+# accepts global flags there. A manager too old for '--prunable' exits non-zero
+# and the finding is skipped rather than falling back to a second definition of
+# reachability.
+prunable_payloads() {
   command -v mise >/dev/null 2>&1 || return 0
-  leftover_installs="$(normalize_path "${MISE_DATA_DIR:-$HOME/.local/share/mise}/installs")"
-  [ -d "$leftover_installs" ] || return 0
+  [ -d "${MISE_DATA_DIR:-$HOME/.local/share/mise}/installs" ] || return 0
 
-  leftover_bin_paths="$(
-    mise_bin_paths | while IFS= read -r leftover_bin_dir; do
-      [ -n "$leftover_bin_dir" ] || continue
-      normalize_path "$leftover_bin_dir"
-    done
-  )"
+  # A manager that decides to prompt would otherwise block on doctor's own
+  # stdin, and its prompt text is lost under 2>/dev/null, leaving the process
+  # hung with nothing printed to explain why.
+  prunable_listing="$(mise ls -C "$HOME" --prunable --no-header 2>/dev/null </dev/null)" ||
+    return 0
+  [ -n "$prunable_listing" ] || return 0
 
-  leftover_count=0
-  for leftover_payload in "$leftover_installs"/*; do
-    [ -d "$leftover_payload" ] || continue
-    leftover_payload="$(normalize_path "$leftover_payload")"
+  printf '%s\n' "$prunable_listing"
+}
 
-    leftover_reachable=0
-    while IFS= read -r leftover_bin_dir; do
-      [ -n "$leftover_bin_dir" ] || continue
-      case "$leftover_bin_dir" in
-        "$leftover_payload"|"$leftover_payload"/*)
-          leftover_reachable=1
-          break
-          ;;
-      esac
-    done <<EOF
-$leftover_bin_paths
+# One row per payload: the name the recovery command takes, and the disk it
+# holds. The manager is asked where each payload lives rather than the name
+# being turned back into a path, because the install directory is a slug of the
+# tool name and the two do not round-trip.
+#
+# Rows are collected before anything prints because the summary line carries
+# the total, and the name column cannot be padded until the longest name is
+# known.
+collect_prunable_rows() {
+  prunable_rows=""
+  prunable_total_kb=0
+  prunable_name_width=0
+
+  while read -r prunable_tool prunable_version prunable_rest; do
+    [ -n "$prunable_tool" ] || continue
+    prunable_name="$prunable_tool@$prunable_version"
+
+    # This loop's own rows are read from the heredoc below, on this same
+    # stdin. A 'mise where' that ever consumed a byte -- a trust prompt, some
+    # future subcommand behaviour -- would eat the remaining payload lines,
+    # and because the count above comes from a separate awk pass, the summary
+    # would then describe more payloads than the list beneath it shows.
+    prunable_path="$(mise where "$prunable_name" 2>/dev/null </dev/null || true)"
+
+    # 0.0 MB already means something real: a payload symlinked outside the
+    # data directory, like a rust toolchain, measures genuinely zero. A path
+    # 'mise where' could not name, or one it named that no longer exists, is
+    # a different case -- unmeasured, not tiny -- so it renders as '?' and
+    # stays out of the total instead of silently reading as "nothing to
+    # reclaim".
+    if [ -n "$prunable_path" ] && [ -e "$prunable_path" ]; then
+      prunable_kb="$(du -sk "$prunable_path" 2>/dev/null | awk 'NR == 1 { print $1 + 0 }')"
+      [ -n "$prunable_kb" ] || prunable_kb=0
+      prunable_total_kb=$((prunable_total_kb + prunable_kb))
+      prunable_size="$(format_payload_size "$prunable_kb")"
+    else
+      prunable_size="?"
+    fi
+
+    if [ "${#prunable_name}" -gt "$prunable_name_width" ]; then
+      prunable_name_width="${#prunable_name}"
+    fi
+    prunable_rows="$prunable_rows$prunable_name|$prunable_size
+"
+  done <<EOF
+$1
 EOF
+}
 
-    [ "$leftover_reachable" -eq 1 ] || leftover_count=$((leftover_count + 1))
-  done
-
-  printf '%s\n' "$leftover_count"
+# Kilobytes as the megabytes a reader decides on.
+format_payload_size() {
+  awk -v kb="$1" 'BEGIN { printf "%.1f MB\n", kb / 1024 }'
 }
 
 # A separate finding from executable selection, so it prints after that block
 # and carries its own second line instead of sharing the block's guidance
 # sentence. It never sets the issue flag: disk a user chose to keep is not a
-# readiness problem, and Terrapod neither runs 'mise uninstall' nor decides
-# which payloads to remove. The provider is named because the payloads sit in
-# mise's own data directory, which is the case ADR 0020 exempts from ADR 0012's
-# ban on suggesting an uninstall command.
+# readiness problem, and Terrapod neither prunes nor decides what to prune. The
+# command is named because the payloads sit in mise's own data directory, which
+# is the case ADR 0020 exempts from ADR 0012's ban on suggesting a removal
+# command. 'mise prune' rather than a frozen 'mise uninstall' list, because it
+# recomputes when it runs: a version a project starts declaring between this
+# report and that run is not removed.
 render_leftover_payloads() {
-  leftover_found="$(leftover_payload_count)"
-  [ -n "$leftover_found" ] || return 0
+  leftover_detail="$1"
+
+  leftover_listing="$(prunable_payloads)"
+  [ -n "$leftover_listing" ] || return 0
+
+  leftover_found="$(printf '%s\n' "$leftover_listing" | awk 'NF { count++ } END { print count + 0 }')"
   [ "$leftover_found" -gt 0 ] || return 0
 
-  if [ "$leftover_found" -eq 1 ]; then
-    printf '%s\n' "  advisory - 1 mise payload is outside any canonical declaration"
-  else
-    printf '  advisory - %s mise payloads are outside any canonical declaration\n' "$leftover_found"
+  leftover_total=""
+  if [ "$leftover_detail" = "true" ]; then
+    collect_prunable_rows "$leftover_listing"
+    leftover_total=" ($(format_payload_size "$prunable_total_kb"))"
   fi
-  printf '%s\n' "             'mise uninstall' reclaims the disk; Terrapod does not remove them."
+
+  if [ "$leftover_found" -eq 1 ]; then
+    printf '  advisory - 1 mise payload can be pruned%s\n' "$leftover_total"
+  else
+    printf '  advisory - %s mise payloads can be pruned%s\n' "$leftover_found" "$leftover_total"
+  fi
+
+  if [ "$leftover_detail" = "true" ]; then
+    # %9s: 'format_payload_size' can emit a four-digit megabyte figure for a
+    # gigabyte-scale payload (a rust or node toolchain), and %8s overflows on
+    # that width, shifting the row one column left of every other.
+    printf '%s' "$prunable_rows" | while IFS='|' read -r leftover_name leftover_size; do
+      [ -n "$leftover_name" ] || continue
+      printf '             %-*s  %9s\n' \
+        "$prunable_name_width" "$leftover_name" "$leftover_size"
+    done
+  fi
+
+  printf '%s\n' "             'mise prune --tools' reclaims the disk; Terrapod does not remove them."
 }
 
 initialize_mise_bin_paths
@@ -637,7 +703,7 @@ render_advisories
 # apply and doctor report the finding. status only summarizes readiness, which
 # this advisory deliberately does not affect, so it has nothing to add there.
 case "$mode" in
-  apply|doctor) render_leftover_payloads ;;
+  apply|doctor) render_leftover_payloads "$show_payloads" ;;
 esac
 
 case "$mode" in

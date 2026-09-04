@@ -99,6 +99,26 @@ mkdir -p "$mise_which_dir"
 : >"$mise_bin_paths_file"
 : >"$mise_bin_paths_log"
 
+# 'mise ls --prunable' is the verdict source for the payload advisory. The
+# fixture file's three states are the three the helper has to tell apart: the
+# file missing is a mise too old for the flag, empty is a machine with nothing
+# to prune, and lines are payloads.
+mise_prunable_file="$tmp_dir/mise-prunable"
+mise_ls_log="$tmp_dir/mise-ls.log"
+: >"$mise_ls_log"
+
+# 'mise where' turns a tool@version into an install path, and 'du' turns that
+# path into a size. Both are stubbed so a size assertion is exact instead of
+# depending on the filesystem's block accounting.
+mise_where_dir="$tmp_dir/mise-where"
+payload_size_dir="$tmp_dir/payload-sizes"
+mkdir -p "$mise_where_dir" "$payload_size_dir"
+
+# Tool names carry ':' and '/', neither of which can be a fixture filename.
+payload_fixture_key() {
+  printf '%s' "$1" | tr ':/@' '___'
+}
+
 cat >"$prefix/bin/mise" <<EOF
 #!/bin/sh
 case "\${1:-}" in
@@ -114,10 +134,40 @@ case "\${1:-}" in
       exit 1
     fi
     ;;
+  ls)
+    printf '%s\n' "\$*" >>"$mise_ls_log"
+    if [ ! -f "$mise_prunable_file" ]; then
+      printf '%s\n' "error: unexpected argument '--prunable' found" >&2
+      exit 2
+    fi
+    cat "$mise_prunable_file"
+    ;;
+  where)
+    where_key="\$(printf '%s' "\${2:-}" | tr ':/@' '___')"
+    if [ -f "$mise_where_dir/\$where_key" ]; then
+      cat "$mise_where_dir/\$where_key"
+    else
+      exit 1
+    fi
+    ;;
 esac
 exit 0
 EOF
 chmod +x "$prefix/bin/mise"
+
+# 'du -sk <path>' prints kilobytes then the path. The fixture is keyed by the
+# path's basename so a test states a payload's size in one line.
+cat >"$path_dir/du" <<EOF
+#!/bin/sh
+du_path="\${2:-}"
+du_key="\${du_path##*/}"
+if [ -f "$payload_size_dir/\$du_key" ]; then
+  printf '%s\t%s\n' "\$(cat "$payload_size_dir/\$du_key")" "\$du_path"
+else
+  printf '%s\t%s\n' 0 "\$du_path"
+fi
+EOF
+chmod +x "$path_dir/du"
 
 run_selection() {
   mode="$1"
@@ -696,9 +746,9 @@ assert_contains "$absent_status_output" "Warning: executable selection helper is
   fail "tpod status stays informational when the executable selection helper is missing"
 pass "tpod status stays informational when the executable selection helper is missing"
 
-# Leftover mise payloads: installs the migration to Homebrew left behind, which
-# no declaration can reach and which no other finding reports since the shims
-# they generate stopped being read as selection defects.
+# Payloads no configuration mise has tracked can reach. mise owns the
+# computation (ADR 0021): it judges per installed version against every config
+# it has seen, so a version a project-local mise.toml selects is not counted.
 leftover_data_dir="$tmp_dir/mise-data"
 leftover_installs="$leftover_data_dir/installs"
 
@@ -717,66 +767,158 @@ run_leftover_selection() {
 
 absent_installs_output="$(run_leftover_selection doctor)"
 assert_not_contains "$absent_installs_output" "mise payload" \
-  "an absent mise installs directory says nothing about leftover payloads"
+  "an absent mise installs directory says nothing about prunable payloads"
 assert_contains "$absent_installs_output" "Canonical executable selection: ready" \
   "an absent mise installs directory leaves the selection verdict alone"
 
-mkdir -p "$leftover_installs/aqua-sharkdp-bat" \
-  "$leftover_installs/aqua-junegunn-fzf" \
-  "$leftover_installs/aqua-lsd-rs-lsd"
+mkdir -p "$leftover_installs"
+
+# The installs directory exists but the fixture file does not, which is the
+# mise too old to know '--prunable'. Skipping is the whole contract here: the
+# check exists to ask mise what is reachable, so a mise that cannot answer
+# leaves nothing to report.
+unsupported_flag_output="$(run_leftover_selection doctor)"
+assert_not_contains "$unsupported_flag_output" "mise payload" \
+  "a mise that rejects --prunable produces no payload advisory"
+assert_contains "$unsupported_flag_output" "Canonical executable selection: ready" \
+  "a mise that rejects --prunable does not fail the selection verdict"
+
+: >"$mise_prunable_file"
+nothing_prunable_output="$(run_leftover_selection doctor)"
+assert_not_contains "$nothing_prunable_output" "mise payload" \
+  "a machine with nothing to prune says nothing"
+
+cat >"$mise_prunable_file" <<'EOF'
+aqua:sharkdp/bat              0.26.1
+npm:pnpm                      10.33.3
+node                          22.22.2
+EOF
 leftover_output="$(run_leftover_selection doctor)"
 assert_line "$leftover_output" \
-  "  advisory - 3 mise payloads are outside any canonical declaration" \
-  "payloads no declaration reaches are reported as one counted advisory"
+  "  advisory - 3 mise payloads can be pruned" \
+  "prunable payloads are reported as one counted advisory"
 assert_line "$leftover_output" \
-  "             'mise uninstall' reclaims the disk; Terrapod does not remove them." \
-  "the leftover advisory carries its own guidance line"
+  "             'mise prune --tools' reclaims the disk; Terrapod does not remove them." \
+  "the payload advisory carries its own guidance line"
 assert_not_contains "$leftover_output" \
   "Adjust PATH or remove the other installation manually" \
-  "the leftover advisory does not borrow the selection block's guidance sentence"
+  "the payload advisory does not borrow the selection block's guidance sentence"
+assert_not_contains "$leftover_output" "aqua:sharkdp/bat" \
+  "the default advisory names no payload"
 assert_contains "$leftover_output" "Canonical executable selection: ready" \
-  "leftover payloads are a separate finding from executable selection"
+  "prunable payloads are a separate finding from executable selection"
+
+# ADR 0020 pins the invocation to '$HOME' and '--no-header' so the row count
+# an awk pass produces cannot be thrown off by a header line -- an untested
+# flag string is free to drift, and 'mise ls' would then answer with a header
+# row awk counts as a payload.
+assert_file_contains "$mise_ls_log" "-C $tmp_dir/home --prunable --no-header" \
+  "'mise ls' is invoked home-pinned, header-free, and prunable-only"
+
+cat >"$mise_prunable_file" <<'EOF'
+node                          22.22.2
+EOF
+single_payload_output="$(run_leftover_selection doctor)"
+assert_line "$single_payload_output" \
+  "  advisory - 1 mise payload can be pruned" \
+  "one prunable payload is reported in the singular"
 
 # Decision guard: disk a user chose to keep is not a readiness problem. Without
 # this assertion nothing stops a later change from setting the issue flag here.
 leftover_status_output="$(run_leftover_selection status)"
 assert_contains "$leftover_status_output" "Executable selection: ready" \
-  "tpod status stays ready on a machine whose only finding is leftover payloads"
+  "tpod status stays ready on a machine whose only finding is prunable payloads"
 assert_not_contains "$leftover_status_output" "mise payload" \
-  "status leaves the leftover payload advisory to apply and doctor"
+  "status leaves the payload advisory to apply and doctor"
 
 leftover_apply_output="$(run_leftover_selection apply)"
 assert_line "$leftover_apply_output" \
-  "  advisory - 3 mise payloads are outside any canonical declaration" \
-  "apply reports leftover payloads"
+  "  advisory - 1 mise payload can be pruned" \
+  "apply reports prunable payloads"
 
-mkdir -p "$leftover_installs/node/20.0.0/bin"
-printf '%s\n' "$leftover_installs/node/20.0.0/bin" >"$mise_bin_paths_file"
-declared_payload_output="$(run_leftover_selection doctor)"
-assert_line "$declared_payload_output" \
-  "  advisory - 3 mise payloads are outside any canonical declaration" \
-  "a payload holding a reported mise bin directory is not a leftover"
-assert_not_contains "$declared_payload_output" "4 mise payloads" \
-  "the declared payload is excluded from the count rather than added to it"
+# The detail listing. Sizes come from stubbed 'mise where' and 'du', so the
+# rendered megabytes are exact rather than filesystem-dependent.
+cat >"$mise_prunable_file" <<'EOF'
+aqua:sharkdp/bat              0.26.1
+npm:pnpm                      10.33.3
+node                          22.22.2
+rust                          stable (symlink)
+go                             1.21.0
+npm:left-pad                   1.3.0
+deno                            1.40.0
+EOF
+printf '%s\n' "$tmp_dir/payloads/bat" >"$mise_where_dir/$(payload_fixture_key "aqua:sharkdp/bat@0.26.1")"
+printf '%s\n' "$tmp_dir/payloads/pnpm" >"$mise_where_dir/$(payload_fixture_key "npm:pnpm@10.33.3")"
+printf '%s\n' "$tmp_dir/payloads/node" >"$mise_where_dir/$(payload_fixture_key "node@22.22.2")"
+printf '%s\n' "$tmp_dir/payloads/rust" >"$mise_where_dir/$(payload_fixture_key "rust@stable")"
+printf '%s\n' "$tmp_dir/payloads/go" >"$mise_where_dir/$(payload_fixture_key "go@1.21.0")"
+# 'deno' answers with a path, but nothing is ever created there -- the payload
+# 'mise where' remembers after its install was removed by hand. 'npm:left-pad'
+# gets no fixture at all, the mise-too-old-to-answer case at the row level.
+printf '%s\n' "$tmp_dir/payloads/deno-removed" >"$mise_where_dir/$(payload_fixture_key "deno@1.40.0")"
+mkdir -p "$tmp_dir/payloads/bat" "$tmp_dir/payloads/pnpm" \
+  "$tmp_dir/payloads/node" "$tmp_dir/payloads/rust" "$tmp_dir/payloads/go"
+printf '%s\n' 12288 >"$payload_size_dir/bat"
+printf '%s\n' 4096 >"$payload_size_dir/pnpm"
+printf '%s\n' 62464 >"$payload_size_dir/node"
+printf '%s\n' 0 >"$payload_size_dir/rust"
+# Four-digit megabytes: 1258291 KiB rounds to 1228.8 MB, the width that
+# overflows an %8s field.
+printf '%s\n' 1258291 >"$payload_size_dir/go"
 
-# One payload name can be a string prefix of another. A comparison that ignores
-# the path boundary lets either name hide the other, in both directions.
-mkdir -p "$leftover_installs/node-canary"
-sibling_payload_output="$(run_leftover_selection doctor)"
-assert_line "$sibling_payload_output" \
-  "  advisory - 4 mise payloads are outside any canonical declaration" \
-  "a payload whose name extends a declared payload's name is still a leftover"
+run_payload_detail() {
+  HOME="$tmp_dir/home" \
+    MISE_DATA_DIR="$leftover_data_dir" \
+    TERRAPOD_EXECUTABLE_SELECTION_INVENTORY_DIR="$inventory" \
+    TERRAPOD_STANDARD_HOMEBREW_PREFIX="$prefix" \
+    TERRAPOD_MISE_SHIMS_DIR="$mise_shims" \
+    TERRAPOD_MANAGED_PATH="$path_dir:/usr/bin:/bin" \
+    PATH="$path_dir:/usr/bin:/bin" \
+    "$selection" doctor macos-terminal false false true 2>&1 || true
+}
 
-rm -rf "$leftover_installs"
-mkdir -p "$leftover_installs/node" "$leftover_installs/node-canary/2026.1.1/bin"
-printf '%s\n' "$leftover_installs/node-canary/2026.1.1/bin" >"$mise_bin_paths_file"
-sibling_declared_output="$(run_leftover_selection doctor)"
-assert_line "$sibling_declared_output" \
-  "  advisory - 1 mise payload is outside any canonical declaration" \
-  "a declared payload does not cover the sibling whose name it extends"
+payload_detail_output="$(run_payload_detail)"
+assert_line "$payload_detail_output" \
+  "  advisory - 7 mise payloads can be pruned (1305.8 MB)" \
+  "the detailed advisory carries the total size, excluding unmeasured payloads"
+assert_line "$payload_detail_output" \
+  "             aqua:sharkdp/bat@0.26.1    12.0 MB" \
+  "the detailed advisory lists each payload with its size"
+assert_line "$payload_detail_output" \
+  "             npm:pnpm@10.33.3            4.0 MB" \
+  "payload names are padded to a shared width"
+assert_line "$payload_detail_output" \
+  "             node@22.22.2               61.0 MB" \
+  "a version-level payload is listed by tool and version"
+assert_line "$payload_detail_output" \
+  "             rust@stable                 0.0 MB" \
+  "a payload linked outside the data directory that genuinely measures zero keeps 0.0 MB"
+assert_line "$payload_detail_output" \
+  "             go@1.21.0                1228.8 MB" \
+  "a gigabyte-scale payload's four-digit megabyte figure stays aligned with every other row"
+assert_line "$payload_detail_output" \
+  "             npm:left-pad@1.3.0               ?" \
+  "a payload 'mise where' cannot resolve renders as an unknown size"
+assert_line "$payload_detail_output" \
+  "             deno@1.40.0                      ?" \
+  "a payload whose 'mise where' path no longer exists renders as an unknown size"
+assert_line "$payload_detail_output" \
+  "             'mise prune --tools' reclaims the disk; Terrapod does not remove them." \
+  "the detailed advisory keeps the guidance line last"
 
-# The whole check depends on mise to say which directories are declared, so an
-# absent mise skips it rather than calling every payload a leftover.
+# The acceptance criterion the issue states: the list and the count describe
+# the same set, so a reader can act on the list without wondering what the
+# number covered.
+payload_row_count="$(
+  printf '%s\n' "$payload_detail_output" |
+    grep -cE ' (MB|\?)$' || true
+)"
+[ "$payload_row_count" = "7" ] ||
+  fail "the detailed listing has exactly one row per counted payload (found $payload_row_count)"
+pass "the detailed listing has exactly one row per counted payload"
+
+# The whole check depends on mise to say what is reachable, so an absent mise
+# skips it rather than calling every payload prunable.
 mise_absent_path_dir="$tmp_dir/mise-absent-path"
 mkdir -p "$mise_absent_path_dir"
 for path_entry in "$path_dir"/*; do
@@ -787,4 +929,4 @@ for path_entry in "$path_dir"/*; do
 done
 mise_absent_output="$(run_leftover_selection doctor "$mise_absent_path_dir")"
 assert_not_contains "$mise_absent_output" "mise payload" \
-  "an absent mise skips the leftover payload check instead of reporting one"
+  "an absent mise skips the payload check instead of reporting one"

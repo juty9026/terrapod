@@ -176,7 +176,7 @@ show_help() {
   printf '%s\n' "  tpod setup"
   printf '%s\n' "  tpod configure [--yes] <$preset_args>"
   printf '%s\n' "  tpod status"
-  printf '%s\n' "  tpod doctor"
+  printf '%s\n' "  tpod doctor [--payloads]"
   printf '%s\n' "  tpod diff"
   printf '%s\n' "  tpod apply"
   printf '%s\n' "  tpod update"
@@ -199,6 +199,8 @@ show_help() {
   printf '%s\n' "                                        existing config without the confirmation prompt."
   printf '%s\n' "                                        Set TERRAPOD_ASSUME_YES=1 for the same effect."
   printf '%s\n' "                                        Required when configure runs without a terminal."
+  printf '%s\n' "  --payloads                            Let doctor list the mise payloads its advisory counts,"
+  printf '%s\n' "                                        with the disk each one holds."
   printf '\n'
   print_section "Examples:"
   printf '%s\n' "  tpod setup"
@@ -823,6 +825,7 @@ run_executable_selection() {
   mode="$1"
   config_file="$2"
   profile="$3"
+  show_payloads="${4:-false}"
 
   canonical_homebrew_prefix="$(standard_homebrew_prefix "$profile" 2>/dev/null || true)"
   TERRAPOD_STANDARD_HOMEBREW_PREFIX="$canonical_homebrew_prefix" \
@@ -830,7 +833,8 @@ run_executable_selection() {
     "$mode" \
     "$profile" \
     "$(effective_ai_cli_tools_enabled "$config_file" "$profile")" \
-    "$(config_data_bool "$config_file" enableMacosAppGroupLauncher)"
+    "$(config_data_bool "$config_file" enableMacosAppGroupLauncher)" \
+    "$show_payloads"
 }
 
 join_tools() {
@@ -1529,9 +1533,19 @@ print_remaining_install_warnings() {
 }
 
 run_doctor() {
-  if [ "$#" -ne 0 ]; then
-    fail_usage "doctor accepts no arguments"
-  fi
+  doctor_show_payloads=false
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --payloads)
+        doctor_show_payloads=true
+        shift
+        ;;
+      *)
+        fail_usage "doctor accepts only --payloads"
+        ;;
+    esac
+  done
 
   doctor_failed=0
   doctor_guidance_printed=0
@@ -1606,7 +1620,7 @@ run_doctor() {
   if executable_selection_helper_available; then
     executable_selection_status=0
     executable_selection_output="$(
-      run_executable_selection doctor "$config_file" "$profile"
+      run_executable_selection doctor "$config_file" "$profile" "$doctor_show_payloads"
     )" || executable_selection_status="$?"
     printf '%s\n' "$executable_selection_output"
     case "$executable_selection_output" in

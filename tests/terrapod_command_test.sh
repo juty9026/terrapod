@@ -723,6 +723,9 @@ install_warnings_lib="$repo_root/dot_local/lib/terrapod/install-warnings.sh"
 executable_selection_helper="$repo_root/dot_local/lib/terrapod/executable_executable-selection"
 executable_selection_stub="$tmp_dir/bin/executable-selection"
 write_stub "$executable_selection_stub" \
+  'if [ -n "${TERRAPOD_EXECUTABLE_SELECTION_ARGS_FILE:-}" ]; then' \
+  '  printf "%s %s\n" "${1:-}" "${5:-unset}" >>"$TERRAPOD_EXECUTABLE_SELECTION_ARGS_FILE"' \
+  'fi' \
   'if [ -n "${TERRAPOD_EXECUTABLE_SELECTION_OUTPUT:-}" ]; then' \
   '  printf "%s\n" "$TERRAPOD_EXECUTABLE_SELECTION_OUTPUT"' \
   '  exit "${TERRAPOD_EXECUTABLE_SELECTION_STATUS:-0}"' \
@@ -1456,6 +1459,11 @@ assert_contains \
   "$help_output" \
   "tpod doctor" \
   "Terrapod help documents short doctor command"
+
+assert_contains \
+  "$help_output" \
+  "tpod doctor [--payloads]" \
+  "Terrapod help documents the doctor payload listing"
 
 assert_contains \
   "$help_output" \
@@ -2318,6 +2326,48 @@ wrong_prefix_doctor_status=$?
 set -e
 assert_status "$wrong_prefix_doctor_status" 0 "doctor keeps a non-standard Homebrew prefix advisory-only"
 assert_contains "$wrong_prefix_doctor_output" "warn - Homebrew prefix is /wrong/homebrew; expected $standard_brew_prefix" "doctor reports the expected standard Homebrew prefix as an advisory"
+
+# --payloads is the only argument doctor takes, and it reaches the helper as
+# the fifth positional argument. Nothing else may turn the listing on: apply
+# and status print the summary line, which is the shape #237 settled on.
+payloads_args_file="$tmp_dir/payloads-args"
+payloads_path="$(homebrew_owned_status_doctor_path payloads "$standard_brew_prefix" zsh apt)"
+
+: >"$payloads_args_file"
+TERRAPOD_EXECUTABLE_SELECTION_ARGS_FILE="$payloads_args_file" \
+  TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" \
+  TERRAPOD_CHEZMOI_CONFIG="$status_ubuntu_config" \
+  PATH="$payloads_path" /bin/sh "$vps_homebrew_terrapod" doctor >/dev/null 2>&1 || true
+assert_file_contains "$payloads_args_file" "doctor false" \
+  "doctor leaves the payload listing off by default"
+
+: >"$payloads_args_file"
+TERRAPOD_EXECUTABLE_SELECTION_ARGS_FILE="$payloads_args_file" \
+  TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" \
+  TERRAPOD_CHEZMOI_CONFIG="$status_ubuntu_config" \
+  PATH="$payloads_path" /bin/sh "$vps_homebrew_terrapod" doctor --payloads >/dev/null 2>&1 || true
+assert_file_contains "$payloads_args_file" "doctor true" \
+  "doctor --payloads turns the payload listing on"
+
+: >"$payloads_args_file"
+TERRAPOD_EXECUTABLE_SELECTION_ARGS_FILE="$payloads_args_file" \
+  TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" \
+  TERRAPOD_CHEZMOI_CONFIG="$status_ubuntu_config" \
+  PATH="$payloads_path" /bin/sh "$vps_homebrew_terrapod" status >/dev/null 2>&1 || true
+assert_file_contains "$payloads_args_file" "status false" \
+  "status never turns the payload listing on"
+
+set +e
+doctor_bad_flag_output="$(
+  TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" \
+    TERRAPOD_CHEZMOI_CONFIG="$status_ubuntu_config" \
+    PATH="$payloads_path" /bin/sh "$vps_homebrew_terrapod" doctor --verbose 2>&1
+)"
+doctor_bad_flag_status=$?
+set -e
+assert_status "$doctor_bad_flag_status" 64 "doctor rejects an unknown argument"
+assert_contains "$doctor_bad_flag_output" "terrapod: doctor accepts only --payloads" \
+  "doctor explains which argument it takes"
 
 status_incomplete_vps_config="$tmp_dir/status-incomplete-vps.toml"
 cat >"$status_incomplete_vps_config" <<'TOML'
