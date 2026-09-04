@@ -13,6 +13,11 @@ if [[ -z "${HOMEBREW_PREFIX:-}" && -x /home/linuxbrew/.linuxbrew/bin/brew ]]; th
   eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 fi
 {{ else if eq .chezmoi.os "darwin" -}}
+# This ordering does not survive a macOS login shell on its own: /etc/zprofile
+# runs /usr/libexec/path_helper right after this file and re-prepends the
+# /etc/paths entries. The managed .zprofile repeats the prepends afterwards to
+# put the ordering declared here back.
+#
 # Both prefixes are probed regardless of the reported architecture: a translated
 # shell on a machine that only carries an Intel Homebrew still needs it on PATH.
 # Apple Silicon wins when both are installed.
