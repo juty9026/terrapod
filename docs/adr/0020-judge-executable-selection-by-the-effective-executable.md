@@ -10,6 +10,8 @@ Advisories group by the directory a command resolved through and print invariant
 
 This decision supersedes ADR 0012's definition of the compared executable as the one selected first on the ambient PATH, its singular expected executable, and its rule that only exact path matches and symlinks resolving to the same file count as canonical. It narrows ADR 0012's prohibition on suggesting provider-specific uninstall commands to cases where the provider is inferred; a payload inside a provider's own data directory establishes that provider by location. ADR 0012's non-destructive apply contract, advisory-only treatment of a non-canonical primary executable, and refusal to scan secondary PATH copies remain in force.
 
+ADR 0021 supersedes this decision's definition of the unreachable payload finding and its advisory wording, and delegates that computation to the Development Runtime Manager. This decision's effective executable model, managed default PATH, canonical location sets, and advisory grouping remain in force.
+
 ## Considered Options
 
 - Reconstruct the managed default PATH in POSIX shell inside the helper: rejected because the managed shell templates and the helper would carry the same ordering rules in two places and drift on every PATH change.
@@ -26,5 +28,5 @@ This decision supersedes ADR 0012's definition of the compared executable as the
 - Development Runtime declarations are canonical under either supported activation mode.
 - The managed default PATH reflects system PATH ordering, so a login-shell ordering defect surfaces as an advisory rather than being hidden.
 - Advisory output carries per-package actual and canonical paths, and repeats invariant guidance once per advisory block.
-- Unreachable Development Runtime payloads are advisory, do not affect `tpod status` readiness, and are never removed by Terrapod.
+- Unreachable Development Runtime payloads are advisory, do not affect `tpod status` readiness, and are never removed by Terrapod. ADR 0021 moves the computation of which payloads those are to the Development Runtime Manager.
 - Executable selection remains read-only and does not persist state.
