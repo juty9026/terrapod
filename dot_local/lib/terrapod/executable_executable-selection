@@ -5,11 +5,12 @@ mode="${1:-}"
 profile="${2:-}"
 ai_enabled="${3:-false}"
 launcher_enabled="${4:-false}"
+show_payloads="${5:-false}"
 
 case "$mode" in
   apply|status|doctor) ;;
   *)
-    printf '%s\n' "usage: executable-selection {apply|status|doctor} <profile> <ai-enabled> <launcher-enabled>" >&2
+    printf '%s\n' "usage: executable-selection {apply|status|doctor} <profile> <ai-enabled> <launcher-enabled> [show-payloads]" >&2
     exit 2
     ;;
 esac
@@ -541,6 +542,46 @@ prunable_payloads() {
   printf '%s\n' "$prunable_listing"
 }
 
+# One row per payload: the name the recovery command takes, and the disk it
+# holds. The manager is asked where each payload lives rather than the name
+# being turned back into a path, because the install directory is a slug of the
+# tool name and the two do not round-trip.
+#
+# Rows are collected before anything prints because the summary line carries
+# the total, and the name column cannot be padded until the longest name is
+# known.
+collect_prunable_rows() {
+  prunable_rows=""
+  prunable_total_kb=0
+  prunable_name_width=0
+
+  while read -r prunable_tool prunable_version prunable_rest; do
+    [ -n "$prunable_tool" ] || continue
+    prunable_name="$prunable_tool@$prunable_version"
+
+    prunable_path="$(mise where "$prunable_name" 2>/dev/null || true)"
+    prunable_kb=0
+    if [ -n "$prunable_path" ]; then
+      prunable_kb="$(du -sk "$prunable_path" 2>/dev/null | awk 'NR == 1 { print $1 + 0 }')"
+      [ -n "$prunable_kb" ] || prunable_kb=0
+    fi
+
+    prunable_total_kb=$((prunable_total_kb + prunable_kb))
+    if [ "${#prunable_name}" -gt "$prunable_name_width" ]; then
+      prunable_name_width="${#prunable_name}"
+    fi
+    prunable_rows="$prunable_rows$prunable_name $prunable_kb
+"
+  done <<EOF
+$1
+EOF
+}
+
+# Kilobytes as the megabytes a reader decides on.
+format_payload_size() {
+  awk -v kb="$1" 'BEGIN { printf "%.1f MB\n", kb / 1024 }'
+}
+
 # A separate finding from executable selection, so it prints after that block
 # and carries its own second line instead of sharing the block's guidance
 # sentence. It never sets the issue flag: disk a user chose to keep is not a
@@ -551,17 +592,34 @@ prunable_payloads() {
 # recomputes when it runs: a version a project starts declaring between this
 # report and that run is not removed.
 render_leftover_payloads() {
+  leftover_detail="$1"
+
   leftover_listing="$(prunable_payloads)"
   [ -n "$leftover_listing" ] || return 0
 
   leftover_found="$(printf '%s\n' "$leftover_listing" | awk 'NF { count++ } END { print count + 0 }')"
   [ "$leftover_found" -gt 0 ] || return 0
 
-  if [ "$leftover_found" -eq 1 ]; then
-    printf '%s\n' "  advisory - 1 mise payload can be pruned"
-  else
-    printf '  advisory - %s mise payloads can be pruned\n' "$leftover_found"
+  leftover_total=""
+  if [ "$leftover_detail" = "true" ]; then
+    collect_prunable_rows "$leftover_listing"
+    leftover_total=" ($(format_payload_size "$prunable_total_kb"))"
   fi
+
+  if [ "$leftover_found" -eq 1 ]; then
+    printf '  advisory - 1 mise payload can be pruned%s\n' "$leftover_total"
+  else
+    printf '  advisory - %s mise payloads can be pruned%s\n' "$leftover_found" "$leftover_total"
+  fi
+
+  if [ "$leftover_detail" = "true" ]; then
+    printf '%s' "$prunable_rows" | while read -r leftover_name leftover_kb; do
+      [ -n "$leftover_name" ] || continue
+      printf '             %-*s  %8s\n' \
+        "$prunable_name_width" "$leftover_name" "$(format_payload_size "$leftover_kb")"
+    done
+  fi
+
   printf '%s\n' "             'mise prune --tools' reclaims the disk; Terrapod does not remove them."
 }
 
@@ -625,7 +683,7 @@ render_advisories
 # apply and doctor report the finding. status only summarizes readiness, which
 # this advisory deliberately does not affect, so it has nothing to add there.
 case "$mode" in
-  apply|doctor) render_leftover_payloads ;;
+  apply|doctor) render_leftover_payloads "$show_payloads" ;;
 esac
 
 case "$mode" in

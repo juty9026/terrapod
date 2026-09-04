@@ -105,6 +105,18 @@ mkdir -p "$mise_which_dir"
 # to prune, and lines are payloads.
 mise_prunable_file="$tmp_dir/mise-prunable"
 
+# 'mise where' turns a tool@version into an install path, and 'du' turns that
+# path into a size. Both are stubbed so a size assertion is exact instead of
+# depending on the filesystem's block accounting.
+mise_where_dir="$tmp_dir/mise-where"
+payload_size_dir="$tmp_dir/payload-sizes"
+mkdir -p "$mise_where_dir" "$payload_size_dir"
+
+# Tool names carry ':' and '/', neither of which can be a fixture filename.
+payload_fixture_key() {
+  printf '%s' "$1" | tr ':/@' '___'
+}
+
 cat >"$prefix/bin/mise" <<EOF
 #!/bin/sh
 case "\${1:-}" in
@@ -127,10 +139,32 @@ case "\${1:-}" in
     fi
     cat "$mise_prunable_file"
     ;;
+  where)
+    where_key="\$(printf '%s' "\${2:-}" | tr ':/@' '___')"
+    if [ -f "$mise_where_dir/\$where_key" ]; then
+      cat "$mise_where_dir/\$where_key"
+    else
+      exit 1
+    fi
+    ;;
 esac
 exit 0
 EOF
 chmod +x "$prefix/bin/mise"
+
+# 'du -sk <path>' prints kilobytes then the path. The fixture is keyed by the
+# path's basename so a test states a payload's size in one line.
+cat >"$path_dir/du" <<EOF
+#!/bin/sh
+du_path="\${2:-}"
+du_key="\${du_path##*/}"
+if [ -f "$payload_size_dir/\$du_key" ]; then
+  printf '%s\t%s\n' "\$(cat "$payload_size_dir/\$du_key")" "\$du_path"
+else
+  printf '%s\t%s\n' 0 "\$du_path"
+fi
+EOF
+chmod +x "$path_dir/du"
 
 run_selection() {
   mode="$1"
@@ -791,6 +825,67 @@ leftover_apply_output="$(run_leftover_selection apply)"
 assert_line "$leftover_apply_output" \
   "  advisory - 1 mise payload can be pruned" \
   "apply reports prunable payloads"
+
+# The detail listing. Sizes come from stubbed 'mise where' and 'du', so the
+# rendered megabytes are exact rather than filesystem-dependent.
+cat >"$mise_prunable_file" <<'EOF'
+aqua:sharkdp/bat              0.26.1
+npm:pnpm                      10.33.3
+node                          22.22.2
+rust                          stable (symlink)
+EOF
+printf '%s\n' "$tmp_dir/payloads/bat" >"$mise_where_dir/aqua_sharkdp_bat_0.26.1"
+printf '%s\n' "$tmp_dir/payloads/pnpm" >"$mise_where_dir/npm_pnpm_10.33.3"
+printf '%s\n' "$tmp_dir/payloads/node" >"$mise_where_dir/node_22.22.2"
+printf '%s\n' "$tmp_dir/payloads/rust" >"$mise_where_dir/rust_stable"
+mkdir -p "$tmp_dir/payloads/bat" "$tmp_dir/payloads/pnpm" \
+  "$tmp_dir/payloads/node" "$tmp_dir/payloads/rust"
+printf '%s\n' 12288 >"$payload_size_dir/bat"
+printf '%s\n' 4096 >"$payload_size_dir/pnpm"
+printf '%s\n' 62464 >"$payload_size_dir/node"
+printf '%s\n' 0 >"$payload_size_dir/rust"
+
+run_payload_detail() {
+  HOME="$tmp_dir/home" \
+    MISE_DATA_DIR="$leftover_data_dir" \
+    TERRAPOD_EXECUTABLE_SELECTION_INVENTORY_DIR="$inventory" \
+    TERRAPOD_STANDARD_HOMEBREW_PREFIX="$prefix" \
+    TERRAPOD_MISE_SHIMS_DIR="$mise_shims" \
+    TERRAPOD_MANAGED_PATH="$path_dir:/usr/bin:/bin" \
+    PATH="$path_dir:/usr/bin:/bin" \
+    "$selection" doctor macos-terminal false false true 2>&1 || true
+}
+
+payload_detail_output="$(run_payload_detail)"
+assert_line "$payload_detail_output" \
+  "  advisory - 4 mise payloads can be pruned (77.0 MB)" \
+  "the detailed advisory carries the total size"
+assert_line "$payload_detail_output" \
+  "             aqua:sharkdp/bat@0.26.1   12.0 MB" \
+  "the detailed advisory lists each payload with its size"
+assert_line "$payload_detail_output" \
+  "             npm:pnpm@10.33.3           4.0 MB" \
+  "payload names are padded to a shared width"
+assert_line "$payload_detail_output" \
+  "             node@22.22.2              61.0 MB" \
+  "a version-level payload is listed by tool and version"
+assert_line "$payload_detail_output" \
+  "             rust@stable                0.0 MB" \
+  "a payload linked outside the data directory is listed without its target's size"
+assert_line "$payload_detail_output" \
+  "             'mise prune --tools' reclaims the disk; Terrapod does not remove them." \
+  "the detailed advisory keeps the guidance line last"
+
+# The acceptance criterion the issue states: the list and the count describe
+# the same set, so a reader can act on the list without wondering what the
+# number covered.
+payload_row_count="$(
+  printf '%s\n' "$payload_detail_output" |
+    grep -c ' MB$' || true
+)"
+[ "$payload_row_count" = "4" ] ||
+  fail "the detailed listing has exactly one row per counted payload (found $payload_row_count)"
+pass "the detailed listing has exactly one row per counted payload"
 
 # The whole check depends on mise to say what is reachable, so an absent mise
 # skips it rather than calling every payload prunable.
