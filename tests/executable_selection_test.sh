@@ -93,14 +93,17 @@ EOF
 # is the machine where mise has no active declaration for anything: 'bin-paths'
 # says nothing and 'which' reports the tool is not currently active.
 mise_bin_paths_file="$tmp_dir/mise-bin-paths"
+mise_bin_paths_log="$tmp_dir/mise-bin-paths.log"
 mise_which_dir="$tmp_dir/mise-which"
 mkdir -p "$mise_which_dir"
 : >"$mise_bin_paths_file"
+: >"$mise_bin_paths_log"
 
 cat >"$prefix/bin/mise" <<EOF
 #!/bin/sh
 case "\${1:-}" in
   bin-paths)
+    printf '%s\n' bin-paths >>"$mise_bin_paths_log"
     cat "$mise_bin_paths_file"
     ;;
   which)
@@ -324,9 +327,18 @@ select_runtimes_from() {
 }
 
 select_runtimes_from "$mise_bin_dir"
+: >"$mise_bin_paths_log"
 bin_paths_output="$(run_mise_selection)"
 assert_not_contains "$bin_paths_output" "advisory - node" \
   "a runtime resolving through a reported mise bin directory is canonical"
+
+# One process, one probe. The directory set feeds four Development Runtime
+# declarations, and every read of it happens inside a pipeline, so a cache that
+# fills itself on first read fills a subshell instead.
+bin_paths_calls="$(grep -c . "$mise_bin_paths_log")"
+[ "$bin_paths_calls" = 1 ] ||
+  fail "the check asks mise for its bin paths once per process (asked $bin_paths_calls times)"
+pass "the check asks mise for its bin paths once per process"
 
 select_runtimes_from "$mise_shims"
 shims_mode_output="$(run_mise_selection)"
