@@ -535,7 +535,10 @@ prunable_payloads() {
   command -v mise >/dev/null 2>&1 || return 0
   [ -d "${MISE_DATA_DIR:-$HOME/.local/share/mise}/installs" ] || return 0
 
-  prunable_listing="$(mise ls -C "$HOME" --prunable --no-header 2>/dev/null)" ||
+  # A manager that decides to prompt would otherwise block on doctor's own
+  # stdin, and its prompt text is lost under 2>/dev/null, leaving the process
+  # hung with nothing printed to explain why.
+  prunable_listing="$(mise ls -C "$HOME" --prunable --no-header 2>/dev/null </dev/null)" ||
     return 0
   [ -n "$prunable_listing" ] || return 0
 
@@ -559,18 +562,32 @@ collect_prunable_rows() {
     [ -n "$prunable_tool" ] || continue
     prunable_name="$prunable_tool@$prunable_version"
 
-    prunable_path="$(mise where "$prunable_name" 2>/dev/null || true)"
-    prunable_kb=0
-    if [ -n "$prunable_path" ]; then
+    # This loop's own rows are read from the heredoc below, on this same
+    # stdin. A 'mise where' that ever consumed a byte -- a trust prompt, some
+    # future subcommand behaviour -- would eat the remaining payload lines,
+    # and because the count above comes from a separate awk pass, the summary
+    # would then describe more payloads than the list beneath it shows.
+    prunable_path="$(mise where "$prunable_name" 2>/dev/null </dev/null || true)"
+
+    # 0.0 MB already means something real: a payload symlinked outside the
+    # data directory, like a rust toolchain, measures genuinely zero. A path
+    # 'mise where' could not name, or one it named that no longer exists, is
+    # a different case -- unmeasured, not tiny -- so it renders as '?' and
+    # stays out of the total instead of silently reading as "nothing to
+    # reclaim".
+    if [ -n "$prunable_path" ] && [ -e "$prunable_path" ]; then
       prunable_kb="$(du -sk "$prunable_path" 2>/dev/null | awk 'NR == 1 { print $1 + 0 }')"
       [ -n "$prunable_kb" ] || prunable_kb=0
+      prunable_total_kb=$((prunable_total_kb + prunable_kb))
+      prunable_size="$(format_payload_size "$prunable_kb")"
+    else
+      prunable_size="?"
     fi
 
-    prunable_total_kb=$((prunable_total_kb + prunable_kb))
     if [ "${#prunable_name}" -gt "$prunable_name_width" ]; then
       prunable_name_width="${#prunable_name}"
     fi
-    prunable_rows="$prunable_rows$prunable_name $prunable_kb
+    prunable_rows="$prunable_rows$prunable_name|$prunable_size
 "
   done <<EOF
 $1
@@ -613,10 +630,13 @@ render_leftover_payloads() {
   fi
 
   if [ "$leftover_detail" = "true" ]; then
-    printf '%s' "$prunable_rows" | while read -r leftover_name leftover_kb; do
+    # %9s: 'format_payload_size' can emit a four-digit megabyte figure for a
+    # gigabyte-scale payload (a rust or node toolchain), and %8s overflows on
+    # that width, shifting the row one column left of every other.
+    printf '%s' "$prunable_rows" | while IFS='|' read -r leftover_name leftover_size; do
       [ -n "$leftover_name" ] || continue
-      printf '             %-*s  %8s\n' \
-        "$prunable_name_width" "$leftover_name" "$(format_payload_size "$leftover_kb")"
+      printf '             %-*s  %9s\n' \
+        "$prunable_name_width" "$leftover_name" "$leftover_size"
     done
   fi
 

@@ -104,6 +104,8 @@ mkdir -p "$mise_which_dir"
 # file missing is a mise too old for the flag, empty is a machine with nothing
 # to prune, and lines are payloads.
 mise_prunable_file="$tmp_dir/mise-prunable"
+mise_ls_log="$tmp_dir/mise-ls.log"
+: >"$mise_ls_log"
 
 # 'mise where' turns a tool@version into an install path, and 'du' turns that
 # path into a size. Both are stubbed so a size assertion is exact instead of
@@ -133,6 +135,7 @@ case "\${1:-}" in
     fi
     ;;
   ls)
+    printf '%s\n' "\$*" >>"$mise_ls_log"
     if [ ! -f "$mise_prunable_file" ]; then
       printf '%s\n' "error: unexpected argument '--prunable' found" >&2
       exit 2
@@ -805,6 +808,13 @@ assert_not_contains "$leftover_output" "aqua:sharkdp/bat" \
 assert_contains "$leftover_output" "Canonical executable selection: ready" \
   "prunable payloads are a separate finding from executable selection"
 
+# ADR 0020 pins the invocation to '$HOME' and '--no-header' so the row count
+# an awk pass produces cannot be thrown off by a header line -- an untested
+# flag string is free to drift, and 'mise ls' would then answer with a header
+# row awk counts as a payload.
+assert_file_contains "$mise_ls_log" "-C $tmp_dir/home --prunable --no-header" \
+  "'mise ls' is invoked home-pinned, header-free, and prunable-only"
+
 cat >"$mise_prunable_file" <<'EOF'
 node                          22.22.2
 EOF
@@ -833,17 +843,28 @@ aqua:sharkdp/bat              0.26.1
 npm:pnpm                      10.33.3
 node                          22.22.2
 rust                          stable (symlink)
+go                             1.21.0
+npm:left-pad                   1.3.0
+deno                            1.40.0
 EOF
-printf '%s\n' "$tmp_dir/payloads/bat" >"$mise_where_dir/aqua_sharkdp_bat_0.26.1"
-printf '%s\n' "$tmp_dir/payloads/pnpm" >"$mise_where_dir/npm_pnpm_10.33.3"
-printf '%s\n' "$tmp_dir/payloads/node" >"$mise_where_dir/node_22.22.2"
-printf '%s\n' "$tmp_dir/payloads/rust" >"$mise_where_dir/rust_stable"
+printf '%s\n' "$tmp_dir/payloads/bat" >"$mise_where_dir/$(payload_fixture_key "aqua:sharkdp/bat@0.26.1")"
+printf '%s\n' "$tmp_dir/payloads/pnpm" >"$mise_where_dir/$(payload_fixture_key "npm:pnpm@10.33.3")"
+printf '%s\n' "$tmp_dir/payloads/node" >"$mise_where_dir/$(payload_fixture_key "node@22.22.2")"
+printf '%s\n' "$tmp_dir/payloads/rust" >"$mise_where_dir/$(payload_fixture_key "rust@stable")"
+printf '%s\n' "$tmp_dir/payloads/go" >"$mise_where_dir/$(payload_fixture_key "go@1.21.0")"
+# 'deno' answers with a path, but nothing is ever created there -- the payload
+# 'mise where' remembers after its install was removed by hand. 'npm:left-pad'
+# gets no fixture at all, the mise-too-old-to-answer case at the row level.
+printf '%s\n' "$tmp_dir/payloads/deno-removed" >"$mise_where_dir/$(payload_fixture_key "deno@1.40.0")"
 mkdir -p "$tmp_dir/payloads/bat" "$tmp_dir/payloads/pnpm" \
-  "$tmp_dir/payloads/node" "$tmp_dir/payloads/rust"
+  "$tmp_dir/payloads/node" "$tmp_dir/payloads/rust" "$tmp_dir/payloads/go"
 printf '%s\n' 12288 >"$payload_size_dir/bat"
 printf '%s\n' 4096 >"$payload_size_dir/pnpm"
 printf '%s\n' 62464 >"$payload_size_dir/node"
 printf '%s\n' 0 >"$payload_size_dir/rust"
+# Four-digit megabytes: 1258291 KiB rounds to 1228.8 MB, the width that
+# overflows an %8s field.
+printf '%s\n' 1258291 >"$payload_size_dir/go"
 
 run_payload_detail() {
   HOME="$tmp_dir/home" \
@@ -858,20 +879,29 @@ run_payload_detail() {
 
 payload_detail_output="$(run_payload_detail)"
 assert_line "$payload_detail_output" \
-  "  advisory - 4 mise payloads can be pruned (77.0 MB)" \
-  "the detailed advisory carries the total size"
+  "  advisory - 7 mise payloads can be pruned (1305.8 MB)" \
+  "the detailed advisory carries the total size, excluding unmeasured payloads"
 assert_line "$payload_detail_output" \
-  "             aqua:sharkdp/bat@0.26.1   12.0 MB" \
+  "             aqua:sharkdp/bat@0.26.1    12.0 MB" \
   "the detailed advisory lists each payload with its size"
 assert_line "$payload_detail_output" \
-  "             npm:pnpm@10.33.3           4.0 MB" \
+  "             npm:pnpm@10.33.3            4.0 MB" \
   "payload names are padded to a shared width"
 assert_line "$payload_detail_output" \
-  "             node@22.22.2              61.0 MB" \
+  "             node@22.22.2               61.0 MB" \
   "a version-level payload is listed by tool and version"
 assert_line "$payload_detail_output" \
-  "             rust@stable                0.0 MB" \
-  "a payload linked outside the data directory is listed without its target's size"
+  "             rust@stable                 0.0 MB" \
+  "a payload linked outside the data directory that genuinely measures zero keeps 0.0 MB"
+assert_line "$payload_detail_output" \
+  "             go@1.21.0                1228.8 MB" \
+  "a gigabyte-scale payload's four-digit megabyte figure stays aligned with every other row"
+assert_line "$payload_detail_output" \
+  "             npm:left-pad@1.3.0               ?" \
+  "a payload 'mise where' cannot resolve renders as an unknown size"
+assert_line "$payload_detail_output" \
+  "             deno@1.40.0                      ?" \
+  "a payload whose 'mise where' path no longer exists renders as an unknown size"
 assert_line "$payload_detail_output" \
   "             'mise prune --tools' reclaims the disk; Terrapod does not remove them." \
   "the detailed advisory keeps the guidance line last"
@@ -881,9 +911,9 @@ assert_line "$payload_detail_output" \
 # number covered.
 payload_row_count="$(
   printf '%s\n' "$payload_detail_output" |
-    grep -c ' MB$' || true
+    grep -cE ' (MB|\?)$' || true
 )"
-[ "$payload_row_count" = "4" ] ||
+[ "$payload_row_count" = "7" ] ||
   fail "the detailed listing has exactly one row per counted payload (found $payload_row_count)"
 pass "the detailed listing has exactly one row per counted payload"
 
