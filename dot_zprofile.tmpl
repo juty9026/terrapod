@@ -1,4 +1,26 @@
-# Login-shell PATH is initialized by the managed .zshenv for both profiles.
+{{ if eq .chezmoi.os "darwin" -}}
+# The managed .zshenv builds PATH, but on macOS it does not get the last word:
+# /etc/zprofile runs /usr/libexec/path_helper right afterwards, which
+# re-prepends the /etc/paths entries (/usr/local/bin, /usr/bin, /bin,
+# /usr/sbin, /sbin) and leaves the Homebrew prefix and $HOME/.local/bin behind
+# them. Repeating .zshenv's two prepends here, in the same order, restores the
+# ordering it declared; this is Homebrew's own documented answer to
+# path_helper. The duplicates the repeat creates collapse because .zshenv
+# already declared `typeset -U path PATH`, which keeps the first occurrence.
+if [[ -d "$HOME/.local/bin" ]]; then
+  path=("$HOME/.local/bin" $path)
+fi
+
+# HOMEBREW_PREFIX carries whichever prefix .zshenv resolved, so the two files
+# never disagree about which Homebrew is in charge. An uninstalled Homebrew
+# leaves it unset and nothing here runs.
+if [[ -n "${HOMEBREW_PREFIX:-}" && -x "$HOMEBREW_PREFIX/bin/brew" ]]; then
+  eval "$("$HOMEBREW_PREFIX/bin/brew" shellenv)"
+fi
+{{ else -}}
+# Ubuntu has no path_helper, so the PATH the managed .zshenv builds reaches the
+# login shell unreordered and this file leaves it alone.
+{{ end -}}
 {{ if default false (get . "enableMacosAppGroupDevelopmentApps") }}
 # OrbStack ships its shell integration with the development-apps macOS App Group.
 # The readability guard keeps login shells working when the cask is missing.
