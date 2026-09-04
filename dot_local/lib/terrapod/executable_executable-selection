@@ -36,6 +36,73 @@ standard_homebrew_prefix() {
   terrapod_standard_homebrew_prefix_for_profile "$profile"
 }
 
+# The PATH every verdict is computed in. Inheriting the caller's PATH makes the
+# same machine answer differently depending on how tpod was invoked, so the
+# check reconstructs the PATH a login shell builds instead of reading the one
+# it was handed.
+#
+# Two details are load-bearing. PATH is reset to the system default before the
+# probe, because letting the caller's PATH into the probe reproduces the same
+# bug one level down. The Homebrew variables are cleared because
+# dot_zshenv.tmpl skips its 'brew shellenv' probe when the environment already
+# carries a prefix, so a leaked prefix whose bin directory is not on the reset
+# PATH would yield a managed PATH with no Homebrew in it at all.
+#
+# 'zsh -lc' reads .zshenv, /etc/zprofile, and .zprofile but not .zshrc. That is
+# the right boundary: it excludes fastfetch, oh-my-zsh, and compinit, and the
+# only PATH .zshrc contributes is mise activation, which 'mise bin-paths'
+# supplies directly.
+probe_login_path() {
+  probe_zsh="$(command -v zsh 2>/dev/null || true)"
+  [ -n "$probe_zsh" ] || return 1
+
+  PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+    env -u HOMEBREW_PREFIX -u HOMEBREW_CELLAR -u HOMEBREW_REPOSITORY -u MISE_SHELL \
+    "$probe_zsh" -lc 'print -rn -- $PATH' 2>/dev/null
+}
+
+mise_bin_paths() {
+  command -v mise >/dev/null 2>&1 || return 0
+  mise bin-paths 2>/dev/null || true
+}
+
+managed_path_value=""
+managed_path_inherited=0
+
+# Probed once per process; every resolution afterwards reads the variable.
+initialize_managed_path() {
+  if [ -n "${TERRAPOD_MANAGED_PATH:-}" ]; then
+    managed_path_value="$TERRAPOD_MANAGED_PATH"
+    return
+  fi
+
+  login_path="$(probe_login_path || true)"
+  if [ -z "$login_path" ]; then
+    managed_path_value="$PATH"
+    managed_path_inherited=1
+    return
+  fi
+
+  managed_path_value="$(mise_bin_paths | tr '\n' ':')$login_path"
+}
+
+managed_path() {
+  printf '%s\n' "$managed_path_value"
+}
+
+# command -v inside the managed PATH. The subshell keeps the assignment from
+# leaking into the rest of the check, and the hash table is dropped because a
+# command this process already ran -- mise, brew -- would otherwise report
+# where the ambient PATH found it rather than where the managed PATH does.
+resolve_in_path() {
+  (
+    PATH="$managed_path_value"
+    export PATH
+    hash -r 2>/dev/null || true
+    command -v "$1" 2>/dev/null
+  )
+}
+
 core_records() {
   while IFS=' ' read -r package command; do
     printf '%s|%s|%s\n' homebrew-formula "$package" "$command"
@@ -199,6 +266,14 @@ print_advisory() {
   printf '%s\n' "             Adjust PATH or remove the other installation manually, then rerun 'tpod doctor'."
 }
 
+initialize_managed_path
+
+# A verdict that cannot be made invocation-independent still has to be
+# interpretable, so the PATH it was computed from is named.
+if [ "$managed_path_inherited" -eq 1 ]; then
+  printf '  note - executable selection judged against the inherited PATH: %s\n' "$(managed_path)"
+fi
+
 failure_found=0
 issue_found=0
 records="$(active_records)"
@@ -221,7 +296,7 @@ while IFS='|' read -r provider package command; do
     continue
   fi
 
-  actual="$(command -v "$command" 2>/dev/null || true)"
+  actual="$(resolve_in_path "$command" || true)"
   if [ -z "$actual" ]; then
     print_failure "$package is unavailable on PATH (canonical: $expected)"
     failure_found=1

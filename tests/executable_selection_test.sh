@@ -95,6 +95,7 @@ run_selection() {
     TERRAPOD_EXECUTABLE_SELECTION_INVENTORY_DIR="$inventory" \
     TERRAPOD_STANDARD_HOMEBREW_PREFIX="$prefix" \
     TERRAPOD_MISE_SHIMS_DIR="$mise_shims" \
+    TERRAPOD_MANAGED_PATH="$path_dir:/usr/bin:/bin" \
     PATH="$path_dir:/usr/bin:/bin" \
     "$selection" "$mode" macos-terminal false false "$@"
 }
@@ -177,6 +178,7 @@ ai_enabled_output="$(
     TERRAPOD_EXECUTABLE_SELECTION_INVENTORY_DIR="$inventory" \
     TERRAPOD_STANDARD_HOMEBREW_PREFIX="$prefix" \
     TERRAPOD_MISE_SHIMS_DIR="$mise_shims" \
+    TERRAPOD_MANAGED_PATH="$path_dir:/usr/bin:/bin" \
     PATH="$path_dir:/usr/bin:/bin" \
     "$selection" doctor macos-terminal true false 2>&1
 )"
@@ -201,6 +203,7 @@ run_claude_selection() {
     TERRAPOD_EXECUTABLE_SELECTION_INVENTORY_DIR="$inventory" \
     TERRAPOD_STANDARD_HOMEBREW_PREFIX="$prefix" \
     TERRAPOD_MISE_SHIMS_DIR="$mise_shims" \
+    TERRAPOD_MANAGED_PATH="$claude_path_dir:/usr/bin:/bin" \
     PATH="$claude_path_dir:/usr/bin:/bin" \
     "$selection" doctor macos-terminal true false 2>&1 || true
 }
@@ -225,6 +228,36 @@ claude_missing_output="$(run_claude_selection)"
 assert_contains "$claude_missing_output" "failure - claude-code is not installed through the Claude Code installer" \
   "an absent Claude Code install names the vendor installer"
 
+# With no TERRAPOD_MANAGED_PATH and a zsh that refuses to run, the probe cannot
+# produce a managed PATH. The verdict then falls back to the inherited PATH and
+# has to say so, because that is the one case where it depends on the caller.
+failing_probe_dir="$tmp_dir/failing-probe"
+mkdir -p "$failing_probe_dir"
+cat >"$failing_probe_dir/zsh" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+chmod +x "$failing_probe_dir/zsh"
+
+inherited_path="$failing_probe_dir:$path_dir:/usr/bin:/bin"
+fallback_output="$(
+  HOME="$tmp_dir/home" \
+    TERRAPOD_EXECUTABLE_SELECTION_INVENTORY_DIR="$inventory" \
+    TERRAPOD_STANDARD_HOMEBREW_PREFIX="$prefix" \
+    TERRAPOD_MISE_SHIMS_DIR="$mise_shims" \
+    PATH="$inherited_path" \
+    "$selection" doctor macos-terminal false false 2>&1 || true
+)"
+assert_contains "$fallback_output" \
+  "note - executable selection judged against the inherited PATH: $inherited_path" \
+  "a failed login-shell probe names the PATH the verdict was computed from"
+assert_not_contains "$fallback_output" "failure -" \
+  "the inherited-PATH fallback still resolves the declared commands"
+
+managed_output="$(run_selection doctor)"
+assert_not_contains "$managed_output" "inherited PATH" \
+  "a computed managed PATH says nothing about inheriting one"
+
 status_output="$(run_selection status)"
 assert_contains "$status_output" "Executable selection:" \
   "status exposes executable selection state"
@@ -247,6 +280,7 @@ assert_canonical_prefix() {
       TERRAPOD_MISE_SHIMS_DIR="$mise_shims" \
       TERRAPOD_MACHINE_ARCH="$arch" \
       TERRAPOD_DARWIN_TRANSLATED="$translated" \
+      TERRAPOD_MANAGED_PATH="$path_dir:/usr/bin:/bin" \
       PATH="$path_dir:/usr/bin:/bin" \
       "$selection" doctor "$profile" false false 2>&1
   )"
@@ -272,6 +306,7 @@ missing_lib_output="$(
     TERRAPOD_STANDARD_HOMEBREW_PREFIX="$prefix" \
     TERRAPOD_MISE_SHIMS_DIR="$mise_shims" \
     TERRAPOD_HOMEBREW_PREFIX_LIB="$tmp_dir/absent-homebrew-prefix.sh" \
+    TERRAPOD_MANAGED_PATH="$path_dir:/usr/bin:/bin" \
     PATH="$path_dir:/usr/bin:/bin" \
     "$selection" doctor macos-terminal false false 2>&1
 )"
