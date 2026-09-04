@@ -115,17 +115,89 @@ managed_path() {
   printf '%s\n' "$managed_path_value"
 }
 
-# command -v inside the managed PATH. The subshell keeps the assignment from
+# command -v inside a given PATH. The subshell keeps the assignment from
 # leaking into the rest of the check, and the hash table is dropped because a
 # command this process already ran -- mise, brew -- would otherwise report
-# where the ambient PATH found it rather than where the managed PATH does.
-resolve_in_path() {
+# where the ambient PATH found it rather than where the given PATH does.
+resolve_in() {
   (
-    PATH="$managed_path_value"
+    PATH="$1"
     export PATH
     hash -r 2>/dev/null || true
-    command -v "$1" 2>/dev/null
+    command -v "$2" 2>/dev/null
   )
+}
+
+resolve_in_path() {
+  resolve_in "$managed_path_value" "$1"
+}
+
+# The managed PATH with one directory dropped. Used to ask what a shim forwards
+# to: removing the shims directory and resolving again is the only way to
+# observe the next match, because the shim itself answers every other probe.
+managed_path_without() {
+  printf '%s' "$managed_path_value" | awk -v drop="$1" '
+    BEGIN { RS = ":" }
+    {
+      entry = $0
+      sub(/\/+$/, "", entry)
+      if (entry == drop) next
+      out = out (kept++ ? ":" : "") $0
+    }
+    END { printf "%s", out }
+  '
+}
+
+# Trailing and repeated slashes name the same file but not the same string, and
+# the three sources an effective executable can come from -- command -v, 'mise
+# which', and a second resolution -- do not agree on them.
+normalize_path() {
+  printf '%s\n' "$1" | sed -e 's|//*|/|g' -e 's|\(.\)/*$|\1|'
+}
+
+# The file that actually runs when the command is typed, which is not always
+# the file the managed PATH resolves to. A Development Runtime Manager shim is
+# a symlink to the manager binary, so it neither equals nor is -ef to the
+# executable it ends up running; both comparisons the check makes are blind to
+# it and the forwarding has to be followed by asking.
+#
+# A shim for a tool no active config selects does not execute the manager's own
+# payload at all: the manager refuses to resolve it and the shim forwards to
+# the next PATH match. That is the case that produced 15 false advisories on a
+# macOS workstation for commands already running the Homebrew build, so the
+# fall-through is resolved rather than assumed unreachable.
+#
+# When neither question answers -- the manager is gone, or nothing else on PATH
+# provides the command -- the shim itself is the honest answer, because that is
+# the file the managed PATH would hand the caller.
+effective_executable() {
+  effective_command="$1"
+  effective_resolved="$2"
+  effective_shims="$(normalize_path "$(mise_shims_dir)")"
+
+  case "$(normalize_path "$effective_resolved")" in
+    "$effective_shims"/*) ;;
+    *)
+      normalize_path "$effective_resolved"
+      return
+      ;;
+  esac
+
+  effective_active="$(mise_which "$effective_command")"
+  if [ -n "$effective_active" ]; then
+    normalize_path "$effective_active"
+    return
+  fi
+
+  effective_fallthrough="$(
+    resolve_in "$(managed_path_without "$effective_shims")" "$effective_command"
+  )"
+  if [ -n "$effective_fallthrough" ]; then
+    normalize_path "$effective_fallthrough"
+    return
+  fi
+
+  normalize_path "$effective_resolved"
 }
 
 core_records() {
@@ -302,7 +374,7 @@ any_candidate_installed() {
   }
 }
 
-# Whether the executable that runs is one of the canonical candidates. Path
+# Whether the effective executable is one of the canonical candidates. Path
 # equality and -ef are both needed: -ef alone misses a candidate that names a
 # file this machine does not have, and equality alone misses the ordinary case
 # of one file reached through two paths.
@@ -378,7 +450,14 @@ while IFS='|' read -r provider package command; do
     continue
   fi
 
-  if ! matches_canonical "$actual" "$candidates"; then
+  # The verdict is made on the effective executable, but the advisory names the
+  # path the managed PATH resolved to. That path is what the reader has to act
+  # on -- it is the entry to reorder or the file to remove -- while the file the
+  # forwarding reached is somewhere the reader never put anything. It is also
+  # the directory advisories group by, since a shared resolved directory is the
+  # shared cause.
+  effective="$(effective_executable "$command" "$actual")"
+  if ! matches_canonical "$effective" "$candidates"; then
     print_advisory "$package" "$actual" "$representative"
     issue_found=1
   fi

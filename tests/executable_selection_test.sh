@@ -371,6 +371,55 @@ assert_contains "$inactive_runtime_output" "canonical: $mise_shims/node" \
 : >"$mise_bin_paths_file"
 rm -f "$mise_which_dir"/*
 
+# A shim is a symlink to the mise binary, never to the executable it ends up
+# running, so neither string equality nor -ef can see through it. These four
+# cases are the whole of that indirection: the shim forwards because mise has
+# nothing active, or it forwards to what mise does have active, and either
+# destination can be canonical or not.
+ln -s "$prefix/bin/mise" "$mise_shims/rg"
+shim_path="$mise_shims:$path_dir:/usr/bin:/bin"
+
+run_shim_selection() {
+  HOME="$tmp_dir/home" \
+    TERRAPOD_EXECUTABLE_SELECTION_INVENTORY_DIR="$inventory" \
+    TERRAPOD_STANDARD_HOMEBREW_PREFIX="$prefix" \
+    TERRAPOD_MISE_SHIMS_DIR="$mise_shims" \
+    TERRAPOD_MANAGED_PATH="$shim_path" \
+    PATH="$shim_path" \
+    "$selection" doctor macos-terminal false false 2>&1 || true
+}
+
+passthrough_output="$(run_shim_selection)"
+assert_not_contains "$passthrough_output" "advisory - ripgrep" \
+  "a shim mise cannot activate is judged by the canonical file it forwards to"
+
+# The same fall-through, landing somewhere else. Without this the fix would
+# also swallow the findings the check exists for.
+rogue_shim_dir="$tmp_dir/rogue-shim-target"
+write_executable "$rogue_shim_dir/rg"
+rm -f "$path_dir/rg"
+ln -s "$rogue_shim_dir/rg" "$path_dir/rg"
+rogue_passthrough_output="$(run_shim_selection)"
+assert_contains "$rogue_passthrough_output" "advisory - ripgrep resolves to $mise_shims/rg" \
+  "a shim forwarding to a non-canonical file stays an advisory"
+assert_contains "$rogue_passthrough_output" "canonical: $prefix/bin/rg" \
+  "the shim advisory names the path the reader has to act on and the canonical one"
+
+rm -f "$path_dir/rg"
+ln -s "$prefix/bin/rg" "$path_dir/rg"
+
+printf '%s\n' "$prefix/bin/rg" >"$mise_which_dir/rg"
+active_canonical_output="$(run_shim_selection)"
+assert_not_contains "$active_canonical_output" "advisory - ripgrep" \
+  "a shim mise activates onto the canonical file raises no advisory"
+
+printf '%s\n' "$rogue_shim_dir/rg" >"$mise_which_dir/rg"
+active_rogue_output="$(run_shim_selection)"
+assert_contains "$active_rogue_output" "advisory - ripgrep resolves to $mise_shims/rg" \
+  "a shim mise activates onto its own payload is an advisory when Homebrew is canonical"
+
+rm -f "$mise_shims/rg" "$mise_which_dir/rg"
+
 # The canonical path appears in whichever concern the record raises, so these
 # assertions observe the resolved prefix without depending on what the host
 # machine has actually installed.
