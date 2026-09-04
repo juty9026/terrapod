@@ -61,9 +61,34 @@ probe_login_path() {
     "$probe_zsh" -lc 'print -rn -- $PATH' 2>/dev/null
 }
 
-mise_bin_paths() {
+mise_bin_paths_value=""
+
+# Probed once per process, the same shape initialize_managed_path uses and for
+# the same reason: every read of this value happens inside a pipeline or a
+# command substitution, so a cache filled on first read would be filled in a
+# subshell and thrown away. The directory set answers both the managed PATH and
+# every Development Runtime candidate set, and 'mise bin-paths' is not a cheap
+# command to run once per declaration.
+initialize_mise_bin_paths() {
   command -v mise >/dev/null 2>&1 || return 0
-  mise bin-paths 2>/dev/null || true
+  mise_bin_paths_value="$(mise bin-paths 2>/dev/null || true)"
+}
+
+mise_bin_paths() {
+  [ -n "$mise_bin_paths_value" ] || return 0
+  printf '%s\n' "$mise_bin_paths_value"
+}
+
+mise_shims_dir() {
+  printf '%s\n' "${TERRAPOD_MISE_SHIMS_DIR:-${MISE_DATA_DIR:-$HOME/.local/share/mise}/shims}"
+}
+
+# The file mise currently selects for a command, or nothing. Failing is not an
+# error here: a tool mise knows about but no active config selects is exactly
+# the case this check exists to describe.
+mise_which() {
+  command -v mise >/dev/null 2>&1 || return 0
+  mise which "$1" 2>/dev/null || true
 }
 
 managed_path_value=""
@@ -224,7 +249,18 @@ provider_label() {
   esac
 }
 
-expected_executable() {
+# The locations a command is allowed to resolve to, newline separated. The
+# Development Runtime Manager is the only provider with more than one: 'mise
+# activate' puts the active install directories on PATH and 'mise activate
+# --shims' puts the shims directory there, both are supported activation
+# modes, and pinning either one as the single answer makes the other mode
+# permanently non-canonical. Every other provider installs to one place.
+#
+# The first line is the representative, the path a failure message names when
+# it has to print a single canonical location. For mise that is the active
+# target, and the shims path when nothing is active, because those are the two
+# locations that exist independently of which runtimes happen to be installed.
+canonical_candidates() {
   provider="$1"
   command="$2"
 
@@ -237,16 +273,52 @@ expected_executable() {
       printf '%s/.local/bin/%s\n' "$HOME" "$command"
       ;;
     mise)
-      mise_shims_dir="${TERRAPOD_MISE_SHIMS_DIR:-${MISE_DATA_DIR:-$HOME/.local/share/mise}/shims}"
-      printf '%s/%s\n' "$mise_shims_dir" "$command"
+      mise_which "$command"
+      printf '%s/%s\n' "$(mise_shims_dir)" "$command"
+      mise_bin_paths | while IFS= read -r bin_dir; do
+        [ -n "$bin_dir" ] || continue
+        printf '%s/%s\n' "$bin_dir" "$command"
+      done
       ;;
   esac
 }
 
-files_are_same() {
-  first="$1"
-  second="$2"
-  [ "$first" = "$second" ] || [ "$first" -ef "$second" ]
+first_candidate() {
+  printf '%s\n' "$1" | awk 'NF { print; exit }'
+}
+
+# A declaration is installed when any accepted location holds an executable.
+# Requiring all of them would fail every machine, because the shims path and
+# the active install directory are alternatives, not companions.
+any_candidate_installed() {
+  printf '%s\n' "$1" | {
+    while IFS= read -r candidate; do
+      [ -n "$candidate" ] || continue
+      if [ -x "$candidate" ]; then
+        exit 0
+      fi
+    done
+    exit 1
+  }
+}
+
+# Whether the executable that runs is one of the canonical candidates. Path
+# equality and -ef are both needed: -ef alone misses a candidate that names a
+# file this machine does not have, and equality alone misses the ordinary case
+# of one file reached through two paths.
+matches_canonical() {
+  matches_actual="$1"
+  matches_list="$2"
+
+  printf '%s\n' "$matches_list" | {
+    while IFS= read -r candidate; do
+      [ -n "$candidate" ] || continue
+      if [ "$matches_actual" = "$candidate" ] || [ "$matches_actual" -ef "$candidate" ]; then
+        exit 0
+      fi
+    done
+    exit 1
+  }
 }
 
 print_failure() {
@@ -266,6 +338,7 @@ print_advisory() {
   printf '%s\n' "             Adjust PATH or remove the other installation manually, then rerun 'tpod doctor'."
 }
 
+initialize_mise_bin_paths
 initialize_managed_path
 
 # A verdict that cannot be made invocation-independent still has to be
@@ -280,7 +353,8 @@ records="$(active_records)"
 
 while IFS='|' read -r provider package command; do
   [ -n "$provider" ] || continue
-  expected="$(expected_executable "$provider" "$command" 2>/dev/null || true)"
+  candidates="$(canonical_candidates "$provider" "$command" 2>/dev/null || true)"
+  representative="$(first_candidate "$candidates")"
 
   if ! provider_has_package "$provider" "$package"; then
     print_failure "$package is not installed through $(provider_label "$provider")"
@@ -289,8 +363,8 @@ while IFS='|' read -r provider package command; do
     continue
   fi
 
-  if [ -z "$expected" ] || [ ! -x "$expected" ]; then
-    print_failure "$package canonical executable is missing: ${expected:-unknown}"
+  if ! any_candidate_installed "$candidates"; then
+    print_failure "$package canonical executable is missing: ${representative:-unknown}"
     failure_found=1
     issue_found=1
     continue
@@ -298,14 +372,14 @@ while IFS='|' read -r provider package command; do
 
   actual="$(resolve_in_path "$command" || true)"
   if [ -z "$actual" ]; then
-    print_failure "$package is unavailable on PATH (canonical: $expected)"
+    print_failure "$package is unavailable on PATH (canonical: $representative)"
     failure_found=1
     issue_found=1
     continue
   fi
 
-  if ! files_are_same "$actual" "$expected"; then
-    print_advisory "$package" "$actual" "$expected"
+  if ! matches_canonical "$actual" "$candidates"; then
+    print_advisory "$package" "$actual" "$representative"
     issue_found=1
   fi
 done <<EOF

@@ -88,6 +88,37 @@ python python3
 uv uv
 EOF
 
+# The stand-in for mise answers from fixture files so a test can describe an
+# activation mode without installing a runtime. Both files start empty, which
+# is the machine where mise has no active declaration for anything: 'bin-paths'
+# says nothing and 'which' reports the tool is not currently active.
+mise_bin_paths_file="$tmp_dir/mise-bin-paths"
+mise_bin_paths_log="$tmp_dir/mise-bin-paths.log"
+mise_which_dir="$tmp_dir/mise-which"
+mkdir -p "$mise_which_dir"
+: >"$mise_bin_paths_file"
+: >"$mise_bin_paths_log"
+
+cat >"$prefix/bin/mise" <<EOF
+#!/bin/sh
+case "\${1:-}" in
+  bin-paths)
+    printf '%s\n' bin-paths >>"$mise_bin_paths_log"
+    cat "$mise_bin_paths_file"
+    ;;
+  which)
+    if [ -f "$mise_which_dir/\${2:-}" ]; then
+      cat "$mise_which_dir/\${2:-}"
+    else
+      printf '%s is a mise bin however it is not currently active\n' "\${2:-}" >&2
+      exit 1
+    fi
+    ;;
+esac
+exit 0
+EOF
+chmod +x "$prefix/bin/mise"
+
 run_selection() {
   mode="$1"
   shift
@@ -261,6 +292,84 @@ assert_not_contains "$managed_output" "inherited PATH" \
 status_output="$(run_selection status)"
 assert_contains "$status_output" "Executable selection:" \
   "status exposes executable selection state"
+
+# Canonical selection for a Development Runtime declaration is a set: the
+# manager's active target, the directories it reports as its bin paths, and the
+# shims path. The same machine has to stay canonical whether it runs
+# 'mise activate' or 'mise activate --shims'.
+mise_bin_dir="$tmp_dir/mise-installs/bin"
+mise_active_dir="$tmp_dir/mise-active/bin"
+mise_path_dir="$tmp_dir/mise-path"
+mkdir -p "$mise_path_dir"
+for runtime_command in bun node python3 uv; do
+  write_executable "$mise_bin_dir/$runtime_command"
+  write_executable "$mise_active_dir/$runtime_command"
+done
+printf '%s\n' "$mise_bin_dir" >"$mise_bin_paths_file"
+
+run_mise_selection() {
+  HOME="$tmp_dir/home" \
+    TERRAPOD_EXECUTABLE_SELECTION_INVENTORY_DIR="$inventory" \
+    TERRAPOD_STANDARD_HOMEBREW_PREFIX="$prefix" \
+    TERRAPOD_MISE_SHIMS_DIR="$mise_shims" \
+    TERRAPOD_MANAGED_PATH="$mise_path_dir:$path_dir:/usr/bin:/bin" \
+    PATH="$mise_path_dir:$path_dir:/usr/bin:/bin" \
+    "$selection" doctor macos-terminal false false 2>&1 || true
+}
+
+# Puts the runtime commands ahead of everything else, resolving to the given
+# directory, so each accepted location can be judged on its own.
+select_runtimes_from() {
+  for runtime_command in bun node python3 uv; do
+    rm -f "$mise_path_dir/$runtime_command"
+    ln -s "$1/$runtime_command" "$mise_path_dir/$runtime_command"
+  done
+}
+
+select_runtimes_from "$mise_bin_dir"
+: >"$mise_bin_paths_log"
+bin_paths_output="$(run_mise_selection)"
+assert_not_contains "$bin_paths_output" "advisory - node" \
+  "a runtime resolving through a reported mise bin directory is canonical"
+
+# One process, one probe. The directory set feeds four Development Runtime
+# declarations, and every read of it happens inside a pipeline, so a cache that
+# fills itself on first read fills a subshell instead.
+bin_paths_calls="$(grep -c . "$mise_bin_paths_log")"
+[ "$bin_paths_calls" = 1 ] ||
+  fail "the check asks mise for its bin paths once per process (asked $bin_paths_calls times)"
+pass "the check asks mise for its bin paths once per process"
+
+select_runtimes_from "$mise_shims"
+shims_mode_output="$(run_mise_selection)"
+assert_not_contains "$shims_mode_output" "advisory - node" \
+  "the shims path stays canonical once the bin directories are accepted"
+
+for runtime_command in bun node python3 uv; do
+  printf '%s\n' "$mise_active_dir/$runtime_command" >"$mise_which_dir/$runtime_command"
+done
+select_runtimes_from "$mise_active_dir"
+active_target_output="$(run_mise_selection)"
+assert_not_contains "$active_target_output" "advisory - node" \
+  "the target mise reports as active is canonical"
+
+mise_rogue_dir="$tmp_dir/mise-rogue"
+write_executable "$mise_rogue_dir/node"
+rm -f "$mise_path_dir/node"
+ln -s "$mise_rogue_dir/node" "$mise_path_dir/node"
+rogue_runtime_output="$(run_mise_selection)"
+assert_contains "$rogue_runtime_output" "advisory - node resolves to $mise_path_dir/node" \
+  "a runtime outside every accepted location stays an advisory"
+assert_contains "$rogue_runtime_output" "canonical: $mise_active_dir/node" \
+  "the advisory names the active target as the single canonical location"
+
+rm -f "$mise_which_dir/node"
+inactive_runtime_output="$(run_mise_selection)"
+assert_contains "$inactive_runtime_output" "canonical: $mise_shims/node" \
+  "the advisory names the shims path when mise reports nothing active"
+
+: >"$mise_bin_paths_file"
+rm -f "$mise_which_dir"/*
 
 # The canonical path appears in whichever concern the record raises, so these
 # assertions observe the resolved prefix without depending on what the host
