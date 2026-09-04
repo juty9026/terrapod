@@ -99,6 +99,12 @@ mkdir -p "$mise_which_dir"
 : >"$mise_bin_paths_file"
 : >"$mise_bin_paths_log"
 
+# 'mise ls --prunable' is the verdict source for the payload advisory. The
+# fixture file's three states are the three the helper has to tell apart: the
+# file missing is a mise too old for the flag, empty is a machine with nothing
+# to prune, and lines are payloads.
+mise_prunable_file="$tmp_dir/mise-prunable"
+
 cat >"$prefix/bin/mise" <<EOF
 #!/bin/sh
 case "\${1:-}" in
@@ -113,6 +119,13 @@ case "\${1:-}" in
       printf '%s is a mise bin however it is not currently active\n' "\${2:-}" >&2
       exit 1
     fi
+    ;;
+  ls)
+    if [ ! -f "$mise_prunable_file" ]; then
+      printf '%s\n' "error: unexpected argument '--prunable' found" >&2
+      exit 2
+    fi
+    cat "$mise_prunable_file"
     ;;
 esac
 exit 0
@@ -696,9 +709,9 @@ assert_contains "$absent_status_output" "Warning: executable selection helper is
   fail "tpod status stays informational when the executable selection helper is missing"
 pass "tpod status stays informational when the executable selection helper is missing"
 
-# Leftover mise payloads: installs the migration to Homebrew left behind, which
-# no declaration can reach and which no other finding reports since the shims
-# they generate stopped being read as selection defects.
+# Payloads no configuration mise has tracked can reach. mise owns the
+# computation (ADR 0021): it judges per installed version against every config
+# it has seen, so a version a project-local mise.toml selects is not counted.
 leftover_data_dir="$tmp_dir/mise-data"
 leftover_installs="$leftover_data_dir/installs"
 
@@ -717,66 +730,70 @@ run_leftover_selection() {
 
 absent_installs_output="$(run_leftover_selection doctor)"
 assert_not_contains "$absent_installs_output" "mise payload" \
-  "an absent mise installs directory says nothing about leftover payloads"
+  "an absent mise installs directory says nothing about prunable payloads"
 assert_contains "$absent_installs_output" "Canonical executable selection: ready" \
   "an absent mise installs directory leaves the selection verdict alone"
 
-mkdir -p "$leftover_installs/aqua-sharkdp-bat" \
-  "$leftover_installs/aqua-junegunn-fzf" \
-  "$leftover_installs/aqua-lsd-rs-lsd"
+mkdir -p "$leftover_installs"
+
+# The installs directory exists but the fixture file does not, which is the
+# mise too old to know '--prunable'. Skipping is the whole contract here: the
+# check exists to ask mise what is reachable, so a mise that cannot answer
+# leaves nothing to report.
+unsupported_flag_output="$(run_leftover_selection doctor)"
+assert_not_contains "$unsupported_flag_output" "mise payload" \
+  "a mise that rejects --prunable produces no payload advisory"
+assert_contains "$unsupported_flag_output" "Canonical executable selection: ready" \
+  "a mise that rejects --prunable does not fail the selection verdict"
+
+: >"$mise_prunable_file"
+nothing_prunable_output="$(run_leftover_selection doctor)"
+assert_not_contains "$nothing_prunable_output" "mise payload" \
+  "a machine with nothing to prune says nothing"
+
+cat >"$mise_prunable_file" <<'EOF'
+aqua:sharkdp/bat              0.26.1
+npm:pnpm                      10.33.3
+node                          22.22.2
+EOF
 leftover_output="$(run_leftover_selection doctor)"
 assert_line "$leftover_output" \
-  "  advisory - 3 mise payloads are outside any canonical declaration" \
-  "payloads no declaration reaches are reported as one counted advisory"
+  "  advisory - 3 mise payloads can be pruned" \
+  "prunable payloads are reported as one counted advisory"
 assert_line "$leftover_output" \
-  "             'mise uninstall' reclaims the disk; Terrapod does not remove them." \
-  "the leftover advisory carries its own guidance line"
+  "             'mise prune --tools' reclaims the disk; Terrapod does not remove them." \
+  "the payload advisory carries its own guidance line"
 assert_not_contains "$leftover_output" \
   "Adjust PATH or remove the other installation manually" \
-  "the leftover advisory does not borrow the selection block's guidance sentence"
+  "the payload advisory does not borrow the selection block's guidance sentence"
+assert_not_contains "$leftover_output" "aqua:sharkdp/bat" \
+  "the default advisory names no payload"
 assert_contains "$leftover_output" "Canonical executable selection: ready" \
-  "leftover payloads are a separate finding from executable selection"
+  "prunable payloads are a separate finding from executable selection"
+
+cat >"$mise_prunable_file" <<'EOF'
+node                          22.22.2
+EOF
+single_payload_output="$(run_leftover_selection doctor)"
+assert_line "$single_payload_output" \
+  "  advisory - 1 mise payload can be pruned" \
+  "one prunable payload is reported in the singular"
 
 # Decision guard: disk a user chose to keep is not a readiness problem. Without
 # this assertion nothing stops a later change from setting the issue flag here.
 leftover_status_output="$(run_leftover_selection status)"
 assert_contains "$leftover_status_output" "Executable selection: ready" \
-  "tpod status stays ready on a machine whose only finding is leftover payloads"
+  "tpod status stays ready on a machine whose only finding is prunable payloads"
 assert_not_contains "$leftover_status_output" "mise payload" \
-  "status leaves the leftover payload advisory to apply and doctor"
+  "status leaves the payload advisory to apply and doctor"
 
 leftover_apply_output="$(run_leftover_selection apply)"
 assert_line "$leftover_apply_output" \
-  "  advisory - 3 mise payloads are outside any canonical declaration" \
-  "apply reports leftover payloads"
+  "  advisory - 1 mise payload can be pruned" \
+  "apply reports prunable payloads"
 
-mkdir -p "$leftover_installs/node/20.0.0/bin"
-printf '%s\n' "$leftover_installs/node/20.0.0/bin" >"$mise_bin_paths_file"
-declared_payload_output="$(run_leftover_selection doctor)"
-assert_line "$declared_payload_output" \
-  "  advisory - 3 mise payloads are outside any canonical declaration" \
-  "a payload holding a reported mise bin directory is not a leftover"
-assert_not_contains "$declared_payload_output" "4 mise payloads" \
-  "the declared payload is excluded from the count rather than added to it"
-
-# One payload name can be a string prefix of another. A comparison that ignores
-# the path boundary lets either name hide the other, in both directions.
-mkdir -p "$leftover_installs/node-canary"
-sibling_payload_output="$(run_leftover_selection doctor)"
-assert_line "$sibling_payload_output" \
-  "  advisory - 4 mise payloads are outside any canonical declaration" \
-  "a payload whose name extends a declared payload's name is still a leftover"
-
-rm -rf "$leftover_installs"
-mkdir -p "$leftover_installs/node" "$leftover_installs/node-canary/2026.1.1/bin"
-printf '%s\n' "$leftover_installs/node-canary/2026.1.1/bin" >"$mise_bin_paths_file"
-sibling_declared_output="$(run_leftover_selection doctor)"
-assert_line "$sibling_declared_output" \
-  "  advisory - 1 mise payload is outside any canonical declaration" \
-  "a declared payload does not cover the sibling whose name it extends"
-
-# The whole check depends on mise to say which directories are declared, so an
-# absent mise skips it rather than calling every payload a leftover.
+# The whole check depends on mise to say what is reachable, so an absent mise
+# skips it rather than calling every payload prunable.
 mise_absent_path_dir="$tmp_dir/mise-absent-path"
 mkdir -p "$mise_absent_path_dir"
 for path_entry in "$path_dir"/*; do
@@ -787,4 +804,4 @@ for path_entry in "$path_dir"/*; do
 done
 mise_absent_output="$(run_leftover_selection doctor "$mise_absent_path_dir")"
 assert_not_contains "$mise_absent_output" "mise payload" \
-  "an absent mise skips the leftover payload check instead of reporting one"
+  "an absent mise skips the payload check instead of reporting one"

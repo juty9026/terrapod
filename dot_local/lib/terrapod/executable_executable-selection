@@ -509,72 +509,60 @@ render_advisories() {
 }
 
 # Payloads under the Development Runtime Manager's own install directory that
-# no declaration can reach. ADR 0010 moved the Core Shell Stack to Homebrew and
-# ADR 0012 kept apply non-destructive, so every install made before that
-# migration stays on disk: no config selects it, 'mise which' reports it is not
-# active, and mise keeps generating a shim for it. Those shims used to be
-# (over)reported as one selection advisory per tool; silencing them correctly
-# left the disk they occupy with nothing to report it at all, which is what
-# this count restores.
+# no configuration it has tracked can reach. ADR 0010 moved the Core Shell
+# Stack to Homebrew and ADR 0012 kept apply non-destructive, so every install
+# made before that migration stays on disk with nothing selecting it.
 #
-# A payload is reachable when a 'mise bin-paths' entry lies beneath it. The
-# comparison respects the path boundary rather than comparing strings: one
-# payload name can extend another -- 'installs/node' and 'installs/node-canary'
-# -- and a prefix test would let either hide the other.
-leftover_payload_count() {
+# The manager owns this computation (ADR 0021). It judges per installed
+# version rather than per install directory, against every config it has
+# tracked rather than the one resolved from the current directory, and it
+# reports the tool's real name -- 'npm:pnpm', not the install directory slug
+# 'npm-pnpm' -- which is what the recovery command has to be spelled with.
+#
+# Terrapod computed this itself until ADR 0021, by comparing install
+# directories against 'mise bin-paths'. That reports only the toolset resolved
+# from the directory tpod runs in, so every version a project declared counted
+# as unreachable: 426 MB of the 620 MB reported on the workstation in #246 was
+# in active use.
+#
+# '-C "$HOME"' pins the invocation, on ADR 0020's rule that a verdict must not
+# depend on how tpod was called. It follows the subcommand because the manager
+# accepts global flags there. A manager too old for '--prunable' exits non-zero
+# and the finding is skipped rather than falling back to a second definition of
+# reachability.
+prunable_payloads() {
   command -v mise >/dev/null 2>&1 || return 0
-  leftover_installs="$(normalize_path "${MISE_DATA_DIR:-$HOME/.local/share/mise}/installs")"
-  [ -d "$leftover_installs" ] || return 0
+  [ -d "${MISE_DATA_DIR:-$HOME/.local/share/mise}/installs" ] || return 0
 
-  leftover_bin_paths="$(
-    mise_bin_paths | while IFS= read -r leftover_bin_dir; do
-      [ -n "$leftover_bin_dir" ] || continue
-      normalize_path "$leftover_bin_dir"
-    done
-  )"
+  prunable_listing="$(mise ls -C "$HOME" --prunable --no-header 2>/dev/null)" ||
+    return 0
+  [ -n "$prunable_listing" ] || return 0
 
-  leftover_count=0
-  for leftover_payload in "$leftover_installs"/*; do
-    [ -d "$leftover_payload" ] || continue
-    leftover_payload="$(normalize_path "$leftover_payload")"
-
-    leftover_reachable=0
-    while IFS= read -r leftover_bin_dir; do
-      [ -n "$leftover_bin_dir" ] || continue
-      case "$leftover_bin_dir" in
-        "$leftover_payload"|"$leftover_payload"/*)
-          leftover_reachable=1
-          break
-          ;;
-      esac
-    done <<EOF
-$leftover_bin_paths
-EOF
-
-    [ "$leftover_reachable" -eq 1 ] || leftover_count=$((leftover_count + 1))
-  done
-
-  printf '%s\n' "$leftover_count"
+  printf '%s\n' "$prunable_listing"
 }
 
 # A separate finding from executable selection, so it prints after that block
 # and carries its own second line instead of sharing the block's guidance
 # sentence. It never sets the issue flag: disk a user chose to keep is not a
-# readiness problem, and Terrapod neither runs 'mise uninstall' nor decides
-# which payloads to remove. The provider is named because the payloads sit in
-# mise's own data directory, which is the case ADR 0020 exempts from ADR 0012's
-# ban on suggesting an uninstall command.
+# readiness problem, and Terrapod neither prunes nor decides what to prune. The
+# command is named because the payloads sit in mise's own data directory, which
+# is the case ADR 0020 exempts from ADR 0012's ban on suggesting a removal
+# command. 'mise prune' rather than a frozen 'mise uninstall' list, because it
+# recomputes when it runs: a version a project starts declaring between this
+# report and that run is not removed.
 render_leftover_payloads() {
-  leftover_found="$(leftover_payload_count)"
-  [ -n "$leftover_found" ] || return 0
+  leftover_listing="$(prunable_payloads)"
+  [ -n "$leftover_listing" ] || return 0
+
+  leftover_found="$(printf '%s\n' "$leftover_listing" | awk 'NF { count++ } END { print count + 0 }')"
   [ "$leftover_found" -gt 0 ] || return 0
 
   if [ "$leftover_found" -eq 1 ]; then
-    printf '%s\n' "  advisory - 1 mise payload is outside any canonical declaration"
+    printf '%s\n' "  advisory - 1 mise payload can be pruned"
   else
-    printf '  advisory - %s mise payloads are outside any canonical declaration\n' "$leftover_found"
+    printf '  advisory - %s mise payloads can be pruned\n' "$leftover_found"
   fi
-  printf '%s\n' "             'mise uninstall' reclaims the disk; Terrapod does not remove them."
+  printf '%s\n' "             'mise prune --tools' reclaims the disk; Terrapod does not remove them."
 }
 
 initialize_mise_bin_paths
