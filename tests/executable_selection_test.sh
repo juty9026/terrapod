@@ -695,3 +695,96 @@ assert_contains "$absent_status_output" "Warning: executable selection helper is
 [ "$absent_status_status" -eq 0 ] ||
   fail "tpod status stays informational when the executable selection helper is missing"
 pass "tpod status stays informational when the executable selection helper is missing"
+
+# Leftover mise payloads: installs the migration to Homebrew left behind, which
+# no declaration can reach and which no other finding reports since the shims
+# they generate stopped being read as selection defects.
+leftover_data_dir="$tmp_dir/mise-data"
+leftover_installs="$leftover_data_dir/installs"
+
+run_leftover_selection() {
+  leftover_mode="$1"
+  leftover_path="${2:-$path_dir}"
+  HOME="$tmp_dir/home" \
+    MISE_DATA_DIR="$leftover_data_dir" \
+    TERRAPOD_EXECUTABLE_SELECTION_INVENTORY_DIR="$inventory" \
+    TERRAPOD_STANDARD_HOMEBREW_PREFIX="$prefix" \
+    TERRAPOD_MISE_SHIMS_DIR="$mise_shims" \
+    TERRAPOD_MANAGED_PATH="$leftover_path:/usr/bin:/bin" \
+    PATH="$leftover_path:/usr/bin:/bin" \
+    "$selection" "$leftover_mode" macos-terminal false false 2>&1 || true
+}
+
+absent_installs_output="$(run_leftover_selection doctor)"
+assert_not_contains "$absent_installs_output" "mise payload" \
+  "an absent mise installs directory says nothing about leftover payloads"
+assert_contains "$absent_installs_output" "Canonical executable selection: ready" \
+  "an absent mise installs directory leaves the selection verdict alone"
+
+mkdir -p "$leftover_installs/aqua-sharkdp-bat" \
+  "$leftover_installs/aqua-junegunn-fzf" \
+  "$leftover_installs/aqua-lsd-rs-lsd"
+leftover_output="$(run_leftover_selection doctor)"
+assert_line "$leftover_output" \
+  "  advisory - 3 mise payloads are outside any canonical declaration" \
+  "payloads no declaration reaches are reported as one counted advisory"
+assert_line "$leftover_output" \
+  "             'mise uninstall' reclaims the disk; Terrapod does not remove them." \
+  "the leftover advisory carries its own guidance line"
+assert_not_contains "$leftover_output" \
+  "Adjust PATH or remove the other installation manually" \
+  "the leftover advisory does not borrow the selection block's guidance sentence"
+assert_contains "$leftover_output" "Canonical executable selection: ready" \
+  "leftover payloads are a separate finding from executable selection"
+
+# Decision guard: disk a user chose to keep is not a readiness problem. Without
+# this assertion nothing stops a later change from setting the issue flag here.
+leftover_status_output="$(run_leftover_selection status)"
+assert_contains "$leftover_status_output" "Executable selection: ready" \
+  "tpod status stays ready on a machine whose only finding is leftover payloads"
+assert_not_contains "$leftover_status_output" "mise payload" \
+  "status leaves the leftover payload advisory to apply and doctor"
+
+leftover_apply_output="$(run_leftover_selection apply)"
+assert_line "$leftover_apply_output" \
+  "  advisory - 3 mise payloads are outside any canonical declaration" \
+  "apply reports leftover payloads"
+
+mkdir -p "$leftover_installs/node/20.0.0/bin"
+printf '%s\n' "$leftover_installs/node/20.0.0/bin" >"$mise_bin_paths_file"
+declared_payload_output="$(run_leftover_selection doctor)"
+assert_line "$declared_payload_output" \
+  "  advisory - 3 mise payloads are outside any canonical declaration" \
+  "a payload holding a reported mise bin directory is not a leftover"
+assert_not_contains "$declared_payload_output" "4 mise payloads" \
+  "the declared payload is excluded from the count rather than added to it"
+
+# One payload name can be a string prefix of another. A comparison that ignores
+# the path boundary lets either name hide the other, in both directions.
+mkdir -p "$leftover_installs/node-canary"
+sibling_payload_output="$(run_leftover_selection doctor)"
+assert_line "$sibling_payload_output" \
+  "  advisory - 4 mise payloads are outside any canonical declaration" \
+  "a payload whose name extends a declared payload's name is still a leftover"
+
+rm -rf "$leftover_installs"
+mkdir -p "$leftover_installs/node" "$leftover_installs/node-canary/2026.1.1/bin"
+printf '%s\n' "$leftover_installs/node-canary/2026.1.1/bin" >"$mise_bin_paths_file"
+sibling_declared_output="$(run_leftover_selection doctor)"
+assert_line "$sibling_declared_output" \
+  "  advisory - 1 mise payload is outside any canonical declaration" \
+  "a declared payload does not cover the sibling whose name it extends"
+
+# The whole check depends on mise to say which directories are declared, so an
+# absent mise skips it rather than calling every payload a leftover.
+mise_absent_path_dir="$tmp_dir/mise-absent-path"
+mkdir -p "$mise_absent_path_dir"
+for path_entry in "$path_dir"/*; do
+  case "${path_entry##*/}" in
+    mise) continue ;;
+  esac
+  ln -s "$path_entry" "$mise_absent_path_dir/${path_entry##*/}"
+done
+mise_absent_output="$(run_leftover_selection doctor "$mise_absent_path_dir")"
+assert_not_contains "$mise_absent_output" "mise payload" \
+  "an absent mise skips the leftover payload check instead of reporting one"
