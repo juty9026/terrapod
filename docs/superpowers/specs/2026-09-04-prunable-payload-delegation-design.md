@@ -82,7 +82,7 @@ and this design does not reopen it.
 
 ## Verdict source
 
-    mise -C "$HOME" ls --prunable --no-header
+    mise ls -C "$HOME" --prunable --no-header
 
 Emits one `tool<space...>version` line per prunable payload; a linked payload
 carries a trailing `(symlink)` field. The count is the line count.
@@ -90,7 +90,9 @@ carries a trailing `(symlink)` field. The count is the line count.
 `-C "$HOME"` pins the invocation. The prunable set does not vary with the
 working directory on the machines measured, but ADR 0020 already established
 that a verdict must not depend on how `tpod` was invoked, and pinning costs
-nothing.
+nothing. It follows the subcommand rather than preceding it — mise accepts
+global flags in both positions, and keeping `ls` as the first word lets the
+test stub dispatch on `$1` the way it already does for `bin-paths` and `which`.
 
 Sizes, when asked for, come from `mise where "$tool@$version"` and `du -sk` on
 the result. Twenty payloads resolve in 0.53s.
