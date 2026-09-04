@@ -401,13 +401,111 @@ print_failure() {
   esac
 }
 
-print_advisory() {
-  package="$1"
-  actual="$2"
-  expected="$3"
-  printf '  advisory - %s resolves to %s\n' "$package" "$actual"
-  printf '             canonical: %s\n' "$expected"
-  printf '%s\n' "             Adjust PATH or remove the other installation manually, then rerun 'tpod doctor'."
+# Advisories are buffered rather than printed as they are found, so the shape
+# of the block can be decided once every finding is in. The key is the
+# directory the managed PATH resolved to: when several commands resolve
+# through one directory, that directory is the single cause, and the reader
+# has one entry to reorder rather than fifteen findings to read.
+#
+# The record loop reads from a heredoc rather than a pipeline, so appending
+# here reaches the buffer the renderer reads. Filling it from inside a
+# pipeline would fill a subshell and throw it away.
+advisory_records=""
+
+buffer_advisory() {
+  advisory_package="$1"
+  advisory_actual="$2"
+  advisory_expected="$3"
+
+  case "$advisory_actual" in
+    */*) advisory_dir="${advisory_actual%/*}" ;;
+    *) advisory_dir="$advisory_actual" ;;
+  esac
+
+  advisory_records="$advisory_records$advisory_dir|$advisory_package|$advisory_actual|$advisory_expected
+"
+}
+
+# The guidance sentence is invariant, so it prints once as the block's last
+# line instead of once per finding. That is one step further than #237's mock,
+# which repeats it per group; the stated goal is to stop repeating invariant
+# text, and there is only one sentence to give.
+#
+# A group of two or more collapses to a header, a wrapped package list, and
+# the canonical location. Per-package actual and canonical paths still have to
+# be recoverable -- ADR 0012 requires the advisory to carry both -- so a group
+# prints the shared canonical directory only when its canonical paths share
+# one, and falls back to a line per package when they do not.
+render_advisories() {
+  printf '%s' "$advisory_records" | awk \
+    -v guidance="Adjust PATH or remove the other installation manually, then rerun 'tpod doctor'." '
+    BEGIN {
+      FS = "|"
+      indent = "             "
+      width = 76
+    }
+
+    function directory_of(path,   trimmed) {
+      trimmed = path
+      sub(/\/[^\/]*$/, "", trimmed)
+      return trimmed
+    }
+
+    {
+      dir = $1
+      if (!(dir in count)) { order[++groups] = dir }
+      slot = ++count[dir]
+      package[dir, slot] = $2
+      actual[dir, slot] = $3
+      canonical[dir, slot] = $4
+    }
+
+    END {
+      for (g = 1; g <= groups; g++) {
+        dir = order[g]
+        members = count[dir]
+
+        if (members == 1) {
+          printf "  advisory - %s resolves to %s\n", package[dir, 1], actual[dir, 1]
+          printf "%scanonical: %s\n", indent, canonical[dir, 1]
+          continue
+        }
+
+        printf "  advisory - %d commands resolve through %s\n", members, dir
+
+        line = ""
+        for (member = 1; member <= members; member++) {
+          item = package[dir, member] (member < members ? "," : "")
+          candidate = (line == "" ? item : line " " item)
+          if (line != "" && length(candidate) + length(indent) > width) {
+            print indent line
+            line = item
+          } else {
+            line = candidate
+          }
+        }
+        if (line != "") print indent line
+
+        shared = directory_of(canonical[dir, 1])
+        for (member = 2; member <= members; member++) {
+          if (directory_of(canonical[dir, member]) != shared) {
+            shared = ""
+            break
+          }
+        }
+
+        if (shared != "") {
+          printf "%scanonical: %s\n", indent, shared
+        } else {
+          for (member = 1; member <= members; member++) {
+            printf "%scanonical (%s): %s\n", indent, package[dir, member], canonical[dir, member]
+          }
+        }
+      }
+
+      if (groups > 0) { printf "  %s\n", guidance }
+    }
+  '
 }
 
 initialize_mise_bin_paths
@@ -458,12 +556,14 @@ while IFS='|' read -r provider package command; do
   # shared cause.
   effective="$(effective_executable "$command" "$actual")"
   if ! matches_canonical "$effective" "$candidates"; then
-    print_advisory "$package" "$actual" "$representative"
+    buffer_advisory "$package" "$actual" "$representative"
     issue_found=1
   fi
 done <<EOF
 $records
 EOF
+
+render_advisories
 
 case "$mode" in
   apply)

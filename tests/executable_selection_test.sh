@@ -420,9 +420,94 @@ assert_contains "$active_rogue_output" "advisory - ripgrep resolves to $mise_shi
 
 rm -f "$mise_shims/rg" "$mise_which_dir/rg"
 
-# The canonical path appears in whichever concern the record raises, so these
-# assertions observe the resolved prefix without depending on what the host
-# machine has actually installed.
+rm -f "$path_dir/bat"
+ln -s "$prefix/bin/bat" "$path_dir/bat"
+
+# The output shape #237 is about. Fifteen commands resolving through one
+# directory share one cause, so they collapse into a single finding with a
+# wrapped package list, the lone genuine finding keeps the two-line form that
+# makes it readable beside them, and the invariant guidance sentence prints
+# once for the whole block instead of once per package.
+#
+# Advisory lines are asserted whole rather than as substrings, because a group
+# line and a per-package line differ only in their tail.
+assert_line() {
+  if ! printf '%s\n' "$1" | grep -F -x -e "$2" >/dev/null; then
+    printf '%s\n' "missing line: $2" >&2
+    printf '%s\n' "$1" | sed 's/^/  /' >&2
+    fail "$3"
+  fi
+  pass "$3"
+}
+
+assert_occurrences() {
+  occurrences="$(printf '%s\n' "$1" | grep -c -F -e "$2" || true)"
+  [ "$occurrences" = "$3" ] || fail "$4 (found $occurrences)"
+  pass "$4"
+}
+
+group_dir="$tmp_dir/group-bin"
+single_dir="$tmp_dir/single-bin"
+mkdir -p "$group_dir" "$single_dir"
+for group_command in bat dust duf fastfetch fd fzf gh delta lazygit lsd nvim rg starship zellij zoxide; do
+  write_executable "$group_dir/$group_command"
+done
+write_executable "$single_dir/git"
+
+run_group_selection() {
+  HOME="$tmp_dir/home" \
+    TERRAPOD_EXECUTABLE_SELECTION_INVENTORY_DIR="$inventory" \
+    TERRAPOD_STANDARD_HOMEBREW_PREFIX="$prefix" \
+    TERRAPOD_MISE_SHIMS_DIR="$mise_shims" \
+    TERRAPOD_MANAGED_PATH="$group_dir:$single_dir:$path_dir:/usr/bin:/bin" \
+    PATH="$group_dir:$single_dir:$path_dir:/usr/bin:/bin" \
+    "$selection" doctor macos-terminal false false 2>&1 || true
+}
+
+group_output="$(run_group_selection)"
+assert_line "$group_output" "  advisory - 15 commands resolve through $group_dir" \
+  "advisories that share a resolved directory collapse into one finding"
+assert_line "$group_output" \
+  "             bat, dust, duf, fastfetch, fd, fzf, gh, git-delta, lazygit," \
+  "the grouped finding wraps its package list instead of running it off the line"
+assert_line "$group_output" "             lsd, neovim, ripgrep, starship, zellij, zoxide" \
+  "the wrapped package list carries every package in the group"
+assert_line "$group_output" "             canonical: $prefix/bin" \
+  "a group whose canonical paths share a directory names that directory once"
+assert_not_contains "$group_output" "advisory - bat resolves to" \
+  "a grouped package does not also print an advisory header of its own"
+assert_line "$group_output" "  advisory - git resolves to $single_dir/git" \
+  "a lone finding keeps the per-package form"
+assert_line "$group_output" "             canonical: $prefix/bin/git" \
+  "a lone finding still names its canonical executable"
+assert_line "$group_output" \
+  "  Adjust PATH or remove the other installation manually, then rerun 'tpod doctor'." \
+  "the guidance sentence closes the advisory block"
+assert_occurrences "$group_output" \
+  "Adjust PATH or remove the other installation manually, then rerun 'tpod doctor'." 1 \
+  "the guidance sentence prints once for the whole block, not once per finding"
+
+# ADR 0012 requires the advisory to carry both paths, so a group collapses to a
+# single canonical directory only when its members actually share one. A
+# Development Runtime declaration resolving through the same directory as the
+# Homebrew ones does not, and the group falls back to a line per package.
+write_executable "$group_dir/node"
+mixed_canonical_output="$(run_group_selection)"
+assert_line "$mixed_canonical_output" "  advisory - 16 commands resolve through $group_dir" \
+  "a Development Runtime declaration joins the group of its resolved directory"
+assert_line "$mixed_canonical_output" "             canonical (bat): $prefix/bin/bat" \
+  "a group with unshared canonical directories names each package's canonical path"
+assert_line "$mixed_canonical_output" "             canonical (node): $mise_shims/node" \
+  "the per-package fallback keeps each provider's own canonical location"
+assert_occurrences "$mixed_canonical_output" "             canonical (" 16 \
+  "the per-package fallback covers every package in the group"
+rm -f "$group_dir/node"
+
+# The canonical location appears in whichever concern the record raises -- a
+# missing-executable failure, a per-package advisory, or a group's shared
+# canonical directory -- so these assertions observe the resolved prefix
+# without depending on what the host machine has actually installed or on
+# which shape the finding takes.
 assert_canonical_prefix() {
   profile="$1"
   arch="$2"
@@ -444,8 +529,8 @@ assert_canonical_prefix() {
   )"
   set -e
 
-  assert_contains "$prefix_output" "$expected_prefix/bin/bat" "$label"
-  assert_not_contains "$prefix_output" "$rejected_prefix/bin/bat" "$label rejects the other prefix"
+  assert_contains "$prefix_output" "$expected_prefix/bin" "$label"
+  assert_not_contains "$prefix_output" "$rejected_prefix/bin" "$label rejects the other prefix"
 }
 
 assert_canonical_prefix macos-terminal x86_64 1 /opt/homebrew /usr/local \
