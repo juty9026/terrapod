@@ -168,7 +168,7 @@ helper는 최신 안정 release의 모든 TTF를 설치하고, 이전 release가
 
 macOS desktop application은 machine-local data key로 제어되는 opt-in App Group으로 나뉩니다. Homebrew bootstrap 중 chezmoi는 선택한 group을 `Brewfile.macos-desktop-apps.tmpl`에서 temporary Brewfile로 render하고, 그 rendered bundle을 설치합니다.
 
-- `terminal-apps`: Ghostty.
+- `terminal-apps`: Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, Noto Sans CJK KR.
 - `automation`: Hammerspoon, Karabiner-Elements, Scroll Reverser.
 - `launcher`: Raycast와 1Password CLI.
 - `monitoring`: iStat Menus.
@@ -320,7 +320,7 @@ Optional stack profile과 macOS App Group setting은 기본적으로 disabled입
 | `enableEditorStack` | `false` | rich Neovim configuration을 관리하는 Optional Editor Stack을 활성화합니다. Plain Neovim은 어느 쪽이든 Core Shell Stack에 남아 있습니다. |
 | `enableAiCliTools` | `false` | Antigravity CLI, Claude Code, Codex를 설치합니다. Antigravity CLI와 Codex는 Homebrew cask `antigravity-cli`, `codex`로, Claude Code는 공식 installer로 설치합니다. macOS Terminal Profile 전용이며 VPS Shell Profile에서는 무시됩니다. |
 | `enableDevelopmentWorkspace` | `false` | Optional Editor Stack, 적용 가능한 경우의 Optional AI Tool Stack, development-specific Zellij workspace surface를 포함하는 Optional Development Workspace preset을 활성화합니다. |
-| `enableMacosAppGroupTerminalApps` | `false` | terminal-apps macOS App Group에 포함된 Ghostty를 설치합니다. |
+| `enableMacosAppGroupTerminalApps` | `false` | terminal-apps macOS App Group에 포함된 Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, Noto Sans CJK KR를 설치합니다. |
 | `enableMacosAppGroupAutomation` | `false` | automation macOS App Group인 Hammerspoon, Karabiner-Elements, Scroll Reverser를 설치합니다. |
 | `enableMacosAppGroupLauncher` | `false` | launcher macOS App Group인 Raycast와 1Password CLI를 설치합니다. |
 | `enableMacosAppGroupMonitoring` | `false` | monitoring macOS App Group인 iStat Menus를 설치합니다. |
@@ -340,6 +340,8 @@ Terrapod은 기존 mise, APT, vendor-installed 및 기타 alternate payload를 �
 `~/.config/zsh/path.d`의 file은 명시적인 machine-local PATH override입니다. 항상 가장 높은
 우선순위를 유지합니다. 다른 executable이 먼저 선택되면 actual path와 canonical path를
 advisory로 표시합니다. nonstandard Homebrew prefix도 advisory이며 cleanup과 PATH 변경은 수동입니다.
+`~/.local/share/zsh/site-functions`는 이미 managed `fpath`에 포함되어 있으므로, vendor
+installer가 이 경로를 추가해도 machine-local override가 필요하지 않습니다.
 
 `enableMacosAppGroupAiApps`는 deprecated key이며 alias로 해석하지 않습니다. 명시적으로 migrate하려면 `tpod setup` 또는 `terrapod configure <Preset>`를 실행합니다. Terrapod은 이전 선택만으로 Zed를 설치하지 않습니다.
 
@@ -391,9 +393,13 @@ enableDevelopmentWorkspace = true
 
 ## Git Configuration
 
-Terrapod은 공용 Git 설정을 `~/.config/git/config`에서 관리합니다.
-`~/.gitconfig`이 없으면 생성하고, 이후 content는 사용자가 관리합니다. 설치 후
-identity를 설정합니다.
+Git 설정은 세 개의 file로 나뉩니다. Terrapod은 공용 설정을
+`~/.config/git/config`에서 관리합니다. `~/.gitconfig`이 없으면, 공용 설정은
+그 file에서 관리된다는 comment와 `~/.gitconfig.local`을 가리키는 `[include]`
+항목으로 채워 생성하고, 이후 content는 사용자가 관리합니다. identity와 서명
+설정은 이 file에 둡니다. `~/.gitconfig.local`은 Terrapod이 만들거나 관리하지
+않으므로, 서명 프로그램이나 SSH command처럼 한 machine에만 적용할 설정이 있을
+때 직접 만들어 사용합니다. 설치 후 identity를 설정합니다.
 
 ```sh
 git config set --global user.name "Your Name"
@@ -408,6 +414,11 @@ git config set --global gpg.format ssh
 git config set --global user.signingKey "ssh-ed25519 YOUR_PUBLIC_KEY"
 git config set --global commit.gpgSign true
 ```
+
+Terrapod은 공용 GitHub CLI 설정도 `~/.config/gh/config.yml`에서 관리하며,
+`git_protocol: ssh`와 `pr checkout`용 `co` alias를 설정합니다. GitHub CLI
+authentication(`~/.config/gh/hosts.yml`)은 machine-local로 유지되며, Terrapod은
+이를 관리하거나 건드리지 않습니다.
 
 ## Repository Conventions
 

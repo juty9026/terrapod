@@ -100,6 +100,10 @@ _Avoid_: OS provisioning wizard, standalone installer, configure shortcut
 A first-run setup choice that expands into concrete optional stack and app-group settings for a machine.
 _Avoid_: machine preset, permanent mode, dynamic policy
 
+**Machine-Local Git Include**:
+The optional, unmanaged `~/.gitconfig.local` file that the seeded `~/.gitconfig` includes for Git settings that belong to one machine only.
+_Avoid_: managed Git config, user Git config, SSH allowed signers
+
 **Canonical README**:
 The English `README.md` that defines the authoritative Terrapod README content.
 _Avoid_: primary docs, source README
@@ -195,6 +199,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - The **GitHub CLI Extension Set** belongs to the **Core Shell Stack** on both the **macOS Terminal Profile** and the **VPS Shell Profile**; its first member is `github/gh-stack`.
 - `tpod apply` installs a **GitHub CLI Extension Set** member only when `gh extension list` does not already report it, and never runs `gh extension upgrade` or passes a `--pin` tag; extensions installed by hand outside the set are left alone.
 - A failed **GitHub CLI Extension Set** member install becomes a `gh-extensions` install warning instead of a failed apply; a missing `gh` executable records the same category with guidance pointing at the Homebrew core install warning.
+- Shared GitHub CLI configuration (`git_protocol` and the `co` alias) is managed as part of the **Core Shell Stack**, while GitHub CLI authentication (`hosts.yml`) is machine state that **Terrapod** never manages.
 - The **Development Runtime Stack** includes Bun, Node.js 24, Python 3.13, and uv managed by the **Development Runtime Manager**.
 - pnpm belongs to the **Development Runtime Stack** through Node.js Corepack, not as a mise-managed tool.
 - Rich Neovim configuration belongs to the **Optional Editor Stack**, not the **Core Shell Stack**, and is opt-in for every machine profile.
@@ -305,6 +310,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Routine `tpod apply` keeps the normal interactive chezmoi apply behavior instead of silently overwriting user-modified managed files.
 - Machine-local PATH customizations should live in the managed zsh extension point rather than direct edits to managed shell startup files.
 - Terrapod does not automatically migrate vendor-installer shell startup edits such as Antigravity PATH lines into the managed zsh extension point; first-run guidance should point users to the backup and extension point instead.
+- The per-user zsh site-functions directory (`~/.local/share/zsh/site-functions`) is part of the declared `.zshrc` `fpath` on every machine profile, so vendor installers that append it are not machine-local customizations; this does not change the rule that other vendor-appended shell startup edits stay unmigrated.
 - After first-run completion, the installer should explain how to make `tpod` available in the current terminal because a child installer process cannot update the parent shell's `PATH`.
 - First-run `tpod` availability guidance should include the absolute `~/.local/bin/tpod` command for immediate recovery and a login-shell refresh or new-terminal instruction for normal use.
 - External package manager, runtime manager, shell integration, desktop app, and vendor tool installer failures during first-run declared-state apply should warn without blocking **Terrapod** command installation when the managed dotfiles can still be written.
@@ -335,6 +341,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - When **macOS App Group** settings change, `tpod apply` keeps Homebrew desktop app warning marker content aligned with currently enabled groups; failures for disabled groups are removed from readiness warnings while enabled group failures remain.
 - The implemented **macOS App Groups** are terminal-apps, automation, launcher, monitoring, development-apps, and mobile-dev.
 - The terminal-apps **macOS App Group** contains Ghostty.
+- The terminal-apps **macOS App Group** also carries the terminal fonts `font-d2coding`, `font-hack-nerd-font`, `font-jetbrains-mono-nerd-font`, and `font-noto-sans-cjk-kr` installed as Homebrew casks, distinct from the Jetendard font installer owned by the **macOS Terminal Profile**.
 - cmux is outside the declared **macOS Desktop App Stack**; existing cmux installs or settings may remain on a machine unmanaged and are not removed by **Terrapod**.
 - The automation **macOS App Group** contains Hammerspoon and Karabiner-Elements.
 - The launcher **macOS App Group** contains Raycast and 1Password CLI.
@@ -390,6 +397,8 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Rich **Terrapod Setup** presentation may use setup-only emoji, color, spacing, and aligned prompt layout when it improves first-run review clarity.
 - Routine command visual treatment is separate from rich **Terrapod Setup** presentation; Setup remains its own gum-backed UI.
 - Error output avoids product metaphor and states the failed condition plus the next useful action.
+- Shared Git settings belong to the managed `~/.config/git/config`, identity and signing settings belong to the seeded `~/.gitconfig`, and per-machine overrides belong to the **Machine-Local Git Include**.
+- The seeded `~/.gitconfig` is created once, points at the **Machine-Local Git Include**, and is never re-applied, so an existing machine's `~/.gitconfig` is untouched by this seeding.
 
 ## Example Dialogue
 

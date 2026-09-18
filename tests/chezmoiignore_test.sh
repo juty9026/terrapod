@@ -294,6 +294,7 @@ done
 pass "macOS ignores VPS-only entries"
 
 macos_brewfile="$(render_template "$macos_data" "Brewfile.macos-desktop-apps.tmpl")"
+linux_macos_desktop_apps_brewfile="$(render_template "$ubuntu_data" "Brewfile.macos-desktop-apps.tmpl")"
 terminal_apps_brewfile="$(render_template "$macos_terminal_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 automation_apps_brewfile="$(render_template "$macos_automation_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 launcher_apps_brewfile="$(render_template "$macos_launcher_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
@@ -1110,6 +1111,10 @@ assert_managed_paths_exclude_prefix \
   "terminal-apps group does not manage rendered macOS Desktop App Stack Brewfile target"
 
 assert_not_contains "$macos_brewfile" 'cask "ghostty"' "macOS default does not render Ghostty"
+assert_not_contains "$macos_brewfile" 'cask "font-d2coding"' "macOS default does not render D2Coding"
+assert_not_contains "$macos_brewfile" 'cask "font-hack-nerd-font"' "macOS default does not render Hack Nerd Font"
+assert_not_contains "$macos_brewfile" 'cask "font-jetbrains-mono-nerd-font"' "macOS default does not render JetBrains Mono Nerd Font"
+assert_not_contains "$macos_brewfile" 'cask "font-noto-sans-cjk-kr"' "macOS default does not render Noto Sans CJK KR"
 assert_not_contains "$macos_brewfile" 'cask "cmux"' "macOS default does not render cmux"
 assert_not_contains "$macos_brewfile" 'cask "hammerspoon"' "macOS default does not render Hammerspoon"
 assert_not_contains "$macos_brewfile" 'cask "karabiner-elements"' "macOS default does not render Karabiner-Elements"
@@ -1126,7 +1131,14 @@ assert_not_contains "$macos_brewfile" 'cask "antigravity-ide"' "macOS default do
 assert_not_contains "$macos_brewfile" 'cask "stablyai/orca/orca"' "macOS default does not render Orca"
 assert_not_contains "$macos_brewfile" 'cask "orbstack"' "macOS default does not render OrbStack"
 
+assert_not_contains "$linux_macos_desktop_apps_brewfile" 'cask "' \
+  "Linux renders no macOS Desktop App Stack casks, including the terminal-apps fonts"
+
 assert_contains "$terminal_apps_brewfile" 'cask "ghostty"' "terminal-apps group renders Ghostty"
+assert_contains "$terminal_apps_brewfile" 'cask "font-d2coding"' "terminal-apps group renders D2Coding"
+assert_contains "$terminal_apps_brewfile" 'cask "font-hack-nerd-font"' "terminal-apps group renders Hack Nerd Font"
+assert_contains "$terminal_apps_brewfile" 'cask "font-jetbrains-mono-nerd-font"' "terminal-apps group renders JetBrains Mono Nerd Font"
+assert_contains "$terminal_apps_brewfile" 'cask "font-noto-sans-cjk-kr"' "terminal-apps group renders Noto Sans CJK KR"
 assert_not_contains "$terminal_apps_brewfile" 'cask "cmux"' "terminal-apps group does not render cmux"
 assert_not_contains "$terminal_apps_brewfile" 'cask "hammerspoon"' "terminal-apps group does not render automation casks"
 

@@ -6,6 +6,7 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 managed_config="$repo_root/dot_config/git/config"
 user_config_source="$repo_root/create_dot_gitconfig"
 readme="$repo_root/README.md"
+readme_ko="$repo_root/README.ko.md"
 make_tmp_dir
 
 if [ ! -f "$managed_config" ]; then
@@ -42,7 +43,14 @@ for personal_setting in \
 do
   assert_file_not_contains "$managed_config" "$personal_setting" \
     "shared Git config excludes personal setting: $personal_setting"
+  assert_file_not_contains "$user_config_source" "$personal_setting" \
+    "seeded ~/.gitconfig excludes personal setting: $personal_setting"
 done
+
+assert_file_contains "$user_config_source" "[include]" \
+  "seeded ~/.gitconfig includes machine-local overrides"
+assert_file_contains "$user_config_source" "path = ~/.gitconfig.local" \
+  "seeded ~/.gitconfig points its include at ~/.gitconfig.local"
 
 test_home="$tmp_dir/home"
 test_xdg="$tmp_dir/xdg"
@@ -75,6 +83,35 @@ if [ "$(HOME="$test_home" XDG_CONFIG_HOME="$test_xdg" git config --get merge.ff)
 fi
 pass "setting user-level Git identity preserves shared Terrapod settings"
 
+if ! HOME="$test_home" XDG_CONFIG_HOME="$test_xdg" git config --list >/dev/null; then
+  fail "git config --list succeeds when ~/.gitconfig.local does not exist"
+fi
+pass "git config --list succeeds when ~/.gitconfig.local does not exist"
+
+if HOME="$test_home" XDG_CONFIG_HOME="$test_xdg" git config --get-all core.editor >/dev/null 2>&1; then
+  fail "git reports nothing from a missing ~/.gitconfig.local"
+fi
+pass "git reports nothing from a missing ~/.gitconfig.local"
+
+printf '[core]\n\teditor = nano\n' >"$test_home/.gitconfig.local"
+
+if [ "$(HOME="$test_home" XDG_CONFIG_HOME="$test_xdg" git config --get core.editor)" != "nano" ]; then
+  fail "a setting in ~/.gitconfig.local is honored through the ~/.gitconfig include"
+fi
+pass "a setting in ~/.gitconfig.local is honored through the ~/.gitconfig include"
+
+harness_origin="$(HOME="$test_home" XDG_CONFIG_HOME="$test_xdg" git config --show-origin --get core.editor)"
+case "$harness_origin" in
+  "file:$test_home/.gitconfig.local"*)
+    pass "Git reports ~/.gitconfig.local as the origin of its own settings"
+    ;;
+  *)
+    fail "Git reports ~/.gitconfig.local as the origin of its own settings: $harness_origin"
+    ;;
+esac
+
+rm "$test_home/.gitconfig.local"
+
 cp "$test_home/.gitconfig" "$tmp_dir/user-config-before"
 HOME="$test_home" XDG_CONFIG_HOME="$test_xdg" \
   chezmoi --source "$repo_root" --destination "$test_home" apply "$test_home/.gitconfig"
@@ -101,6 +138,10 @@ assert_file_contains "$readme" 'git config set --global user.signingKey "ssh-ed2
   "README documents optional SSH signing setup"
 assert_file_not_contains "$readme" "gitAllowedSigners" \
   "README removes the managed Git signer option"
+assert_file_contains "$readme" "~/.gitconfig.local" \
+  "README documents the machine-local Git include"
+assert_file_contains "$readme_ko" "~/.gitconfig.local" \
+  "Korean README documents the machine-local Git include"
 
 # The configured diff tool has to be one Terrapod actually installs; `vimdiff`
 # was not, so `git difftool` failed on the VPS Shell Profile and fell back to

@@ -147,6 +147,14 @@ assert_key_row_contains '`enableMacosAppGroupTerminalApps`' 'terminal-apps' \
   "README documents terminal-apps group on its option row"
 assert_key_row_contains '`enableMacosAppGroupTerminalApps`' 'Ghostty' \
   "README documents Ghostty on the terminal-apps option row"
+assert_key_row_contains '`enableMacosAppGroupTerminalApps`' 'D2Coding' \
+  "README documents D2Coding on the terminal-apps option row"
+assert_key_row_contains '`enableMacosAppGroupTerminalApps`' 'Hack Nerd Font' \
+  "README documents Hack Nerd Font on the terminal-apps option row"
+assert_key_row_contains '`enableMacosAppGroupTerminalApps`' 'JetBrains Mono Nerd Font' \
+  "README documents JetBrains Mono Nerd Font on the terminal-apps option row"
+assert_key_row_contains '`enableMacosAppGroupTerminalApps`' 'Noto Sans CJK KR' \
+  "README documents Noto Sans CJK KR on the terminal-apps option row"
 assert_file_not_contains "$readme" 'cmux' \
   "README no longer documents cmux as part of the macOS Desktop App Stack"
 assert_key_row_contains '`enableMacosAppGroupAutomation`' 'automation' \

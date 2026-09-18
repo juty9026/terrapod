@@ -15,6 +15,14 @@ if [[ -z "${ZELLIJ:-}" && "${SHLVL:-1}" -le 1 ]] && command -v fastfetch &>/dev/
   fastfetch
 fi
 
+# Per-user zsh completions
+# Vendor CLI installers (sentry-cli and others) append this same fpath entry
+# to the end of .zshrc so their completions load. Declaring it here makes
+# those appends redundant instead of drift, and puts it ahead of every
+# compinit rebuild below so completions dropped there register on first use.
+# A missing directory is not an error: zsh silently skips it on fpath.
+fpath=("$HOME/.local/share/zsh/site-functions" $fpath)
+
 # Oh My Zsh
 export ZSH="$HOME/.oh-my-zsh"
 ZSH_THEME=""
