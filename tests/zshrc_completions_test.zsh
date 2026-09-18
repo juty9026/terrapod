@@ -143,3 +143,66 @@ reset_dumps
 
   pass "ZSH_DISABLE_COMPFIX keeps insecure directories in the rebuilt table"
 ) || exit 1
+
+# A fresh machine has never populated this directory. The managed fpath entry
+# has to be harmless until something does: no stderr, no lost completion
+# table.
+reset_dumps
+(
+  source "$tmp_dir/home/.zshrc" 2>"$tmp_dir/stderr"
+
+  if (( ! ${+_comps} )); then
+    fail "sourcing .zshrc should build a completion table even when the \
+per-user site-functions directory does not exist yet"
+  fi
+
+  pass "the completion table still builds when the site-functions directory is absent"
+) || exit 1
+
+if [[ -s "$tmp_dir/stderr" ]]; then
+  cat "$tmp_dir/stderr" >&2
+  fail "sourcing .zshrc with the site-functions directory absent should not print to stderr"
+fi
+
+pass "sourcing .zshrc with the site-functions directory absent produces no stderr output"
+
+# The whole point: a completion a vendor installer drops in the conventional
+# per-user directory has to be live in the very first shell, the same table
+# the zinit block rebuilds for zsh-completions.
+site_functions_dir="$tmp_dir/home/.local/share/zsh/site-functions"
+mkdir -p "$site_functions_dir"
+cat >"$site_functions_dir/_terrapod-site-functions-probe" <<'STUB'
+#compdef terrapod-site-functions-probe
+_message 'terrapod site-functions probe'
+STUB
+
+reset_dumps
+(
+  source "$tmp_dir/home/.zshrc"
+
+  if (( ! ${+_comps[terrapod-site-functions-probe]} )); then
+    fail "a completion dropped in the per-user site-functions directory should register"
+  fi
+
+  pass "a completion dropped in the per-user site-functions directory registers"
+) || exit 1
+
+# Vendor installers append the same fpath line to the end of .zshrc; the
+# duplicate entry that leaves behind must be harmless, not something a user
+# has to clean up by hand.
+cat >>"$tmp_dir/home/.zshrc" <<'VENDOR'
+
+# sentry
+fpath=("$HOME/.local/share/zsh/site-functions" $fpath)
+VENDOR
+
+reset_dumps
+(
+  source "$tmp_dir/home/.zshrc"
+
+  if (( ! ${+_comps[terrapod-site-functions-probe]} )); then
+    fail "a vendor-appended duplicate site-functions fpath entry should not break completions"
+  fi
+
+  pass "a vendor-appended duplicate site-functions fpath entry is harmless"
+) || exit 1

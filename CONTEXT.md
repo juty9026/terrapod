@@ -298,6 +298,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Routine `tpod apply` keeps the normal interactive chezmoi apply behavior instead of silently overwriting user-modified managed files.
 - Machine-local PATH customizations should live in the managed zsh extension point rather than direct edits to managed shell startup files.
 - Terrapod does not automatically migrate vendor-installer shell startup edits such as Antigravity PATH lines into the managed zsh extension point; first-run guidance should point users to the backup and extension point instead.
+- The per-user zsh site-functions directory (`~/.local/share/zsh/site-functions`) is part of the declared `.zshrc` `fpath` on every machine profile, so vendor installers that append it are not machine-local customizations; this does not change the rule that other vendor-appended shell startup edits stay unmigrated.
 - After first-run completion, the installer should explain how to make `tpod` available in the current terminal because a child installer process cannot update the parent shell's `PATH`.
 - First-run `tpod` availability guidance should include the absolute `~/.local/bin/tpod` command for immediate recovery and a login-shell refresh or new-terminal instruction for normal use.
 - External package manager, runtime manager, shell integration, desktop app, and vendor tool installer failures during first-run declared-state apply should warn without blocking **Terrapod** command installation when the managed dotfiles can still be written.
