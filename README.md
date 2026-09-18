@@ -409,9 +409,14 @@ enableDevelopmentWorkspace = true
 
 ## Git Configuration
 
-Terrapod manages shared Git settings in `~/.config/git/config`. It creates
-`~/.gitconfig` when missing, then leaves its contents user-managed. Configure
-your identity after installation.
+Git settings live in three files. Terrapod manages shared settings in
+`~/.config/git/config`. It creates `~/.gitconfig` when missing, seeded with a
+comment pointing back at the shared file and an `[include]` of
+`~/.gitconfig.local`, then leaves its contents user-managed from then on:
+put your identity and signing settings there. `~/.gitconfig.local` is never
+created or managed by Terrapod; create it yourself for settings that belong
+to one machine only, such as a different signing program or SSH command.
+Configure your identity after installation.
 
 ```sh
 git config set --global user.name "Your Name"

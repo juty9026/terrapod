@@ -1,1 +1,4 @@
-# User-specific Git settings. Terrapod does not manage this file after creation.
+# Shared Git settings are managed in ~/.config/git/config.
+# Terrapod does not manage this file after creation.
+[include]
+	path = ~/.gitconfig.local
