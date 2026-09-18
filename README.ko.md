@@ -384,9 +384,13 @@ enableDevelopmentWorkspace = true
 
 ## Git Configuration
 
-Terrapod은 공용 Git 설정을 `~/.config/git/config`에서 관리합니다.
-`~/.gitconfig`이 없으면 생성하고, 이후 content는 사용자가 관리합니다. 설치 후
-identity를 설정합니다.
+Git 설정은 세 개의 file로 나뉩니다. Terrapod은 공용 설정을
+`~/.config/git/config`에서 관리합니다. `~/.gitconfig`이 없으면, 공용 설정은
+그 file에서 관리된다는 comment와 `~/.gitconfig.local`을 가리키는 `[include]`
+항목으로 채워 생성하고, 이후 content는 사용자가 관리합니다. identity와 서명
+설정은 이 file에 둡니다. `~/.gitconfig.local`은 Terrapod이 만들거나 관리하지
+않으므로, 서명 프로그램이나 SSH command처럼 한 machine에만 적용할 설정이 있을
+때 직접 만들어 사용합니다. 설치 후 identity를 설정합니다.
 
 ```sh
 git config set --global user.name "Your Name"

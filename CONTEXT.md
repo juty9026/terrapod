@@ -96,6 +96,10 @@ _Avoid_: OS provisioning wizard, standalone installer, configure shortcut
 A first-run setup choice that expands into concrete optional stack and app-group settings for a machine.
 _Avoid_: machine preset, permanent mode, dynamic policy
 
+**Machine-Local Git Include**:
+The optional, unmanaged `~/.gitconfig.local` file that the seeded `~/.gitconfig` includes for Git settings that belong to one machine only.
+_Avoid_: managed Git config, user Git config, SSH allowed signers
+
 **Canonical README**:
 The English `README.md` that defines the authoritative Terrapod README content.
 _Avoid_: primary docs, source README
@@ -384,6 +388,8 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Rich **Terrapod Setup** presentation may use setup-only emoji, color, spacing, and aligned prompt layout when it improves first-run review clarity.
 - Routine command visual treatment is separate from rich **Terrapod Setup** presentation; Setup remains its own gum-backed UI.
 - Error output avoids product metaphor and states the failed condition plus the next useful action.
+- Shared Git settings belong to the managed `~/.config/git/config`, identity and signing settings belong to the seeded `~/.gitconfig`, and per-machine overrides belong to the **Machine-Local Git Include**.
+- The seeded `~/.gitconfig` is created once, points at the **Machine-Local Git Include**, and is never re-applied, so an existing machine's `~/.gitconfig` is untouched by this seeding.
 
 ## Example Dialogue
 
