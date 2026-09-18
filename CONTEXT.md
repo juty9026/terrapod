@@ -188,6 +188,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - The **VPS Shell Profile** includes the **Core Shell Stack**.
 - The **VPS Shell Profile** includes the **Development Runtime Stack**.
 - The **Core Shell Stack** includes Oh My Zsh and modern CLI tools such as fd, ripgrep, zoxide, lazygit, GitHub CLI (`gh`), and plain Neovim.
+- Shared GitHub CLI configuration (`git_protocol` and the `co` alias) is managed as part of the **Core Shell Stack**, while GitHub CLI authentication (`hosts.yml`) is machine state that **Terrapod** never manages.
 - The **Development Runtime Stack** includes Bun, Node.js 24, Python 3.13, and uv managed by the **Development Runtime Manager**.
 - pnpm belongs to the **Development Runtime Stack** through Node.js Corepack, not as a mise-managed tool.
 - Rich Neovim configuration belongs to the **Optional Editor Stack**, not the **Core Shell Stack**, and is opt-in for every machine profile.
