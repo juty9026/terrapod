@@ -147,6 +147,7 @@ Apple Silicon에서는 Homebrew를 `/opt/homebrew`에 설치하고, Intel Mac에
 
 - standard-prefix Homebrew와 shared 20-formula `Brewfile` bundle
 - Homebrew를 통한 ripgrep, neovim, zellij, lazygit, GitHub CLI (`gh`), starship, mise 같은 Core Shell Stack CLI
+- `gh extension install`을 통한 GitHub CLI Extension Set (`github/gh-stack`)
 - 최신 안정 GitHub release에서 제공하는 Jetendard terminal font
 - Oh My Zsh, zinit, SCM Breeze
 - mise를 통한 Bun, Node.js 24, Python 3.13, uv/uvx
@@ -211,6 +212,7 @@ Ubuntu에서는 initial apply가 VPS shell profile을 위한 setup script를 실
 - standard-prefix Homebrew와 shared 20-formula `Brewfile` bundle
 - Oh My Zsh, zinit, SCM Breeze
 - Homebrew를 통한 ripgrep, neovim, zellij, lazygit, GitHub CLI (`gh`), starship, mise 같은 Core Shell Stack CLI
+- `gh extension install`을 통한 GitHub CLI Extension Set (`github/gh-stack`)
 - mise를 통한 Bun, Node.js 24, Python 3.13, uv/uvx
 - Node.js Corepack을 통한 pnpm
 - login shell을 zsh로 전환
@@ -264,6 +266,13 @@ Claude Code는 자체적으로 업데이트하며 이 명령의 대상이 아닙
 ```sh
 brew update
 brew upgrade --cask codex antigravity-cli
+```
+
+`tpod apply`는 누락된 GitHub CLI Extension Set member를 설치하지만 업그레이드하거나
+고정하지 않습니다. extension은 `gh extension upgrade`로 직접 업그레이드합니다.
+
+```sh
+gh extension upgrade --all
 ```
 
 development runtime을 의도적으로 업데이트할 때는 mise를 직접 사용합니다.

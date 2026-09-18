@@ -907,6 +907,57 @@ homebrew_prefix() {
   brew --prefix 2>/dev/null
 }
 
+# Mirrors gh-extensions.tmpl; add a new extension in both places.
+github_cli_extension_set_members() {
+  printf '%s\n' github/gh-stack
+}
+
+github_cli_extension_installed() {
+  extension="$1"
+
+  gh extension list 2>/dev/null | awk -v want="$extension" '
+    {
+      for (i = 1; i <= NF; i++) {
+        if ($i == want) {
+          found = 1
+        }
+      }
+    }
+    END { exit !found }
+  '
+}
+
+print_github_cli_extension_set_status() {
+  if ! command -v gh >/dev/null 2>&1; then
+    print_colon_state_line "GitHub CLI Extension Set" "missing" "(gh is not installed)"
+    return
+  fi
+
+  missing=
+  available=
+  for extension in $(github_cli_extension_set_members); do
+    if github_cli_extension_installed "$extension"; then
+      if [ -z "$available" ]; then
+        available="$extension"
+      else
+        available="$available, $extension"
+      fi
+    else
+      if [ -z "$missing" ]; then
+        missing="$extension"
+      else
+        missing="$missing, $extension"
+      fi
+    fi
+  done
+
+  if [ -n "$missing" ]; then
+    print_colon_state_line "GitHub CLI Extension Set" "missing" "(missing extensions: $missing)"
+  else
+    print_colon_state_line "GitHub CLI Extension Set" "available" "(extensions available: $available)"
+  fi
+}
+
 print_stack_status() {
   label="$1"
   enabled="$2"
@@ -1114,6 +1165,7 @@ run_status() {
   print_section_value "Profile:" "$(profile_context_label)"
   show_config_context "$config_file"
   printf '%s\n' "Core Shell Stack source: Homebrew"
+  print_github_cli_extension_set_status
   if ! executable_selection_helper_available; then
     print_warning_line "executable selection helper is missing"
   elif ! run_executable_selection status "$config_file" "$profile"; then

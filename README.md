@@ -151,6 +151,7 @@ On Apple Silicon, Homebrew installs at `/opt/homebrew`; on Intel Macs, it instal
 
 - Standard-prefix Homebrew and the shared 20-formula `Brewfile` bundle
 - Core Shell Stack CLIs such as ripgrep, neovim, zellij, lazygit, GitHub CLI (`gh`), starship, and mise through Homebrew
+- GitHub CLI Extension Set (`github/gh-stack`) through `gh extension install`
 - Jetendard terminal font from the latest stable GitHub release
 - Oh My Zsh, zinit, and SCM Breeze
 - Bun, Node.js 24, Python 3.13, and uv/uvx through mise
@@ -218,6 +219,7 @@ On Ubuntu, the initial apply runs setup scripts for the VPS shell profile:
 - Standard-prefix Homebrew and the shared 20-formula `Brewfile` bundle
 - Oh My Zsh, zinit, and SCM Breeze
 - Core Shell Stack CLIs such as ripgrep, neovim, zellij, lazygit, GitHub CLI (`gh`), starship, and mise through Homebrew
+- GitHub CLI Extension Set (`github/gh-stack`) through `gh extension install`
 - Bun, Node.js 24, Python 3.13, and uv/uvx through mise
 - pnpm through Node.js Corepack
 - Login shell switch to zsh
@@ -275,6 +277,13 @@ Claude Code updates itself and is not part of that command.
 ```sh
 brew update
 brew upgrade --cask codex antigravity-cli
+```
+
+`tpod apply` installs a missing GitHub CLI Extension Set member but never
+upgrades or pins one. Upgrade extensions yourself with `gh extension upgrade`.
+
+```sh
+gh extension upgrade --all
 ```
 
 Use mise directly when intentionally updating development runtimes.

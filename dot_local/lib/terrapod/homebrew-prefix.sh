@@ -76,3 +76,14 @@ terrapod_standard_homebrew_mise_path() {
     *) return 1 ;;
   esac
 }
+
+terrapod_standard_homebrew_gh_path() {
+  os="$1"
+  hardware_arch="$(terrapod_homebrew_hardware_arch "$os")" || return 1
+  case "$os:$hardware_arch" in
+    darwin:arm64|darwin:aarch64) printf '%s\n' /opt/homebrew/bin/gh ;;
+    darwin:x86_64) printf '%s\n' /usr/local/bin/gh ;;
+    linux:x86_64|linux:aarch64) printf '%s\n' /home/linuxbrew/.linuxbrew/bin/gh ;;
+    *) return 1 ;;
+  esac
+}

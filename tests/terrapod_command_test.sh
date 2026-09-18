@@ -999,7 +999,7 @@ pass "install warning markers honor XDG_STATE_HOME"
 marker_categories="$(
   sh -c '. "$1"; terrapod_install_warning_categories' sh "$install_warnings_lib"
 )"
-expected_marker_categories="$(printf '%s\n' homebrew-core homebrew-desktop-apps ubuntu-bootstrap shell-integrations mise-tools optional-ai-cli-tools jetendard-font jetendard-settings)"
+expected_marker_categories="$(printf '%s\n' homebrew-core homebrew-desktop-apps ubuntu-bootstrap shell-integrations mise-tools optional-ai-cli-tools jetendard-font jetendard-settings gh-extensions)"
 
 if [ "$marker_categories" != "$expected_marker_categories" ]; then
   printf '%s\n' "expected marker categories:" >&2
@@ -2114,6 +2114,7 @@ assert_contains "$macos_status_output" "Terrapod status" "Terrapod status prints
 assert_contains "$macos_status_output" "Profile: macOS Terminal Profile" "Terrapod status reports macOS Terminal Profile context"
 assert_contains "$macos_status_output" "Config: $status_config (present)" "Terrapod status reports explicit config path"
 assert_contains "$macos_status_output" "Optional Editor Stack         : enabled (rich Neovim configuration)" "Terrapod status reports enabled Optional Editor Stack state"
+assert_contains "$macos_status_output" "GitHub CLI Extension Set      : missing (missing extensions: github/gh-stack)" "Terrapod status reports a missing GitHub CLI Extension Set member"
 assert_contains "$macos_status_output" "Optional AI Tool Stack        : enabled (tools available: agy, claude, codex)" "Terrapod status reports enabled Optional AI Tool Stack tool state"
 assert_contains "$macos_status_output" "Optional Development Workspace: enabled (development Zellij layouts)" "Terrapod status reports enabled Optional Development Workspace state"
 assert_contains "$macos_status_output" "terminal-apps                 : enabled (Ghostty)" "Terrapod status reports enabled Ghostty-only terminal-apps macOS App Group"
@@ -2131,6 +2132,18 @@ assert_no_rich_setup_emoji "$help_output" "Terrapod help does not use setup emoj
 assert_no_ansi_escape "$macos_status_output" "Terrapod status does not use setup ANSI presentation"
 assert_no_rich_setup_emoji "$macos_status_output" "Terrapod status does not use setup emoji presentation"
 assert_no_routine_emoji "$macos_status_output" "captured Terrapod status has no routine emoji"
+
+gh_extension_set_standard_brew_prefix="$tmp_dir/gh-extension-set-standard-homebrew"
+gh_extension_set_path="$(homebrew_owned_status_doctor_path gh-extension-set "$gh_extension_set_standard_brew_prefix" zsh agy claude codex ghostty op)"
+write_stub "$gh_extension_set_path/gh" \
+  'if [ "${1:-}" = extension ] && [ "${2:-}" = list ]; then' \
+  '  printf "%s\t%s\t%s\n" gh-stack github/gh-stack v0.1.1' \
+  'fi'
+gh_extension_set_status_output="$(
+  TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$status_config" PATH="$gh_extension_set_path" \
+    /bin/sh "$terrapod" status
+)"
+assert_contains "$gh_extension_set_status_output" "GitHub CLI Extension Set      : available (extensions available: github/gh-stack)" "Terrapod status reports an installed GitHub CLI Extension Set member"
 
 status_marker_state="$tmp_dir/status-marker-state"
 HOME="$tmp_dir/status-marker-home" XDG_STATE_HOME="$status_marker_state" sh -c \
@@ -2224,6 +2237,7 @@ ubuntu_status_output="$(
 )"
 
 assert_contains "$ubuntu_status_output" "Profile: VPS Shell Profile" "Terrapod status reports VPS Shell Profile context on Ubuntu 24.04"
+assert_contains "$ubuntu_status_output" "GitHub CLI Extension Set      : missing (gh is not installed)" "Terrapod status reports a missing gh executable for the GitHub CLI Extension Set on the VPS Shell Profile"
 assert_contains "$ubuntu_status_output" "Optional Editor Stack         : disabled" "Terrapod status reports disabled Optional Editor Stack without treating nvim as missing"
 assert_contains "$ubuntu_status_output" "Optional AI Tool Stack        : not applicable (VPS Shell Profile)" "Terrapod status reports the Optional AI Tool Stack as not applicable on the VPS Shell Profile"
 assert_contains "$ubuntu_status_output" "Optional Development Workspace: disabled" "Terrapod status reports disabled Optional Development Workspace without missing-tool warnings"

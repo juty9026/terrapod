@@ -189,6 +189,16 @@ assert_managed_paths_exclude_prefix \
   "Brewfile.ai-cli-tools.tmpl" \
   "Ubuntu does not manage the rendered AI CLI tools Brewfile"
 
+assert_managed_paths_exclude_prefix \
+  "$macos_managed" \
+  "gh-extensions.tmpl" \
+  "macOS does not manage the rendered GitHub CLI Extension Set list"
+
+assert_managed_paths_exclude_prefix \
+  "$ubuntu_managed" \
+  "gh-extensions.tmpl" \
+  "Ubuntu does not manage the rendered GitHub CLI Extension Set list"
+
 for entry in \
   .chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl \
   dot_local/lib/terrapod/homebrew-core-bundle.sh
@@ -1789,6 +1799,11 @@ assert_managed_paths_include_prefix \
 
 assert_managed_paths_include_prefix \
   "$ubuntu_managed" \
+  ".chezmoiscripts/run_before_20-install-gh-extensions.sh.tmpl" \
+  "Ubuntu VPS includes always-run GitHub CLI Extension Set install hook"
+
+assert_managed_paths_include_prefix \
+  "$ubuntu_managed" \
   ".chezmoiscripts/run_before_30-install-shell-integrations.sh.tmpl" \
   "Ubuntu VPS includes always-run shell integration install hook"
 
@@ -1801,6 +1816,11 @@ assert_managed_paths_include_prefix \
   "$macos_managed" \
   ".chezmoiscripts/run_after_20-install-mise-tools.sh.tmpl" \
   "macOS includes always-run mise tool reconciliation"
+
+assert_managed_paths_include_prefix \
+  "$macos_managed" \
+  ".chezmoiscripts/run_before_20-install-gh-extensions.sh.tmpl" \
+  "macOS includes always-run GitHub CLI Extension Set install hook"
 
 assert_managed_paths_include_prefix \
   "$macos_managed" \
@@ -2489,6 +2509,7 @@ inlined_warning_scripts="
 .chezmoiscripts/run_before_01-retry-ubuntu-bootstrap.sh.tmpl
 .chezmoiscripts/run_before_02-retry-jetendard-font.sh.tmpl
 .chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl
+.chezmoiscripts/run_before_20-install-gh-extensions.sh.tmpl
 .chezmoiscripts/run_before_30-install-shell-integrations.sh.tmpl
 .chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl
 .chezmoiscripts/run_after_20-install-mise-tools.sh.tmpl

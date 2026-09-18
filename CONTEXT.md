@@ -24,6 +24,10 @@ _Avoid_: optional tools, nice-to-have tools
 The mandatory language/runtime tool set expected to exist in the VPS Shell Profile.
 _Avoid_: project-local runtime, optional runtime
 
+**GitHub CLI Extension Set**:
+The declared set of GitHub CLI extensions installed alongside `gh` as part of the **Core Shell Stack** on both supported profiles.
+_Avoid_: gh plugins, optional gh tools, per-machine gh extensions
+
 **Optional Editor Stack**:
 The opt-in rich editor configuration that is excluded from every machine profile unless explicitly enabled.
 _Avoid_: core shell editor, mandatory editor config, default LazyVim setup
@@ -188,6 +192,9 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - The **VPS Shell Profile** includes the **Core Shell Stack**.
 - The **VPS Shell Profile** includes the **Development Runtime Stack**.
 - The **Core Shell Stack** includes Oh My Zsh and modern CLI tools such as fd, ripgrep, zoxide, lazygit, GitHub CLI (`gh`), and plain Neovim.
+- The **GitHub CLI Extension Set** belongs to the **Core Shell Stack** on both the **macOS Terminal Profile** and the **VPS Shell Profile**; its first member is `github/gh-stack`.
+- `tpod apply` installs a **GitHub CLI Extension Set** member only when `gh extension list` does not already report it, and never runs `gh extension upgrade` or passes a `--pin` tag; extensions installed by hand outside the set are left alone.
+- A failed **GitHub CLI Extension Set** member install becomes a `gh-extensions` install warning instead of a failed apply; a missing `gh` executable records the same category with guidance pointing at the Homebrew core install warning.
 - The **Development Runtime Stack** includes Bun, Node.js 24, Python 3.13, and uv managed by the **Development Runtime Manager**.
 - pnpm belongs to the **Development Runtime Stack** through Node.js Corepack, not as a mise-managed tool.
 - Rich Neovim configuration belongs to the **Optional Editor Stack**, not the **Core Shell Stack**, and is opt-in for every machine profile.
@@ -241,10 +248,10 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Terrapod install warnings are machine-local recovery state stored outside the **Terrapod Source Repository** and managed dotfiles, under the user's XDG state area such as `${XDG_STATE_HOME:-$HOME/.local/state}/terrapod/install-warnings/<category>`.
 - Terrapod install warnings are category-scoped markers that, while their category exists, remain actionable until the same installer category completes successfully; interrupted or failed reruns must not hide the previous recovery signal.
 - A successful rerun of an installer category clears that category's warning marker, while a failed rerun replaces it with the current failure summary and guidance.
-- Mandatory stack warning markers such as Homebrew core, Ubuntu bootstrap, shell integrations, and mise tools are cleared only by successful reruns because their desired state cannot be disabled by optional settings.
+- Mandatory stack warning markers such as Homebrew core, Ubuntu bootstrap, shell integrations, mise tools, and the GitHub CLI Extension Set are cleared only by successful reruns because their desired state cannot be disabled by optional settings.
 - Optional stack or app-group warning marker content may be cleared or reduced when the corresponding desired optional setting is disabled.
 - Terrapod install warnings are updated by both first-run installation and routine `tpod apply` because routine apply is the recovery path for previously failed installer categories.
-- Terrapod install warning categories include stable filename slugs for Homebrew core bundle (`homebrew-core`), Homebrew desktop app bundle (`homebrew-desktop-apps`), Ubuntu bootstrap (`ubuntu-bootstrap`), shell integrations (`shell-integrations`), mise runtime tools (`mise-tools`), optional AI CLI tools (`optional-ai-cli-tools`), Jetendard fonts (`jetendard-font`), and Jetendard settings (`jetendard-settings`); best-effort UI nudges such as opening Karabiner do not need install warning markers.
+- Terrapod install warning categories include stable filename slugs for Homebrew core bundle (`homebrew-core`), Homebrew desktop app bundle (`homebrew-desktop-apps`), Ubuntu bootstrap (`ubuntu-bootstrap`), shell integrations (`shell-integrations`), mise runtime tools (`mise-tools`), optional AI CLI tools (`optional-ai-cli-tools`), Jetendard fonts (`jetendard-font`), Jetendard settings (`jetendard-settings`), and the **GitHub CLI Extension Set** (`gh-extensions`); best-effort UI nudges such as opening Karabiner do not need install warning markers.
 - Terrapod install warning markers use shell-friendly key/value content with stable category, summary, guidance, and `updated_at` fields instead of free-form logs or captured stack traces.
 - Terrapod install warning marker values stay single-line so shell parsing remains predictable; longer human-readable explanations belong in `tpod doctor` output.
 - Terrapod install warning marker `updated_at` values use UTC ISO 8601 timestamps such as `2026-06-02T03:12:45Z`.
