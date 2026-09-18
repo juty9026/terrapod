@@ -406,6 +406,11 @@ git config set --global user.signingKey "ssh-ed25519 YOUR_PUBLIC_KEY"
 git config set --global commit.gpgSign true
 ```
 
+Terrapod은 공용 GitHub CLI 설정도 `~/.config/gh/config.yml`에서 관리하며,
+`git_protocol: ssh`와 `pr checkout`용 `co` alias를 설정합니다. GitHub CLI
+authentication(`~/.config/gh/hosts.yml`)은 machine-local로 유지되며, Terrapod은
+이를 관리하거나 건드리지 않습니다.
+
 ## Repository Conventions
 
 - `dot_`: home directory의 dotfile

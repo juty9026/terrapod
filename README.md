@@ -433,6 +433,11 @@ git config set --global user.signingKey "ssh-ed25519 YOUR_PUBLIC_KEY"
 git config set --global commit.gpgSign true
 ```
 
+Terrapod also manages shared GitHub CLI settings in `~/.config/gh/config.yml`,
+setting `git_protocol: ssh` and the `co` alias for `pr checkout`. GitHub CLI
+authentication (`~/.config/gh/hosts.yml`) stays machine-local; Terrapod never
+manages or touches it.
+
 ## Repository Conventions
 
 - `dot_`: dotfiles in the home directory
