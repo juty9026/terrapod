@@ -167,7 +167,7 @@ helper는 최신 안정 release의 모든 TTF를 설치하고, 이전 release가
 
 macOS desktop application은 machine-local data key로 제어되는 opt-in App Group으로 나뉩니다. Homebrew bootstrap 중 chezmoi는 선택한 group을 `Brewfile.macos-desktop-apps.tmpl`에서 temporary Brewfile로 render하고, 그 rendered bundle을 설치합니다.
 
-- `terminal-apps`: Ghostty.
+- `terminal-apps`: Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, Noto Sans CJK KR.
 - `automation`: Hammerspoon, Karabiner-Elements, Scroll Reverser.
 - `launcher`: Raycast와 1Password CLI.
 - `monitoring`: iStat Menus.
@@ -311,7 +311,7 @@ Optional stack profile과 macOS App Group setting은 기본적으로 disabled입
 | `enableEditorStack` | `false` | rich Neovim configuration을 관리하는 Optional Editor Stack을 활성화합니다. Plain Neovim은 어느 쪽이든 Core Shell Stack에 남아 있습니다. |
 | `enableAiCliTools` | `false` | Antigravity CLI, Claude Code, Codex를 설치합니다. Antigravity CLI와 Codex는 Homebrew cask `antigravity-cli`, `codex`로, Claude Code는 공식 installer로 설치합니다. macOS Terminal Profile 전용이며 VPS Shell Profile에서는 무시됩니다. |
 | `enableDevelopmentWorkspace` | `false` | Optional Editor Stack, 적용 가능한 경우의 Optional AI Tool Stack, development-specific Zellij workspace surface를 포함하는 Optional Development Workspace preset을 활성화합니다. |
-| `enableMacosAppGroupTerminalApps` | `false` | terminal-apps macOS App Group에 포함된 Ghostty를 설치합니다. |
+| `enableMacosAppGroupTerminalApps` | `false` | terminal-apps macOS App Group에 포함된 Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, Noto Sans CJK KR를 설치합니다. |
 | `enableMacosAppGroupAutomation` | `false` | automation macOS App Group인 Hammerspoon, Karabiner-Elements, Scroll Reverser를 설치합니다. |
 | `enableMacosAppGroupLauncher` | `false` | launcher macOS App Group인 Raycast와 1Password CLI를 설치합니다. |
 | `enableMacosAppGroupMonitoring` | `false` | monitoring macOS App Group인 iStat Menus를 설치합니다. |
