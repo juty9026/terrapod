@@ -40,7 +40,8 @@ terrapod_install_warning_categories() {
     mise-tools \
     optional-ai-cli-tools \
     jetendard-font \
-    jetendard-settings
+    jetendard-settings \
+    gh-extensions
 }
 
 terrapod_install_warning_is_category() {
