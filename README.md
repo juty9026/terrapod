@@ -357,6 +357,8 @@ Files in `~/.config/zsh/path.d` are explicit machine-local PATH overrides. They
 remain highest priority. If another executable is selected first, Terrapod
 reports the actual and canonical paths as an advisory. Nonstandard Homebrew
 prefixes are also advisory; cleanup and PATH changes remain manual.
+`~/.local/share/zsh/site-functions` is already on the managed `fpath`, so a
+vendor installer that appends it needs no machine-local override.
 
 `enableMacosAppGroupAiApps` is deprecated and is not treated as an alias for `enableMacosAppGroupDevelopmentApps`. Run `tpod setup` or `terrapod configure <Preset>` to migrate explicitly; Terrapod does not install Zed based on the old selection.
 

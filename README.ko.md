@@ -331,6 +331,8 @@ Terrapod은 기존 mise, APT, vendor-installed 및 기타 alternate payload를 �
 `~/.config/zsh/path.d`의 file은 명시적인 machine-local PATH override입니다. 항상 가장 높은
 우선순위를 유지합니다. 다른 executable이 먼저 선택되면 actual path와 canonical path를
 advisory로 표시합니다. nonstandard Homebrew prefix도 advisory이며 cleanup과 PATH 변경은 수동입니다.
+`~/.local/share/zsh/site-functions`는 이미 managed `fpath`에 포함되어 있으므로, vendor
+installer가 이 경로를 추가해도 machine-local override가 필요하지 않습니다.
 
 `enableMacosAppGroupAiApps`는 deprecated key이며 alias로 해석하지 않습니다. 명시적으로 migrate하려면 `tpod setup` 또는 `terrapod configure <Preset>`를 실행합니다. Terrapod은 이전 선택만으로 Zed를 설치하지 않습니다.
 
