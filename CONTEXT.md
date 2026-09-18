@@ -334,6 +334,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - When **macOS App Group** settings change, `tpod apply` keeps Homebrew desktop app warning marker content aligned with currently enabled groups; failures for disabled groups are removed from readiness warnings while enabled group failures remain.
 - The implemented **macOS App Groups** are terminal-apps, automation, launcher, monitoring, development-apps, and mobile-dev.
 - The terminal-apps **macOS App Group** contains Ghostty.
+- The terminal-apps **macOS App Group** also carries the terminal fonts `font-d2coding`, `font-hack-nerd-font`, `font-jetbrains-mono-nerd-font`, and `font-noto-sans-cjk-kr` installed as Homebrew casks, distinct from the Jetendard font installer owned by the **macOS Terminal Profile**.
 - cmux is outside the declared **macOS Desktop App Stack**; existing cmux installs or settings may remain on a machine unmanaged and are not removed by **Terrapod**.
 - The automation **macOS App Group** contains Hammerspoon and Karabiner-Elements.
 - The launcher **macOS App Group** contains Raycast and 1Password CLI.

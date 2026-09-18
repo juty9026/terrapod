@@ -174,7 +174,7 @@ machine-local data keys. During Homebrew bootstrap, chezmoi renders selected
 groups from `Brewfile.macos-desktop-apps.tmpl` into a temporary Brewfile and
 installs that rendered bundle:
 
-- `terminal-apps`: Ghostty.
+- `terminal-apps`: Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, and Noto Sans CJK KR.
 - `automation`: Hammerspoon, Karabiner-Elements, and Scroll Reverser.
 - `launcher`: Raycast and 1Password CLI.
 - `monitoring`: iStat Menus.
@@ -331,7 +331,7 @@ Optional stack profiles and macOS App Group settings are disabled by default.
 | `enableEditorStack` | `false` | Enables the Optional Editor Stack, which manages the rich Neovim configuration. Plain Neovim remains in the Core Shell Stack either way. |
 | `enableAiCliTools` | `false` | Installs Antigravity CLI, Claude Code, and Codex: Antigravity CLI and Codex through Homebrew casks `antigravity-cli` and `codex`, and Claude Code through its official installer. macOS Terminal Profile only; ignored on the VPS Shell Profile. |
 | `enableDevelopmentWorkspace` | `false` | Enables the Optional Development Workspace preset, including the Optional Editor Stack, the Optional AI Tool Stack where it applies, and development-specific Zellij workspace surfaces. |
-| `enableMacosAppGroupTerminalApps` | `false` | Installs the terminal-apps macOS App Group: Ghostty. |
+| `enableMacosAppGroupTerminalApps` | `false` | Installs the terminal-apps macOS App Group: Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, and Noto Sans CJK KR. |
 | `enableMacosAppGroupAutomation` | `false` | Installs the automation macOS App Group: Hammerspoon, Karabiner-Elements, and Scroll Reverser. |
 | `enableMacosAppGroupLauncher` | `false` | Installs the launcher macOS App Group: Raycast and 1Password CLI. |
 | `enableMacosAppGroupMonitoring` | `false` | Installs the monitoring macOS App Group: iStat Menus. |
