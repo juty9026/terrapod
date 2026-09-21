@@ -76,3 +76,11 @@ the installer resume from a config it never applies.
   derived from its rows, and Terrapod Setup, Preset expansion, the config
   writer, and status read the same rows. It lives here because Terrapod Setup
   and the installer both run before the full apply.
+- The reader also owns the completeness verdict: `managed_setup_config_verdict`
+  answers, for a path it is handed, whether the managed config is `missing`,
+  `non-regular`, `unreadable`, `unsupported`, `incomplete`, or `complete`, with
+  the problem message or missing keys as its detail. `tpod` and the installer
+  print and exit on that answer instead of each climbing the file-state,
+  syntax, and missing-key ladder themselves, so "complete" has one definition.
+  The verdict is the presence rule only; the installer's stored-profile match
+  stays its own condition on a `complete` verdict.
