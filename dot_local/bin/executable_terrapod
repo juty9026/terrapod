@@ -669,10 +669,6 @@ prompt_for_setup_settings() {
   printf '%s\n' "$setup_data"
 }
 
-config_file_is_usable() {
-  [ "$(config_file_state "$1")" = "readable" ]
-}
-
 config_file_problem_message() {
   printf '%s\n' "config path is not a readable regular file: $1"
 }
@@ -692,48 +688,19 @@ config_data_bool() {
   fi
 }
 
-managed_setup_missing_keys() {
-  config_file="$1"
-  missing=
-
-  for key in $(managed_setup_keys); do
-    if ! config_data_key_present "$config_file" "$key"; then
-      if [ -z "$missing" ]; then
-        missing="$key"
-      else
-        missing="$missing, $key"
-      fi
-    fi
-  done
-
-  printf '%s\n' "$missing"
-}
-
 managed_setup_guidance_message() {
   printf '%s\n' "Run 'tpod setup' or 'tpod configure <$(available_preset_args "$(current_profile)")>' to complete the managed setup config."
 }
 
-managed_setup_config_is_supported() {
-  ! unsupported_managed_config_problem_message "$1" >/dev/null 2>&1
-}
-
-is_managed_setup_config_complete() {
-  config_file="$1"
-
-  config_file_is_usable "$config_file" &&
-    managed_setup_config_is_supported "$config_file" &&
-    [ -z "$(managed_setup_missing_keys "$config_file")" ]
-}
-
 print_managed_setup_config_guidance() {
-  config_file="$1"
+  config_verdict="$1"
 
-  if problem_message="$(unsupported_managed_config_problem_message "$config_file")"; then
-    printf '%s\n' "  $problem_message"
+  if [ "$(managed_setup_verdict_state "$config_verdict")" = "unsupported" ]; then
+    printf '%s\n' "  $(managed_setup_verdict_detail "$config_verdict")"
     return 0
   fi
 
-  missing_keys="$(managed_setup_missing_keys "$config_file")"
+  missing_keys="$(managed_setup_verdict_detail "$config_verdict")"
 
   if [ -z "$missing_keys" ]; then
     return 0
@@ -1080,20 +1047,24 @@ status_key_tool_warnings() {
 
 print_status_warnings() {
   config_file="$1"
-  profile="$2"
+  config_verdict="$2"
+  profile="$3"
   printed=0
 
-  if ! config_file_is_usable "$config_file" &&
-    [ "$(config_file_state "$config_file")" != "missing" ]; then
-    print_warning_line "$(config_file_problem_message "$config_file")"
-    printed=1
-  elif problem_message="$(unsupported_managed_config_problem_message "$config_file")"; then
-    print_warning_line "$problem_message"
-    printed=1
-  elif ! is_managed_setup_config_complete "$config_file"; then
-    print_warning_line "managed setup config is incomplete (missing keys: $(managed_setup_missing_keys "$config_file"))"
-    printed=1
-  fi
+  case "$(managed_setup_verdict_state "$config_verdict")" in
+    non-regular|unreadable)
+      print_warning_line "$(config_file_problem_message "$config_file")"
+      printed=1
+      ;;
+    unsupported)
+      print_warning_line "$(managed_setup_verdict_detail "$config_verdict")"
+      printed=1
+      ;;
+    missing|incomplete)
+      print_warning_line "managed setup config is incomplete (missing keys: $(managed_setup_verdict_detail "$config_verdict"))"
+      printed=1
+      ;;
+  esac
 
   if [ "$profile" = "unsupported" ]; then
     print_warning_line "$(unsupported_profile_reason)"
@@ -1145,11 +1116,12 @@ run_status() {
   fi
 
   config_file="$(terrapod_chezmoi_config_file)"
+  config_verdict="$(managed_setup_config_verdict "$config_file")"
   profile="$(current_profile)"
 
   print_title "Terrapod status"
   print_section_value "Profile:" "$(profile_context_label)"
-  show_config_context "$config_file"
+  show_config_context "$config_file" "$config_verdict"
   printf '%s\n' "Core Shell Stack source: Homebrew"
   print_github_cli_extension_set_status
   if ! executable_selection_helper_available; then
@@ -1170,29 +1142,29 @@ run_status() {
   if [ "$profile" = "macos-terminal" ]; then
     print_jetendard_status
   fi
-  print_status_warnings "$config_file" "$profile"
+  print_status_warnings "$config_file" "$config_verdict" "$profile"
   print_install_warning_status
 }
 
 show_config_context() {
   config_file="$1"
-  config_state="$(config_file_state "$config_file")"
+  config_verdict="$2"
 
   print_styled "36" "Config:"
 
-  case "$config_state" in
-    readable)
-      if ! managed_setup_config_is_supported "$config_file"; then
-        printf ' %s (unsupported managed setup config)\n' "$config_file"
-        print_managed_setup_config_guidance "$config_file"
-      elif is_managed_setup_config_complete "$config_file"; then
-        printf ' %s (' "$config_file"
-        print_state_word "present"
-        printf ')\n'
-      else
-        printf ' %s (present; incomplete managed setup config)\n' "$config_file"
-        print_managed_setup_config_guidance "$config_file"
-      fi
+  case "$(managed_setup_verdict_state "$config_verdict")" in
+    unsupported)
+      printf ' %s (unsupported managed setup config)\n' "$config_file"
+      print_managed_setup_config_guidance "$config_verdict"
+      ;;
+    complete)
+      printf ' %s (' "$config_file"
+      print_state_word "present"
+      printf ')\n'
+      ;;
+    incomplete)
+      printf ' %s (present; incomplete managed setup config)\n' "$config_file"
+      print_managed_setup_config_guidance "$config_verdict"
       ;;
     unreadable)
       printf ' %s (unreadable managed setup config)\n' "$config_file"
@@ -1204,7 +1176,7 @@ show_config_context() {
       ;;
     *)
       printf ' %s (missing; incomplete managed setup config)\n' "$config_file"
-      print_managed_setup_config_guidance "$config_file"
+      print_managed_setup_config_guidance "$config_verdict"
       ;;
   esac
 }
@@ -1265,11 +1237,12 @@ run_chezmoi_command() {
 
 show_diff_context() {
   config_file="$(terrapod_chezmoi_config_file)"
+  config_verdict="$(managed_setup_config_verdict "$config_file")"
   profile="$(current_profile)"
 
   print_title "Terrapod diff"
   print_section_value "Profile:" "$(profile_context_label)"
-  show_config_context "$config_file"
+  show_config_context "$config_file" "$config_verdict"
   show_stack_context "$config_file" "$profile"
   printf '%s\n' "Delegating declared-state diff to: $(render_chezmoi_command diff)"
 }
@@ -1284,15 +1257,17 @@ run_diff() {
 }
 
 fatal_incomplete_managed_setup_config() {
-  config_file="$1"
+  config_verdict="$1"
 
-  printf '%s\n' "terrapod: managed setup config is incomplete (missing keys: $(managed_setup_missing_keys "$config_file"))" >&2
+  printf '%s\n' "terrapod: managed setup config is incomplete (missing keys: $(managed_setup_verdict_detail "$config_verdict"))" >&2
   managed_setup_guidance_message >&2
   exit 1
 }
 
 run_apply_preflight() {
   config_file="$1"
+  config_verdict="$2"
+  config_state="$(managed_setup_verdict_state "$config_verdict")"
 
   if ! command -v chezmoi >/dev/null 2>&1; then
     fatal "chezmoi is required before apply; install it or run the Terrapod installer, then rerun 'tpod apply'"
@@ -1303,27 +1278,32 @@ run_apply_preflight() {
   print_state_word "available"
   printf '\n'
 
-  if [ -e "$config_file" ] || [ -L "$config_file" ]; then
-    if [ ! -f "$config_file" ] || [ ! -r "$config_file" ]; then
+  case "$config_state" in
+    non-regular|unreadable)
       fatal "config path is not a readable file: $config_file"
-    fi
+      ;;
+    missing)
+      print_styled "36" "Preflight:"
+      printf ' config file is '
+      print_state_word "missing"
+      printf '\n'
+      ;;
+    *)
+      print_styled "36" "Preflight:"
+      printf ' config file is '
+      print_state_word "readable"
+      printf '\n'
+      ;;
+  esac
 
-    print_styled "36" "Preflight:"
-    printf ' config file is '
-    print_state_word "readable"
-    printf '\n'
-  else
-    print_styled "36" "Preflight:"
-    printf ' config file is '
-    print_state_word "missing"
-    printf '\n'
-  fi
-
-  reject_unsupported_managed_config_syntax "$config_file"
-
-  if ! is_managed_setup_config_complete "$config_file"; then
-    fatal_incomplete_managed_setup_config "$config_file"
-  fi
+  case "$config_state" in
+    unsupported)
+      fatal "$(managed_setup_verdict_detail "$config_verdict")"
+      ;;
+    missing|incomplete)
+      fatal_incomplete_managed_setup_config "$config_verdict"
+      ;;
+  esac
 }
 
 validate_managed_target() {
@@ -1371,11 +1351,12 @@ run_post_apply_validation() {
 
 show_apply_context() {
   config_file="$1"
+  config_verdict="$2"
   profile="$(current_profile)"
 
   print_title "Terrapod apply"
   print_section_value "Profile:" "$(profile_context_label)"
-  show_config_context "$config_file"
+  show_config_context "$config_file" "$config_verdict"
   show_stack_context "$config_file" "$profile"
   printf '%s\n' "Delegating declared-state apply to: $(render_chezmoi_command apply)"
 }
@@ -1405,8 +1386,9 @@ run_apply() {
   fi
 
   config_file="$(terrapod_chezmoi_config_file)"
-  show_apply_context "$config_file"
-  run_apply_preflight "$config_file"
+  config_verdict="$(managed_setup_config_verdict "$config_file")"
+  show_apply_context "$config_file" "$config_verdict"
+  run_apply_preflight "$config_file" "$config_verdict"
   prune_retired_install_warnings
 
   if ! run_chezmoi_command apply; then
@@ -1593,11 +1575,12 @@ run_doctor() {
   doctor_failed=0
   doctor_guidance_printed=0
   config_file="$(terrapod_chezmoi_config_file)"
+  config_verdict="$(managed_setup_config_verdict "$config_file")"
   profile="$(current_profile)"
 
   print_title "Terrapod doctor"
   print_section_value "Profile:" "$(profile_context_label)"
-  show_config_context "$config_file"
+  show_config_context "$config_file" "$config_verdict"
   print_section "Checks:"
 
   if [ "$profile" = "unsupported" ]; then
@@ -1607,19 +1590,23 @@ run_doctor() {
     doctor_ok "Profile is supported: $(profile_context_label)"
   fi
 
-  if ! config_file_is_usable "$config_file" &&
-    [ "$(config_file_state "$config_file")" != "missing" ]; then
-    doctor_warn "$(config_file_problem_message "$config_file")"
-    doctor_guidance "$(config_file_guidance_message)"
-  elif problem_message="$(unsupported_managed_config_problem_message "$config_file")"; then
-    doctor_warn "$problem_message"
-    doctor_guidance "$(managed_setup_guidance_message)"
-  elif is_managed_setup_config_complete "$config_file"; then
-    doctor_ok "Managed setup config is complete"
-  else
-    doctor_warn "managed setup config is incomplete (missing keys: $(managed_setup_missing_keys "$config_file"))"
-    doctor_guidance "$(managed_setup_guidance_message)"
-  fi
+  case "$(managed_setup_verdict_state "$config_verdict")" in
+    non-regular|unreadable)
+      doctor_warn "$(config_file_problem_message "$config_file")"
+      doctor_guidance "$(config_file_guidance_message)"
+      ;;
+    unsupported)
+      doctor_warn "$(managed_setup_verdict_detail "$config_verdict")"
+      doctor_guidance "$(managed_setup_guidance_message)"
+      ;;
+    complete)
+      doctor_ok "Managed setup config is complete"
+      ;;
+    *)
+      doctor_warn "managed setup config is incomplete (missing keys: $(managed_setup_verdict_detail "$config_verdict"))"
+      doctor_guidance "$(managed_setup_guidance_message)"
+      ;;
+  esac
 
   doctor_check_command zsh
 
@@ -1691,30 +1678,32 @@ run_doctor() {
 }
 
 show_update_context() {
-  config_file="$(terrapod_chezmoi_config_file)"
+  config_file="$1"
+  config_verdict="$2"
 
   print_title "Terrapod update"
   print_section_value "Profile:" "$(profile_context_label)"
-  show_config_context "$config_file"
-  if is_managed_setup_config_complete "$config_file"; then
+  show_config_context "$config_file" "$config_verdict"
+  if [ "$(managed_setup_verdict_state "$config_verdict")" = "complete" ]; then
     printf '%s\n' "Delegating source update to: $(render_chezmoi_command update --exclude scripts)"
   fi
 }
 
 run_update_preflight() {
   config_file="$1"
+  config_verdict="$2"
 
-  if [ -e "$config_file" ] || [ -L "$config_file" ]; then
-    if [ ! -f "$config_file" ] || [ ! -r "$config_file" ]; then
+  case "$(managed_setup_verdict_state "$config_verdict")" in
+    non-regular|unreadable)
       fatal "config path is not a readable file: $config_file"
-    fi
-  fi
-
-  reject_unsupported_managed_config_syntax "$config_file"
-
-  if ! is_managed_setup_config_complete "$config_file"; then
-    fatal_incomplete_managed_setup_config "$config_file"
-  fi
+      ;;
+    unsupported)
+      fatal "$(managed_setup_verdict_detail "$config_verdict")"
+      ;;
+    missing|incomplete)
+      fatal_incomplete_managed_setup_config "$config_verdict"
+      ;;
+  esac
 }
 
 # The refreshed command normally sits beside the running one, so a tpod
@@ -1748,8 +1737,9 @@ run_update() {
   fi
 
   config_file="$(terrapod_chezmoi_config_file)"
-  show_update_context
-  run_update_preflight "$config_file"
+  config_verdict="$(managed_setup_config_verdict "$config_file")"
+  show_update_context "$config_file" "$config_verdict"
+  run_update_preflight "$config_file" "$config_verdict"
 
   if ! run_chezmoi_command update --exclude scripts; then
     printf '%s\n' "terrapod: chezmoi update failed; fix the error above, then rerun 'tpod update'." >&2

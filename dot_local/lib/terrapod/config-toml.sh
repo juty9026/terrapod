@@ -485,6 +485,92 @@ unsupported_managed_config_problem_message() {
   return 1
 }
 
+# The managed setup keys the config lacks, ", "-joined in managed_setup_keys
+# order. A missing file lacks every one of them.
+managed_setup_missing_keys() {
+  missing_config_file="$1"
+  missing_keys=
+
+  for missing_key in $(managed_setup_keys); do
+    if ! config_data_key_present "$missing_config_file" "$missing_key"; then
+      if [ -z "$missing_keys" ]; then
+        missing_keys="$missing_key"
+      else
+        missing_keys="$missing_keys, $missing_key"
+      fi
+    fi
+  done
+
+  printf '%s\n' "$missing_keys"
+}
+
+# The verdict on the managed Terrapod Setup config at the path it is handed:
+# the one place the file state, then unsupported syntax, then missing keys
+# ladder is climbed. Callers capture it once with $(...) and decide how to print
+# it and what exit status it implies; it never calls fatal().
+#
+# Two lines. The first is the state:
+#   missing      no file; every managed setup key is missing
+#   non-regular  not a regular file (a directory, or a dangling symlink)
+#   unreadable   a regular file the caller cannot read
+#   unsupported  syntax the reader cannot parse safely
+#   incomplete   parseable, but a managed setup key is absent
+#   complete     `profile` and every current Managed Setting key are present
+# The second is the detail: the problem message for unsupported, the missing
+# keys (", "-joined, in schema order) for missing and incomplete, else empty.
+#
+# complete is the presence rule only. The first-run installer additionally
+# reruns Terrapod Setup when the stored profile differs from the detected one;
+# that is its rule, so the verdict does not take a profile.
+managed_setup_config_verdict() {
+  verdict_config_file="$1"
+
+  case "$(config_file_state "$verdict_config_file")" in
+    missing)
+      printf '%s\n%s\n' "missing" "$(managed_setup_missing_keys "$verdict_config_file")"
+      return 0
+      ;;
+    non-regular)
+      printf '%s\n\n' "non-regular"
+      return 0
+      ;;
+    unreadable)
+      printf '%s\n\n' "unreadable"
+      return 0
+      ;;
+  esac
+
+  if verdict_problem_message="$(unsupported_managed_config_problem_message "$verdict_config_file")"; then
+    printf '%s\n%s\n' "unsupported" "$verdict_problem_message"
+    return 0
+  fi
+
+  verdict_missing_keys="$(managed_setup_missing_keys "$verdict_config_file")"
+
+  if [ -n "$verdict_missing_keys" ]; then
+    printf '%s\n%s\n' "incomplete" "$verdict_missing_keys"
+  else
+    printf '%s\n\n' "complete"
+  fi
+}
+
+# Accessors for a captured verdict. $(...) drops the trailing newlines, so an
+# empty detail leaves a verdict with no second line at all. Parameter expansion
+# only: status runs under a PATH that may hold no external commands.
+managed_setup_verdict_state() {
+  printf '%s\n' "${1%%
+*}"
+}
+
+managed_setup_verdict_detail() {
+  case "$1" in
+    *"
+"*) printf '%s\n' "${1#*
+}" ;;
+    *) printf '\n' ;;
+  esac
+}
+
 reject_unsupported_managed_config_syntax() {
   config_file="$1"
 

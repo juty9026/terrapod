@@ -548,33 +548,16 @@ toml_string_value_matches() {
   [ "$value" = "\"$expected\"" ] || [ "$value" = "'$expected'" ]
 }
 
-managed_setup_config_path_is_usable_for_resume() {
-  config_file="$1"
-
-  case "$(config_file_state "$config_file")" in
-    missing|readable)
-      return 0
-      ;;
-    non-regular)
-      fatal "config path is not a regular file: $config_file"
-      ;;
-    unreadable)
-      fatal "config path is not readable: $config_file"
-      ;;
-  esac
-}
-
-managed_setup_config_complete() {
+# First-run resume reuses a config only when the shared verdict is complete and
+# the stored profile is the detected one. The profile match is this rule's, not
+# the verdict's: tpod never compares them, but a config saved for another
+# profile would resume into settings that do not fit this machine.
+managed_setup_config_profile_matches() {
   config_file="$1"
   expected_profile="$2"
 
-  [ -f "$config_file" ] || return 1
   setup_profile="$(config_data_value "$config_file" profile)" || return 1
-  toml_string_value_matches "$setup_profile" "$expected_profile" || return 1
-
-  for key in $(managed_setup_keys); do
-    config_data_key_present "$config_file" "$key" || return 1
-  done
+  toml_string_value_matches "$setup_profile" "$expected_profile"
 }
 
 print_setup_recovery() {
@@ -705,13 +688,25 @@ ensure_first_run_setup() {
   # so honouring one here would read a config the installer never applies.
   config_file="$(terrapod_default_chezmoi_config_file)"
 
-  managed_setup_config_path_is_usable_for_resume "$config_file"
-  reject_unsupported_managed_config_syntax "$config_file"
+  config_verdict="$(managed_setup_config_verdict "$config_file")"
 
-  if managed_setup_config_complete "$config_file" "$profile"; then
-    printf '%s\n' "terrapod installer: Reusing complete managed Terrapod Setup config: $config_file"
-    return 0
-  fi
+  case "$(managed_setup_verdict_state "$config_verdict")" in
+    non-regular)
+      fatal "config path is not a regular file: $config_file"
+      ;;
+    unreadable)
+      fatal "config path is not readable: $config_file"
+      ;;
+    unsupported)
+      fatal "$(managed_setup_verdict_detail "$config_verdict")"
+      ;;
+    complete)
+      if managed_setup_config_profile_matches "$config_file" "$profile"; then
+        printf '%s\n' "terrapod installer: Reusing complete managed Terrapod Setup config: $config_file"
+        return 0
+      fi
+      ;;
+  esac
 
   run_terrapod_setup "$profile" "$source_dir"
 }
