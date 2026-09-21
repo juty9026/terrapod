@@ -1,0 +1,12 @@
+{{- /* Renders "true" when any macOS App Group is enabled, else "false". Callers compare the trimmed text, since the string "false" is itself truthy. One entry per group in the Managed Setting schema; tests/managed_setting_schema_test.sh fails when a group is missing here. */ -}}
+{{- if or
+  (default false (get . "enableMacosAppGroupTerminalApps"))
+  (default false (get . "enableMacosAppGroupAutomation"))
+  (default false (get . "enableMacosAppGroupLauncher"))
+  (default false (get . "enableMacosAppGroupMonitoring"))
+  (default false (get . "enableMacosAppGroupDevelopmentApps"))
+  (default false (get . "enableMacosAppGroupMobileDev")) -}}
+true
+{{- else -}}
+false
+{{- end -}}

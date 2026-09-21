@@ -547,6 +547,7 @@ copy_desktop_apply_source_fixture() {
 
   cp "$repo_root/Brewfile" "$source_dir/Brewfile"
   cp "$repo_root/Brewfile.macos-desktop-apps.tmpl" "$source_dir/Brewfile.macos-desktop-apps.tmpl"
+  cp -R "$repo_root/.chezmoitemplates" "$source_dir/.chezmoitemplates"
   sed \
     -e "s#/opt/homebrew/bin/brew#$fixture_brew_bin#g" \
     -e "s#/usr/local/bin/brew#$fixture_brew_bin#g" \

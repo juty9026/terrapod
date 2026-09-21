@@ -517,80 +517,35 @@ confirm_setup_write() {
   fatal_gum_setup_failure
 }
 
-setup_option_title() {
-  case "$1" in
-    "Optional Development Workspace")
-      printf '%s\n' "Optional Development Workspace"
-      ;;
-    "Optional Editor Stack")
-      printf '%s\n' "Optional Editor Stack"
-      ;;
-    "Optional AI Tool Stack")
-      printf '%s\n' "Optional AI Tool Stack"
-      ;;
-    "terminal-apps macOS App Group")
-      printf '%s\n' "terminal-apps"
-      ;;
-    "automation macOS App Group")
-      printf '%s\n' "automation"
-      ;;
-    "launcher macOS App Group")
-      printf '%s\n' "launcher"
-      ;;
-    "monitoring macOS App Group")
-      printf '%s\n' "monitoring"
-      ;;
-    "development-apps macOS App Group")
-      printf '%s\n' "development-apps"
-      ;;
-    "mobile-dev macOS App Group")
-      printf '%s\n' "mobile-dev"
+# The explanation Setup prints before each prompt. Its first line comes from
+# the schema summary; only the notes that have no place in a schema row (trust
+# notes, environment notes, what the Workspace bundles) live in the case below.
+show_setup_option_block() {
+  key="$1"
+
+  summary="$(managed_setting_field "$key" summary)"
+  printf '%s\n' "$(managed_setting_field "$key" name)"
+  case "$(managed_setting_field "$key" kind)" in
+    macos-app-group)
+      printf '%s\n' "  Installs $summary."
       ;;
     *)
-      return 1
+      printf '%s\n' "  $summary."
       ;;
   esac
-}
 
-show_setup_option_block() {
-  label="$1"
-
-  title="$(setup_option_title "$label")" || return 0
-  printf '%s\n' "$title"
-
-  case "$label" in
-    "Optional Development Workspace")
-      printf '%s\n' "  Dev Zellij layouts."
+  case "$key" in
+    enableDevelopmentWorkspace)
       printf '%s\n' "  Includes:"
-      printf '%s\n' "    - Optional Editor Stack"
+      printf '%s\n' "    - $(managed_setting_field enableEditorStack name)"
       if ai_cli_tools_supported_profile "${setup_profile:-macos-terminal}"; then
-        printf '%s\n' "    - Optional AI Tool Stack"
+        printf '%s\n' "    - $(managed_setting_field enableAiCliTools name)"
       fi
       ;;
-    "Optional Editor Stack")
-      printf '%s\n' "  Rich Neovim configuration."
-      ;;
-    "Optional AI Tool Stack")
-      printf '%s\n' "  Antigravity CLI, Claude Code, and Codex."
-      ;;
-    "terminal-apps macOS App Group")
-      printf '%s\n' "  Installs Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, and Noto Sans CJK KR."
-      ;;
-    "automation macOS App Group")
-      printf '%s\n' "  Installs Hammerspoon, Karabiner-Elements, and Scroll Reverser."
-      ;;
-    "launcher macOS App Group")
-      printf '%s\n' "  Installs Raycast and 1Password CLI."
-      ;;
-    "monitoring macOS App Group")
-      printf '%s\n' "  Installs iStat Menus."
-      ;;
-    "development-apps macOS App Group")
-      printf '%s\n' "  Installs Zed, Orca ADE, and OrbStack."
+    enableMacosAppGroupDevelopmentApps)
       printf '%s\n' "  Trusts only the fully-qualified stablyai/orca/orca cask, not the entire stablyai/orca tap."
       ;;
-    "mobile-dev macOS App Group")
-      printf '%s\n' "  Installs Android Studio and Maestro."
+    enableMacosAppGroupMobileDev)
       printf '%s\n' "  Sets ANDROID_HOME and JAVA_HOME for Android builds."
       printf '%s\n' "  Trusts only the fully-qualified mobile-dev-inc/tap/maestro formula, not the entire mobile-dev-inc/tap tap."
       printf '%s\n' "  Android SDK components and Xcode stay outside Terrapod."
@@ -612,11 +567,11 @@ setup_confirm_actions() {
 }
 
 prompt_setup_bool() {
-  label="$1"
+  key="$1"
   current="$2"
 
-  show_setup_option_block "$label" >&2
-  prompt_name="$(setup_option_title "$label" || printf '%s\n' "$label")"
+  show_setup_option_block "$key" >&2
+  prompt_name="$(managed_setting_field "$key" name)"
   setup_confirm_actions "$current"
 
   if gum confirm "Enable $prompt_name?" \
@@ -641,51 +596,77 @@ prompt_setup_bool() {
   fatal_gum_setup_failure
 }
 
+# Settings text is the rendered 'key = value' lines, so Setup edits the very
+# text it will write and the schema row order stays the write order.
+settings_data_get() {
+  printf '%s\n' "$1" | sed -n "s/^$2 = //p"
+}
+
+settings_data_set() {
+  printf '%s\n' "$1" | sed "s/^$2 = .*/$2 = $3/"
+}
+
+set_setup_value() {
+  setup_data="$(settings_data_set "$setup_data" "$1" "$2")"
+}
+
+# A setting that does not apply to the profile is not offered; the value the
+# Preset expansion gave it (false) stands.
+ask_setup_setting() {
+  asked_key="$1"
+
+  if ! managed_setting_applies_to_profile "$asked_key" "$setup_profile"; then
+    return
+  fi
+
+  # Assigned on its own line: a cancelled prompt exits its command
+  # substitution, and only a plain assignment lets set -e see that.
+  asked_answer="$(prompt_setup_bool "$asked_key" "$(settings_data_get "$setup_data" "$asked_key")")"
+  set_setup_value "$asked_key" "$asked_answer"
+}
+
 prompt_for_setup_settings() {
   preset="$1"
   profile="$2"
 
-  load_setup_defaults "$preset"
   setup_profile="$profile"
+  setup_data="$(render_preset_data "$preset" "$profile")"
 
   printf '%s\n' "Customize Terrapod settings." >&2
 
-  setup_enableDevelopmentWorkspace="$(prompt_setup_bool "Optional Development Workspace" "$setup_enableDevelopmentWorkspace")"
+  ask_setup_setting enableDevelopmentWorkspace
 
-  if is_enabled "$setup_enableDevelopmentWorkspace"; then
-    setup_enableEditorStack=true
-    setup_enableAiCliTools=true
+  # ADR 0002: the Optional Development Workspace bundles the two optional
+  # stacks, so enabling it neither asks about them nor leaves them off.
+  if is_enabled "$(settings_data_get "$setup_data" enableDevelopmentWorkspace)"; then
+    set_setup_value enableEditorStack true
+    set_setup_value enableAiCliTools true
   else
-    setup_enableEditorStack="$(prompt_setup_bool "Optional Editor Stack" "$setup_enableEditorStack")"
-    if ai_cli_tools_supported_profile "$profile"; then
-      setup_enableAiCliTools="$(prompt_setup_bool "Optional AI Tool Stack" "$setup_enableAiCliTools")"
+    ask_setup_setting enableEditorStack
+    ask_setup_setting enableAiCliTools
+  fi
+
+  # The one applicability rule, applied after the block above so a bundled
+  # stack that does not apply to this profile still ends up false.
+  for key in $(managed_setting_keys); do
+    if ! managed_setting_applies_to_profile "$key" "$profile"; then
+      set_setup_value "$key" false
+      if [ "$(managed_setting_field "$key" kind)" = "optional-stack" ]; then
+        printf '%s\n' "$(managed_setting_field "$key" name): not applicable for $(profile_context_label)" >&2
+      fi
     fi
-  fi
+  done
 
-  if ! ai_cli_tools_supported_profile "$profile"; then
-    setup_enableAiCliTools=false
-    printf '%s\n' "Optional AI Tool Stack: not applicable for $(profile_context_label)" >&2
-  fi
-
-  if [ "$profile" = "macos-terminal" ]; then
+  if any_macos_app_group_applies "$profile"; then
     printf '%s\n' "macOS App Groups:" >&2
-    setup_enableMacosAppGroupTerminalApps="$(prompt_setup_bool "terminal-apps macOS App Group" "$setup_enableMacosAppGroupTerminalApps")"
-    setup_enableMacosAppGroupAutomation="$(prompt_setup_bool "automation macOS App Group" "$setup_enableMacosAppGroupAutomation")"
-    setup_enableMacosAppGroupLauncher="$(prompt_setup_bool "launcher macOS App Group" "$setup_enableMacosAppGroupLauncher")"
-    setup_enableMacosAppGroupMonitoring="$(prompt_setup_bool "monitoring macOS App Group" "$setup_enableMacosAppGroupMonitoring")"
-    setup_enableMacosAppGroupDevelopmentApps="$(prompt_setup_bool "development-apps macOS App Group" "$setup_enableMacosAppGroupDevelopmentApps")"
-    setup_enableMacosAppGroupMobileDev="$(prompt_setup_bool "mobile-dev macOS App Group" "$setup_enableMacosAppGroupMobileDev")"
+    for key in $(managed_setting_keys_of_kind macos-app-group); do
+      ask_setup_setting "$key"
+    done
   else
-    setup_enableMacosAppGroupTerminalApps=false
-    setup_enableMacosAppGroupAutomation=false
-    setup_enableMacosAppGroupLauncher=false
-    setup_enableMacosAppGroupMonitoring=false
-    setup_enableMacosAppGroupDevelopmentApps=false
-    setup_enableMacosAppGroupMobileDev=false
     printf '%s\n' "macOS App Groups: not applicable for $(profile_context_label)" >&2
   fi
 
-  render_setup_data "$profile"
+  printf '%s\n' "$setup_data"
 }
 
 config_file_is_usable() {
@@ -802,7 +783,7 @@ is_enabled() {
 }
 
 ai_cli_tools_supported_profile() {
-  [ "$1" = "macos-terminal" ]
+  managed_setting_applies_to_profile enableAiCliTools "$1"
 }
 
 effective_ai_cli_tools_enabled() {
@@ -987,29 +968,34 @@ print_optional_setting_status() {
   fi
 }
 
-# One row per macOS App Group as 'key|label|apps', read by every command that
-# reports App Group state so the list is edited in one place.
-macos_app_group_table() {
-  printf '%s\n' \
-    'enableMacosAppGroupTerminalApps|terminal-apps|Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, and Noto Sans CJK KR' \
-    'enableMacosAppGroupAutomation|automation|Hammerspoon, Karabiner-Elements, and Scroll Reverser' \
-    'enableMacosAppGroupLauncher|launcher|Raycast and 1Password CLI' \
-    'enableMacosAppGroupMonitoring|monitoring|iStat Menus' \
-    'enableMacosAppGroupDevelopmentApps|development-apps|Zed, Orca ADE, and OrbStack' \
-    'enableMacosAppGroupMobileDev|mobile-dev|Android Studio and Maestro'
+# The macOS App Groups are one section: it is offered, reported, and skipped as
+# a whole, so this asks whether any group applies to the profile.
+any_macos_app_group_applies() {
+  for applicable_group_key in $(managed_setting_keys_of_kind macos-app-group); do
+    if managed_setting_applies_to_profile "$applicable_group_key" "$1"; then
+      return 0
+    fi
+  done
+
+  return 1
 }
 
 print_macos_app_group_status() {
   config_file="$1"
   profile="$2"
 
-  if [ "$profile" != "macos-terminal" ]; then
+  if ! any_macos_app_group_applies "$profile"; then
     printf '%s\n' "macOS App Groups: not applicable for $(profile_context_label)"
     return
   fi
 
   print_section "macOS App Groups:"
-  macos_app_group_table | while IFS='|' read -r group_key group_label group_apps; do
+  managed_setting_schema | while IFS='|' read -r group_key group_kind group_label group_profile group_presets group_apps; do
+    if [ "$group_kind" != "macos-app-group" ] ||
+      ! managed_setting_applies_to_profile "$group_key" "$profile"; then
+      continue
+    fi
+
     print_optional_setting_status \
       "$group_label" \
       "$(config_data_bool "$config_file" "$group_key")" \
@@ -1172,13 +1158,13 @@ run_status() {
     print_warning_line "executable selection helper failed"
   fi
   print_section "Optional stacks:"
-  print_optional_setting_status "Optional Editor Stack" "$(effective_optional_stack_enabled "$config_file" enableEditorStack)" "rich Neovim configuration"
+  print_optional_setting_status "$(managed_setting_field enableEditorStack name)" "$(effective_optional_stack_enabled "$config_file" enableEditorStack)" "rich Neovim configuration"
   if ai_cli_tools_supported_profile "$profile"; then
-    print_stack_status "Optional AI Tool Stack" "$(effective_ai_cli_tools_enabled "$config_file" "$profile")" agy claude codex
+    print_stack_status "$(managed_setting_field enableAiCliTools name)" "$(effective_ai_cli_tools_enabled "$config_file" "$profile")" agy claude codex
   else
-    print_indented_colon_state_line "Optional AI Tool Stack" "not applicable" "($(profile_context_label))"
+    print_indented_colon_state_line "$(managed_setting_field enableAiCliTools name)" "not applicable" "($(profile_context_label))"
   fi
-  print_optional_setting_status "Optional Development Workspace" "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" "development Zellij layouts"
+  print_optional_setting_status "$(managed_setting_field enableDevelopmentWorkspace name)" "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" "development Zellij layouts"
   print_macos_app_group_status "$config_file" "$profile"
   print_key_tool_status "$profile"
   if [ "$profile" = "macos-terminal" ]; then
@@ -1230,22 +1216,27 @@ show_stack_context() {
   print_section "Optional stacks:"
   editor_state="$(bool_state_label "$(effective_optional_stack_enabled "$config_file" enableEditorStack)")"
   workspace_state="$(config_bool_state_label "$config_file" enableDevelopmentWorkspace)"
-  print_colon_state_line "Optional Editor Stack" "$editor_state"
+  print_colon_state_line "$(managed_setting_field enableEditorStack name)" "$editor_state"
   if ai_cli_tools_supported_profile "$profile"; then
     ai_state="$(bool_state_label "$(effective_ai_cli_tools_enabled "$config_file" "$profile")")"
-    print_colon_state_line "Optional AI Tool Stack" "$ai_state"
+    print_colon_state_line "$(managed_setting_field enableAiCliTools name)" "$ai_state"
   else
-    print_colon_state_line "Optional AI Tool Stack" "not applicable" "($(profile_context_label))"
+    print_colon_state_line "$(managed_setting_field enableAiCliTools name)" "not applicable" "($(profile_context_label))"
   fi
-  print_colon_state_line "Optional Development Workspace" "$workspace_state"
+  print_colon_state_line "$(managed_setting_field enableDevelopmentWorkspace name)" "$workspace_state"
 
-  if [ "$profile" != "macos-terminal" ]; then
+  if ! any_macos_app_group_applies "$profile"; then
     printf '%s\n' "macOS App Groups: not applicable for $(profile_context_label)"
     return
   fi
 
   print_section "macOS App Groups:"
-  macos_app_group_table | while IFS='|' read -r group_key group_label group_apps; do
+  managed_setting_schema | while IFS='|' read -r group_key group_kind group_label group_profile group_presets group_apps; do
+    if [ "$group_kind" != "macos-app-group" ] ||
+      ! managed_setting_applies_to_profile "$group_key" "$profile"; then
+      continue
+    fi
+
     print_colon_state_line "$group_label" "$(config_bool_state_label "$config_file" "$group_key")"
   done
 }
@@ -1649,21 +1640,21 @@ run_doctor() {
   esac
 
   doctor_check_optional_setting \
-    "Optional Editor Stack" \
+    "$(managed_setting_field enableEditorStack name)" \
     "$(effective_optional_stack_enabled "$config_file" enableEditorStack)" \
     "rich Neovim configuration"
 
   if ai_cli_tools_supported_profile "$profile"; then
     doctor_check_optional_setting \
-      "Optional AI Tool Stack" \
+      "$(managed_setting_field enableAiCliTools name)" \
       "$(effective_ai_cli_tools_enabled "$config_file" "$profile")" \
       "Antigravity CLI, Claude Code, and Codex"
   else
-    doctor_ok "Optional AI Tool Stack is not applicable for $(profile_context_label)"
+    doctor_ok "$(managed_setting_field enableAiCliTools name) is not applicable for $(profile_context_label)"
   fi
 
   doctor_check_optional_setting \
-    "Optional Development Workspace" \
+    "$(managed_setting_field enableDevelopmentWorkspace name)" \
     "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" \
     "development Zellij layouts"
 
@@ -1772,102 +1763,25 @@ run_update() {
   exec "$refreshed_tpod" apply
 }
 
-render_settings_data() {
-  cat <<EOF
-profile = "$1"
-enableEditorStack = $2
-enableAiCliTools = $3
-enableDevelopmentWorkspace = $4
-enableMacosAppGroupTerminalApps = $5
-enableMacosAppGroupAutomation = $6
-enableMacosAppGroupLauncher = $7
-enableMacosAppGroupMonitoring = $8
-enableMacosAppGroupDevelopmentApps = $9
-enableMacosAppGroupMobileDev = ${10}
-EOF
-}
-
+# Preset expansion: a setting is on when the Preset lists it and it applies to
+# the profile. A setting that does not apply is written false, never omitted.
 render_preset_data() {
   preset="$1"
   profile="$2"
 
-  case "$preset" in
-    minimal)
-      render_settings_data "$profile" false false false false false false false false false
-      ;;
-    development)
-      if ai_cli_tools_supported_profile "$profile"; then
-        render_settings_data "$profile" true true true false false false false false false
-      else
-        render_settings_data "$profile" true false true false false false false false false
-      fi
-      ;;
-    workstation)
-      render_settings_data "$profile" true true true true true true true true true
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
+  if ! is_known_preset "$preset"; then
+    return 1
+  fi
 
-load_setup_defaults() {
-  preset="$1"
-
-  case "$preset" in
-    minimal)
-      setup_enableEditorStack=false
-      setup_enableAiCliTools=false
-      setup_enableDevelopmentWorkspace=false
-      setup_enableMacosAppGroupTerminalApps=false
-      setup_enableMacosAppGroupAutomation=false
-      setup_enableMacosAppGroupLauncher=false
-      setup_enableMacosAppGroupMonitoring=false
-      setup_enableMacosAppGroupDevelopmentApps=false
-      setup_enableMacosAppGroupMobileDev=false
-      ;;
-    development)
-      setup_enableEditorStack=true
-      setup_enableAiCliTools=true
-      setup_enableDevelopmentWorkspace=true
-      setup_enableMacosAppGroupTerminalApps=false
-      setup_enableMacosAppGroupAutomation=false
-      setup_enableMacosAppGroupLauncher=false
-      setup_enableMacosAppGroupMonitoring=false
-      setup_enableMacosAppGroupDevelopmentApps=false
-      setup_enableMacosAppGroupMobileDev=false
-      ;;
-    workstation)
-      setup_enableEditorStack=true
-      setup_enableAiCliTools=true
-      setup_enableDevelopmentWorkspace=true
-      setup_enableMacosAppGroupTerminalApps=true
-      setup_enableMacosAppGroupAutomation=true
-      setup_enableMacosAppGroupLauncher=true
-      setup_enableMacosAppGroupMonitoring=true
-      setup_enableMacosAppGroupDevelopmentApps=true
-      setup_enableMacosAppGroupMobileDev=true
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-render_setup_data() {
-  profile="$1"
-
-  render_settings_data \
-    "$profile" \
-    "$setup_enableEditorStack" \
-    "$setup_enableAiCliTools" \
-    "$setup_enableDevelopmentWorkspace" \
-    "$setup_enableMacosAppGroupTerminalApps" \
-    "$setup_enableMacosAppGroupAutomation" \
-    "$setup_enableMacosAppGroupLauncher" \
-    "$setup_enableMacosAppGroupMonitoring" \
-    "$setup_enableMacosAppGroupDevelopmentApps" \
-    "$setup_enableMacosAppGroupMobileDev"
+  printf '%s\n' "profile = \"$profile\""
+  for preset_key in $(managed_setting_keys); do
+    if managed_setting_applies_to_profile "$preset_key" "$profile" &&
+      managed_setting_enabled_by_preset "$preset_key" "$preset"; then
+      printf '%s\n' "$preset_key = true"
+    else
+      printf '%s\n' "$preset_key = false"
+    fi
+  done
 }
 
 validate_preset() {
@@ -1978,8 +1892,12 @@ write_managed_settings() {
 
   if [ -f "$config_file" ]; then
     config_mode="$(file_mode "$config_file")"
+    # Every key the writer owns: the current keys, which it replaces, and the
+    # retired ones, which it only strips. Space-separated because the awk
+    # shipped with macOS rejects a newline in a -v value.
+    managed_names="$( { managed_setup_keys; retired_managed_setting_keys; } | tr '\n' ' ')"
 
-    awk -v managed_data_file="$managed_data_file" '
+    awk -v managed_data_file="$managed_data_file" -v managed_names="$managed_names" '
       function is_data_section(line) {
         return line ~ "^[[:space:]]*\\[[[:space:]]*(data|\"data\"|\047data\047)[[:space:]]*\\][[:space:]]*($|#)"
       }
@@ -2021,19 +1939,7 @@ write_managed_settings() {
       }
 
       function is_managed_name(name) {
-        return name == "profile" ||
-          name == "enableEditorStack" ||
-          name == "enableAiCliTools" ||
-          name == "enableDevelopmentWorkspace" ||
-          name == "enableMacosAppGroupTerminalApps" ||
-          name == "enableMacosAppGroupAutomation" ||
-          name == "enableMacosAppGroupLauncher" ||
-          name == "enableMacosAppGroupMonitoring" ||
-          name == "enableMacosAppGroupDevelopmentApps" ||
-          name == "enableMacosAppGroupMobileDev" ||
-          name == "enableMacosAppGroupAiApps" ||
-          name == "enableMacosDesktopApps" ||
-          name == "terrapodPreset"
+        return name in managed_name_set
       }
 
       function is_key_assignment(line) {
@@ -2074,6 +1980,11 @@ write_managed_settings() {
 
       BEGIN {
         in_root = 1
+
+        managed_name_count = split(managed_names, managed_name_list, " ")
+        for (i = 1; i <= managed_name_count; i++) {
+          managed_name_set[managed_name_list[i]] = 1
+        }
       }
 
       {

@@ -44,18 +44,113 @@ config_file_state() {
   fi
 }
 
-managed_setup_keys() {
+# The Managed Setting schema: the one place a setting is declared. Terrapod
+# Setup, Preset expansion, the config writer, status, and the installer's
+# completeness check all derive from these rows, so adding a macOS App Group
+# starts and mostly ends here. The reader owns it because Setup and the
+# installer run before the full apply (ADR 0019).
+#
+# One row per Managed Setting, 'key|kind|name|profile|presets|summary':
+#   kind     optional-stack or macos-app-group
+#   name     the display name Setup, status, and doctor show
+#   profile  the one machine profile the setting applies to, or "all". A
+#            setting that does not apply is not offered by Setup and is
+#            written false everywhere, but its key is still written
+#   presets  comma-separated Presets that enable it; listed explicitly, since
+#            Presets are neither ordered nor nested and minimal is in no row
+#   summary  the line Setup opens its explanation with. A macOS App Group
+#            summary is its app list: Setup says "Installs <summary>." and
+#            status reports the group by the same text. An optional stack
+#            summary is the sentence Setup opens with; its status and doctor
+#            details are hand-written, and worded differently
+#
+# Row order is the write order of the TOML and the managed_setup_keys order.
+#
+# The rows are printed by builtins alone: status runs under a PATH that may hold
+# no external commands, and an external command here would silently blank it.
+managed_setting_schema() {
+  while IFS= read -r schema_row; do
+    printf '%s\n' "$schema_row"
+  done <<'ROWS'
+enableEditorStack|optional-stack|Optional Editor Stack|all|development,workstation|Rich Neovim configuration
+enableAiCliTools|optional-stack|Optional AI Tool Stack|macos-terminal|development,workstation|Antigravity CLI, Claude Code, and Codex
+enableDevelopmentWorkspace|optional-stack|Optional Development Workspace|all|development,workstation|Dev Zellij layouts
+enableMacosAppGroupTerminalApps|macos-app-group|terminal-apps|macos-terminal|workstation|Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, and Noto Sans CJK KR
+enableMacosAppGroupAutomation|macos-app-group|automation|macos-terminal|workstation|Hammerspoon, Karabiner-Elements, and Scroll Reverser
+enableMacosAppGroupLauncher|macos-app-group|launcher|macos-terminal|workstation|Raycast and 1Password CLI
+enableMacosAppGroupMonitoring|macos-app-group|monitoring|macos-terminal|workstation|iStat Menus
+enableMacosAppGroupDevelopmentApps|macos-app-group|development-apps|macos-terminal|workstation|Zed, Orca ADE, and OrbStack
+enableMacosAppGroupMobileDev|macos-app-group|mobile-dev|macos-terminal|workstation|Android Studio and Maestro
+ROWS
+}
+
+# Keys that earlier releases wrote and the writer must still strip. They are
+# data so the writer's managed-name check is a superset of the current keys by
+# construction.
+retired_managed_setting_keys() {
   printf '%s\n' \
-    profile \
-    enableEditorStack \
-    enableAiCliTools \
-    enableDevelopmentWorkspace \
-    enableMacosAppGroupTerminalApps \
-    enableMacosAppGroupAutomation \
-    enableMacosAppGroupLauncher \
-    enableMacosAppGroupMonitoring \
-    enableMacosAppGroupDevelopmentApps \
-    enableMacosAppGroupMobileDev
+    enableMacosAppGroupAiApps \
+    enableMacosDesktopApps \
+    terrapodPreset
+}
+
+# Schema keys in row order, without the machine profile.
+managed_setting_keys() {
+  managed_setting_schema | while IFS='|' read -r schema_key schema_rest; do
+    printf '%s\n' "$schema_key"
+  done
+}
+
+managed_setup_keys() {
+  printf '%s\n' profile
+  managed_setting_keys
+}
+
+managed_setting_keys_of_kind() {
+  managed_setting_schema | while IFS='|' read -r schema_key schema_kind schema_rest; do
+    if [ "$schema_kind" = "$1" ]; then
+      printf '%s\n' "$schema_key"
+    fi
+  done
+}
+
+# managed_setting_field <key> kind|name|profile|presets|summary. Prints nothing
+# for an unknown key. It reads every row rather than stopping at the match: a
+# reader that closes the pipe early makes the schema's printf fail with EPIPE,
+# and dash reports that as an I/O error when SIGPIPE is ignored.
+managed_setting_field() {
+  wanted_key="$1"
+  wanted_field="$2"
+
+  managed_setting_schema | while IFS='|' read -r schema_key schema_kind schema_name schema_profile schema_presets schema_summary; do
+    if [ "$schema_key" = "$wanted_key" ]; then
+      case "$wanted_field" in
+        kind) printf '%s\n' "$schema_kind" ;;
+        name) printf '%s\n' "$schema_name" ;;
+        profile) printf '%s\n' "$schema_profile" ;;
+        presets) printf '%s\n' "$schema_presets" ;;
+        summary) printf '%s\n' "$schema_summary" ;;
+      esac
+    fi
+  done
+}
+
+managed_setting_applies_to_profile() {
+  applicable_profile="$(managed_setting_field "$1" profile)"
+
+  [ -n "$applicable_profile" ] || return 1
+  [ "$applicable_profile" = "all" ] || [ "$applicable_profile" = "$2" ]
+}
+
+# Whether a Preset lists the setting. Independent of the machine profile; a
+# caller that expands a Preset also asks managed_setting_applies_to_profile.
+managed_setting_enabled_by_preset() {
+  [ -n "$2" ] || return 1
+
+  case ",$(managed_setting_field "$1" presets)," in
+    *",$2,"*) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 config_data_value() {
