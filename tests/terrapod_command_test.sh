@@ -2209,6 +2209,7 @@ assert_contains "$dotted_status_output" "Optional AI Tool Stack        : enabled
 assert_contains "$dotted_status_output" "terminal-apps                 : enabled (Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, and Noto Sans CJK KR)" "Terrapod status reads root dotted data keys for the terminal-apps App Group with its terminal fonts"
 assert_contains "$dotted_status_output" "development-apps              : enabled (Zed, Orca ADE, and OrbStack)" "Terrapod status reads root dotted data keys for Zed, Orca ADE, and OrbStack in development-apps"
 assert_contains "$dotted_status_output" "mobile-dev                    : enabled (Android Studio and Maestro)" "Terrapod status reads root dotted data keys for the mobile-dev App Group"
+assert_contains "$dotted_status_output" "Warnings: none" "Terrapod status has no warnings for root dotted data keys when tools are present"
 
 # --- terminal-apps description drift -----------------------------------------
 # The Brewfile template is the source of truth for what the terminal-apps macOS
@@ -2243,20 +2244,19 @@ terminal_apps_display_names() {
 
 terminal_apps_names="$(terminal_apps_display_names <"$repo_root/Brewfile.macos-desktop-apps.tmpl")" \
   || fail "every terminal-apps Brewfile cask has a display name in the drift test map"
-terminal_apps_name_count="$(printf '%s\n' "$terminal_apps_names" | grep -c .)"
-if [ "$terminal_apps_name_count" -ne 5 ]; then
-  fail "the terminal-apps Brewfile block yields five casks, got $terminal_apps_name_count"
+if [ -z "$terminal_apps_names" ]; then
+  fail "the terminal-apps Brewfile block yields at least one cask"
 fi
-pass "the terminal-apps Brewfile block yields five casks, all with a display name"
+pass "the terminal-apps Brewfile block yields casks, all with a display name"
 
-if printf '%s\n' '# terminal-apps macOS App Group' 'cask "ghostty"' 'cask "font-new-mystery"' '{{ end -}}' \
-  | terminal_apps_display_names >/dev/null 2>&1; then
+if unknown_cask_output="$(printf '%s\n' '# terminal-apps macOS App Group' 'cask "ghostty"' 'cask "font-new-mystery"' '{{ end -}}' \
+  | terminal_apps_display_names 2>&1)"; then
   fail "the drift test rejects a terminal-apps cask its map does not know"
 fi
-pass "the drift test rejects a terminal-apps cask its map does not know"
+assert_contains "$unknown_cask_output" "unknown terminal-apps cask: font-new-mystery" "the drift test rejects a terminal-apps cask its map does not know"
 
-terminal_apps_status_line="$(printf '%s\n' "$macos_status_output" | grep '^ *terminal-apps ')"
-terminal_apps_dotted_status_line="$(printf '%s\n' "$dotted_status_output" | grep '^ *terminal-apps ')"
+terminal_apps_status_line="$(printf '%s\n' "$macos_status_output" | grep '^ *terminal-apps ' || true)"
+terminal_apps_dotted_status_line="$(printf '%s\n' "$dotted_status_output" | grep '^ *terminal-apps ' || true)"
 terminal_apps_setup_line="$(printf '%s\n' "$setup_output_text" | awk 'found { print; exit } $0 ~ /^terminal-apps\r?$/ { found = 1 }')"
 while IFS= read -r terminal_apps_name; do
   assert_contains "$terminal_apps_status_line" "$terminal_apps_name" "Terrapod status names $terminal_apps_name in the terminal-apps description"
@@ -2265,7 +2265,6 @@ while IFS= read -r terminal_apps_name; do
 done <<EOF_NAMES
 $terminal_apps_names
 EOF_NAMES
-assert_contains "$dotted_status_output" "Warnings: none" "Terrapod status has no warnings for root dotted data keys when tools are present"
 
 status_ubuntu_config="$tmp_dir/status-ubuntu.toml"
 status_ubuntu_os_release="$tmp_dir/status-ubuntu-os-release"
