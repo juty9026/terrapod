@@ -1664,7 +1664,7 @@ assert_not_contains "$setup_output_text" "Optional Development Workspace: Dev Ze
 assert_not_contains "$setup_output_text" "Optional Editor Stack: included by Optional Development Workspace" "gum setup no longer repeats workspace-included Editor Stack as a standalone message"
 assert_not_contains "$setup_output_text" "Optional AI Tool Stack: included by Optional Development Workspace" "gum setup no longer repeats workspace-included AI Tool Stack as a standalone message"
 assert_contains "$setup_output_text" "terminal-apps" "gum setup leads terminal-apps App Group prompt with the group name"
-assert_contains "$setup_output_text" "  Installs Ghostty." "gum setup describes terminal-apps under its group name"
+assert_contains "$setup_output_text" "  Installs Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, and Noto Sans CJK KR." "gum setup describes terminal-apps under its group name, fonts included"
 assert_contains "$setup_output_text" "automation" "gum setup leads automation App Group prompt with the group name"
 assert_contains "$setup_output_text" "  Installs Hammerspoon, Karabiner-Elements, and Scroll Reverser." "gum setup describes automation under its group name"
 assert_contains "$setup_output_text" "development-apps" "gum setup leads development-apps App Group prompt with the group name"
@@ -2117,7 +2117,7 @@ assert_contains "$macos_status_output" "Optional Editor Stack         : enabled 
 assert_contains "$macos_status_output" "GitHub CLI Extension Set      : missing (missing extensions: github/gh-stack)" "Terrapod status reports a missing GitHub CLI Extension Set member"
 assert_contains "$macos_status_output" "Optional AI Tool Stack        : enabled (tools available: agy, claude, codex)" "Terrapod status reports enabled Optional AI Tool Stack tool state"
 assert_contains "$macos_status_output" "Optional Development Workspace: enabled (development Zellij layouts)" "Terrapod status reports enabled Optional Development Workspace state"
-assert_contains "$macos_status_output" "terminal-apps                 : enabled (Ghostty)" "Terrapod status reports enabled Ghostty-only terminal-apps macOS App Group"
+assert_contains "$macos_status_output" "terminal-apps                 : enabled (Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, and Noto Sans CJK KR)" "Terrapod status reports enabled terminal-apps macOS App Group with its terminal fonts"
 assert_contains "$macos_status_output" "automation                    : enabled (Hammerspoon, Karabiner-Elements, and Scroll Reverser)" "Terrapod status reports enabled automation macOS App Group"
 assert_contains "$macos_status_output" "launcher                      : enabled (Raycast and 1Password CLI)" "Terrapod status reports enabled launcher macOS App Group"
 assert_contains "$macos_status_output" "monitoring                    : disabled" "Terrapod status reports disabled monitoring macOS App Group"
@@ -2206,9 +2206,65 @@ dotted_status_output="$(
 
 assert_contains "$dotted_status_output" "Optional Editor Stack         : enabled (rich Neovim configuration)" "Terrapod status reads root dotted data keys for effective editor stack state"
 assert_contains "$dotted_status_output" "Optional AI Tool Stack        : enabled (tools available: agy, claude, codex)" "Terrapod status reads root dotted data keys for effective AI stack state"
-assert_contains "$dotted_status_output" "terminal-apps                 : enabled (Ghostty)" "Terrapod status reads root dotted data keys for Ghostty-only macOS App Groups"
+assert_contains "$dotted_status_output" "terminal-apps                 : enabled (Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, and Noto Sans CJK KR)" "Terrapod status reads root dotted data keys for the terminal-apps App Group with its terminal fonts"
 assert_contains "$dotted_status_output" "development-apps              : enabled (Zed, Orca ADE, and OrbStack)" "Terrapod status reads root dotted data keys for Zed, Orca ADE, and OrbStack in development-apps"
 assert_contains "$dotted_status_output" "mobile-dev                    : enabled (Android Studio and Maestro)" "Terrapod status reads root dotted data keys for the mobile-dev App Group"
+
+# --- terminal-apps description drift -----------------------------------------
+# The Brewfile template is the source of truth for what the terminal-apps macOS
+# App Group installs; the descriptions in `tpod status` and Terrapod Setup must
+# keep naming every cask it declares.
+terminal_apps_display_name() {
+  case "$1" in
+    ghostty) printf '%s\n' "Ghostty" ;;
+    font-d2coding) printf '%s\n' "D2Coding" ;;
+    font-hack-nerd-font) printf '%s\n' "Hack Nerd Font" ;;
+    font-jetbrains-mono-nerd-font) printf '%s\n' "JetBrains Mono Nerd Font" ;;
+    font-noto-sans-cjk-kr) printf '%s\n' "Noto Sans CJK KR" ;;
+    *) return 1 ;;
+  esac
+}
+
+# Reads a Brewfile template on stdin and prints the display name of every cask
+# in its terminal-apps block. Fails on a cask the map above does not know, so a
+# new cask cannot pass without its description being updated.
+terminal_apps_display_names() {
+  awk '
+    /^# terminal-apps macOS App Group$/ { in_block = 1; next }
+    in_block && /^\{\{ end/ { exit }
+    in_block && /^cask "/ { split($0, parts, "\""); print parts[2] }
+  ' | while IFS= read -r cask_token; do
+    terminal_apps_display_name "$cask_token" || {
+      printf 'unknown terminal-apps cask: %s\n' "$cask_token" >&2
+      return 1
+    }
+  done
+}
+
+terminal_apps_names="$(terminal_apps_display_names <"$repo_root/Brewfile.macos-desktop-apps.tmpl")" \
+  || fail "every terminal-apps Brewfile cask has a display name in the drift test map"
+terminal_apps_name_count="$(printf '%s\n' "$terminal_apps_names" | grep -c .)"
+if [ "$terminal_apps_name_count" -ne 5 ]; then
+  fail "the terminal-apps Brewfile block yields five casks, got $terminal_apps_name_count"
+fi
+pass "the terminal-apps Brewfile block yields five casks, all with a display name"
+
+if printf '%s\n' '# terminal-apps macOS App Group' 'cask "ghostty"' 'cask "font-new-mystery"' '{{ end -}}' \
+  | terminal_apps_display_names >/dev/null 2>&1; then
+  fail "the drift test rejects a terminal-apps cask its map does not know"
+fi
+pass "the drift test rejects a terminal-apps cask its map does not know"
+
+terminal_apps_status_line="$(printf '%s\n' "$macos_status_output" | grep '^ *terminal-apps ')"
+terminal_apps_dotted_status_line="$(printf '%s\n' "$dotted_status_output" | grep '^ *terminal-apps ')"
+terminal_apps_setup_line="$(printf '%s\n' "$setup_output_text" | awk 'found { print; exit } $0 ~ /^terminal-apps\r?$/ { found = 1 }')"
+while IFS= read -r terminal_apps_name; do
+  assert_contains "$terminal_apps_status_line" "$terminal_apps_name" "Terrapod status names $terminal_apps_name in the terminal-apps description"
+  assert_contains "$terminal_apps_dotted_status_line" "$terminal_apps_name" "Terrapod status names $terminal_apps_name in the terminal-apps description for root dotted data keys"
+  assert_contains "$terminal_apps_setup_line" "$terminal_apps_name" "Terrapod Setup names $terminal_apps_name in the terminal-apps explanation"
+done <<EOF_NAMES
+$terminal_apps_names
+EOF_NAMES
 assert_contains "$dotted_status_output" "Warnings: none" "Terrapod status has no warnings for root dotted data keys when tools are present"
 
 status_ubuntu_config="$tmp_dir/status-ubuntu.toml"
