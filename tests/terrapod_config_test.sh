@@ -762,7 +762,7 @@ fi
 pass "gum setup customizes concrete settings and completes"
 
 assert_file_contains "$tmp_dir/gum-equivalent.out" "terminal-apps" "gum setup labels terminal-apps App Group with the group name"
-assert_file_contains "$tmp_dir/gum-equivalent.out" "  Installs Ghostty." "gum setup describes terminal-apps App Group as Ghostty-only"
+assert_file_contains "$tmp_dir/gum-equivalent.out" "  Installs Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, and Noto Sans CJK KR." "gum setup describes terminal-apps App Group with Ghostty and its terminal fonts"
 assert_data_key_once_with_value "$gum_equivalent_config" "enableEditorStack" "true" "gum setup writes included Optional Editor Stack"
 assert_data_key_once_with_value "$gum_equivalent_config" "enableAiCliTools" "true" "gum setup writes included Optional AI Tool Stack"
 assert_data_key_once_with_value "$gum_equivalent_config" "enableDevelopmentWorkspace" "true" "gum setup writes enabled Optional Development Workspace"

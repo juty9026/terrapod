@@ -528,7 +528,7 @@ setup_option_title() {
     "Optional AI Tool Stack")
       printf '%s\n' "Optional AI Tool Stack"
       ;;
-    "terminal-apps macOS App Group (Ghostty)")
+    "terminal-apps macOS App Group")
       printf '%s\n' "terminal-apps"
       ;;
     "automation macOS App Group")
@@ -573,8 +573,8 @@ show_setup_option_block() {
     "Optional AI Tool Stack")
       printf '%s\n' "  Antigravity CLI, Claude Code, and Codex."
       ;;
-    "terminal-apps macOS App Group (Ghostty)")
-      printf '%s\n' "  Installs Ghostty."
+    "terminal-apps macOS App Group")
+      printf '%s\n' "  Installs Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, and Noto Sans CJK KR."
       ;;
     "automation macOS App Group")
       printf '%s\n' "  Installs Hammerspoon, Karabiner-Elements, and Scroll Reverser."
@@ -669,7 +669,7 @@ prompt_for_setup_settings() {
 
   if [ "$profile" = "macos-terminal" ]; then
     printf '%s\n' "macOS App Groups:" >&2
-    setup_enableMacosAppGroupTerminalApps="$(prompt_setup_bool "terminal-apps macOS App Group (Ghostty)" "$setup_enableMacosAppGroupTerminalApps")"
+    setup_enableMacosAppGroupTerminalApps="$(prompt_setup_bool "terminal-apps macOS App Group" "$setup_enableMacosAppGroupTerminalApps")"
     setup_enableMacosAppGroupAutomation="$(prompt_setup_bool "automation macOS App Group" "$setup_enableMacosAppGroupAutomation")"
     setup_enableMacosAppGroupLauncher="$(prompt_setup_bool "launcher macOS App Group" "$setup_enableMacosAppGroupLauncher")"
     setup_enableMacosAppGroupMonitoring="$(prompt_setup_bool "monitoring macOS App Group" "$setup_enableMacosAppGroupMonitoring")"
@@ -991,7 +991,7 @@ print_optional_setting_status() {
 # reports App Group state so the list is edited in one place.
 macos_app_group_table() {
   printf '%s\n' \
-    'enableMacosAppGroupTerminalApps|terminal-apps|Ghostty' \
+    'enableMacosAppGroupTerminalApps|terminal-apps|Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, and Noto Sans CJK KR' \
     'enableMacosAppGroupAutomation|automation|Hammerspoon, Karabiner-Elements, and Scroll Reverser' \
     'enableMacosAppGroupLauncher|launcher|Raycast and 1Password CLI' \
     'enableMacosAppGroupMonitoring|monitoring|iStat Menus' \
