@@ -1,12 +1,5 @@
 {{- if eq .chezmoi.os "darwin" -}}
-{{- $enableMacosAppGroups := or
-  (default false (get . "enableMacosAppGroupTerminalApps"))
-  (default false (get . "enableMacosAppGroupAutomation"))
-  (default false (get . "enableMacosAppGroupLauncher"))
-  (default false (get . "enableMacosAppGroupMonitoring"))
-  (default false (get . "enableMacosAppGroupDevelopmentApps"))
-  (default false (get . "enableMacosAppGroupMobileDev"))
--}}
+{{- $enableMacosAppGroups := eq (includeTemplate "any-macos-app-group-enabled" . | trim) "true" -}}
 #!/bin/sh
 set -eu
 

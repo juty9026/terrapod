@@ -70,5 +70,9 @@ the installer resume from a config it never applies.
 - The installer keeps ignoring `TERRAPOD_CHEZMOI_CONFIG` end to end, and that
   is now a documented divergence at one call site rather than a difference
   hidden in a duplicated function.
-- Adding a config key still means editing `managed_setup_keys` once. Before
-  this change it meant editing two copies that could disagree.
+- Adding a config key still means editing the reader once. Before this change
+  it meant editing two copies that could disagree.
+- The reader also owns the Managed Setting schema: `managed_setup_keys` is
+  derived from its rows, and Terrapod Setup, Preset expansion, the config
+  writer, and status read the same rows. It lives here because Terrapod Setup
+  and the installer both run before the full apply.

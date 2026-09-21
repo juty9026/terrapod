@@ -97,8 +97,12 @@ The interactive setup workflow that turns a **Preset** into concrete machine-loc
 _Avoid_: OS provisioning wizard, standalone installer, configure shortcut
 
 **Preset**:
-A first-run setup choice that expands into concrete optional stack and app-group settings for a machine.
+A first-run setup choice that expands into concrete **Managed Settings** for a machine.
 _Avoid_: machine preset, permanent mode, dynamic policy
+
+**Managed Setting**:
+A machine-local on/off choice that **Terrapod Setup** proposes from a **Preset** and saves as a concrete value: an optional stack or a **macOS App Group**. The machine profile is not a **Managed Setting**; it decides which ones apply.
+_Avoid_: option, flag, toggle, managed key
 
 **Machine-Local Git Include**:
 The optional, unmanaged `~/.gitconfig.local` file that the seeded `~/.gitconfig` includes for Git settings that belong to one machine only.
@@ -135,8 +139,8 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - An existing **Terrapod Source Repository** checkout without the installed **Terrapod** command surface is treated as an incomplete first-run installation and is eligible for resume.
 - Incomplete first-run resume reuses existing managed **Terrapod Setup** config when it is present and complete; **Terrapod Setup** is rerun only when managed setup config is missing or incomplete.
 - When incomplete first-run resume reruns **Terrapod Setup**, it remains in first-run context and continues into recovery-core apply and full declared-state apply after setup completes.
-- Managed **Terrapod Setup** config is complete only when the profile and all current managed optional stack and **macOS App Group** setting keys are present; missing managed keys cause setup to rerun instead of silently filling Preset defaults.
-- Managed **Terrapod Setup** config completeness is schema-based rather than platform-pruned; unsupported platform options such as **macOS App Group** keys on the **VPS Shell Profile** are still stored as concrete disabled settings.
+- Managed **Terrapod Setup** config is complete only when the profile and all current **Managed Setting** keys are present; missing managed keys cause setup to rerun instead of silently filling Preset defaults.
+- Managed **Terrapod Setup** config completeness is schema-based rather than platform-pruned; a **Managed Setting** that does not apply to the current profile, such as a **macOS App Group** key on the **VPS Shell Profile**, is still stored as a concrete disabled setting.
 - First-run resume may rerun **Terrapod Setup** when managed setup config is incomplete, but routine `tpod apply` must not open interactive setup prompts automatically; routine apply should report missing managed setup keys and guide users to an explicit setup or configure command.
 - Routine `tpod apply` exits non-zero when required managed setup config keys are missing because declared state cannot be computed safely without explicit user configuration.
 - The first-run **Terrapod** installer stops with guidance when the default chezmoi source directory already exists but is not a resumable **Terrapod Source Repository** checkout.
@@ -169,7 +173,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Explicit routine `tpod setup` may review and change existing complete managed setup config; routine `tpod apply` does not open this interactive workflow automatically.
 - Routine `tpod setup` changes managed setup config only and does not create shell startup file backups because it does not apply or overwrite shell startup files.
 - A **Preset** is a starting point for concrete settings, not a permanent dynamic policy.
-- A **Preset** shows a summary of the optional stack and app-group settings it will enable before installation.
+- A **Preset** shows a summary of the **Managed Settings** it will enable before installation.
 - First-run setup allows users to customize the concrete settings produced by a **Preset** before they are saved.
 - **Terrapod Setup** lets users customize **Optional Editor Stack**, **Optional AI Tool Stack**, **Optional Development Workspace**, and applicable **macOS App Group** settings before saving concrete machine-local settings.
 - **Terrapod Setup** customization should feel like reviewing and adjusting concrete settings proposed by the selected **Preset**, not answering standalone yes/no questions about abstract option names.
@@ -180,7 +184,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - In **Terrapod Setup**, enabling **Optional Development Workspace** presents **Optional Editor Stack** and **Optional AI Tool Stack** as a grouped inclusion list under the workspace prompt rather than as repeated standalone included-setting messages.
 - In the **macOS App Groups** section of **Terrapod Setup**, each group should use the same setting block structure while leading with the group name, because the section heading already supplies the **macOS App Group** context.
 - The final **Terrapod Setup** settings summary should continue showing the concrete machine-local key/value settings that will be written, even when earlier customization prompts use more human-facing labels.
-- Changing a **Preset** in the future must not silently change machines that already saved concrete optional stack and app-group settings.
+- Changing a **Preset** in the future must not silently change machines that already saved concrete **Managed Settings**.
 - The first **Preset** choices are minimal, development, and workstation.
 - The minimal **Preset** keeps optional stacks and macOS app groups disabled.
 - The development **Preset** enables the **Optional Editor Stack**, **Optional AI Tool Stack**, and **Optional Development Workspace**.
