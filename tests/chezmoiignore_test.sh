@@ -3,6 +3,7 @@ set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$repo_root/tests/lib/harness.sh"
+. "$repo_root/tests/lib/test-support.sh"
 make_tmp_dir
 chezmoi_config="$tmp_dir/chezmoi.toml"
 
@@ -60,16 +61,6 @@ render_managed_file() {
     --destination "$tmp_dir/home" \
     --override-data "$data" \
     cat "$tmp_dir/home/$destination"
-}
-
-write_stub() {
-  path="$1"
-  shift
-  {
-    printf '%s\n' '#!/bin/sh'
-    printf '%s\n' "$@"
-  } >"$path"
-  chmod +x "$path"
 }
 
 assert_texts_differ() {
@@ -569,59 +560,6 @@ write_stub "$macos_brew_bin/brew" \
   '  bundle) exit 0 ;;' \
   '  *) exit 64 ;;' \
   'esac'
-
-write_brew_bundle_stub() {
-  path="$1"
-
-  write_stub "$path" \
-    'printf "%s\n" "brew args:$*" >>"$MACOS_BREW_LOG"' \
-    'bundle_file=' \
-    'for arg do' \
-    '  case "$arg" in' \
-    '    --file=*) bundle_file="${arg#--file=}" ;;' \
-    '  esac' \
-    'done' \
-    'case "$1" in' \
-    '  --prefix) printf "%s\n" "${MACOS_BREW_PREFIX:-/opt/homebrew}"; exit 0 ;;' \
-    '  shellenv)' \
-    '    case "${MACOS_BREW_SHELLENV_MODE:-success}" in' \
-    '      command-failure) exit 41 ;;' \
-    '      eval-failure) printf "%s\n" "false" ;;' \
-    '      *) printf "%s\n" ":" ;;' \
-    '    esac' \
-    '    ;;' \
-    '  analytics) exit 0 ;;' \
-    '  bundle)' \
-    '    if [ "${MACOS_BREW_DRAIN_STDIN:-}" = "1" ]; then' \
-    '      cat >/dev/null' \
-    '    fi' \
-    '    if [ "${MACOS_BREW_ECHO_OUTPUT:-}" = "1" ]; then' \
-    '      printf "%s\n" "visible brew bundle output: $*"' \
-    '    fi' \
-    '    for formula in ${MACOS_BREW_FAIL_FORMULAE:-}; do' \
-    '      if [ -n "$bundle_file" ] && grep -Eq "^brew \"$formula\"(,[[:space:]]|$)" "$bundle_file" 2>/dev/null; then' \
-    '        exit 42' \
-    '      fi' \
-    '    done' \
-    '    if [ "${MACOS_BREW_FAIL_CORE_BULK:-}" = "1" ] && [ -n "$bundle_file" ] && grep -Fx "brew \"mise\"" "$bundle_file" >/dev/null 2>&1 && grep -Fx "brew \"btop\"" "$bundle_file" >/dev/null 2>&1; then' \
-    '      exit 42' \
-    '    fi' \
-    '    for cask in ${MACOS_BREW_FAIL_CASKS:-}; do' \
-    '      if [ -n "$bundle_file" ] && grep -Eq "^cask \"$cask\"(,[[:space:]]|$)" "$bundle_file" 2>/dev/null; then' \
-    '        exit 42' \
-    '      fi' \
-    '    done' \
-    '    if [ "${MACOS_BREW_FAIL_DESKTOP_BULK:-}" = "1" ] && [ -n "$bundle_file" ] && grep -Fx "# Rendered opt-in macOS Desktop App Stack." "$bundle_file" >/dev/null 2>&1; then' \
-    '      exit 42' \
-    '    fi' \
-    '    if [ "${MACOS_BREW_FAIL_BULK:-}" = "1" ] && [ -n "$bundle_file" ] && grep -Fx "tap \"homebrew/cask\"" "$bundle_file" >/dev/null 2>&1; then' \
-    '      exit 42' \
-    '    fi' \
-    '    exit 0' \
-    '    ;;' \
-    '  *) exit 64 ;;' \
-    'esac'
-}
 
 run_linux_homebrew_arch_case() {
   arch="$1"

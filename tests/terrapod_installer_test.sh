@@ -3,6 +3,7 @@ set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$repo_root/tests/lib/harness.sh"
+. "$repo_root/tests/lib/test-support.sh"
 install_warnings_lib_template="$repo_root/dot_local/lib/terrapod/install-warnings.sh"
 export TERRAPOD_INSTALL_WARNINGS_LIB_TEMPLATE="$install_warnings_lib_template"
 config_toml_lib_template="$repo_root/dot_local/lib/terrapod/config-toml.sh"
@@ -156,18 +157,6 @@ for recovery_core_path in \
   assert_contains "$install_script_text" "\$source_dir/$recovery_core_path" "install.sh resume check names $recovery_core_path"
 done
 
-assert_status() {
-  actual="$1"
-  expected="$2"
-  message="$3"
-
-  if [ "$actual" -ne "$expected" ]; then
-    fail "$message"
-  fi
-
-  pass "$message"
-}
-
 assert_failure() {
   actual="$1"
   message="$2"
@@ -307,60 +296,6 @@ assert_no_shell_backup_for() {
   fi
 
   pass "$message"
-}
-
-make_case_dir() {
-  name="$1"
-  case_dir="$tmp_dir/$name"
-  mkdir -p \
-    "$case_dir/bin" \
-    "$case_dir/home" \
-    "$case_dir/xdg-data" \
-    "$case_dir/xdg-config"
-  printf '%s\n' "$case_dir"
-}
-
-write_stub() {
-  stub="$1"
-  shift
-  : >"$stub"
-  while [ "$#" -gt 0 ]; do
-    printf '%s\n' "$1" >>"$stub"
-    shift
-  done
-  chmod +x "$stub"
-}
-
-write_uname_stub() {
-  case_dir="$1"
-  kernel_name="$2"
-  machine="${3:-}"
-  if [ -z "$machine" ]; then
-    case "$kernel_name" in
-      Darwin) machine=arm64 ;;
-      *) machine=x86_64 ;;
-    esac
-  fi
-  write_stub "$case_dir/bin/uname" \
-    '#!/bin/sh' \
-    'case "${1-}" in' \
-    "  -s) printf '%s\\n' '$kernel_name' ;;" \
-    "  -m) printf '%s\\n' '$machine' ;;" \
-    "  '') printf '%s\\n' '$kernel_name' ;;" \
-    '  *) exit 64 ;;' \
-    'esac'
-}
-
-write_uname_machine_stub() {
-  case_dir="$1"
-  machine="$2"
-  write_stub "$case_dir/bin/uname" \
-    '#!/bin/sh' \
-    'case "${1-}" in' \
-    '  -s) printf "%s\n" "${TERRAPOD_TEST_UNAME_S:-Linux}" ;;' \
-    "  -m) printf '%s\\n' '$machine' ;;" \
-    '  *) exit 64 ;;' \
-    'esac'
 }
 
 write_os_release() {
@@ -1180,9 +1115,6 @@ run_installer_case() {
   case_dir="$1"
   input_text="
 "
-  stdout_file="$case_dir/stdout"
-  stderr_file="$case_dir/stderr"
-
   if [ "$#" -gt 1 ]; then
     input_text="$2"
   fi
@@ -1191,16 +1123,16 @@ run_installer_case() {
     write_macos_brew_gum_stubs "$case_dir" 0
   fi
 
-  if printf '%s' "$input_text" | PATH="$case_dir/bin:$safe_path_dir" \
+  capture_case_command "$case_dir" "$input_text" env \
+    PATH="$case_dir/bin:$safe_path_dir" \
     HOME="$case_dir/home" \
     XDG_DATA_HOME="$case_dir/xdg-data" \
     XDG_CONFIG_HOME="$case_dir/xdg-config" \
     TERRAPOD_EXPECTED_HOMEBREW_PATH="${TERRAPOD_EXPECTED_HOMEBREW_PATH-$case_dir/bin/brew}" \
-    "$install_script" >"$stdout_file" 2>"$stderr_file"; then
-    installer_status=0
-  else
-    installer_status=$?
-  fi
+    "$install_script"
+  installer_status="$case_status"
+  stdout_file="$case_stdout_file"
+  stderr_file="$case_stderr_file"
 }
 
 darwin_case="$(make_case_dir darwin-profile)"
@@ -1426,7 +1358,7 @@ assert_contains "$ubuntu_gum_failure_log_text" "brew args:install chezmoi gum" "
 assert_not_contains "$ubuntu_gum_failure_log_text" "terrapod args:setup" "Homebrew bootstrap tool failure stops before Terrapod Setup"
 
 unsupported_arch_case="$(make_case_dir unsupported-architecture)"
-write_uname_machine_stub "$unsupported_arch_case" "armv7l"
+write_uname_stub "$unsupported_arch_case" "Linux" "armv7l"
 unsupported_arch_os_release="$(write_os_release "$unsupported_arch_case" "ID=ubuntu" 'VERSION_ID="24.04"')"
 write_ubuntu_package_stubs "$unsupported_arch_case"
 TERRAPOD_OS_RELEASE_FILE="$unsupported_arch_os_release"
@@ -1439,7 +1371,7 @@ assert_failure "$installer_status" "unsupported Ubuntu architecture fails before
 assert_contains "$(cat "$unsupported_arch_case/stderr")" "Unsupported CPU architecture: armv7l. Supported architectures: x86_64, aarch64." "unsupported architecture guidance is explicit"
 
 arm64_arch_case="$(make_case_dir arm64-architecture)"
-write_uname_machine_stub "$arm64_arch_case" "arm64"
+write_uname_stub "$arm64_arch_case" "Linux" "arm64"
 arm64_arch_os_release="$(write_os_release "$arm64_arch_case" "ID=ubuntu" 'VERSION_ID="24.04"')"
 write_ubuntu_package_stubs "$arm64_arch_case"
 TERRAPOD_OS_RELEASE_FILE="$arm64_arch_os_release"

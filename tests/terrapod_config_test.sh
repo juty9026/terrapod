@@ -3,160 +3,18 @@ set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$repo_root/tests/lib/harness.sh"
+. "$repo_root/tests/lib/test-support.sh"
 make_tmp_dir
-
-write_gum_stub() {
-  path="$1"
-
-  cat >"$path" <<'SH'
-#!/bin/sh
-set -eu
-
-log_file="${TERRAPOD_GUM_LOG:?}"
-responses_file="${TERRAPOD_GUM_RESPONSES:?}"
-
-printf '%s' "gum args:" >>"$log_file"
-for arg do
-  printf '%s' " $arg" >>"$log_file"
-done
-printf '\n' >>"$log_file"
-
-if [ "${1:-}" = "--version" ]; then
-  printf '%s\n' "gum test stub"
-  exit 0
-fi
-
-next_response() {
-  response="$(sed -n '1p' "$responses_file")"
-  sed '1d' "$responses_file" >"$responses_file.tmp"
-  mv "$responses_file.tmp" "$responses_file"
-  printf '%s\n' "$response"
-}
-
-confirm_default_status() {
-  for arg do
-    case "$arg" in
-      --default=true)
-        return 0
-        ;;
-      --default=false)
-        return 1
-        ;;
-    esac
-  done
-
-  return 1
-}
-
-case "${1:-}" in
-  choose)
-    if [ "${2:-}" = "--help" ]; then
-      printf '%s\n' "Usage: gum choose [<options> ...] [flags]"
-      printf '%s\n' "      --label-delimiter=\"\""
-      exit 0
-    fi
-
-    while IFS= read -r option; do
-      printf '%s\n' "gum stdin: $option" >>"$log_file"
-    done
-
-    response="$(next_response)"
-    if [ -z "$response" ] || [ "$response" = "__CANCEL__" ]; then
-      exit 130
-    fi
-    if [ "$response" = "__ERROR__" ]; then
-      printf '%s\n' "simulated gum operational failure" >&2
-      exit 2
-    fi
-    printf '%s\n' "$response"
-    ;;
-  confirm)
-    response="$(next_response)"
-    case "$response" in
-      "")
-        shift
-        confirm_default_status "$@"
-        ;;
-      yes|y|true|enabled)
-        exit 0
-        ;;
-      no|n|false|disabled)
-        exit 1
-        ;;
-      __CANCEL__)
-        exit 130
-        ;;
-      __ERROR__)
-        printf '%s\n' "simulated gum operational failure" >&2
-        exit 2
-        ;;
-      *)
-        printf '%s\n' "unexpected gum confirm response: $response" >&2
-        exit 2
-        ;;
-    esac
-    ;;
-  style)
-    shift
-    for arg do
-      case "$arg" in
-        --*)
-          ;;
-        *)
-          printf '%s\n' "$arg"
-          ;;
-      esac
-    done
-    ;;
-  *)
-    printf '%s\n' "unexpected gum command: ${1:-}" >&2
-    exit 2
-    ;;
-esac
-SH
-
-  chmod +x "$path"
-}
-
-write_no_gum_path() {
-  path="$1"
-  shift
-
-  mkdir -p "$path"
-
-  for command_name do
-    command_path="$(command -v "$command_name" 2>/dev/null || true)"
-    if [ -z "$command_path" ]; then
-      fail "no-gum PATH setup requires $command_name"
-    fi
-
-    ln -s "$command_path" "$path/$command_name"
-  done
-
-  if PATH="$path" command -v gum >/dev/null 2>&1; then
-    fail "no-gum PATH setup should hide gum"
-  fi
-}
-
-shell_quote() {
-  printf "'"
-  printf '%s' "$1" | sed "s/'/'\\\\''/g"
-  printf "'"
-}
 
 run_setup_in_pty() {
   profile="$1"
   term="$2"
   home_dir="$3"
   xdg_config_home="$4"
-
-  if script --version >/dev/null 2>&1; then
-    command_text="env TERM=$(shell_quote "$term") TERRAPOD_PROFILE=$(shell_quote "$profile") TERRAPOD_CHEZMOI_CONFIG= HOME=$(shell_quote "$home_dir") XDG_CONFIG_HOME=$(shell_quote "$xdg_config_home") sh $(shell_quote "$terrapod") setup"
-    script -q -e -c "$command_text" /dev/null
-  else
-    script -q /dev/null env TERM="$term" TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" setup
-  fi
+  command_text="env TERM=$(shell_quote "$term") TERRAPOD_PROFILE=$(shell_quote "$profile") TERRAPOD_CHEZMOI_CONFIG= HOME=$(shell_quote "$home_dir") XDG_CONFIG_HOME=$(shell_quote "$xdg_config_home") sh $(shell_quote "$terrapod") setup"
+  run_in_pty "$command_text"
 }
+
 
 extract_data_section() {
   file="$1"
@@ -443,9 +301,9 @@ run_terrapod_setup() {
 
 terrapod="$repo_root/dot_local/bin/executable_terrapod"
 mkdir -p "$tmp_dir/bin"
-write_gum_stub "$tmp_dir/bin/gum"
+write_gum_stub "$tmp_dir/bin/gum" cancel default
 no_gum_path="$tmp_dir/no-gum-bin"
-write_no_gum_path "$no_gum_path" sh dirname mkdir mktemp awk sed mv rm cat chmod stat cp date
+write_restricted_path "$no_gum_path" sh dirname mkdir mktemp awk sed mv rm cat chmod stat cp date
 
 new_home="$tmp_dir/new-home"
 new_xdg="$tmp_dir/new-xdg"

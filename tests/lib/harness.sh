@@ -116,3 +116,34 @@ assert_file_not_contains() {
 
   pass "$harness_message"
 }
+
+assert_equals() {
+  harness_actual="$1"
+  harness_expected="$2"
+  harness_message="$3"
+
+  if [ "$harness_actual" != "$harness_expected" ]; then
+    harness_report_text "expected: $harness_expected" "actual: $harness_actual"
+    fail "$harness_message"
+  fi
+
+  pass "$harness_message"
+}
+
+assert_status() {
+  harness_actual="$1"
+  harness_expected="$2"
+  harness_message="$3"
+  assert_equals "$harness_actual" "$harness_expected" "$harness_message"
+}
+
+assert_file_exists() {
+  harness_file="$1"
+  harness_message="$2"
+
+  if [ ! -e "$harness_file" ]; then
+    fail "$harness_message; missing $harness_file"
+  fi
+
+  pass "$harness_message"
+}
