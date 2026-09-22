@@ -8,13 +8,10 @@ make_tmp_dir
 . "$repo_root/tests/lib/chezmoi-test-support.sh"
 macos_mise_tools_installer="$(render_template "$macos_data" ".chezmoiscripts/run_after_20-install-mise-tools.sh.tmpl")"
 macos_mise_missing_script="$tmp_dir/macos-mise-missing.sh"
-printf '%s\n' "$macos_mise_tools_installer" |
-  sed \
-    -e "s#/opt/homebrew/bin/brew#$tmp_dir/missing-opt-homebrew-brew#g" \
-    -e "s#/usr/local/bin/brew#$tmp_dir/missing-usr-local-brew#g" \
-    -e "s#/opt/homebrew/bin/mise#$tmp_dir/missing-opt-homebrew-mise#g" \
-    -e "s#/usr/local/bin/mise#$tmp_dir/missing-usr-local-mise#g" \
-    >"$macos_mise_missing_script"
+render_template_with_homebrew_prefix_provider \
+  "$macos_data" \
+  '.chezmoiscripts/run_after_20-install-mise-tools.sh.tmpl' \
+  "$tmp_dir/missing-macos-prefix" >"$macos_mise_missing_script"
 sh -n "$macos_mise_missing_script" || fail "macOS mise tool installer missing-mise test script should be valid sh"
 pass "macOS mise tool installer missing-mise test script is valid sh"
 
@@ -95,14 +92,16 @@ fi
 
 pass "mise tool installer carries no vestigial rendered-config checksum"
 
+mise_tools_prefix="$tmp_dir/mise-tools-prefix"
 mise_tools_installer_script="$tmp_dir/mise-tools-installer.sh"
-printf '%s\n' "$mise_tools_installer" |
-  sed "s#/home/linuxbrew/.linuxbrew/bin/mise#$tmp_dir/mise-tools-bin/mise#g" \
-  >"$mise_tools_installer_script"
+render_template_with_homebrew_prefix_provider \
+  "$ubuntu_data" \
+  '.chezmoiscripts/run_after_20-install-mise-tools.sh.tmpl' \
+  "$mise_tools_prefix" >"$mise_tools_installer_script"
 sh -n "$mise_tools_installer_script" || fail "mise tool installer script should be valid sh"
 pass "mise tool installer script should be valid sh"
 
-mise_tools_bin="$tmp_dir/mise-tools-bin"
+mise_tools_bin="$mise_tools_prefix/bin"
 mise_tools_state="$tmp_dir/mise-tools-state"
 mise_tools_home="$tmp_dir/mise-tools-home"
 mise_tools_log="$tmp_dir/mise-tools.log"

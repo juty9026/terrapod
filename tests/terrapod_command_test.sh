@@ -321,10 +321,11 @@ EOF
 copy_desktop_apply_source_fixture() {
   source_dir="$1"
   fixture_brew_bin="$2"
+  fixture_prefix="${fixture_brew_bin%/bin/brew}"
 
   # Keep this fixture minimal so real chezmoi apply only runs the Homebrew path under test.
-  # All three real Homebrew prefixes are redirected to the stub, because which one the
-  # rendered script reaches for depends on the host chezmoi is running on.
+  # The provider is the only production source replaced; templates and consumers are copied
+  # unchanged and derive every tool path from this prefix.
   mkdir -p \
     "$source_dir/.chezmoiscripts" \
     "$source_dir/dot_local/bin" \
@@ -333,21 +334,19 @@ copy_desktop_apply_source_fixture() {
   cp "$repo_root/Brewfile" "$source_dir/Brewfile"
   cp "$repo_root/Brewfile.macos-desktop-apps.tmpl" "$source_dir/Brewfile.macos-desktop-apps.tmpl"
   cp -R "$repo_root/.chezmoitemplates" "$source_dir/.chezmoitemplates"
-  sed \
-    -e "s#/opt/homebrew/bin/brew#$fixture_brew_bin#g" \
-    -e "s#/usr/local/bin/brew#$fixture_brew_bin#g" \
-    -e "s#/home/linuxbrew/.linuxbrew/bin/brew#$fixture_brew_bin#g" \
-    "$repo_root/.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl" \
-    >"$source_dir/.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl"
+  cp "$repo_root/.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl" \
+    "$source_dir/.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl"
   cp "$terrapod" "$source_dir/dot_local/bin/executable_terrapod"
   cp "$tpod_source" "$source_dir/dot_local/bin/symlink_tpod"
   cp "$repo_root/dot_local/lib/terrapod/config-toml.sh" "$source_dir/dot_local/lib/terrapod/config-toml.sh"
   cp "$repo_root/dot_local/lib/terrapod/homebrew-core-bundle.sh" "$source_dir/dot_local/lib/terrapod/homebrew-core-bundle.sh"
-  sed \
-    -e "s#/opt/homebrew/bin/brew#$fixture_brew_bin#g" \
-    -e "s#/usr/local/bin/brew#$fixture_brew_bin#g" \
-    -e "s#/home/linuxbrew/.linuxbrew/bin/brew#$fixture_brew_bin#g" \
-    "$repo_root/dot_local/lib/terrapod/homebrew-prefix.sh" \
+  cp "$repo_root/dot_local/lib/terrapod/homebrew-paths.sh" "$source_dir/dot_local/lib/terrapod/homebrew-paths.sh"
+  printf '%s\n' \
+    '#!/bin/sh' \
+    'TERRAPOD_HOMEBREW_PREFIX_LOADED=1' \
+    'terrapod_standard_homebrew_prefix_for_os() {' \
+    "  printf '%s\\n' '$fixture_prefix'" \
+    '}' \
     >"$source_dir/dot_local/lib/terrapod/homebrew-prefix.sh"
   cp "$install_warnings_lib" "$source_dir/dot_local/lib/terrapod/install-warnings.sh"
   cp "$repo_root/dot_local/lib/terrapod/install-warning-script.sh" \
@@ -442,9 +441,8 @@ homebrew_owned_status_doctor_path() {
   printf '%s\n' "$owned_path"
 }
 
-# The rendered command reads its Homebrew prefix mapping from a sibling
-# library, so the fixture reproduces the deployed bin/ and lib/ layout and
-# rewrites the prefix in both files.
+# The rendered command reads the production tool-path library and a sibling
+# prefix provider, so the fixture reproduces the deployed bin/ and lib/ layout.
 # Terrapod reads its managed config through the recovery-core library beside
 # the command, so any staged copy of the command needs it too.
 stage_terrapod_config_reader() {
@@ -457,16 +455,21 @@ stage_terrapod_config_reader() {
 
 render_terrapod_with_homebrew_prefix() {
   name="$1"
-  production_prefix="$2"
   fixture_prefix="$3"
   rendered_root="$tmp_dir/terrapod-$name"
   rendered_terrapod="$rendered_root/bin/terrapod"
   rendered_prefix_lib="$rendered_root/lib/terrapod/homebrew-prefix.sh"
 
   mkdir -p "$rendered_root/bin" "$rendered_root/lib/terrapod"
-  sed "s|$production_prefix|$fixture_prefix|g" "$terrapod" >"$rendered_terrapod"
-  sed "s|$production_prefix|$fixture_prefix|g" \
-    "$repo_root/dot_local/lib/terrapod/homebrew-prefix.sh" >"$rendered_prefix_lib"
+  cp "$terrapod" "$rendered_terrapod"
+  cp "$repo_root/dot_local/lib/terrapod/homebrew-paths.sh" "$rendered_root/lib/terrapod/homebrew-paths.sh"
+  printf '%s\n' \
+    '#!/bin/sh' \
+    'TERRAPOD_HOMEBREW_PREFIX_LOADED=1' \
+    'terrapod_standard_homebrew_prefix_for_os() {' \
+    "  printf '%s\\n' '$fixture_prefix'" \
+    '}' \
+    >"$rendered_prefix_lib"
   chmod +x "$rendered_terrapod"
   stage_terrapod_config_reader "$rendered_root/bin"
   printf '%s\n' "$rendered_terrapod"
@@ -1108,7 +1111,8 @@ else
   pass "install warning marker prune reports removal failures through its exit status"
 fi
 
-fake_warning_bin="$tmp_dir/fake-warning-bin"
+fake_warning_prefix="$tmp_dir/fake-warning-prefix"
+fake_warning_bin="$fake_warning_prefix/bin"
 fake_warning_calls="$tmp_dir/fake-warning.calls"
 mkdir -p "$fake_warning_bin"
 write_stub "$fake_warning_bin/terrapod_install_warning_list" \
@@ -1130,11 +1134,20 @@ write_stub "$fake_warning_bin/brew" \
   'esac'
 
 fake_ai_cli_installer="$tmp_dir/fake-ai-cli-installer.sh"
+fake_ai_cli_source="$tmp_dir/fake-ai-cli-source"
+mkdir -p "$fake_ai_cli_source"
+cp -R "$repo_root/." "$fake_ai_cli_source"
+printf '%s\n' \
+  '#!/bin/sh' \
+  'TERRAPOD_HOMEBREW_PREFIX_LOADED=1' \
+  'terrapod_standard_homebrew_prefix_for_os() {' \
+  "  printf '%s\\n' '$fake_warning_prefix'" \
+  '}' \
+  >"$fake_ai_cli_source/dot_local/lib/terrapod/homebrew-prefix.sh"
 chezmoi execute-template \
-  --source "$repo_root" \
+  --source "$fake_ai_cli_source" \
   --override-data "{\"chezmoi\":{\"os\":\"darwin\",\"sourceDir\":\"$repo_root\"},\"enableAiCliTools\":true}" \
-  --file "$repo_root/.chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl" \
-  | sed "s#/opt/homebrew/bin/brew#$fake_warning_bin/brew#g" \
+  --file "$fake_ai_cli_source/.chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl" \
   >"$fake_ai_cli_installer"
 
 if ! HOME="$fake_ai_cli_home" FAKE_INSTALL_WARNING_CALLS="$fake_warning_calls" TERRAPOD_MACHINE_ARCH=aarch64 PATH="$fake_warning_bin:/usr/bin:/bin" /bin/sh "$fake_ai_cli_installer" >"$tmp_dir/fake-ai-cli-installer.out" 2>"$tmp_dir/fake-ai-cli-installer.err"; then
@@ -1168,12 +1181,21 @@ write_stub "$fake_ai_cli_write_failure_home/.local/bin/brew" \
 # The script inlines install-warnings.sh, so the stub is appended after the
 # category assignment to override the real definitions.
 fake_ai_cli_write_failure_installer="$tmp_dir/fake-ai-cli-write-failure-installer.sh"
+fake_ai_cli_write_failure_source="$tmp_dir/fake-ai-cli-write-failure-source"
+mkdir -p "$fake_ai_cli_write_failure_source"
+cp -R "$repo_root/." "$fake_ai_cli_write_failure_source"
+printf '%s\n' \
+  '#!/bin/sh' \
+  'TERRAPOD_HOMEBREW_PREFIX_LOADED=1' \
+  'terrapod_standard_homebrew_prefix_for_os() {' \
+  "  printf '%s\\n' '$fake_ai_cli_write_failure_home/.local'" \
+  '}' \
+  >"$fake_ai_cli_write_failure_source/dot_local/lib/terrapod/homebrew-prefix.sh"
 chezmoi execute-template \
-  --source "$repo_root" \
+  --source "$fake_ai_cli_write_failure_source" \
   --override-data '{"chezmoi":{"os":"darwin"},"enableAiCliTools":true}' \
-  --file "$repo_root/.chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl" \
+  --file "$fake_ai_cli_write_failure_source/.chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl" \
   | sed \
-    -e "s#/opt/homebrew/bin/brew#$fake_ai_cli_write_failure_home/.local/bin/brew#g" \
     -e "/^AI_CLI_WARNING_CATEGORY=/r $fake_ai_cli_warning_stub" \
   >"$fake_ai_cli_write_failure_installer"
 
@@ -3612,7 +3634,7 @@ if [ "$host_os" = "Darwin" ]; then
   desktop_apply_source="$tmp_dir/desktop-apply-source"
   desktop_apply_home="$tmp_dir/desktop-apply-home"
   desktop_apply_state="$tmp_dir/desktop-apply-state"
-  desktop_apply_bin="$tmp_dir/desktop-apply-bin"
+  desktop_apply_bin="$tmp_dir/desktop-apply-prefix/bin"
   desktop_apply_log="$tmp_dir/desktop-apply-brew.log"
   desktop_apply_config="$tmp_dir/desktop-apply.toml"
   mkdir -p "$desktop_apply_home" "$desktop_apply_bin"
@@ -3682,7 +3704,7 @@ fi
 core_apply_source="$tmp_dir/core-apply-source"
 core_apply_home="$tmp_dir/core-apply-home"
 core_apply_state="$tmp_dir/core-apply-state"
-core_apply_bin="$tmp_dir/core-apply-bin"
+core_apply_bin="$tmp_dir/core-apply-prefix/bin"
 core_apply_log="$tmp_dir/core-apply-brew.log"
 core_apply_config="$tmp_dir/core-apply.toml"
 core_apply_prefix="$tmp_dir/core-apply-prefix"

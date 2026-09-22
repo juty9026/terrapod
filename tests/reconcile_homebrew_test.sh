@@ -63,11 +63,14 @@ assert_contains \
   "macOS bootstrap default renders macOS Desktop App Stack warning cleanup"
 
 macos_bootstrap_script="$tmp_dir/macos-bootstrap-default.sh"
-printf '%s\n' "$macos_bootstrap" >"$macos_bootstrap_script"
+render_template_with_homebrew_prefix_provider \
+  "$macos_data" \
+  '.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl' \
+  "$tmp_dir/macos-brew-prefix" >"$macos_bootstrap_script"
 sh -n "$macos_bootstrap_script" || fail "macOS bootstrap default cleanup script should be valid sh"
 pass "macOS bootstrap default cleanup script is valid sh"
 
-macos_brew_bin="$tmp_dir/macos-brew-bin"
+macos_brew_bin="$tmp_dir/macos-brew-prefix/bin"
 macos_brew_log="$tmp_dir/macos-brew.log"
 mkdir -p "$macos_brew_bin"
 write_stub "$macos_brew_bin/brew" \
@@ -94,13 +97,14 @@ run_linux_homebrew_arch_case() {
   case_log="$case_dir/commands.log"
   case_state="$case_dir/state"
   case_home="$case_dir/home"
-  mkdir -p "$case_bin" "$case_home"
+  case_prefix="$case_dir/prefix"
+  mkdir -p "$case_bin" "$case_prefix/bin" "$case_home"
 
   write_stub "$case_bin/uname" "printf '%s\\n' '$arch'"
   write_stub "$case_bin/curl" \
     'printf "%s\n" "curl args:$*" >>"$LINUX_HOMEBREW_ARCH_LOG"' \
     'exit 97'
-  write_stub "$case_bin/brew" \
+  write_stub "$case_prefix/bin/brew" \
     'printf "%s\n" "brew args:$*" >>"$LINUX_HOMEBREW_ARCH_LOG"' \
     'case "$1" in' \
     '  shellenv) printf "%s\n" ":" ;;' \
@@ -109,8 +113,10 @@ run_linux_homebrew_arch_case() {
     '  *) exit 64 ;;' \
     'esac'
 
-  printf '%s\n' "$ubuntu_homebrew_bootstrap" |
-    sed "s#/home/linuxbrew/.linuxbrew/bin/brew#$case_bin/brew#g" >"$case_script"
+  render_template_with_homebrew_prefix_provider \
+    "$ubuntu_data" \
+    '.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl' \
+    "$case_prefix" >"$case_script"
   sh -n "$case_script" || fail "Ubuntu Homebrew $arch bootstrap test script is valid sh"
 
   case_status=0
@@ -118,7 +124,7 @@ run_linux_homebrew_arch_case() {
     XDG_STATE_HOME="$case_state" \
     TERRAPOD_FIRST_RUN_APPLY=1 \
     LINUX_HOMEBREW_ARCH_LOG="$case_log" \
-    LINUX_HOMEBREW_ARCH_PREFIX="$case_dir/prefix" \
+    LINUX_HOMEBREW_ARCH_PREFIX="$case_prefix" \
     PATH="$case_bin:/usr/bin:/bin" \
     sh "$case_script" >"$case_dir/stdout" 2>"$case_dir/stderr" || case_status=$?
 
@@ -165,8 +171,10 @@ run_linux_homebrew_space_case() {
     'printf "%s\n" "curl args:$*" >>"$LINUX_HOMEBREW_SPACE_LOG"' \
     'exit 97'
 
-  printf '%s\n' "$ubuntu_homebrew_bootstrap" |
-    sed "s#/home/linuxbrew/.linuxbrew/bin/brew#$case_dir/missing-brew#g" >"$case_script"
+  render_template_with_homebrew_prefix_provider \
+    "$ubuntu_data" \
+    '.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl' \
+    "$case_dir/missing-prefix" >"$case_script"
   sh -n "$case_script" || fail "Ubuntu Homebrew $case_name space test script is valid sh"
 
   case_status=0
@@ -201,21 +209,6 @@ run_linux_homebrew_space_case() {
 run_linux_homebrew_space_case 3145727 yes low
 run_linux_homebrew_space_case 3145728 no sufficient
 
-replace_standard_brew_path() {
-  input_file="$1"
-  output_file="$2"
-  replacement="$3"
-
-  sed \
-    -e "s#/opt/homebrew/bin/brew#$replacement#g" \
-    -e "s#/usr/local/bin/brew#$replacement#g" \
-    "$input_file" >"$output_file"
-}
-
-macos_bootstrap_with_stub="$tmp_dir/macos-bootstrap-default-with-stub.sh"
-replace_standard_brew_path "$macos_bootstrap_script" "$macos_bootstrap_with_stub" "$macos_brew_bin/brew"
-macos_bootstrap_script="$macos_bootstrap_with_stub"
-
 macos_marker_state="$tmp_dir/macos-marker-state"
 macos_marker_home="$tmp_dir/macos-marker-home"
 mkdir -p "$macos_marker_home"
@@ -234,10 +227,10 @@ fi
 pass "macOS bootstrap default cleanup clears stale homebrew-desktop-apps marker"
 
 homebrew_installer_failure_script="$tmp_dir/macos-bootstrap-homebrew-installer-failure.sh"
-printf '%s\n' "$macos_bootstrap" | sed \
-  -e "s#/opt/homebrew/bin/brew#$tmp_dir/missing-opt-homebrew-brew#g" \
-  -e "s#/usr/local/bin/brew#$tmp_dir/missing-usr-local-brew#g" \
-  >"$homebrew_installer_failure_script"
+render_template_with_homebrew_prefix_provider \
+  "$macos_data" \
+  '.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl' \
+  "$tmp_dir/missing-prefix" >"$homebrew_installer_failure_script"
 sh -n "$homebrew_installer_failure_script" || fail "macOS bootstrap no-Homebrew test script should be valid sh"
 
 homebrew_installer_failure_bin="$tmp_dir/homebrew-installer-failure-bin"
@@ -642,10 +635,9 @@ assert_not_contains \
   "macOS default does not render the OrbStack shell integration"
 
 development_apps_bootstrap_script="$tmp_dir/macos-development-apps-bootstrap.sh"
-printf '%s\n' "$macos_development_apps_bootstrap" | sed \
-  -e "s#/opt/homebrew/bin/brew#$tmp_dir/development-apps-failure-bin/brew#g" \
-  -e "s#/usr/local/bin/brew#$tmp_dir/development-apps-failure-bin/brew#g" \
-  >"$development_apps_bootstrap_script"
+render_template_with_homebrew_prefix_provider "$macos_development_apps_data" \
+  '.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl' \
+  "$tmp_dir/development-apps-failure-prefix" >"$development_apps_bootstrap_script"
 sh -n "$development_apps_bootstrap_script" || fail "development-apps bootstrap script should be valid sh"
 pass "development-apps bootstrap script is valid sh"
 
@@ -706,7 +698,7 @@ assert_contains \
   '>"$single_package_brewfile"' \
   "per-package retry writes the recorded declaration so options such as trusted: true survive"
 
-development_apps_failure_bin="$tmp_dir/development-apps-failure-bin"
+development_apps_failure_bin="$tmp_dir/development-apps-failure-prefix/bin"
 development_apps_failure_state="$tmp_dir/development-apps-failure-state"
 development_apps_failure_home="$tmp_dir/development-apps-failure-home"
 development_apps_failure_log="$tmp_dir/development-apps-failure-brew.log"
@@ -729,14 +721,13 @@ assert_contains "$development_apps_failure_marker_text" "failed casks: stablyai/
 assert_contains "$development_apps_failure_marker_text" "App Groups: development-apps" "Orca failure attribution identifies the development-apps group"
 
 mobile_dev_bootstrap_script="$tmp_dir/macos-mobile-dev-bootstrap.sh"
-printf '%s\n' "$macos_mobile_dev_bootstrap" | sed \
-  -e "s#/opt/homebrew/bin/brew#$tmp_dir/mobile-dev-failure-bin/brew#g" \
-  -e "s#/usr/local/bin/brew#$tmp_dir/mobile-dev-failure-bin/brew#g" \
-  >"$mobile_dev_bootstrap_script"
+render_template_with_homebrew_prefix_provider "$macos_mobile_dev_data" \
+  '.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl' \
+  "$tmp_dir/mobile-dev-failure-prefix" >"$mobile_dev_bootstrap_script"
 sh -n "$mobile_dev_bootstrap_script" || fail "mobile-dev bootstrap script should be valid sh"
 pass "mobile-dev bootstrap script is valid sh"
 
-mobile_dev_failure_bin="$tmp_dir/mobile-dev-failure-bin"
+mobile_dev_failure_bin="$tmp_dir/mobile-dev-failure-prefix/bin"
 mobile_dev_failure_state="$tmp_dir/mobile-dev-failure-state"
 mobile_dev_failure_home="$tmp_dir/mobile-dev-failure-home"
 mobile_dev_failure_log="$tmp_dir/mobile-dev-failure-brew.log"
@@ -761,14 +752,13 @@ assert_contains "$mobile_dev_failure_marker_text" "App Groups: mobile-dev" \
   "a failed tap formula is attributed to its macOS App Group"
 
 terminal_launcher_bootstrap_script="$tmp_dir/macos-terminal-launcher-bootstrap.sh"
-printf '%s\n' "$macos_terminal_launcher_apps_bootstrap" | sed \
-  -e "s#/opt/homebrew/bin/brew#$tmp_dir/terminal-launcher-bin/brew#g" \
-  -e "s#/usr/local/bin/brew#$tmp_dir/terminal-launcher-bin/brew#g" \
-  >"$terminal_launcher_bootstrap_script"
+render_template_with_homebrew_prefix_provider "$macos_terminal_launcher_apps_data" \
+  '.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl' \
+  "$tmp_dir/terminal-launcher-prefix" >"$terminal_launcher_bootstrap_script"
 sh -n "$terminal_launcher_bootstrap_script" || fail "terminal and launcher bootstrap script should be valid sh"
 pass "terminal and launcher bootstrap script is valid sh"
 
-terminal_launcher_bin="$tmp_dir/terminal-launcher-bin"
+terminal_launcher_bin="$tmp_dir/terminal-launcher-prefix/bin"
 terminal_launcher_state="$tmp_dir/terminal-launcher-state"
 terminal_launcher_home="$tmp_dir/terminal-launcher-home"
 terminal_launcher_log="$tmp_dir/terminal-launcher-brew.log"
@@ -855,7 +845,7 @@ if HOME="$terminal_launcher_marker_failure_home" XDG_STATE_HOME="$terminal_launc
 fi
 pass "macOS desktop app bundle failure blocks when the warning marker cannot be recorded"
 
-desktop_retry_marker_failure_bin="$tmp_dir/desktop-retry-marker-failure-bin"
+desktop_retry_marker_failure_bin="$tmp_dir/desktop-retry-marker-failure-prefix/bin"
 desktop_retry_marker_failure_state="$tmp_dir/desktop-retry-marker-failure-state"
 desktop_retry_marker_failure_home="$tmp_dir/desktop-retry-marker-failure-home"
 desktop_retry_marker_failure_log="$tmp_dir/desktop-retry-marker-failure-brew.log"
@@ -879,10 +869,9 @@ write_stub "$desktop_retry_marker_failure_bin/brew" \
   'esac'
 
 desktop_retry_marker_failure_script="$tmp_dir/desktop-retry-marker-failure.sh"
-replace_standard_brew_path \
-  "$terminal_launcher_bootstrap_script" \
-  "$desktop_retry_marker_failure_script" \
-  "$desktop_retry_marker_failure_bin/brew"
+render_template_with_homebrew_prefix_provider "$macos_terminal_launcher_apps_data" \
+  '.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl' \
+  "$tmp_dir/desktop-retry-marker-failure-prefix" >"$desktop_retry_marker_failure_script"
 
 if HOME="$desktop_retry_marker_failure_home" XDG_STATE_HOME="$desktop_retry_marker_failure_state" DESKTOP_RETRY_MARKER_FAILURE_DIR="$desktop_retry_marker_failure_dir" MACOS_BREW_LOG="$desktop_retry_marker_failure_log" PATH="$desktop_retry_marker_failure_bin:/usr/bin:/bin" \
   sh "$desktop_retry_marker_failure_script" >"$tmp_dir/desktop-retry-marker-failure.out" 2>"$tmp_dir/desktop-retry-marker-failure.err"; then
@@ -891,14 +880,13 @@ fi
 pass "macOS desktop reconciliation failure blocks when the warning marker cannot be recorded"
 
 bulk_only_bootstrap_script="$tmp_dir/macos-bulk-only-bootstrap.sh"
-printf '%s\n' "$macos_terminal_launcher_apps_bootstrap" | sed \
-  -e "s#/opt/homebrew/bin/brew#$tmp_dir/bulk-only-bin/brew#g" \
-  -e "s#/usr/local/bin/brew#$tmp_dir/bulk-only-bin/brew#g" \
-  >"$bulk_only_bootstrap_script"
+render_template_with_homebrew_prefix_provider "$macos_terminal_launcher_apps_data" \
+  '.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl' \
+  "$tmp_dir/bulk-only-prefix" >"$bulk_only_bootstrap_script"
 sh -n "$bulk_only_bootstrap_script" || fail "bulk-only desktop bootstrap script should be valid sh"
 pass "bulk-only desktop bootstrap script is valid sh"
 
-bulk_only_bin="$tmp_dir/bulk-only-bin"
+bulk_only_bin="$tmp_dir/bulk-only-prefix/bin"
 bulk_only_state="$tmp_dir/bulk-only-state"
 bulk_only_home="$tmp_dir/bulk-only-home"
 bulk_only_log="$tmp_dir/bulk-only-brew.log"
@@ -932,7 +920,7 @@ awk '
   }
   { print }
 ' "$terminal_launcher_bootstrap_script" |
-  sed "s#$tmp_dir/terminal-launcher-bin/brew#$tmp_dir/fallback-bin/brew#g" >"$fallback_bootstrap_script"
+  sed "s#$tmp_dir/terminal-launcher-prefix/bin/brew#$tmp_dir/fallback-bin/brew#g" >"$fallback_bootstrap_script"
 sh -n "$fallback_bootstrap_script" || fail "fallback desktop bootstrap script should be valid sh"
 pass "fallback desktop bootstrap script is valid sh"
 
@@ -972,7 +960,7 @@ awk '
   }
   { print }
 ' "$terminal_launcher_bootstrap_script" |
-  sed "s#$tmp_dir/terminal-launcher-bin/brew#$tmp_dir/headerless-bin/brew#g" >"$headerless_bootstrap_script"
+  sed "s#$tmp_dir/terminal-launcher-prefix/bin/brew#$tmp_dir/headerless-bin/brew#g" >"$headerless_bootstrap_script"
 sh -n "$headerless_bootstrap_script" || fail "headerless desktop bootstrap script should be valid sh"
 pass "headerless desktop bootstrap script is valid sh"
 
@@ -1006,14 +994,13 @@ assert_not_contains "$headerless_marker_text" "raycast" \
   "a grouped cask whose single-cask bundle succeeds stays out of the marker"
 
 terminal_only_bootstrap_script="$tmp_dir/macos-terminal-only-bootstrap.sh"
-printf '%s\n' "$macos_terminal_apps_bootstrap" | sed \
-  -e "s#/opt/homebrew/bin/brew#$tmp_dir/terminal-only-bin/brew#g" \
-  -e "s#/usr/local/bin/brew#$tmp_dir/terminal-only-bin/brew#g" \
-  >"$terminal_only_bootstrap_script"
+render_template_with_homebrew_prefix_provider "$macos_terminal_apps_data" \
+  '.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl' \
+  "$tmp_dir/terminal-only-prefix" >"$terminal_only_bootstrap_script"
 sh -n "$terminal_only_bootstrap_script" || fail "terminal-only bootstrap script should be valid sh"
 pass "terminal-only bootstrap script is valid sh"
 
-terminal_only_bin="$tmp_dir/terminal-only-bin"
+terminal_only_bin="$tmp_dir/terminal-only-prefix/bin"
 terminal_only_state="$tmp_dir/terminal-only-state"
 terminal_only_home="$tmp_dir/terminal-only-home"
 terminal_only_log="$tmp_dir/terminal-only-brew.log"
