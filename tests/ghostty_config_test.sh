@@ -23,3 +23,10 @@ case ",$features_line," in
   *,ssh-terminfo,*) pass "Ghostty SSH sessions install xterm-ghostty terminfo when possible" ;;
   *) fail "Ghostty shell integration should enable ssh-terminfo" ;;
 esac
+ghostty_font_lines="$(grep -E '^[[:space:]]*font-family[[:space:]]*=' "$repo_root/dot_config/ghostty/config")"
+assert_equals "$ghostty_font_lines" 'font-family = "Jetendard"' \
+  "Ghostty uses Jetendard as its sole font family"
+assert_not_contains "$(cat "$repo_root/dot_config/ghostty/config")" "JetBrainsMono Nerd Font" \
+  "Ghostty no longer declares JetBrains Mono Nerd Font"
+assert_not_contains "$(cat "$repo_root/dot_config/ghostty/config")" "D2Coding" \
+  "Ghostty no longer declares D2Coding"

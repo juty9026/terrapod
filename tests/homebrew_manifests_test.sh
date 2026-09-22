@@ -147,3 +147,38 @@ if ! cmp -s "$expected_runtimes" "$actual_runtimes"; then
   fail "mise declares exactly the mandatory runtime tools"
 fi
 pass "mise declares exactly the mandatory runtime tools"
+if grep -E '^[[:space:]]*cask[[:space:]]+"font-(jetbrains-mono-nerd-font|d2coding)"' "$repo_root/Brewfile" >/dev/null; then
+  fail "core Brewfile no longer declares superseded terminal font casks"
+fi
+pass "core Brewfile no longer declares superseded terminal font casks"
+
+if ! grep -Fx 'brew "gum"' "$repo_root/Brewfile" >/dev/null; then
+  fail "core Brewfile declares gum as the setup UI dependency"
+fi
+
+pass "core Brewfile declares gum as the setup UI dependency"
+
+if grep -E '^[[:space:]]*cask[[:space:]]+"' "$repo_root/Brewfile" >/dev/null; then
+  fail "cross-profile core Brewfile excludes macOS-only casks"
+fi
+pass "cross-profile core Brewfile excludes macOS-only casks"
+ubuntu_mise_config="$(cat "$repo_root/dot_config/mise/config.toml")"
+
+if printf '%s\n' "$ubuntu_mise_config" | grep -F '"aqua:neovim/neovim" = "latest"' >/dev/null; then
+  fail "Ubuntu VPS removes duplicate mise-managed Neovim"
+fi
+
+pass "Ubuntu VPS removes duplicate mise-managed Neovim"
+
+if printf '%s\n' "$ubuntu_mise_config" | grep -F '"aqua:cli/cli" = "latest"' >/dev/null; then
+  fail "Ubuntu VPS removes duplicate mise-managed GitHub CLI"
+fi
+
+pass "Ubuntu VPS removes duplicate mise-managed GitHub CLI"
+
+for formula in neovim gh; do
+  if ! grep -Fx "brew \"$formula\"" "$repo_root/Brewfile" >/dev/null; then
+    fail "cross-profile Brewfile declares migrated formula: $formula"
+  fi
+done
+pass "cross-profile Brewfile declares migrated Neovim and GitHub CLI"
