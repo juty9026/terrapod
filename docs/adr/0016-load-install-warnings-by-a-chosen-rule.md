@@ -38,6 +38,9 @@ trio. A script that only writes or clears a marker, with no exit decision to
 make, calls `terrapod_install_warning_write` or `terrapod_install_warning_clear`
 directly and does not inline the policy layer.
 
+ADR 0022 partially supersedes this call-shape rule for exit-deciding installer
+scripts; the loading rules in this record remain unchanged.
+
 ## Considered Options
 
 - Inline everywhere, including the two `run_onchange_` scripts: rejected on the
