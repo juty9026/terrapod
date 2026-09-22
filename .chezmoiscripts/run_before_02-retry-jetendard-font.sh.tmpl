@@ -4,9 +4,13 @@ set -eu
 
 {{ include "dot_local/lib/terrapod/install-warnings.sh" }}
 
+{{ include "dot_local/lib/terrapod/install-warning-script.sh" }}
+
 {{ include "dot_local/lib/terrapod/jetendard-font-status.sh" }}
 
 font_helper="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/executable_jetendard-font"
+
+declare_install_warning_category jetendard-font "Jetendard font install needs attention"
 
 if ! terrapod_install_warning_existing_path jetendard-font >/dev/null 2>&1; then
   exit 0
@@ -14,8 +18,7 @@ fi
 
 if command -v python3 >/dev/null 2>&1; then
   if python3 "$font_helper" install; then
-    terrapod_install_warning_clear jetendard-font || exit 1
-    exit 0
+    finish_install_warning_category
   else
     # The helper's exit status names the failure; anything else is generic.
     font_status=$?
@@ -24,9 +27,5 @@ else
   font_status=127
 fi
 
-terrapod_install_warning_write \
-  jetendard-font \
-  "Jetendard font install needs attention" \
-  "$(terrapod_jetendard_font_guidance "$font_status")" || exit 1
-exit 0
+fail_install_warning_category "$(terrapod_jetendard_font_guidance "$font_status")"
 {{- end }}

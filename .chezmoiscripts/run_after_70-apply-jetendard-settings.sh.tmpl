@@ -4,25 +4,28 @@ set -eu
 
 {{ include "dot_local/lib/terrapod/install-warnings.sh" }}
 
+{{ include "dot_local/lib/terrapod/install-warning-script.sh" }}
+
+declare_install_warning_category jetendard-settings "Jetendard app settings need attention"
+
 settings_helper="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/executable_jetendard-settings"
 
 if ! command -v python3 >/dev/null 2>&1; then
-  terrapod_install_warning_write jetendard-settings "Jetendard app settings need attention" "Restore Python, quit Orca, then rerun tpod apply." || exit 1
-  exit 0
+  fail_install_warning_category "Restore Python, quit Orca, then rerun tpod apply."
 fi
 
 settings_status=0
 python3 "$settings_helper" apply || settings_status="$?"
 case "$settings_status" in
   0)
-    terrapod_install_warning_clear jetendard-settings || exit 1
+    finish_install_warning_category
     ;;
   2)
-    terrapod_install_warning_write jetendard-settings "Jetendard Orca setting is deferred" "Quit Orca, then rerun tpod apply." || exit 1
+    declare_install_warning_category jetendard-settings "Jetendard Orca setting is deferred"
+    fail_install_warning_category "Quit Orca, then rerun tpod apply."
     ;;
   *)
-    terrapod_install_warning_write jetendard-settings "Jetendard app settings need attention" "Repair the reported Zed or Orca settings file, quit Orca, then rerun tpod apply." || exit 1
+    fail_install_warning_category "Repair the reported Zed or Orca settings file, quit Orca, then rerun tpod apply."
     ;;
 esac
-exit 0
 {{- end }}

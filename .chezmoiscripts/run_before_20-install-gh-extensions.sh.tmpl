@@ -8,29 +8,7 @@ set -eu
 
 {{ include "dot_local/lib/terrapod/install-warning-script.sh" }}
 
-failed_gh_extensions=
-
-append_failed_gh_extension() {
-  extension="$1"
-
-  if [ -n "$failed_gh_extensions" ]; then
-    failed_gh_extensions="$failed_gh_extensions, $extension"
-  else
-    failed_gh_extensions="$extension"
-  fi
-}
-
-finish_gh_extensions() {
-  if [ -n "$failed_gh_extensions" ]; then
-    mark_install_warning \
-      gh-extensions \
-      "GitHub CLI Extension Set install needs attention" \
-      "Failed to install: $failed_gh_extensions. Review gh output, fix authentication or network access, then rerun tpod apply."
-    exit_after_install_warning
-  fi
-
-  clear_install_warning gh-extensions
-}
+declare_install_warning_category gh-extensions "GitHub CLI Extension Set install needs attention"
 
 standard_gh_path() {
   terrapod_standard_homebrew_gh_path "{{ .chezmoi.os }}"
@@ -38,11 +16,7 @@ standard_gh_path() {
 
 gh_bin="$(standard_gh_path || true)"
 if [ -z "$gh_bin" ] || [ ! -x "$gh_bin" ]; then
-  mark_install_warning \
-    gh-extensions \
-    "GitHub CLI Extension Set install needs attention" \
-    "Install the mandatory Homebrew core bundle, then rerun tpod apply."
-  exit_after_install_warning
+  fail_install_warning_category "Install the mandatory Homebrew core bundle, then rerun tpod apply."
 fi
 
 gh_extension_installed() {
@@ -88,8 +62,8 @@ while IFS= read -r declared_extension; do
     ''|'#'*) continue ;;
   esac
 
-  install_gh_extension "$declared_extension" || append_failed_gh_extension "$declared_extension"
+  install_gh_extension "$declared_extension" || note_failed_install_warning_item "$declared_extension"
 done <"$gh_extensions_list"
 
-finish_gh_extensions
+finish_install_warning_category "Failed to install: %s. Review gh output, fix authentication or network access, then rerun tpod apply."
 {{- end }}

@@ -8,29 +8,7 @@ set -eu
 
 {{ include "dot_local/lib/terrapod/install-warning-script.sh" }}
 
-failed_mise_steps=
-
-append_failed_mise_step() {
-  step="$1"
-
-  if [ -n "$failed_mise_steps" ]; then
-    failed_mise_steps="$failed_mise_steps, $step"
-  else
-    failed_mise_steps="$step"
-  fi
-}
-
-finish_mise_tools() {
-  if [ -n "$failed_mise_steps" ]; then
-    mark_install_warning \
-      mise-tools \
-      "mise tool install needs attention" \
-      "Failed step(s): $failed_mise_steps. Review mise output, fix tool installation issues, then rerun tpod apply. If mise aqua resolution hit GitHub API rate limits, export a temporary GITHUB_TOKEN or run gh auth login before rerunning."
-    exit_after_install_warning
-  fi
-
-  clear_install_warning mise-tools
-}
+declare_install_warning_category mise-tools "mise tool install needs attention"
 
 standard_mise_path() {
   terrapod_standard_homebrew_mise_path "{{ .chezmoi.os }}"
@@ -38,22 +16,18 @@ standard_mise_path() {
 
 mise_bin="$(standard_mise_path || true)"
 if [ -z "$mise_bin" ] || [ ! -x "$mise_bin" ]; then
-  mark_install_warning \
-    mise-tools \
-    "mise tool install needs attention" \
-    "Install the mandatory Homebrew core bundle, then rerun tpod apply."
-  exit_after_install_warning
+  fail_install_warning_category "Install the mandatory Homebrew core bundle, then rerun tpod apply."
 fi
 
 if ! "$mise_bin" install --yes -C "$HOME"; then
-  append_failed_mise_step "mise install"
+  note_failed_install_warning_item "mise install"
 fi
 
 if "$mise_bin" exec --yes -C "$HOME" -- sh -c 'command -v corepack' >/dev/null 2>&1; then
   if ! "$mise_bin" exec --yes -C "$HOME" -- corepack enable; then
-    append_failed_mise_step "corepack enable"
+    note_failed_install_warning_item "corepack enable"
   fi
 fi
 
-finish_mise_tools
+finish_install_warning_category "Failed step(s): %s. Review mise output, fix tool installation issues, then rerun tpod apply. If mise aqua resolution hit GitHub API rate limits, export a temporary GITHUB_TOKEN or run gh auth login before rerunning."
 {{- end }}

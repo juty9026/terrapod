@@ -9,14 +9,13 @@ set -eu
 {{ include "dot_local/lib/terrapod/install-warning-script.sh" }}
 
 AI_CLI_WARNING_CATEGORY=optional-ai-cli-tools
+declare_install_warning_category "$AI_CLI_WARNING_CATEGORY" "Optional AI CLI tool install needs attention"
 
 {{ if not (and (eq .chezmoi.os "darwin") (or (default false (get . "enableAiCliTools")) (default false (get . "enableDevelopmentWorkspace")))) }}
-clear_install_warning "$AI_CLI_WARNING_CATEGORY"
-exit 0
+finish_install_warning_category
 {{ else }}
 ai_cli_brewfile=
 claude_code_installer=
-failed_ai_cli_tools=
 
 CLAUDE_CODE_CANONICAL_EXECUTABLE="$HOME/.local/bin/claude"
 CLAUDE_CODE_INSTALLER_URL=https://claude.ai/install.sh
@@ -27,32 +26,6 @@ cleanup_ai_cli_install() {
 }
 
 trap cleanup_ai_cli_install EXIT HUP INT TERM
-
-append_failed_ai_cli_tool() {
-  if [ -z "$failed_ai_cli_tools" ]; then
-    failed_ai_cli_tools="$1"
-  else
-    failed_ai_cli_tools="$failed_ai_cli_tools, $1"
-  fi
-}
-
-finish_ai_cli_install() {
-  if [ -n "$failed_ai_cli_tools" ]; then
-    mark_install_warning \
-      "$AI_CLI_WARNING_CATEGORY" \
-      "Optional AI CLI tool install needs attention" \
-      "Failed: $failed_ai_cli_tools. Review the installer output and network access, then rerun tpod apply."
-
-    if ! install_warning_recorded; then
-      echo "Failed to record Optional AI CLI tool install warning." >&2
-      return 1
-    fi
-
-    return 0
-  fi
-
-  clear_install_warning "$AI_CLI_WARNING_CATEGORY"
-}
 
 standard_brew_path() {
   terrapod_standard_homebrew_brew_path "{{ .chezmoi.os }}"
@@ -98,12 +71,9 @@ install_claude_code() {
   [ -x "$CLAUDE_CODE_CANONICAL_EXECUTABLE" ]
 }
 
-install_ai_cli_bundle || append_failed_ai_cli_tool "Homebrew bundle"
-install_claude_code || append_failed_ai_cli_tool "Claude Code"
+install_ai_cli_bundle || note_failed_install_warning_item "Homebrew bundle"
+install_claude_code || note_failed_install_warning_item "Claude Code"
 
-if ! finish_ai_cli_install; then
-  exit 1
-fi
-exit 0
+finish_install_warning_category "Failed: %s. Review the installer output and network access, then rerun tpod apply."
 {{ end }}
 {{- end }}

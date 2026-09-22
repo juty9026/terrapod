@@ -461,11 +461,10 @@ render_jetendard_adapter_fixture "$macos_jetendard_settings" "$jetendard_setting
 
 for adapter in "$jetendard_installer_fixture" "$jetendard_retry_fixture" "$jetendard_settings_fixture"; do
   : >"$jetendard_adapter_log"
-  if JETENDARD_ADAPTER_LOG="$jetendard_adapter_log" JETENDARD_MARKER_EXISTS=1 JETENDARD_CLEAR_FAIL=1 sh "$adapter" >/dev/null 2>&1; then
-    fail "successful Jetendard adapter blocks when warning clear fails: $adapter"
-  fi
+  JETENDARD_ADAPTER_LOG="$jetendard_adapter_log" JETENDARD_MARKER_EXISTS=1 JETENDARD_CLEAR_FAIL=1 sh "$adapter" >/dev/null 2>&1 || \
+    fail "successful Jetendard adapter continues when warning clear fails: $adapter"
 done
-pass "Jetendard adapters treat warning-clear failures as blocking"
+pass "Jetendard adapters leave stale warning-clear failures for a later rerun"
 
 : >"$jetendard_adapter_log"
 JETENDARD_ADAPTER_LOG="$jetendard_adapter_log" JETENDARD_MARKER_EXISTS=0 JETENDARD_CLEAR_FAIL=0 sh "$jetendard_retry_fixture"
@@ -2090,7 +2089,7 @@ assert_not_contains "$ai_cli_tools_installer" "raw.githubusercontent.com/Homebre
 assert_not_contains "$ai_cli_tools_installer" "HOMEBREW_NO_AUTO_UPDATE=1" "Ubuntu AI installer runs no Homebrew bundle"
 assert_not_contains "$ai_cli_tools_installer" "install_ai_cli_bundle" "Ubuntu AI installer renders no Homebrew bundle step"
 assert_not_contains "$ai_cli_tools_installer" 'cask "codex"' "Ubuntu AI installer renders no macOS-only casks"
-assert_contains "$ai_cli_tools_installer" 'clear_install_warning "$AI_CLI_WARNING_CATEGORY"' "Ubuntu AI installer only clears stale optional AI CLI markers"
+assert_contains "$ai_cli_tools_installer" 'finish_install_warning_category' "Ubuntu AI installer clears stale optional AI CLI markers through the policy layer"
 assert_contains "$macos_ai_cli_tools_installer" "/opt/homebrew/bin/brew" "macOS AI installer uses mandatory standard Homebrew"
 assert_contains "$macos_ai_cli_tools_installer" "HOMEBREW_NO_AUTO_UPDATE=1" "AI bundle disables Homebrew auto-update"
 assert_contains "$macos_terminal_apps_bootstrap" "HOMEBREW_NO_AUTO_UPDATE=1" "desktop bundle disables Homebrew auto-update"
@@ -2105,7 +2104,7 @@ assert_text_equals "$ai_cli_tools_brewfile" "" "Ubuntu Optional AI Tool Stack re
 assert_text_equals "$development_workspace_ai_brewfile" "" "Ubuntu Optional Development Workspace renders no AI Homebrew casks"
 
 assert_contains "$disabled_ai_cli_tools_cleanup" "AI_CLI_WARNING_CATEGORY=optional-ai-cli-tools" "disabled Optional AI Tool Stack renders optional AI CLI warning category"
-assert_contains "$disabled_ai_cli_tools_cleanup" 'clear_install_warning "$AI_CLI_WARNING_CATEGORY"' "disabled Optional AI Tool Stack renders stale marker cleanup"
+assert_contains "$disabled_ai_cli_tools_cleanup" 'finish_install_warning_category' "disabled Optional AI Tool Stack renders policy-layer stale marker cleanup"
 assert_not_contains "$disabled_ai_cli_tools_cleanup" "raw.githubusercontent.com/Homebrew/install" "disabled Optional AI Tool Stack cleanup does not render Homebrew installer URL"
 
 disabled_ai_cli_tools_cleanup_script="$tmp_dir/disabled-ai-cli-tools-cleanup.sh"
@@ -2605,6 +2604,16 @@ for warning_script in $path_sourced_warning_scripts; do
     "$rendered_warning_script" \
     "/dot_local/lib/terrapod/install-warnings.sh" \
     "run_onchange script sources the marker library by path: $warning_script"
+
+  assert_not_contains \
+    "$rendered_warning_script" \
+    "declare_install_warning_category() {" \
+    "run_onchange script keeps the policy layer out of its content hash: $warning_script"
+
+  assert_contains \
+    "$rendered_warning_script" \
+    "/dot_local/lib/terrapod/install-warning-script.sh" \
+    "run_onchange script sources the policy layer by path: $warning_script"
 
   assert_not_contains \
     "$rendered_warning_script" \

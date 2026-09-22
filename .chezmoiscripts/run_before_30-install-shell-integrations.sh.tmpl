@@ -8,6 +8,8 @@ set -eu
 
 {{ include "dot_local/lib/terrapod/install-warning-script.sh" }}
 
+declare_install_warning_category shell-integrations "Shell integration setup needs attention"
+
 shell_integrations_warning_exists() {
   terrapod_install_warning_existing_path shell-integrations >/dev/null 2>&1
 }
@@ -29,17 +31,17 @@ install_oh_my_zsh() {
   oh_my_zsh_installer="$(mktemp "${TMPDIR:-/tmp}/terrapod-oh-my-zsh-installer.XXXXXX")"
   installer_paths="$installer_paths $oh_my_zsh_installer"
   if ! curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh -o "$oh_my_zsh_installer"; then
-    append_failed_shell_integration "Oh My Zsh"
+    note_failed_install_warning_item "Oh My Zsh"
   elif ! sh "$oh_my_zsh_installer" --unattended --keep-zshrc; then
-    append_failed_shell_integration "Oh My Zsh"
+    note_failed_install_warning_item "Oh My Zsh"
   elif ! oh_my_zsh_install_complete; then
-    append_failed_shell_integration "Oh My Zsh"
+    note_failed_install_warning_item "Oh My Zsh"
   fi
 }
 
 reinstall_partial_oh_my_zsh() {
   if ! rm -rf "$HOME/.oh-my-zsh"; then
-    append_failed_shell_integration "Oh My Zsh"
+    note_failed_install_warning_item "Oh My Zsh"
     return
   fi
 
@@ -49,20 +51,20 @@ reinstall_partial_oh_my_zsh() {
 install_zinit() {
   echo "Installing zinit..."
   if ! mkdir -p "$HOME/.local/share/zinit"; then
-    append_failed_shell_integration "zinit"
+    note_failed_install_warning_item "zinit"
     return
   fi
 
   if ! git clone https://github.com/zdharma-continuum/zinit "$HOME/.local/share/zinit/zinit.git"; then
-    append_failed_shell_integration "zinit"
+    note_failed_install_warning_item "zinit"
   elif ! zinit_install_complete; then
-    append_failed_shell_integration "zinit"
+    note_failed_install_warning_item "zinit"
   fi
 }
 
 reinstall_partial_zinit() {
   if ! rm -rf "$HOME/.local/share/zinit/zinit.git"; then
-    append_failed_shell_integration "zinit"
+    note_failed_install_warning_item "zinit"
     return
   fi
 
@@ -72,45 +74,21 @@ reinstall_partial_zinit() {
 install_scm_breeze() {
   echo "Installing SCM Breeze..."
   if ! git clone https://github.com/scmbreeze/scm_breeze.git "$HOME/.scm_breeze"; then
-    append_failed_shell_integration "SCM Breeze"
+    note_failed_install_warning_item "SCM Breeze"
   elif ! scm_breeze_install_complete; then
-    append_failed_shell_integration "SCM Breeze"
+    note_failed_install_warning_item "SCM Breeze"
   elif ! "$HOME/.scm_breeze/install.sh"; then
-    append_failed_shell_integration "SCM Breeze"
+    note_failed_install_warning_item "SCM Breeze"
   fi
 }
 
 reinstall_partial_scm_breeze() {
   if ! rm -rf "$HOME/.scm_breeze"; then
-    append_failed_shell_integration "SCM Breeze"
+    note_failed_install_warning_item "SCM Breeze"
     return
   fi
 
   install_scm_breeze
-}
-
-failed_shell_integrations=
-
-append_failed_shell_integration() {
-  failed_shell_integration="$1"
-
-  if [ -n "$failed_shell_integrations" ]; then
-    failed_shell_integrations="$failed_shell_integrations, $failed_shell_integration"
-  else
-    failed_shell_integrations="$failed_shell_integration"
-  fi
-}
-
-finish_shell_integrations() {
-  if [ -n "$failed_shell_integrations" ]; then
-    mark_install_warning \
-      shell-integrations \
-      "Shell integration setup needs attention" \
-      "Failed item(s): $failed_shell_integrations. Review installer output, fix network or installer requirements, then rerun tpod apply."
-    exit_after_install_warning
-  fi
-
-  clear_install_warning shell-integrations
 }
 
 installer_paths=
@@ -130,11 +108,7 @@ setup_macos_brew() {
   fi
 
   echo "Homebrew is required to install shell integrations." >&2
-  mark_install_warning \
-    shell-integrations \
-    "Shell integration setup needs attention" \
-    "Install Homebrew or fix brew on PATH, then rerun tpod apply."
-  exit_after_install_warning
+  fail_install_warning_category "Install Homebrew or fix brew on PATH, then rerun tpod apply."
 }
 
 ensure_git() {
@@ -144,19 +118,11 @@ ensure_git() {
 
 {{ if eq .chezmoi.os "darwin" }}
   if ! brew install git; then
-    mark_install_warning \
-      shell-integrations \
-      "Shell integration setup needs attention" \
-      "Install git with Homebrew, then rerun tpod apply."
-    exit_after_install_warning
+    fail_install_warning_category "Install git with Homebrew, then rerun tpod apply."
   fi
 {{ else }}
   echo "git is required to install shell integrations." >&2
-  mark_install_warning \
-    shell-integrations \
-    "Shell integration setup needs attention" \
-    "Install git, then rerun tpod apply."
-  exit_after_install_warning
+  fail_install_warning_category "Install git, then rerun tpod apply."
 {{ end }}
 }
 
@@ -191,9 +157,9 @@ elif shell_integrations_warning_exists && ! scm_breeze_install_complete; then
 elif shell_integrations_warning_exists; then
   echo "Installing SCM Breeze..."
   if ! "$HOME/.scm_breeze/install.sh"; then
-    append_failed_shell_integration "SCM Breeze"
+    note_failed_install_warning_item "SCM Breeze"
   fi
 fi
 
-finish_shell_integrations
+finish_install_warning_category "Failed item(s): %s. Review installer output, fix network or installer requirements, then rerun tpod apply."
 {{- end }}
