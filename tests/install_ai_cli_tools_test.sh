@@ -23,7 +23,7 @@ assert_not_contains "$ai_cli_tools_installer" "HOMEBREW_NO_AUTO_UPDATE=1" "Ubunt
 assert_not_contains "$ai_cli_tools_installer" "install_ai_cli_bundle" "Ubuntu AI installer renders no Homebrew bundle step"
 assert_not_contains "$ai_cli_tools_installer" 'cask "codex"' "Ubuntu AI installer renders no macOS-only casks"
 assert_contains "$ai_cli_tools_installer" 'finish_install_warning_category' "Ubuntu AI installer clears stale optional AI CLI markers through the policy layer"
-assert_contains "$macos_ai_cli_tools_installer" "/opt/homebrew/bin/brew" "macOS AI installer uses mandatory standard Homebrew"
+assert_contains "$macos_ai_cli_tools_installer" 'terrapod_standard_homebrew_brew_path "darwin"' "macOS AI installer derives brew from the standard Homebrew prefix"
 assert_contains "$macos_ai_cli_tools_installer" "HOMEBREW_NO_AUTO_UPDATE=1" "AI bundle disables Homebrew auto-update"
 assert_contains "$macos_terminal_apps_bootstrap" "HOMEBREW_NO_AUTO_UPDATE=1" "desktop bundle disables Homebrew auto-update"
 
@@ -59,17 +59,15 @@ pass "disabled Optional AI Tool Stack cleanup clears stale optional AI CLI marke
 
 ai_cli_tools_installer_script="$tmp_dir/ai-cli-tools-installer.sh"
 macos_ai_cli_tools_installer_script="$tmp_dir/macos-ai-cli-tools-installer.sh"
-printf '%s\n' "$ai_cli_tools_installer" |
-  sed \
-    -e "s#/opt/homebrew/bin/brew#$tmp_dir/missing-opt-homebrew-brew#g" \
-    -e "s#/usr/local/bin/brew#$tmp_dir/missing-usr-local-brew#g" \
-    -e "s#/home/linuxbrew/.linuxbrew/bin/brew#$tmp_dir/linux-ai-brew-bin/brew#g" \
-    >"$ai_cli_tools_installer_script"
-printf '%s\n' "$macos_ai_cli_tools_installer" |
-  sed \
-    -e "s#/opt/homebrew/bin/brew#$tmp_dir/macos-ai-brew-bin/brew#g" \
-    -e "s#/usr/local/bin/brew#$tmp_dir/macos-intel-ai-brew-bin/brew#g" \
-    >"$macos_ai_cli_tools_installer_script"
+render_template_with_homebrew_prefix_provider \
+  "$ai_cli_tools_data" \
+  '.chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl' \
+  "$tmp_dir/linux-ai-prefix" >"$ai_cli_tools_installer_script"
+macos_ai_prefix="$tmp_dir/macos-ai-prefix"
+render_template_with_homebrew_prefix_provider \
+  "$macos_ai_cli_tools_data" \
+  '.chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl' \
+  "$macos_ai_prefix" >"$macos_ai_cli_tools_installer_script"
 sh -n "$ai_cli_tools_installer_script" || fail "enabled Optional AI Tool Stack installer script should be valid sh"
 sh -n "$macos_ai_cli_tools_installer_script" || fail "macOS Optional AI Tool Stack installer script should be valid sh"
 pass "enabled Optional AI Tool Stack installer scripts are valid sh"
@@ -122,11 +120,9 @@ write_claude_installer_stubs() {
     'chmod +x "$HOME/.local/bin/claude"'
 }
 
-macos_ai_brew_bin="$tmp_dir/macos-ai-brew-bin"
-macos_intel_ai_brew_bin="$tmp_dir/macos-intel-ai-brew-bin"
-mkdir -p "$macos_ai_brew_bin" "$macos_intel_ai_brew_bin"
+macos_ai_brew_bin="$macos_ai_prefix/bin"
+mkdir -p "$macos_ai_brew_bin"
 write_ai_brew_stub "$macos_ai_brew_bin/brew"
-write_ai_brew_stub "$macos_intel_ai_brew_bin/brew"
 write_stub "$macos_ai_brew_bin/uname" 'printf "%s\n" "${AI_UNAME_ARCH:-arm64}"'
 write_claude_installer_stubs "$macos_ai_brew_bin"
 
@@ -150,7 +146,7 @@ run_macos_ai_arch_case() {
 }
 
 run_macos_ai_arch_case arm64 "$macos_ai_brew_bin"
-run_macos_ai_arch_case x86_64 "$macos_intel_ai_brew_bin"
+run_macos_ai_arch_case x86_64 "$macos_ai_brew_bin"
 
 macos_ai_brew_home="$tmp_dir/macos-ai-brew-home"
 macos_ai_brew_state="$tmp_dir/macos-ai-brew-state"

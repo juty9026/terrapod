@@ -5,40 +5,36 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$repo_root/tests/lib/harness.sh"
 . "$repo_root/tests/lib/test-support.sh"
 make_tmp_dir
+. "$repo_root/tests/lib/chezmoi-test-support.sh"
 
 mkdir -p "$tmp_dir/bin"
 
+gh_prefix="$tmp_dir/gh-prefix"
+gh_bin_dir="$gh_prefix/bin"
+mkdir -p "$gh_bin_dir"
 rendered_linux="$tmp_dir/gh-extensions-linux.sh"
-chezmoi execute-template \
-  --source "$repo_root" \
-  --override-data '{"chezmoi":{"os":"linux"}}' \
-  --file "$repo_root/.chezmoiscripts/run_before_20-install-gh-extensions.sh.tmpl" \
-  >"$rendered_linux"
+render_template_with_homebrew_prefix_provider \
+  '{"chezmoi":{"os":"linux"}}' \
+  '.chezmoiscripts/run_before_20-install-gh-extensions.sh.tmpl' \
+  "$gh_prefix" >"$rendered_linux"
 
 sh -n "$rendered_linux" || fail "rendered Linux GitHub CLI Extension Set script should be valid sh"
 pass "rendered Linux GitHub CLI Extension Set script is valid sh"
 
 rendered_darwin="$tmp_dir/gh-extensions-darwin.sh"
-chezmoi execute-template \
-  --source "$repo_root" \
-  --override-data '{"chezmoi":{"os":"darwin"}}' \
-  --file "$repo_root/.chezmoiscripts/run_before_20-install-gh-extensions.sh.tmpl" \
-  >"$rendered_darwin"
+render_template_with_homebrew_prefix_provider \
+  '{"chezmoi":{"os":"darwin"}}' \
+  '.chezmoiscripts/run_before_20-install-gh-extensions.sh.tmpl' \
+  "$gh_prefix" >"$rendered_darwin"
 
 sh -n "$rendered_darwin" || fail "rendered macOS GitHub CLI Extension Set script should be valid sh"
 pass "rendered macOS GitHub CLI Extension Set script is valid sh"
 
 assert_contains "$(cat "$rendered_linux")" "github/gh-stack" "rendered script declares github/gh-stack"
 
-# The script resolves gh from the standard Homebrew prefix, so the test stub
-# has to live at the exact hardcoded path the script embeds. TERRAPOD_MACHINE_ARCH
-# pins hardware-arch detection so the substitution below always targets the
-# right literal path regardless of the host running the test.
-gh_extensions_script="$tmp_dir/gh-extensions.sh"
-sed 's#/home/linuxbrew/.linuxbrew/bin/gh#'"$tmp_dir"'/gh-bin/gh#g' "$rendered_linux" >"$gh_extensions_script"
-
-gh_bin_dir="$tmp_dir/gh-bin"
-mkdir -p "$gh_bin_dir"
+# The fake provider is the only staged source change. The rendered script and
+# its shared tool-path derivation are the production code.
+gh_extensions_script="$rendered_linux"
 
 write_stub "$gh_bin_dir/gh" \
   'printf "%s\n" "gh args:$*" >>"$GH_EXTENSIONS_TEST_LOG"' \
@@ -143,7 +139,10 @@ missing_gh_state="$tmp_dir/missing-gh-state"
 mkdir -p "$missing_gh_home"
 : >"$GH_EXTENSIONS_TEST_LOG"
 missing_gh_script="$tmp_dir/gh-extensions-missing-gh.sh"
-sed 's#/home/linuxbrew/.linuxbrew/bin/gh#'"$tmp_dir"'/missing-gh-bin/gh#g' "$rendered_linux" >"$missing_gh_script"
+render_template_with_homebrew_prefix_provider \
+  '{"chezmoi":{"os":"linux"}}' \
+  '.chezmoiscripts/run_before_20-install-gh-extensions.sh.tmpl' \
+  "$tmp_dir/missing-gh-prefix" >"$missing_gh_script"
 
 missing_gh_status=0
 HOME="$missing_gh_home" \

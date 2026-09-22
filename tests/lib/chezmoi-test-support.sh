@@ -44,6 +44,31 @@ render_template() {
     --file "$repo_root/$file"
 }
 
+render_template_with_homebrew_prefix_provider() {
+  data="$1"
+  file="$2"
+  prefix="$3"
+  source="$tmp_dir/homebrew-prefix-source-${file##*/}"
+
+  rm -rf "$source"
+  mkdir -p "$source"
+  cp -R "$repo_root/." "$source"
+  printf '%s\n' \
+    '#!/bin/sh' \
+    'TERRAPOD_HOMEBREW_PREFIX_LOADED=1' \
+    'terrapod_standard_homebrew_prefix_for_os() {' \
+    "  printf '%s\\n' '$prefix'" \
+    '}' \
+    >"$source/dot_local/lib/terrapod/homebrew-prefix.sh"
+
+  chezmoi \
+    --config "$chezmoi_config" \
+    --source "$source" \
+    execute-template \
+    --override-data "$data" \
+    --file "$source/$file"
+}
+
 render_managed_file() {
   data="$1"
   destination="$2"

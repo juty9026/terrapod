@@ -22,10 +22,12 @@ esac
 script_dir="${script_path%/*}"
 script_dir="$(CDPATH= cd -- "$script_dir" 2>/dev/null && pwd || printf '%s\n' ".")"
 homebrew_prefix_lib="${TERRAPOD_HOMEBREW_PREFIX_LIB:-$script_dir/homebrew-prefix.sh}"
+homebrew_paths_lib="$script_dir/homebrew-paths.sh"
 if [ ! -f "$homebrew_prefix_lib" ]; then
   printf '%s\n' "  failure - Homebrew prefix library is unavailable: $homebrew_prefix_lib" >&2
   exit 1
 fi
+. "$homebrew_paths_lib"
 . "$homebrew_prefix_lib"
 
 standard_homebrew_prefix() {

@@ -15,6 +15,7 @@ command_dir="${command_path%/*}"
 command_dir="$(CDPATH= cd -- "$command_dir" 2>/dev/null && pwd || printf '%s\n' ".")"
 install_warnings_lib="${TERRAPOD_INSTALL_WARNINGS_LIB:-$command_dir/../lib/terrapod/install-warnings.sh}"
 homebrew_prefix_lib="${TERRAPOD_HOMEBREW_PREFIX_LIB:-$command_dir/../lib/terrapod/homebrew-prefix.sh}"
+homebrew_paths_lib="$command_dir/../lib/terrapod/homebrew-paths.sh"
 config_toml_lib="${TERRAPOD_CONFIG_TOML_LIB:-$command_dir/../lib/terrapod/config-toml.sh}"
 # Helpers ship as 'lib/terrapod/<name>' but are tracked under the chezmoi
 # source name 'executable_<name>', so a command run straight from the checkout
@@ -40,7 +41,8 @@ executable_selection_helper="$(resolve_helper "${TERRAPOD_EXECUTABLE_SELECTION_H
 jetendard_font_helper="$(resolve_helper "${TERRAPOD_JETENDARD_FONT_HELPER:-}" jetendard-font)"
 jetendard_settings_helper="$(resolve_helper "${TERRAPOD_JETENDARD_SETTINGS_HELPER:-}" jetendard-settings)"
 TERRAPOD_HOMEBREW_PREFIX_LOADED=
-if [ -f "$homebrew_prefix_lib" ]; then
+if [ -f "$homebrew_paths_lib" ] && [ -f "$homebrew_prefix_lib" ]; then
+  . "$homebrew_paths_lib"
   . "$homebrew_prefix_lib"
 fi
 
