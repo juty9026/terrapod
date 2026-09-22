@@ -3,137 +3,15 @@ set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$repo_root/tests/lib/harness.sh"
+. "$repo_root/tests/lib/test-support.sh"
 make_tmp_dir
 
 # PATH is later pointed at a stub bin directory whose uname always reports
 # Darwin, so the real host has to be recorded before that happens.
 host_os="$(uname -s)"
 
-write_stub() {
-  path="$1"
-  shift
-  {
-    printf '%s\n' '#!/bin/sh'
-    printf '%s\n' "$@"
-  } >"$path"
-  chmod +x "$path"
-}
-
 write_linux_uname_stub() {
-  write_stub "$1" \
-    'case "${1:-}" in' \
-    '  -m) printf "%s\n" "x86_64" ;;' \
-    '  *) printf "%s\n" "Linux" ;;' \
-    'esac'
-}
-
-write_gum_stub() {
-  path="$1"
-
-  cat >"$path" <<'SH'
-#!/bin/sh
-set -eu
-
-log_file="${TERRAPOD_GUM_LOG:?}"
-responses_file="${TERRAPOD_GUM_RESPONSES:?}"
-
-printf '%s' "gum args:" >>"$log_file"
-for arg do
-  printf '%s' " $arg" >>"$log_file"
-done
-printf '\n' >>"$log_file"
-
-if [ "${1:-}" = "--version" ]; then
-  printf '%s\n' "gum test stub"
-  exit 0
-fi
-
-next_response() {
-  response="$(sed -n '1p' "$responses_file")"
-  sed '1d' "$responses_file" >"$responses_file.tmp"
-  mv "$responses_file.tmp" "$responses_file"
-
-  if [ -z "$response" ]; then
-    exit 130
-  fi
-
-  printf '%s\n' "$response"
-}
-
-case "${1:-}" in
-  choose)
-    if [ "${2:-}" = "--help" ]; then
-      printf '%s\n' "Usage: gum choose [<options> ...] [flags]"
-      printf '%s\n' "      --label-delimiter=\"\""
-      exit 0
-    fi
-
-    while IFS= read -r option; do
-      printf '%s\n' "gum stdin: $option" >>"$log_file"
-    done
-
-    response="$(next_response)"
-    if [ "$response" = "__CANCEL__" ]; then
-      exit 130
-    fi
-    if [ "$response" = "__ERROR__" ]; then
-      printf '%s\n' "simulated gum operational failure" >&2
-      exit 2
-    fi
-    printf '%s\n' "$response"
-    ;;
-  confirm)
-    response="$(next_response)"
-    case "$response" in
-      yes|y|true|enabled)
-        exit 0
-        ;;
-      no|n|false|disabled)
-        exit 1
-        ;;
-      __CANCEL__)
-        exit 130
-        ;;
-      __ERROR__)
-        printf '%s\n' "simulated gum operational failure" >&2
-        exit 2
-        ;;
-      *)
-        printf '%s\n' "unexpected gum confirm response: $response" >&2
-        exit 2
-        ;;
-    esac
-    ;;
-  style)
-    shift
-    for arg do
-      case "$arg" in
-        --*)
-          ;;
-        *)
-          printf '%s\n' "$arg"
-          ;;
-      esac
-    done
-    ;;
-  *)
-    printf '%s\n' "unexpected gum command: ${1:-}" >&2
-    exit 2
-    ;;
-esac
-SH
-
-  chmod +x "$path"
-}
-
-write_gum_responses() {
-  responses_file="$1"
-  shift
-
-  : >"$responses_file"
-  for response do
-    printf '%s\n' "$response" >>"$responses_file"
-  done
+  write_uname_stub "$1" Linux x86_64
 }
 
 write_old_gum_stub() {
@@ -189,45 +67,15 @@ SH
   chmod +x "$path"
 }
 
-write_no_gum_path() {
-  path="$1"
-  shift
-
-  mkdir -p "$path"
-
-  for command_name do
-    command_path="$(command -v "$command_name" 2>/dev/null || true)"
-    if [ -z "$command_path" ]; then
-      fail "no-gum PATH setup requires $command_name"
-    fi
-
-    ln -s "$command_path" "$path/$command_name"
-  done
-
-  if PATH="$path" command -v gum >/dev/null 2>&1; then
-    fail "no-gum PATH setup should hide gum"
-  fi
-}
-
-shell_quote() {
-  printf "'"
-  printf '%s' "$1" | sed "s/'/'\\\\''/g"
-  printf "'"
-}
-
 run_setup_in_pty() {
   profile="$1"
   term="$2"
   home_dir="$3"
   xdg_config_home="$4"
-
-  if script --version >/dev/null 2>&1; then
-    command_text="env TERM=$(shell_quote "$term") TERRAPOD_PROFILE=$(shell_quote "$profile") TERRAPOD_CHEZMOI_CONFIG= HOME=$(shell_quote "$home_dir") XDG_CONFIG_HOME=$(shell_quote "$xdg_config_home") sh $(shell_quote "$terrapod") setup"
-    script -q -e -c "$command_text" /dev/null
-  else
-    script -q /dev/null env TERM="$term" TERRAPOD_PROFILE="$profile" TERRAPOD_CHEZMOI_CONFIG= HOME="$home_dir" XDG_CONFIG_HOME="$xdg_config_home" sh "$terrapod" setup
-  fi
+  command_text="env TERM=$(shell_quote "$term") TERRAPOD_PROFILE=$(shell_quote "$profile") TERRAPOD_CHEZMOI_CONFIG= HOME=$(shell_quote "$home_dir") XDG_CONFIG_HOME=$(shell_quote "$xdg_config_home") sh $(shell_quote "$terrapod") setup"
+  run_in_pty "$command_text"
 }
+
 
 run_command_in_pty() {
   term="$1"
@@ -255,23 +103,7 @@ run_command_in_pty() {
     command_text="$command_text $(shell_quote "$arg")"
   done
 
-  if script --version >/dev/null 2>&1; then
-    script -q -e -c "$command_text" /dev/null
-  else
-    script -q /dev/null sh -c "$command_text"
-  fi
-}
-
-assert_status() {
-  actual="$1"
-  expected="$2"
-  message="$3"
-
-  if [ "$actual" -ne "$expected" ]; then
-    fail "$message"
-  fi
-
-  pass "$message"
+  run_in_pty "$command_text"
 }
 
 assert_failure() {
@@ -473,53 +305,6 @@ write_failing_command_stub() {
     'exit 90'
 }
 
-write_brew_bundle_stub() {
-  path="$1"
-
-  write_stub "$path" \
-    'printf "%s\n" "brew args:$*" >>"$MACOS_BREW_LOG"' \
-    'bundle_file=' \
-    'for arg do' \
-    '  case "$arg" in' \
-    '    --file=*) bundle_file="${arg#--file=}" ;;' \
-    '  esac' \
-    'done' \
-    'case "$1" in' \
-    '  --prefix) printf "%s\n" "${MACOS_BREW_PREFIX:-/opt/homebrew}"; exit 0 ;;' \
-    '  shellenv) printf "%s\n" ":" ;;' \
-    '  analytics) exit 0 ;;' \
-    '  bundle)' \
-    '    if [ "${MACOS_BREW_ECHO_OUTPUT:-}" = "1" ]; then' \
-    '      printf "%s\n" "visible brew bundle output: $*"' \
-    '    fi' \
-    '    for formula in ${MACOS_BREW_FAIL_FORMULAE:-}; do' \
-    '      if [ -n "$bundle_file" ] && grep -Fx "brew \"$formula\"" "$bundle_file" >/dev/null 2>&1; then' \
-    '        exit 42' \
-    '      fi' \
-    '    done' \
-    '    if [ "${MACOS_BREW_FAIL_CORE_BULK:-}" = "1" ] && [ -n "$bundle_file" ] && grep -Fx "brew \"mise\"" "$bundle_file" >/dev/null 2>&1 && grep -Fx "brew \"btop\"" "$bundle_file" >/dev/null 2>&1; then' \
-    '      exit 42' \
-    '    fi' \
-    '    for cask in ${MACOS_BREW_FAIL_CASKS:-}; do' \
-    '      if [ -n "$bundle_file" ] && grep -Fx "cask \"$cask\"" "$bundle_file" >/dev/null 2>&1; then' \
-    '        exit 42' \
-    '      fi' \
-    '    done' \
-    '    if [ "${MACOS_BREW_FAIL_DESKTOP_BULK:-}" = "1" ] && [ -n "$bundle_file" ] && grep -Fx "# Rendered opt-in macOS Desktop App Stack." "$bundle_file" >/dev/null 2>&1; then' \
-    '      exit 42' \
-    '    fi' \
-    '    if [ "${MACOS_BREW_FAIL_BULK:-}" = "1" ] && [ -n "$bundle_file" ] && grep -Fx "tap \"homebrew/cask\"" "$bundle_file" >/dev/null 2>&1; then' \
-    '      exit 42' \
-    '    fi' \
-    '    if [ -n "${MACOS_BREW_INSTALLED_FILE:-}" ]; then' \
-    '      : >"$MACOS_BREW_INSTALLED_FILE"' \
-    '    fi' \
-    '    exit 0' \
-    '    ;;' \
-    '  *) exit 64 ;;' \
-    'esac'
-}
-
 write_os_release() {
   path="$1"
   id="$2"
@@ -714,9 +499,9 @@ assert_no_terrapod_artifacts_under() {
 
 mkdir -p "$tmp_dir/bin" "$tmp_dir/home"
 system_path="$PATH"
-write_gum_stub "$tmp_dir/bin/gum"
+write_gum_stub "$tmp_dir/bin/gum" cancel cancel
 no_gum_path="$tmp_dir/no-gum-bin"
-write_no_gum_path "$no_gum_path" sh
+write_restricted_path "$no_gum_path" sh
 
 terrapod="$repo_root/dot_local/bin/executable_terrapod"
 tpod_source="$repo_root/dot_local/bin/symlink_tpod"

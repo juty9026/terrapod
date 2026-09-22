@@ -43,12 +43,15 @@ Ubuntu container image and has to be invoked directly with Docker available.
 Every test file sources `tests/lib/harness.sh` for its assertion vocabulary
 instead of declaring its own. The harness provides `fail`, `pass`, `skip`, a
 `make_tmp_dir` preamble that fills `$tmp_dir` and removes it however the test
-ends, and four assertions with fixed signatures:
+ends, and seven assertions with fixed signatures:
 
     assert_contains          <haystack> <needle> <message>
     assert_not_contains      <haystack> <needle> <message>
     assert_file_contains     <file>     <needle> <message>
     assert_file_not_contains <file>     <needle> <message>
+    assert_equals            <actual>   <expected> <message>
+    assert_status            <actual>   <expected> <message>
+    assert_file_exists       <path>                <message>
 
 The haystack forms take a string and the file forms take a path; neither
 guesses. Assertions specific to one test file still live in that file.

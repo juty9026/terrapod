@@ -3,6 +3,7 @@ set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$repo_root/tests/lib/harness.sh"
+. "$repo_root/tests/lib/test-support.sh"
 make_tmp_dir
 chezmoi_bin="$(command -v chezmoi)"
 
@@ -21,16 +22,6 @@ assert_first_occurrence_before() {
   fi
 
   pass "$message"
-}
-
-write_stub() {
-  path="$1"
-  shift
-  {
-    printf '%s\n' '#!/bin/sh'
-    printf '%s\n' "$@"
-  } >"$path"
-  chmod +x "$path"
 }
 
 mkdir -p "$tmp_dir/bin" "$tmp_dir/home"
