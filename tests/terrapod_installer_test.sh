@@ -1391,7 +1391,7 @@ write_stub "$rosetta_arch_case/bin/sysctl" \
   'exit 1'
 rosetta_installer_output="$(
   HOME="$rosetta_arch_case/home" PATH="$rosetta_arch_case/bin:/usr/bin:/bin" \
-    TERRAPOD_PRINT_EXPECTED_HOMEBREW_PATH=1 sh "$repo_root/install.sh"
+    TERRAPOD_INSTALLER_TEST_HOOK=print_expected_homebrew_path sh "$repo_root/install.sh"
 )"
 if [ "$rosetta_installer_output" != /opt/homebrew/bin/brew ]; then
   fail "Rosetta installer selects Apple Silicon Homebrew"
@@ -1399,15 +1399,14 @@ fi
 pass "Rosetta installer selects Apple Silicon Homebrew"
 assert_not_contains "$rosetta_installer_output" "/usr/local/bin/brew" "Rosetta installer never falls back to Intel Homebrew"
 
-rosetta_installer_functions="$rosetta_arch_case/install-functions.sh"
-sed '$d' "$repo_root/install.sh" >"$rosetta_installer_functions"
 rosetta_standard_brew="$rosetta_arch_case/opt/homebrew/bin/brew"
 rosetta_shadow_brew="$rosetta_arch_case/usr/local/bin/brew"
 mkdir -p "${rosetta_standard_brew%/brew}" "${rosetta_shadow_brew%/brew}"
 write_stub "$rosetta_standard_brew" '#!/bin/sh' 'exit 0'
 write_stub "$rosetta_shadow_brew" '#!/bin/sh' 'exit 0'
-if ! PATH="${rosetta_shadow_brew%/brew}:/usr/bin:/bin" sh -c \
-  '. "$1"; reject_nonstandard_homebrew "$2"' sh "$rosetta_installer_functions" "$rosetta_standard_brew"; then
+if ! PATH="${rosetta_shadow_brew%/brew}:/usr/bin:/bin" \
+  TERRAPOD_EXPECTED_HOMEBREW_PATH="$rosetta_standard_brew" \
+  TERRAPOD_INSTALLER_TEST_HOOK=reject_nonstandard_homebrew sh "$install_script"; then
   fail "Rosetta installer accepts an existing standard Apple Silicon Homebrew despite an Intel PATH shadow"
 fi
 pass "Rosetta installer accepts an existing standard Apple Silicon Homebrew despite an Intel PATH shadow"
@@ -1427,8 +1426,6 @@ assert_failure "$installer_status" "nonstandard Homebrew prefix is rejected"
 assert_contains "$(cat "$nonstandard_prefix_case/stderr")" "Homebrew exists outside the supported prefix" "nonstandard prefix guidance is explicit"
 
 candidate_paths_case="$(make_case_dir homebrew-candidate-paths)"
-candidate_installer_functions="$candidate_paths_case/install-functions.sh"
-sed '$d' "$repo_root/install.sh" >"$candidate_installer_functions"
 candidate_missing_brew="$candidate_paths_case/opt/missing/bin/brew"
 candidate_present_brew="$candidate_paths_case/opt/custom/bin/brew"
 mkdir -p "${candidate_present_brew%/brew}"
@@ -1437,7 +1434,7 @@ write_stub "$candidate_present_brew" '#!/bin/sh' 'exit 0'
 candidate_found_brew="$(
   PATH="$safe_path_dir:/usr/bin:/bin" \
     TERRAPOD_HOMEBREW_CANDIDATE_PATHS="$candidate_missing_brew:$candidate_present_brew" \
-    sh -c '. "$1"; find_homebrew || true' sh "$candidate_installer_functions"
+    TERRAPOD_INSTALLER_TEST_HOOK=find_homebrew sh "$install_script"
 )"
 if [ "$candidate_found_brew" != "$candidate_present_brew" ]; then
   fail "find_homebrew splits candidate paths on colons"
@@ -1445,7 +1442,7 @@ fi
 pass "find_homebrew splits candidate paths on colons"
 
 default_candidate_brew="$(
-  PATH="$safe_path_dir:/usr/bin:/bin" sh -c '. "$1"; find_homebrew || true' sh "$candidate_installer_functions"
+  PATH="$safe_path_dir:/usr/bin:/bin" TERRAPOD_INSTALLER_TEST_HOOK=find_homebrew sh "$install_script"
 )"
 case "$default_candidate_brew" in
   ''|/opt/homebrew/bin/brew|/usr/local/bin/brew)
@@ -1459,8 +1456,8 @@ esac
 candidate_reject_stderr="$candidate_paths_case/reject-stderr"
 if PATH="$safe_path_dir:/usr/bin:/bin" \
   TERRAPOD_HOMEBREW_CANDIDATE_PATHS="$candidate_missing_brew:$candidate_present_brew" \
-  sh -c '. "$1"; reject_nonstandard_homebrew "$2"' sh \
-    "$candidate_installer_functions" "$candidate_paths_case/opt/homebrew/bin/brew" \
+  TERRAPOD_EXPECTED_HOMEBREW_PATH="$candidate_paths_case/opt/homebrew/bin/brew" \
+  TERRAPOD_INSTALLER_TEST_HOOK=reject_nonstandard_homebrew sh "$install_script" \
     2>"$candidate_reject_stderr"; then
   fail "reject_nonstandard_homebrew splits candidate paths on colons"
 fi
@@ -2752,31 +2749,6 @@ if grep -n "load_install_warnings_from_source .* || return 0" "$repo_root/instal
 fi
 pass "install.sh no longer skips the marker snapshot when the library is missing"
 
-install_warnings_loader_case="$(make_case_dir install-warnings-loader)"
-install_warnings_loader_functions="$install_warnings_loader_case/install-functions.sh"
-sed '$d' "$repo_root/install.sh" >"$install_warnings_loader_functions"
-
-install_warnings_loader_empty_source="$install_warnings_loader_case/empty-source"
-mkdir -p "$install_warnings_loader_empty_source"
-if sh -c '. "$1"; load_install_warnings_from_source "$2"' \
-  sh "$install_warnings_loader_functions" "$install_warnings_loader_empty_source"; then
-  fail "install.sh treats a checkout without the marker library as fatal"
-fi
-pass "install.sh treats a checkout without the marker library as fatal"
-
-install_warnings_loader_real_source="$install_warnings_loader_case/real-source"
-mkdir -p "$install_warnings_loader_real_source/dot_local/lib/terrapod"
-cp "$repo_root/dot_local/lib/terrapod/install-warnings.sh" \
-  "$install_warnings_loader_real_source/dot_local/lib/terrapod/install-warnings.sh"
-if ! install_warnings_loader_categories="$(
-  sh -c '. "$1"; load_install_warnings_from_source "$2" && terrapod_install_warning_categories' \
-    sh "$install_warnings_loader_functions" "$install_warnings_loader_real_source"
-)"; then
-  fail "install.sh loads the install warning library from a real checkout and makes terrapod_install_warning_categories callable"
-fi
-assert_contains "$install_warnings_loader_categories" "homebrew-core" \
-  "install.sh loads the install warning library from a real checkout and makes terrapod_install_warning_categories callable"
-
 missing_install_warnings_library_case="$(make_case_dir missing-install-warnings-library)"
 write_uname_stub "$missing_install_warnings_library_case" "Darwin"
 write_command_call_stubs "$missing_install_warnings_library_case" "curl" "wget" "git" "sh"
@@ -2884,57 +2856,6 @@ assert_contains "$unreadable_marker_stdout" "Terrapod first-run apply completed 
 assert_contains "$unreadable_marker_stdout" "install warning markers could not be read" "unknown warning state explains that markers could not be read"
 assert_contains "$unreadable_marker_stdout" "$unreadable_marker_case/home/.local/bin/tpod doctor" "unknown warning state prints the absolute doctor recovery command"
 
-marker_status_case="$(make_case_dir marker-change-status)"
-marker_status_functions="$marker_status_case/install-functions.sh"
-sed '$d' "$repo_root/install.sh" >"$marker_status_functions"
-marker_status_home="$marker_status_case/home"
-marker_status_snapshot="$marker_status_case/snapshot"
-mkdir -p "$marker_status_home" "$marker_status_snapshot"
-
-marker_status_result=0
-sh -c '. "$1"; install_warning_marker_change_status "$2" "$3"' \
-  sh "$marker_status_functions" "$marker_status_case" "$marker_status_snapshot" ||
-  marker_status_result="$?"
-assert_status "$marker_status_result" 2 "marker change status reports an unknown state when the warning library is not loaded"
-
-HOME="$marker_status_home" sh -c \
-  '. "$1"; terrapod_install_warning_write mise-tools "snapshot warning" "snapshot guidance"' \
-  sh "$install_warnings_lib_template"
-HOME="$marker_status_home" sh -c \
-  '. "$1"; . "$2"; snapshot_install_warnings_from_source "$3" "$4"' \
-  sh "$install_warnings_lib_template" "$marker_status_functions" \
-  "$marker_status_case" "$marker_status_snapshot"
-
-marker_status_result=0
-HOME="$marker_status_home" sh -c \
-  '. "$1"; . "$2"; install_warning_marker_change_status "$3" "$4"' \
-  sh "$install_warnings_lib_template" "$marker_status_functions" \
-  "$marker_status_case" "$marker_status_snapshot" ||
-  marker_status_result="$?"
-assert_status "$marker_status_result" 0 "marker change status reports no change when every marker still matches the snapshot"
-
-HOME="$marker_status_home" sh -c \
-  '. "$1"; terrapod_install_warning_write mise-tools "changed warning" "changed guidance"' \
-  sh "$install_warnings_lib_template"
-
-marker_status_result=0
-HOME="$marker_status_home" sh -c \
-  '. "$1"; . "$2"; install_warning_marker_change_status "$3" "$4"' \
-  sh "$install_warnings_lib_template" "$marker_status_functions" \
-  "$marker_status_case" "$marker_status_snapshot" ||
-  marker_status_result="$?"
-assert_status "$marker_status_result" 1 "marker change status reports a change when a marker was rewritten"
-
-chmod 000 "$marker_status_home/.local/state/terrapod/install-warnings/mise-tools"
-marker_status_result=0
-HOME="$marker_status_home" sh -c \
-  '. "$1"; . "$2"; install_warning_marker_change_status "$3" "$4"' \
-  sh "$install_warnings_lib_template" "$marker_status_functions" \
-  "$marker_status_case" "$marker_status_snapshot" ||
-  marker_status_result="$?"
-chmod 600 "$marker_status_home/.local/state/terrapod/install-warnings/mise-tools"
-assert_status "$marker_status_result" 2 "marker change status reports an unknown state when a marker exists but cannot be read"
-
 write_mktemp_dir_stub() {
   stub="$1"
   snapshot_root="$2"
@@ -2957,57 +2878,41 @@ EOF
 }
 
 snapshot_trap_case="$(make_case_dir marker-snapshot-trap)"
-snapshot_trap_functions="$snapshot_trap_case/install-functions.sh"
-sed '$d' "$repo_root/install.sh" >"$snapshot_trap_functions"
+prepare_resumable_macos_case "$snapshot_trap_case"
+write_complete_setup_config "$snapshot_trap_case/xdg-config/chezmoi/chezmoi.toml"
 snapshot_trap_root="$snapshot_trap_case/snapshots"
-mkdir -p "$snapshot_trap_root" "$snapshot_trap_case/home/.local/bin"
+mkdir -p "$snapshot_trap_root"
 write_mktemp_dir_stub "$snapshot_trap_case/bin/mktemp" "$snapshot_trap_root"
-
-if PATH="$snapshot_trap_case/bin:$PATH" sh -c '
-. "$1"
-snapshot_install_warnings_from_source() {
-  return 1
-}
-run_initial_apply macos-terminal "$2" "$3"
-' sh "$snapshot_trap_functions" "$snapshot_trap_case" "$snapshot_trap_case/home/.local/bin" \
-  >"$snapshot_trap_case/stdout" 2>"$snapshot_trap_case/stderr"; then
-  fail "a failed marker snapshot stops the initial apply"
-fi
-pass "a failed marker snapshot stops the initial apply"
-
+TERRAPOD_INSTALLER_TEST_HOOK=fail_snapshot
+TERRAPOD_STUB_CALL_LOG="$snapshot_trap_case/command-calls"
+export TERRAPOD_INSTALLER_TEST_HOOK TERRAPOD_STUB_CALL_LOG
+run_installer_case "$snapshot_trap_case"
+unset TERRAPOD_INSTALLER_TEST_HOOK TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "a failed marker snapshot stops the initial apply"
 assert_contains "$(cat "$snapshot_trap_case/stderr")" "failed to snapshot install warning markers" \
   "a failed marker snapshot explains itself"
-
 if [ -n "$(find "$snapshot_trap_root" -mindepth 1 -print)" ]; then
-  printf '%s\n' "leftover snapshot temp entries:" >&2
-  find "$snapshot_trap_root" -mindepth 1 -print | sed 's/^/  /' >&2
   fail "a failed marker snapshot removes the snapshot temp directory"
 fi
 pass "a failed marker snapshot removes the snapshot temp directory"
+assert_not_contains "$(cat "$snapshot_trap_case/command-calls")" "tpod args:apply" \
+  "a failed marker snapshot stops before full apply"
 
 signal_trap_case="$(make_case_dir marker-snapshot-signal)"
-signal_trap_functions="$signal_trap_case/install-functions.sh"
-sed '$d' "$repo_root/install.sh" >"$signal_trap_functions"
+prepare_resumable_macos_case "$signal_trap_case"
+write_complete_setup_config "$signal_trap_case/xdg-config/chezmoi/chezmoi.toml"
 signal_trap_root="$signal_trap_case/snapshots"
-mkdir -p "$signal_trap_root" "$signal_trap_case/home/.local/bin"
+mkdir -p "$signal_trap_root"
 write_mktemp_dir_stub "$signal_trap_case/bin/mktemp" "$signal_trap_root"
-
-if PATH="$signal_trap_case/bin:$PATH" sh -c '
-. "$1"
-snapshot_install_warnings_from_source() {
-  kill -TERM $$
-  sleep 5
-}
-run_initial_apply macos-terminal "$2" "$3"
-' sh "$signal_trap_functions" "$signal_trap_case" "$signal_trap_case/home/.local/bin" \
-  >"$signal_trap_case/stdout" 2>"$signal_trap_case/stderr"; then
-  fail "an interrupted initial apply stops instead of continuing"
-fi
-pass "an interrupted initial apply stops instead of continuing"
-
+TERRAPOD_INSTALLER_TEST_HOOK=interrupt_snapshot
+TERRAPOD_STUB_CALL_LOG="$signal_trap_case/command-calls"
+export TERRAPOD_INSTALLER_TEST_HOOK TERRAPOD_STUB_CALL_LOG
+run_installer_case "$signal_trap_case"
+unset TERRAPOD_INSTALLER_TEST_HOOK TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "an interrupted initial apply stops instead of continuing"
 if [ -n "$(find "$signal_trap_root" -mindepth 1 -print)" ]; then
-  printf '%s\n' "leftover snapshot temp entries:" >&2
-  find "$signal_trap_root" -mindepth 1 -print | sed 's/^/  /' >&2
   fail "an interrupted initial apply removes the snapshot temp directory"
 fi
 pass "an interrupted initial apply removes the snapshot temp directory"
+assert_not_contains "$(cat "$signal_trap_case/command-calls")" "tpod args:apply" \
+  "an interrupted snapshot stops before full apply"

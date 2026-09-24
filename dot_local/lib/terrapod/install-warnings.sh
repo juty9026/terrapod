@@ -266,6 +266,65 @@ terrapod_install_warning_read() {
   cat "$marker_path"
 }
 
+# Snapshot the readable markers before the first full apply. Identity links also
+# detect a same-content rewrite performed within the clock's timestamp granularity.
+terrapod_install_warning_snapshot() {
+  warning_snapshot_dir="$1"
+  mkdir -p "$warning_snapshot_dir" || return 1
+
+  for warning_category in $(terrapod_install_warning_categories); do
+    warning_marker_path="$(terrapod_install_warning_existing_path "$warning_category" 2>/dev/null || true)"
+    [ -n "$warning_marker_path" ] || continue
+
+    warning_snapshot_file="$warning_snapshot_dir/$warning_category"
+    : >"$warning_snapshot_file" || return 1
+    if terrapod_install_warning_read "$warning_category" >"$warning_snapshot_file" 2>/dev/null; then
+      ln "$warning_marker_path" "$warning_snapshot_dir/$warning_category.identity" 2>/dev/null || true
+    else
+      rm -f "$warning_snapshot_file"
+      : >"$warning_snapshot_dir/$warning_category.unreadable" || return 1
+    fi
+  done
+}
+
+# Return 0 for no change, 1 for a changed marker, or 2 when its state is unknown.
+terrapod_install_warning_change_status() {
+  warning_snapshot_dir="$1"
+  warning_changed=false
+
+  for warning_category in $(terrapod_install_warning_categories); do
+    if [ -f "$warning_snapshot_dir/$warning_category.unreadable" ]; then
+      return 2
+    fi
+
+    warning_marker_path="$(terrapod_install_warning_existing_path "$warning_category" 2>/dev/null || true)"
+    if [ -z "$warning_marker_path" ]; then
+      continue
+    fi
+
+    warning_current_file="$warning_snapshot_dir/current-$warning_category"
+    if ! terrapod_install_warning_read "$warning_category" >"$warning_current_file" 2>/dev/null; then
+      rm -f "$warning_current_file"
+      return 2
+    fi
+
+    if [ ! -f "$warning_snapshot_dir/$warning_category" ] ||
+      ! cmp -s "$warning_snapshot_dir/$warning_category" "$warning_current_file" ||
+      {
+        [ -f "$warning_snapshot_dir/$warning_category.identity" ] &&
+          [ ! "$warning_snapshot_dir/$warning_category.identity" -ef "$warning_marker_path" ]
+      }; then
+      warning_changed=true
+    fi
+    rm -f "$warning_current_file"
+  done
+
+  if [ "$warning_changed" = true ]; then
+    return 1
+  fi
+  return 0
+}
+
 terrapod_install_warning_value() {
   category="$1"
   field="$2"
