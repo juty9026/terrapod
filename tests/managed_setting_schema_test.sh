@@ -60,18 +60,18 @@ terrapod|show_setup_option_block|enableEditorStack|per-key Setup notes: the Incl
 terrapod|show_setup_option_block|enableAiCliTools|per-key Setup notes: the Includes list of the Optional Development Workspace
 terrapod|show_setup_option_block|enableMacosAppGroupDevelopmentApps|per-key Setup notes: cask trust note
 terrapod|show_setup_option_block|enableMacosAppGroupMobileDev|per-key Setup notes: environment, trust, and scope notes
-terrapod|effective_ai_cli_tools_enabled|enableAiCliTools|effective optional stack helper: the launcher and status read the effective AI Tool Stack state
 terrapod|ai_cli_tools_supported_profile|enableAiCliTools|profile applicability of the AI Tool Stack, asked of the schema
+terrapod|run_executable_selection|enableAiCliTools|the executable selection helper takes the evaluated AI Tool Stack state as an argument
 terrapod|run_executable_selection|enableMacosAppGroupLauncher|the executable selection helper takes the launcher state as an argument
-terrapod|run_status|enableEditorStack|effective optional stack helper for the status line
-terrapod|run_status|enableAiCliTools|status keeps the hand-written executable checks for agy, claude, and codex
-terrapod|run_status|enableDevelopmentWorkspace|status reads the Workspace state as its own setting
-terrapod|show_stack_context|enableEditorStack|effective optional stack helper for the context lines
-terrapod|show_stack_context|enableAiCliTools|context keeps the effective-state logic of the AI Tool Stack
-terrapod|show_stack_context|enableDevelopmentWorkspace|context reads the Workspace state as its own setting
-terrapod|run_doctor|enableEditorStack|effective optional stack helper for the doctor check
-terrapod|run_doctor|enableAiCliTools|doctor keeps the effective-state logic of the AI Tool Stack
-terrapod|run_doctor|enableDevelopmentWorkspace|doctor reads the Workspace state as its own setting
+terrapod|run_status|enableEditorStack|status formats this setting from the shared readiness result
+terrapod|run_status|enableAiCliTools|status formats this setting and checks agy, claude, and codex from the shared readiness result
+terrapod|run_status|enableDevelopmentWorkspace|status formats this setting from the shared readiness result
+terrapod|show_stack_context|enableEditorStack|apply and diff context format this setting from the shared readiness result
+terrapod|show_stack_context|enableAiCliTools|apply and diff context format this setting from the shared readiness result
+terrapod|show_stack_context|enableDevelopmentWorkspace|apply and diff context format this setting from the shared readiness result
+terrapod|run_doctor|enableEditorStack|doctor formats this setting from the shared readiness result
+terrapod|run_doctor|enableAiCliTools|doctor formats this setting from the shared readiness result
+terrapod|run_doctor|enableDevelopmentWorkspace|doctor formats this setting from the shared readiness result
 terrapod|effective_optional_stack_enabled|enableDevelopmentWorkspace|the Workspace turns on every optional stack it bundles
 ALLOWLIST
 

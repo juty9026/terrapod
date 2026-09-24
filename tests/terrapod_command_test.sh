@@ -516,7 +516,16 @@ write_stub "$executable_selection_stub" \
   'if [ -n "${TERRAPOD_EXECUTABLE_SELECTION_ARGS_FILE:-}" ]; then' \
   '  printf "%s %s\n" "${1:-}" "${5:-unset}" >>"$TERRAPOD_EXECUTABLE_SELECTION_ARGS_FILE"' \
   'fi' \
+  'if [ -n "${TERRAPOD_EXECUTABLE_SELECTION_SETTINGS_FILE:-}" ]; then' \
+  '  printf "%s %s %s\n" "${1:-}" "${3:-}" "${4:-}" >>"$TERRAPOD_EXECUTABLE_SELECTION_SETTINGS_FILE"' \
+  'fi' \
+  'if [ -n "${TERRAPOD_EXECUTABLE_SELECTION_STDERR:-}" ]; then' \
+  '  printf "%s\n" "$TERRAPOD_EXECUTABLE_SELECTION_STDERR" >&2' \
+  'fi' \
   'if [ -n "${TERRAPOD_EXECUTABLE_SELECTION_OUTPUT:-}" ]; then' \
+  '  if [ "${TERRAPOD_EXECUTABLE_SELECTION_GUIDANCE:-}" = present ]; then' \
+  '    printf "%s\n" present >"$TERRAPOD_EXECUTABLE_SELECTION_GUIDANCE_FILE"' \
+  '  fi' \
   '  printf "%s\n" "$TERRAPOD_EXECUTABLE_SELECTION_OUTPUT"' \
   '  exit "${TERRAPOD_EXECUTABLE_SELECTION_STATUS:-0}"' \
   'fi' \
@@ -1864,12 +1873,14 @@ cat >"$jetendard_home/Library/Application Support/orca/profiles/secondary/orca-d
 JSON
 
 if ! jetendard_status_output="$(
-  HOME="$jetendard_home" TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$status_config" PATH="$macos_status_path" \
+  TERRAPOD_EXECUTABLE_SELECTION_SETTINGS_FILE="$tmp_dir/selection-settings" \
+    HOME="$jetendard_home" TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$status_config" PATH="$macos_status_path" \
     /bin/sh "$macos_terrapod" status
 )"; then
   fail "Terrapod status succeeds when Jetendard is installed"
 fi
 assert_contains "$jetendard_status_output" "Jetendard font                : installed" "Terrapod status reports installed Jetendard font files"
+assert_file_contains "$tmp_dir/selection-settings" "status true true" "status passes the evaluated AI Tool Stack and launcher states to executable selection"
 
 if ! jetendard_doctor_output="$(
   HOME="$jetendard_home" TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$status_config" PATH="$macos_status_path" \
@@ -1883,6 +1894,9 @@ assert_contains "$jetendard_doctor_output" "ok - Jetendard font files: Jetendard
 assert_contains "$jetendard_doctor_output" "ok - Ghostty font setting: Ghostty uses Jetendard." "Terrapod doctor validates the Ghostty font setting"
 assert_contains "$jetendard_doctor_output" "ok - Zed font settings: Zed buffer and terminal use Jetendard." "Terrapod doctor validates the Zed font settings"
 assert_contains "$jetendard_doctor_output" "ok - Orca font settings: Orca profiles use Jetendard." "Terrapod doctor validates all Orca profile font settings"
+assert_contains "$jetendard_doctor_output" "ok - terminal-apps is enabled (Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, and Noto Sans CJK KR)" "Terrapod doctor reports an enabled macOS App Group from the managed setting schema"
+assert_contains "$jetendard_doctor_output" "ok - monitoring is disabled" "Terrapod doctor accepts a disabled macOS App Group without probing its apps"
+assert_not_contains "$jetendard_doctor_output" "macOS App Groups are not applicable" "Terrapod doctor applies macOS App Groups on macOS"
 
 rm "$jetendard_home/Library/Fonts/Jetendard-Regular.ttf"
 missing_jetendard_status_output="$(
@@ -2099,6 +2113,12 @@ ubuntu_status_output="$(
   TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_ubuntu_config" PATH="$ubuntu_status_path" \
     /bin/sh "$terrapod" status
 )"
+status_helper_stderr_output="$(
+  TERRAPOD_EXECUTABLE_SELECTION_STDERR='selection stderr' \
+    TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_ubuntu_config" PATH="$ubuntu_status_path" \
+    /bin/sh "$terrapod" status 2>&1
+)"
+assert_first_occurrence_before "$status_helper_stderr_output" "Terrapod status" "selection stderr" "status keeps helper errors after its heading"
 
 assert_contains "$ubuntu_status_output" "Profile: VPS Shell Profile" "Terrapod status reports VPS Shell Profile context on Ubuntu 24.04"
 assert_contains "$ubuntu_status_output" "GitHub CLI Extension Set      : missing (gh is not installed)" "Terrapod status reports a missing gh executable for the GitHub CLI Extension Set on the VPS Shell Profile"
@@ -2177,6 +2197,7 @@ assert_status "$shadowed_status_status" 0 "status remains informational for owne
 
 set +e
 shadowed_doctor_output="$(
+  TERRAPOD_EXECUTABLE_SELECTION_GUIDANCE=present \
   TERRAPOD_EXECUTABLE_SELECTION_OUTPUT="  advisory - chezmoi resolves to $shadowed_home/.local/bin/chezmoi
              canonical: $standard_brew_prefix/bin/chezmoi
              Adjust PATH or remove the other installation manually, then rerun 'tpod doctor'." \
@@ -2491,24 +2512,40 @@ doctor_terrapod="$vps_homebrew_terrapod"
 doctor_ok_path="$(homebrew_owned_status_doctor_path doctor-ok "$doctor_standard_brew_prefix" zsh apt)"
 
 if ! doctor_ok_output="$(
-  TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_ok_path" \
+  TERRAPOD_EXECUTABLE_SELECTION_SETTINGS_FILE="$tmp_dir/selection-settings" \
+    TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_ok_path" \
     /bin/sh "$doctor_terrapod" doctor
 )"; then
   fail "Terrapod doctor succeeds when VPS prerequisites are present and optional stacks are disabled"
 fi
+doctor_helper_stderr_output="$(
+  TERRAPOD_EXECUTABLE_SELECTION_STDERR='selection stderr' \
+    TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_ok_path" \
+    /bin/sh "$doctor_terrapod" doctor 2>&1
+)"
+assert_first_occurrence_before "$doctor_helper_stderr_output" "Terrapod doctor" "selection stderr" "doctor keeps helper errors after its heading"
 
 assert_contains "$doctor_ok_output" "Terrapod doctor" "Terrapod doctor prints a command heading"
 assert_contains "$doctor_ok_output" "ok - Profile is supported: VPS Shell Profile" "Terrapod doctor validates supported Ubuntu profile"
 assert_contains "$doctor_ok_output" "Canonical executable selection: ready" "Terrapod doctor validates canonical executable selection"
+assert_file_contains "$tmp_dir/selection-settings" "doctor false false" "doctor passes disabled and non-applicable evaluated settings to executable selection"
 assert_contains "$doctor_ok_output" "ok - apt is available" "Terrapod doctor validates Ubuntu Bootstrap Package Manager availability"
 assert_contains "$doctor_ok_output" "ok - Optional Editor Stack is disabled" "Terrapod doctor treats disabled Optional Editor Stack as valid"
 assert_contains "$doctor_ok_output" "ok - Optional AI Tool Stack is not applicable for VPS Shell Profile" "Terrapod doctor reports the Optional AI Tool Stack as not applicable on the VPS Shell Profile"
 assert_contains "$doctor_ok_output" "ok - brew is available" "VPS Shell Profile doctor always requires Homebrew"
 assert_contains "$doctor_ok_output" "ok - Optional Development Workspace is disabled" "Terrapod doctor treats disabled Optional Development Workspace as valid"
+assert_contains "$doctor_ok_output" "macOS App Groups: not applicable for VPS Shell Profile" "Terrapod doctor reports macOS App Groups as not applicable on VPS"
 assert_contains "$doctor_ok_output" "Guidance: none" "Terrapod doctor prints no guidance when checks pass"
 assert_not_contains "$doctor_ok_output" "Jetendard" "Terrapod doctor excludes Jetendard validation from the VPS Shell Profile"
 assert_no_ansi_escape "$doctor_ok_output" "captured Terrapod doctor is plain without ANSI escapes"
 assert_no_routine_emoji "$doctor_ok_output" "captured Terrapod doctor has no routine emoji"
+
+doctor_display_only_output="$(
+  TERRAPOD_EXECUTABLE_SELECTION_OUTPUT='advisory - display-only text without a guidance result' \
+    TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_ok_path" \
+    /bin/sh "$doctor_terrapod" doctor
+)"
+assert_contains "$doctor_display_only_output" "Guidance: none" "doctor uses the helper guidance result instead of parsing its display text"
 
 doctor_ai_shadow_path="$(homebrew_owned_status_doctor_path doctor-ai-shadow "$doctor_standard_brew_prefix" zsh apt agy claude codex)"
 doctor_ai_shadow_legacy="$tmp_dir/doctor-ai-shadow-legacy"
@@ -2516,6 +2553,7 @@ mkdir -p "$doctor_ai_shadow_legacy"
 mv "$doctor_ai_shadow_path/claude" "$doctor_ai_shadow_legacy/claude"
 
 if ! doctor_shadow_output="$(
+  TERRAPOD_EXECUTABLE_SELECTION_GUIDANCE=present \
   TERRAPOD_EXECUTABLE_SELECTION_OUTPUT="  advisory - claude-code resolves to $doctor_ai_shadow_legacy/claude
              canonical: $tmp_dir/doctor-ai-shadow-canonical/.local/bin/claude
              Adjust PATH or remove the other installation manually, then rerun 'tpod doctor'." \

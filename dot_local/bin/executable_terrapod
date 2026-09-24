@@ -755,36 +755,121 @@ ai_cli_tools_supported_profile() {
   managed_setting_applies_to_profile enableAiCliTools "$1"
 }
 
-effective_ai_cli_tools_enabled() {
-  config_file="$1"
-  profile="$2"
-
-  if ! ai_cli_tools_supported_profile "$profile"; then
-    printf '%s\n' "false"
-    return
-  fi
-
-  effective_optional_stack_enabled "$config_file" enableAiCliTools
-}
-
 executable_selection_helper_available() {
   [ -x "$executable_selection_helper" ]
 }
 
 run_executable_selection() {
   mode="$1"
-  config_file="$2"
-  profile="$3"
-  show_payloads="${4:-false}"
+  show_payloads="${2:-false}"
+  ai_enabled="$(readiness_setting_field enableAiCliTools state)"
+  launcher_enabled="$(readiness_setting_field enableMacosAppGroupLauncher state)"
+  [ "$ai_enabled" = true ] || ai_enabled=false
+  [ "$launcher_enabled" = true ] || launcher_enabled=false
 
-  canonical_homebrew_prefix="$(standard_homebrew_prefix "$profile" 2>/dev/null || true)"
+  canonical_homebrew_prefix="$(standard_homebrew_prefix "$readiness_profile" 2>/dev/null || true)"
   TERRAPOD_STANDARD_HOMEBREW_PREFIX="$canonical_homebrew_prefix" \
     "$executable_selection_helper" \
     "$mode" \
-    "$profile" \
-    "$(effective_ai_cli_tools_enabled "$config_file" "$profile")" \
-    "$(config_data_bool "$config_file" enableMacosAppGroupLauncher)" \
+    "$readiness_profile" \
+    "$ai_enabled" \
+    "$launcher_enabled" \
     "$show_payloads"
+}
+
+# A captured readiness snapshot. Each row is key|kind|name|state|summary;
+# printers may format the facts differently without reading the config again.
+evaluate_readiness() {
+  readiness_config_file="$1"
+  readiness_profile="$2"
+  readiness_check_install_warnings="${3:-true}"
+  readiness_config_verdict="$(managed_setup_config_verdict "$readiness_config_file")"
+  readiness_settings=""
+  readiness_app_groups_apply=false
+
+  while IFS='|' read -r setting_key setting_kind setting_name setting_profile setting_presets setting_summary; do
+    if managed_setting_applies_to_profile "$setting_key" "$readiness_profile"; then
+      case "$setting_kind" in
+        optional-stack)
+          setting_state="$(effective_optional_stack_enabled "$readiness_config_file" "$setting_key")"
+          ;;
+        *) setting_state="$(config_data_bool "$readiness_config_file" "$setting_key")" ;;
+      esac
+      if [ "$setting_kind" = macos-app-group ]; then
+        readiness_app_groups_apply=true
+      fi
+    else
+      setting_state=not-applicable
+    fi
+    readiness_settings="${readiness_settings}${setting_key}|${setting_kind}|${setting_name}|${setting_state}|${setting_summary}
+"
+  done <<EOF
+$(managed_setting_schema)
+EOF
+
+  readiness_install_warnings=""
+  if [ "$readiness_check_install_warnings" = true ] && ensure_install_warnings_loaded; then
+    readiness_install_warnings="$(terrapod_install_warning_list 2>/dev/null || true)"
+  fi
+}
+
+readiness_setting_field() {
+  wanted_setting="$1"
+  wanted_field="$2"
+  while IFS='|' read -r row_key row_kind row_name row_state row_summary; do
+    [ "$row_key" = "$wanted_setting" ] || continue
+    case "$wanted_field" in
+      kind) printf '%s\n' "$row_kind" ;;
+      name) printf '%s\n' "$row_name" ;;
+      state) printf '%s\n' "$row_state" ;;
+      summary) printf '%s\n' "$row_summary" ;;
+    esac
+  done <<EOF
+$readiness_settings
+EOF
+}
+
+# Setup summaries are capitalized and abbreviated for its menu. Preserve the
+# existing status/doctor wording while taking the description from the schema.
+readiness_setting_detail() {
+  case "$1" in
+    Rich\ *) printf 'r%s\n' "${1#R}" ;;
+    Dev\ *) printf 'development%s\n' "${1#Dev}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+evaluate_executable_selection() {
+  selection_mode="$1"
+  selection_payloads="${2:-false}"
+  readiness_selection_status=0
+  readiness_selection_output=""
+  readiness_selection_guidance=false
+
+  if ! executable_selection_helper_available; then
+    readiness_selection_status=missing
+    return
+  fi
+
+  if [ "$selection_mode" != doctor ]; then
+    readiness_selection_output="$(
+      run_executable_selection "$selection_mode" "$selection_payloads"
+    )" || readiness_selection_status=failed
+    return
+  fi
+
+  selection_guidance_file="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/tpod-selection.XXXXXXXX")" || {
+    readiness_selection_status=failed
+    return
+  }
+  readiness_selection_output="$(
+    TERRAPOD_EXECUTABLE_SELECTION_GUIDANCE_FILE="$selection_guidance_file" \
+      run_executable_selection "$selection_mode" "$selection_payloads"
+  )" || readiness_selection_status=failed
+  if [ -s "$selection_guidance_file" ]; then
+    readiness_selection_guidance=true
+  fi
+  /bin/rm -f "$selection_guidance_file"
 }
 
 join_tools() {
@@ -950,24 +1035,20 @@ any_macos_app_group_applies() {
 }
 
 print_macos_app_group_status() {
-  config_file="$1"
-  profile="$2"
-
-  if ! any_macos_app_group_applies "$profile"; then
+  if [ "$readiness_app_groups_apply" = false ]; then
     printf '%s\n' "macOS App Groups: not applicable for $(profile_context_label)"
     return
   fi
 
   print_section "macOS App Groups:"
-  managed_setting_schema | while IFS='|' read -r group_key group_kind group_label group_profile group_presets group_apps; do
-    if [ "$group_kind" != "macos-app-group" ] ||
-      ! managed_setting_applies_to_profile "$group_key" "$profile"; then
+  printf '%s\n' "$readiness_settings" | while IFS='|' read -r group_key group_kind group_label group_state group_apps; do
+    if [ "$group_kind" != "macos-app-group" ] || [ "$group_state" = not-applicable ]; then
       continue
     fi
 
     print_optional_setting_status \
       "$group_label" \
-      "$(config_data_bool "$config_file" "$group_key")" \
+      "$group_state" \
       "$group_apps"
   done
 }
@@ -1087,11 +1168,7 @@ print_status_warnings() {
 install_warning_categories_csv() {
   categories=
 
-  if ! ensure_install_warnings_loaded; then
-    return 0
-  fi
-
-  for category in $(terrapod_install_warning_list 2>/dev/null || true); do
+  for category in $readiness_install_warnings; do
     if [ -z "$categories" ]; then
       categories="$category"
     else
@@ -1118,28 +1195,33 @@ run_status() {
   fi
 
   config_file="$(terrapod_chezmoi_config_file)"
-  config_verdict="$(managed_setup_config_verdict "$config_file")"
   profile="$(current_profile)"
+  evaluate_readiness "$config_file" "$profile"
+  config_verdict="$readiness_config_verdict"
 
   print_title "Terrapod status"
   print_section_value "Profile:" "$(profile_context_label)"
   show_config_context "$config_file" "$config_verdict"
   printf '%s\n' "Core Shell Stack source: Homebrew"
   print_github_cli_extension_set_status
-  if ! executable_selection_helper_available; then
+  evaluate_executable_selection status
+  if [ "$readiness_selection_status" = missing ]; then
     print_warning_line "executable selection helper is missing"
-  elif ! run_executable_selection status "$config_file" "$profile"; then
+  else
+    [ -z "$readiness_selection_output" ] || printf '%s\n' "$readiness_selection_output"
+  fi
+  if [ "$readiness_selection_status" = failed ]; then
     print_warning_line "executable selection helper failed"
   fi
   print_section "Optional stacks:"
-  print_optional_setting_status "$(managed_setting_field enableEditorStack name)" "$(effective_optional_stack_enabled "$config_file" enableEditorStack)" "rich Neovim configuration"
-  if ai_cli_tools_supported_profile "$profile"; then
-    print_stack_status "$(managed_setting_field enableAiCliTools name)" "$(effective_ai_cli_tools_enabled "$config_file" "$profile")" agy claude codex
+  print_optional_setting_status "$(readiness_setting_field enableEditorStack name)" "$(readiness_setting_field enableEditorStack state)" "$(readiness_setting_detail "$(readiness_setting_field enableEditorStack summary)")"
+  if [ "$(readiness_setting_field enableAiCliTools state)" != not-applicable ]; then
+    print_stack_status "$(readiness_setting_field enableAiCliTools name)" "$(readiness_setting_field enableAiCliTools state)" agy claude codex
   else
-    print_indented_colon_state_line "$(managed_setting_field enableAiCliTools name)" "not applicable" "($(profile_context_label))"
+    print_indented_colon_state_line "$(readiness_setting_field enableAiCliTools name)" "not applicable" "($(profile_context_label))"
   fi
-  print_optional_setting_status "$(managed_setting_field enableDevelopmentWorkspace name)" "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" "development Zellij layouts"
-  print_macos_app_group_status "$config_file" "$profile"
+  print_optional_setting_status "$(readiness_setting_field enableDevelopmentWorkspace name)" "$(readiness_setting_field enableDevelopmentWorkspace state)" "$(readiness_setting_detail "$(readiness_setting_field enableDevelopmentWorkspace summary)")"
+  print_macos_app_group_status
   print_key_tool_status "$profile"
   if [ "$profile" = "macos-terminal" ]; then
     print_jetendard_status
@@ -1184,34 +1266,30 @@ show_config_context() {
 }
 
 show_stack_context() {
-  config_file="$1"
-  profile="$2"
-
   print_section "Optional stacks:"
-  editor_state="$(bool_state_label "$(effective_optional_stack_enabled "$config_file" enableEditorStack)")"
-  workspace_state="$(config_bool_state_label "$config_file" enableDevelopmentWorkspace)"
-  print_colon_state_line "$(managed_setting_field enableEditorStack name)" "$editor_state"
-  if ai_cli_tools_supported_profile "$profile"; then
-    ai_state="$(bool_state_label "$(effective_ai_cli_tools_enabled "$config_file" "$profile")")"
-    print_colon_state_line "$(managed_setting_field enableAiCliTools name)" "$ai_state"
+  editor_state="$(bool_state_label "$(readiness_setting_field enableEditorStack state)")"
+  workspace_state="$(bool_state_label "$(readiness_setting_field enableDevelopmentWorkspace state)")"
+  print_colon_state_line "$(readiness_setting_field enableEditorStack name)" "$editor_state"
+  if [ "$(readiness_setting_field enableAiCliTools state)" != not-applicable ]; then
+    ai_state="$(bool_state_label "$(readiness_setting_field enableAiCliTools state)")"
+    print_colon_state_line "$(readiness_setting_field enableAiCliTools name)" "$ai_state"
   else
-    print_colon_state_line "$(managed_setting_field enableAiCliTools name)" "not applicable" "($(profile_context_label))"
+    print_colon_state_line "$(readiness_setting_field enableAiCliTools name)" "not applicable" "($(profile_context_label))"
   fi
-  print_colon_state_line "$(managed_setting_field enableDevelopmentWorkspace name)" "$workspace_state"
+  print_colon_state_line "$(readiness_setting_field enableDevelopmentWorkspace name)" "$workspace_state"
 
-  if ! any_macos_app_group_applies "$profile"; then
+  if [ "$readiness_app_groups_apply" = false ]; then
     printf '%s\n' "macOS App Groups: not applicable for $(profile_context_label)"
     return
   fi
 
   print_section "macOS App Groups:"
-  managed_setting_schema | while IFS='|' read -r group_key group_kind group_label group_profile group_presets group_apps; do
-    if [ "$group_kind" != "macos-app-group" ] ||
-      ! managed_setting_applies_to_profile "$group_key" "$profile"; then
+  printf '%s\n' "$readiness_settings" | while IFS='|' read -r group_key group_kind group_label group_state group_apps; do
+    if [ "$group_kind" != "macos-app-group" ] || [ "$group_state" = not-applicable ]; then
       continue
     fi
 
-    print_colon_state_line "$group_label" "$(config_bool_state_label "$config_file" "$group_key")"
+    print_colon_state_line "$group_label" "$(bool_state_label "$group_state")"
   done
 }
 
@@ -1239,13 +1317,14 @@ run_chezmoi_command() {
 
 show_diff_context() {
   config_file="$(terrapod_chezmoi_config_file)"
-  config_verdict="$(managed_setup_config_verdict "$config_file")"
   profile="$(current_profile)"
+  evaluate_readiness "$config_file" "$profile" false
+  config_verdict="$readiness_config_verdict"
 
   print_title "Terrapod diff"
   print_section_value "Profile:" "$(profile_context_label)"
   show_config_context "$config_file" "$config_verdict"
-  show_stack_context "$config_file" "$profile"
+  show_stack_context
   printf '%s\n' "Delegating declared-state diff to: $(render_chezmoi_command diff)"
 }
 
@@ -1359,7 +1438,7 @@ show_apply_context() {
   print_title "Terrapod apply"
   print_section_value "Profile:" "$(profile_context_label)"
   show_config_context "$config_file" "$config_verdict"
-  show_stack_context "$config_file" "$profile"
+  show_stack_context
   printf '%s\n' "Delegating declared-state apply to: $(render_chezmoi_command apply)"
 }
 
@@ -1388,7 +1467,8 @@ run_apply() {
   fi
 
   config_file="$(terrapod_chezmoi_config_file)"
-  config_verdict="$(managed_setup_config_verdict "$config_file")"
+  evaluate_readiness "$config_file" "$(current_profile)"
+  config_verdict="$readiness_config_verdict"
   show_apply_context "$config_file" "$config_verdict"
   run_apply_preflight "$config_file" "$config_verdict"
   prune_retired_install_warnings
@@ -1400,10 +1480,14 @@ run_apply() {
   fi
 
   executable_selection_status=0
-  if ! executable_selection_helper_available; then
+  evaluate_executable_selection apply
+  if [ "$readiness_selection_status" = missing ]; then
     print_warning_line "executable selection helper is missing"
     executable_selection_status=1
-  elif ! run_executable_selection apply "$config_file" "$(current_profile)"; then
+  else
+    [ -z "$readiness_selection_output" ] || printf '%s\n' "$readiness_selection_output"
+  fi
+  if [ "$readiness_selection_status" = failed ]; then
     print_warning_line "executable selection helper failed"
     executable_selection_status=1
   fi
@@ -1521,7 +1605,7 @@ doctor_check_install_warnings() {
     return
   fi
 
-  categories="$(terrapod_install_warning_list 2>/dev/null || true)"
+  categories="$readiness_install_warnings"
   if [ -z "$categories" ]; then
     doctor_ok "No install warning markers remain"
     return
@@ -1577,8 +1661,9 @@ run_doctor() {
   doctor_failed=0
   doctor_guidance_printed=0
   config_file="$(terrapod_chezmoi_config_file)"
-  config_verdict="$(managed_setup_config_verdict "$config_file")"
   profile="$(current_profile)"
+  evaluate_readiness "$config_file" "$profile"
+  config_verdict="$readiness_config_verdict"
 
   print_title "Terrapod doctor"
   print_section_value "Profile:" "$(profile_context_label)"
@@ -1629,36 +1714,43 @@ run_doctor() {
   esac
 
   doctor_check_optional_setting \
-    "$(managed_setting_field enableEditorStack name)" \
-    "$(effective_optional_stack_enabled "$config_file" enableEditorStack)" \
-    "rich Neovim configuration"
+    "$(readiness_setting_field enableEditorStack name)" \
+    "$(readiness_setting_field enableEditorStack state)" \
+    "$(readiness_setting_detail "$(readiness_setting_field enableEditorStack summary)")"
 
-  if ai_cli_tools_supported_profile "$profile"; then
+  if [ "$(readiness_setting_field enableAiCliTools state)" != not-applicable ]; then
     doctor_check_optional_setting \
-      "$(managed_setting_field enableAiCliTools name)" \
-      "$(effective_ai_cli_tools_enabled "$config_file" "$profile")" \
-      "Antigravity CLI, Claude Code, and Codex"
+      "$(readiness_setting_field enableAiCliTools name)" \
+      "$(readiness_setting_field enableAiCliTools state)" \
+      "$(readiness_setting_detail "$(readiness_setting_field enableAiCliTools summary)")"
   else
-    doctor_ok "$(managed_setting_field enableAiCliTools name) is not applicable for $(profile_context_label)"
+    doctor_ok "$(readiness_setting_field enableAiCliTools name) is not applicable for $(profile_context_label)"
   fi
 
   doctor_check_optional_setting \
-    "$(managed_setting_field enableDevelopmentWorkspace name)" \
-    "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" \
-    "development Zellij layouts"
+    "$(readiness_setting_field enableDevelopmentWorkspace name)" \
+    "$(readiness_setting_field enableDevelopmentWorkspace state)" \
+    "$(readiness_setting_detail "$(readiness_setting_field enableDevelopmentWorkspace summary)")"
+
+  if [ "$readiness_app_groups_apply" = false ]; then
+    print_section "macOS App Groups: not applicable for $(profile_context_label)"
+  else
+    print_section "macOS App Groups:"
+    printf '%s\n' "$readiness_settings" | while IFS='|' read -r group_key group_kind group_name group_state group_summary; do
+      [ "$group_kind" = macos-app-group ] && [ "$group_state" != not-applicable ] || continue
+      doctor_check_optional_setting "$group_name" "$group_state" "$group_summary"
+    done
+  fi
 
   doctor_check_install_warnings
 
-  if executable_selection_helper_available; then
-    executable_selection_status=0
-    executable_selection_output="$(
-      run_executable_selection doctor "$config_file" "$profile" "$doctor_show_payloads"
-    )" || executable_selection_status="$?"
-    printf '%s\n' "$executable_selection_output"
-    case "$executable_selection_output" in
-      *"advisory -"*) doctor_guidance_printed=1 ;;
-    esac
-    if [ "$executable_selection_status" -ne 0 ]; then
+  evaluate_executable_selection doctor "$doctor_show_payloads"
+  if [ "$readiness_selection_status" != missing ]; then
+    [ -z "$readiness_selection_output" ] || printf '%s\n' "$readiness_selection_output"
+    if [ "$readiness_selection_guidance" = true ]; then
+      doctor_guidance_printed=1
+    fi
+    if [ "$readiness_selection_status" = failed ]; then
       doctor_failed=1
       doctor_guidance "Run tpod apply to install missing canonical packages, then rerun tpod doctor."
     fi
