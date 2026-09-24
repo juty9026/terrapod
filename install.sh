@@ -111,8 +111,8 @@ expected_homebrew_path() {
   profile="$1"
   arch="$2"
 
-  if [ -n "${TERRAPOD_EXPECTED_HOMEBREW_PATH:-}" ]; then
-    printf '%s\n' "$TERRAPOD_EXPECTED_HOMEBREW_PATH"
+  if [ -n "${installer_expected_homebrew_path:-}" ]; then
+    printf '%s\n' "$installer_expected_homebrew_path"
     return 0
   fi
 
@@ -139,10 +139,8 @@ expected_homebrew_path() {
   esac
 }
 
-# TERRAPOD_HOMEBREW_CANDIDATE_PATHS overrides the Homebrew search list. Entries
-# are colon-separated like PATH; an empty value means there are no candidates.
 first_executable_homebrew_candidate() {
-  candidate_paths="${TERRAPOD_HOMEBREW_CANDIDATE_PATHS-/opt/homebrew/bin/brew:/usr/local/bin/brew}"
+  candidate_paths="${installer_homebrew_candidate_paths-/opt/homebrew/bin/brew:/usr/local/bin/brew}"
   old_ifs="$IFS"
   IFS=:
   for candidate in $candidate_paths; do
@@ -160,13 +158,13 @@ reject_nonstandard_homebrew() {
 
   # The installer invokes the standard brew by absolute path. A legacy brew on
   # PATH must not make a valid standard-prefix installation look unsupported.
-  if [ "${TERRAPOD_TEST_BREW_ABSENT:-0}" != 1 ] && [ -x "$expected_brew" ]; then
+  if [ "${installer_test_brew_absent:-0}" != 1 ] && [ -x "$expected_brew" ]; then
     return 0
   fi
 
   if command -v brew >/dev/null 2>&1; then
     discovered_brew="$(command -v brew)"
-  elif [ -n "${TERRAPOD_HOMEBREW_CANDIDATE_PATHS:-}" ]; then
+  elif [ "${installer_candidate_paths_overridden:-0}" = 1 ]; then
     discovered_brew="$(first_executable_homebrew_candidate)"
   fi
 
@@ -607,65 +605,6 @@ load_install_warnings_from_source() {
   . "$install_warnings_lib"
 }
 
-snapshot_install_warnings_from_source() {
-  source_dir="$1"
-  snapshot_dir="$2"
-
-  mkdir -p "$snapshot_dir" || return 1
-
-  for category in $(terrapod_install_warning_categories); do
-    if terrapod_install_warning_read "$category" >"$snapshot_dir/$category" 2>/dev/null; then
-      marker_path="$(terrapod_install_warning_existing_path "$category" 2>/dev/null || true)"
-      if [ -n "$marker_path" ]; then
-        ln "$marker_path" "$snapshot_dir/$category.identity" 2>/dev/null || true
-      fi
-    fi
-  done
-}
-
-# Reports 0 when no marker changed, 1 when at least one did, and 2 when the
-# answer could not be determined: the marker library is not loaded, or a
-# marker exists but cannot be read. Reporting either of those as "nothing
-# changed" would hide fresh warnings behind a clean completion message.
-install_warning_marker_change_status() {
-  source_dir="$1"
-  snapshot_dir="$2"
-  changed=false
-
-  if [ "${TERRAPOD_INSTALL_WARNINGS_LOADED:-}" != "1" ]; then
-    return 2
-  fi
-
-  for category in $(terrapod_install_warning_categories); do
-    marker_path="$(terrapod_install_warning_existing_path "$category" 2>/dev/null || true)"
-    if [ -z "$marker_path" ]; then
-      continue
-    fi
-
-    current_file="$snapshot_dir/current-$category"
-    if ! terrapod_install_warning_read "$category" >"$current_file" 2>/dev/null; then
-      rm -f "$current_file"
-      return 2
-    fi
-
-    if [ ! -f "$snapshot_dir/$category" ] ||
-      ! cmp -s "$snapshot_dir/$category" "$current_file" ||
-      {
-        [ -f "$snapshot_dir/$category.identity" ] &&
-          [ ! "$snapshot_dir/$category.identity" -ef "$marker_path" ]
-      }; then
-      changed=true
-    fi
-    rm -f "$current_file"
-  done
-
-  if [ "$changed" = "true" ]; then
-    return 1
-  fi
-
-  return 0
-}
-
 run_terrapod_setup() {
   profile="$1"
   source_dir="$2"
@@ -904,7 +843,7 @@ run_initial_apply() {
   trap 'rm -rf "$marker_snapshot_dir"' EXIT
   trap 'rm -rf "$marker_snapshot_dir"; exit 1' INT TERM
 
-  snapshot_install_warnings_from_source "$source_dir" "$marker_snapshot_dir" ||
+  terrapod_install_warning_snapshot "$marker_snapshot_dir" ||
     fatal "failed to snapshot install warning markers"
 
   if ! TERRAPOD_PROFILE="$profile" "$tpod_bin" apply; then
@@ -912,7 +851,7 @@ run_initial_apply() {
   fi
 
   marker_change_status=0
-  install_warning_marker_change_status "$source_dir" "$marker_snapshot_dir" ||
+  terrapod_install_warning_change_status "$marker_snapshot_dir" ||
     marker_change_status="$?"
 
   rm -rf "$marker_snapshot_dir"
@@ -981,12 +920,49 @@ print_first_run_unknown_marker_completion() {
   printf '%s\n' "  $local_bin_dir/tpod doctor"
 }
 
+# Keep test-only dispatch and environment interpretation at the entry point.
+# Production installation never selects a hook.
+dispatch_installer_test_hook() {
+  hook_phase="$1"
+  hook_profile="$2"
+
+  if [ "$hook_phase" = preflight ]; then
+    installer_expected_homebrew_path="${TERRAPOD_EXPECTED_HOMEBREW_PATH:-}"
+    installer_homebrew_candidate_paths="${TERRAPOD_HOMEBREW_CANDIDATE_PATHS-/opt/homebrew/bin/brew:/usr/local/bin/brew}"
+    installer_candidate_paths_overridden=0
+    if [ -n "${TERRAPOD_HOMEBREW_CANDIDATE_PATHS:-}" ]; then
+      installer_candidate_paths_overridden=1
+    fi
+    installer_test_brew_absent="${TERRAPOD_TEST_BREW_ABSENT:-0}"
+    case "${TERRAPOD_INSTALLER_TEST_HOOK:-}" in
+      print_expected_homebrew_path)
+        expected_homebrew_path "$hook_profile" "$(machine_arch)"
+        exit 0
+        ;;
+      find_homebrew)
+        find_homebrew || true
+        exit 0
+        ;;
+      reject_nonstandard_homebrew)
+        reject_nonstandard_homebrew "$(expected_homebrew_path "$hook_profile" "$(machine_arch)")"
+        exit 0
+        ;;
+    esac
+  else
+    case "${TERRAPOD_INSTALLER_TEST_HOOK:-}" in
+      fail_snapshot)
+        terrapod_install_warning_snapshot() { return 1; }
+        ;;
+      interrupt_snapshot)
+        terrapod_install_warning_snapshot() { kill -TERM "$$"; }
+        ;;
+    esac
+  fi
+}
+
 main() {
   profile="$(detect_profile)"
-  if [ "${TERRAPOD_PRINT_EXPECTED_HOMEBREW_PATH:-}" = 1 ]; then
-    expected_homebrew_path "$profile" "$(machine_arch)"
-    return
-  fi
+  dispatch_installer_test_hook preflight "$profile"
   label="$(profile_label "$profile")"
   local_bin_dir="$(user_local_bin_dir)"
   source_dir="$(default_source_dir)"
@@ -1027,6 +1003,7 @@ main() {
   ensure_first_run_setup "$profile" "$source_dir" "$chezmoi_bin"
   load_install_warnings_from_source "$source_dir" ||
     fatal "failed to load the install warning library from $source_dir"
+  dispatch_installer_test_hook after_load "$profile"
   apply_recovery_core_command_surface "$profile" "$source_dir" "$local_bin_dir"
   apply_recovery_core_shell_startup_files "$profile" "$chezmoi_bin"
   initial_apply_status=0
