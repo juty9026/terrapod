@@ -79,8 +79,6 @@ pass "macOS mise tool installer records missing standard Homebrew mise independe
 
 mise_tools_installer="$(render_template "$ubuntu_data" ".chezmoiscripts/run_after_20-install-mise-tools.sh.tmpl")"
 
-assert_contains "$mise_tools_installer" 'mise_bin="$(standard_mise_path || true)"' "mise installer resolves mise from a standard Homebrew prefix"
-assert_contains "$mise_tools_installer" '"$mise_bin" install --yes -C "$HOME"' "Ubuntu runtime install invokes the resolved Homebrew mise"
 assert_not_contains "$mise_tools_installer" '/usr/bin/mise' "Ubuntu runtime install never falls back to APT mise"
 
 # run_after_20 is not a run_onchange_ script, so a source checksum in it gates

@@ -138,6 +138,7 @@ write_brew_bundle_stub() {
     '  shellenv) case "${MACOS_BREW_SHELLENV_MODE:-success}" in command-failure) exit 41 ;; eval-failure) printf "%s\\n" false ;; *) printf "%s\\n" : ;; esac ;;' \
     '  analytics) exit 0 ;;' \
     '  bundle)' \
+    '    printf "%s\\n" "brew auto-update:${HOMEBREW_NO_AUTO_UPDATE:-}" >>"$log_file"' \
     '    [ "${MACOS_BREW_DRAIN_STDIN:-0}" != 1 ] || cat >/dev/null' \
     '    [ "${MACOS_BREW_ECHO_OUTPUT:-0}" != 1 ] || printf "%s\\n" "visible brew bundle output: $*"' \
     '    for formula in ${MACOS_BREW_FAIL_FORMULAE:-}; do bundle_has brew "$formula" && exit 42; done' \

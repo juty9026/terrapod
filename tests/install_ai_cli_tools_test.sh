@@ -6,7 +6,6 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$repo_root/tests/lib/test-support.sh"
 make_tmp_dir
 . "$repo_root/tests/lib/chezmoi-test-support.sh"
-macos_terminal_apps_bootstrap="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
 ai_cli_tools_installer="$(render_template "$ai_cli_tools_data" ".chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl")"
 macos_ai_cli_tools_installer="$(render_template "$macos_ai_cli_tools_data" ".chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl")"
 development_workspace_ai_installer="$(render_template "$development_workspace_data" ".chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl")"
@@ -19,13 +18,10 @@ macos_development_workspace_ai_brewfile="$(render_template "$macos_development_w
 
 assert_not_contains "$ai_cli_tools_installer" "bootstrap_linux_homebrew" "AI installer no longer owns Linuxbrew bootstrap"
 assert_not_contains "$ai_cli_tools_installer" "raw.githubusercontent.com/Homebrew/install" "AI installer never downloads Homebrew"
-assert_not_contains "$ai_cli_tools_installer" "HOMEBREW_NO_AUTO_UPDATE=1" "Ubuntu AI installer runs no Homebrew bundle"
 assert_not_contains "$ai_cli_tools_installer" "install_ai_cli_bundle" "Ubuntu AI installer renders no Homebrew bundle step"
 assert_not_contains "$ai_cli_tools_installer" 'cask "codex"' "Ubuntu AI installer renders no macOS-only casks"
 assert_contains "$ai_cli_tools_installer" 'finish_install_warning_category' "Ubuntu AI installer clears stale optional AI CLI markers through the policy layer"
 assert_contains "$macos_ai_cli_tools_installer" 'terrapod_homebrew_find_standard_brew "darwin"' "macOS AI installer derives brew from the standard Homebrew prefix"
-assert_contains "$macos_ai_cli_tools_installer" "HOMEBREW_NO_AUTO_UPDATE=1" "AI bundle disables Homebrew auto-update"
-assert_contains "$macos_terminal_apps_bootstrap" "HOMEBREW_NO_AUTO_UPDATE=1" "desktop bundle disables Homebrew auto-update"
 
 for rendered_brewfile in "$macos_ai_cli_tools_brewfile" "$macos_development_workspace_ai_brewfile"; do
   assert_contains "$rendered_brewfile" 'cask "antigravity-cli"' "Optional AI Tool Stack declares Antigravity CLI cask"

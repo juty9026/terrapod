@@ -14,34 +14,28 @@ launcher_apps_brewfile="$(render_template "$macos_launcher_apps_data" "Brewfile.
 monitoring_apps_brewfile="$(render_template "$macos_monitoring_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 development_apps_brewfile="$(render_template "$macos_development_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 mobile_dev_brewfile="$(render_template "$macos_mobile_dev_data" "Brewfile.macos-desktop-apps.tmpl")"
-ubuntu_homebrew_bootstrap="$(render_template "$ubuntu_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
 macos_bootstrap="$(render_template "$macos_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
 macos_terminal_apps_bootstrap="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
 macos_terminal_launcher_apps_bootstrap="$(render_template "$macos_terminal_launcher_apps_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
 macos_development_apps_bootstrap="$(render_template "$macos_development_apps_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
 macos_mobile_dev_bootstrap="$(render_template "$macos_mobile_dev_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
 macos_development_workspace_bootstrap="$(render_template "$macos_development_workspace_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
-assert_contains \
-  "$macos_bootstrap" \
-  'terrapod_homebrew_core_run_bundle "$core_brewfile"' \
-  "macOS bootstrap always runs the core Brewfile through the core bundle helper"
-
-assert_contains "$ubuntu_homebrew_bootstrap" 'core_brewfile="' "Ubuntu renders the mandatory CLI bundle"
-assert_contains "$ubuntu_homebrew_bootstrap" 'HOMEBREW_NO_AUTO_UPDATE=1 "$terrapod_bundle_brew" bundle --no-upgrade' "Ubuntu bundle apply disables automatic updates"
-assert_not_contains "$ubuntu_homebrew_bootstrap" 'linux:arm64' "Ubuntu Homebrew bootstrap rejects the arm64 identifier"
-assert_contains "$ubuntu_homebrew_bootstrap" 'linux:x86_64|linux:aarch64)' "Ubuntu Homebrew reconciliation accepts exactly the supported Linux architecture identifiers"
-
-for bundle_source in \
-  "$repo_root/.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl" \
-  "$repo_root/dot_local/lib/terrapod/homebrew-core-bundle.sh" \
-  "$repo_root/dot_local/lib/terrapod/homebrew-bundle.sh"
-do
-  unguarded_bundle_calls="$(grep 'brew bundle --no-upgrade' "$bundle_source" | grep -v 'HOMEBREW_NO_AUTO_UPDATE=1' || true)"
-  if [ -n "$unguarded_bundle_calls" ]; then
-    fail "every Homebrew bundle call disables automatic updates: $bundle_source"
+# Each fake brew logs "brew auto-update:<value>" for every bundle call, so a
+# run proves that every bundle it made had Homebrew auto-update disabled.
+assert_bundle_calls_disable_auto_update() {
+  bundle_log="$1"
+  bundle_message="$2"
+  bundle_calls="$(grep -c '^brew auto-update:' "$bundle_log" || true)"
+  guarded_bundle_calls="$(grep -cx 'brew auto-update:1' "$bundle_log" || true)"
+  if [ "$bundle_calls" -eq 0 ]; then
+    fail "$bundle_message: no brew bundle call was recorded"
   fi
-done
-pass "every Homebrew bundle call disables automatic updates"
+  if [ "$guarded_bundle_calls" -ne "$bundle_calls" ]; then
+    grep '^brew auto-update:' "$bundle_log" | sed 's/^/  /' >&2
+    fail "$bundle_message"
+  fi
+  pass "$bundle_message"
+}
 
 assert_not_contains \
   "$macos_bootstrap" \
@@ -108,8 +102,9 @@ run_linux_homebrew_arch_case() {
   write_stub "$case_prefix/bin/brew" \
     'printf "%s\n" "brew args:$*" >>"$LINUX_HOMEBREW_ARCH_LOG"' \
     'case "$1" in' \
-    '  shellenv) printf "%s\n" ":" ;;' \
-    '  analytics|bundle) exit 0 ;;' \
+    '  shellenv) printf "export PATH=\"%s/bin:\$PATH\"\n" "$LINUX_HOMEBREW_ARCH_PREFIX" ;;' \
+    '  analytics) exit 0 ;;' \
+    '  bundle) printf "%s\n" "brew auto-update:${HOMEBREW_NO_AUTO_UPDATE:-}" >>"$LINUX_HOMEBREW_ARCH_LOG" ;;' \
     '  --prefix) printf "%s\n" "$LINUX_HOMEBREW_ARCH_PREFIX" ;;' \
     '  *) exit 64 ;;' \
     'esac'
@@ -134,6 +129,7 @@ run_linux_homebrew_arch_case() {
       sed 's/^/stderr: /' "$case_dir/stderr" >&2
       fail "Ubuntu Homebrew bootstrap accepts $arch"
     fi
+    assert_bundle_calls_disable_auto_update "$case_log" "Ubuntu $arch core bundle disables Homebrew auto-update"
   elif [ "$case_status" -eq 0 ]; then
     fail "Ubuntu Homebrew bootstrap rejects $arch"
   fi
@@ -343,6 +339,7 @@ if [ -e "$core_success_state/terrapod/install-warnings/homebrew-core" ]; then
   fail "successful core Homebrew bundle clears stale homebrew-core marker"
 fi
 pass "successful core Homebrew bundle clears stale homebrew-core marker"
+assert_bundle_calls_disable_auto_update "$core_success_log" "macOS core bundle disables Homebrew auto-update"
 
 for shellenv_mode in command-failure eval-failure; do
   shellenv_failure_state="$tmp_dir/core-shellenv-$shellenv_mode-state"
@@ -835,6 +832,8 @@ core_then_desktop_core_text="$(cat "$core_then_desktop_core_marker")"
 core_then_desktop_desktop_text="$(cat "$core_then_desktop_desktop_marker")"
 assert_contains "$core_then_desktop_core_text" "failed formulae: mise" "combined bootstrap core marker keeps failed formula detail"
 assert_contains "$core_then_desktop_desktop_text" "failed casks: ghostty, raycast" "combined bootstrap desktop marker keeps failed cask detail"
+assert_call_log_contains "$core_then_desktop_log" "terrapod-macos-desktop-apps" "combined bootstrap runs the optional desktop bundle"
+assert_bundle_calls_disable_auto_update "$core_then_desktop_log" "macOS core and optional desktop bundles, including per-item retries, disable Homebrew auto-update"
 
 terminal_launcher_marker_failure_bin="$tmp_dir/terminal-launcher-marker-failure-bin"
 terminal_launcher_marker_failure_state="$tmp_dir/terminal-launcher-marker-failure-state"
