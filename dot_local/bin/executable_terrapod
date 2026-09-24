@@ -898,34 +898,6 @@ missing_tools() {
   printf '%s\n' "$missing"
 }
 
-managed_homebrew_cli_records() {
-  tab="$(printf '\t')"
-  while IFS=' ' read -r formula command; do
-    printf '%s%s%s\n' "$formula" "$tab" "$command"
-  done <<'EOF'
-bat bat
-btop btop
-chezmoi chezmoi
-dust dust
-duf duf
-fastfetch fastfetch
-fd fd
-fzf fzf
-gh gh
-git git
-git-delta delta
-gum gum
-lazygit lazygit
-lsd lsd
-mise mise
-neovim nvim
-ripgrep rg
-starship starship
-zellij zellij
-zoxide zoxide
-EOF
-}
-
 # TERRAPOD_STANDARD_HOMEBREW_PREFIX is deliberately not consulted here: it is
 # how this command hands its own answer down to the executable-selection
 # helper, not a way to override the mapping for this command.
@@ -2233,11 +2205,6 @@ run_configure() {
 dispatch_test_hooks() {
   if [ "${TERRAPOD_PRINT_MANAGED_SETUP_KEYS:-}" = "1" ]; then
     managed_setup_keys
-    exit 0
-  fi
-
-  if [ "${TERRAPOD_PRINT_HOMEBREW_CLI_RECORDS:-}" = "1" ]; then
-    managed_homebrew_cli_records
     exit 0
   fi
 
