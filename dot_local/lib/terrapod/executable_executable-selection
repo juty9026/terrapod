@@ -440,6 +440,9 @@ buffer_advisory() {
 # prints the shared canonical directory only when its canonical paths share
 # one, and falls back to a line per package when they do not.
 render_advisories() {
+  if [ -n "$advisory_records" ] && [ -n "${TERRAPOD_EXECUTABLE_SELECTION_GUIDANCE_FILE:-}" ]; then
+    printf '%s\n' present > "$TERRAPOD_EXECUTABLE_SELECTION_GUIDANCE_FILE"
+  fi
   printf '%s' "$advisory_records" | awk \
     -v guidance="Adjust PATH or remove the other installation manually, then rerun 'tpod doctor'." '
     BEGIN {
@@ -618,6 +621,10 @@ render_leftover_payloads() {
 
   leftover_found="$(printf '%s\n' "$leftover_listing" | awk 'NF { count++ } END { print count + 0 }')"
   [ "$leftover_found" -gt 0 ] || return 0
+
+  if [ -n "${TERRAPOD_EXECUTABLE_SELECTION_GUIDANCE_FILE:-}" ]; then
+    printf '%s\n' present > "$TERRAPOD_EXECUTABLE_SELECTION_GUIDANCE_FILE"
+  fi
 
   leftover_total=""
   if [ "$leftover_detail" = "true" ]; then
