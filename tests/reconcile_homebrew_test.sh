@@ -123,7 +123,6 @@ run_linux_homebrew_arch_case() {
   case_status=0
   HOME="$case_home" \
     XDG_STATE_HOME="$case_state" \
-    TERRAPOD_FIRST_RUN_APPLY=1 \
     LINUX_HOMEBREW_ARCH_LOG="$case_log" \
     LINUX_HOMEBREW_ARCH_PREFIX="$case_prefix" \
     PATH="$case_bin:/usr/bin:/bin" \
@@ -181,7 +180,6 @@ run_linux_homebrew_space_case() {
   case_status=0
   HOME="$case_home" \
     XDG_STATE_HOME="$case_state" \
-    TERRAPOD_FIRST_RUN_APPLY=1 \
     LINUX_HOMEBREW_SPACE_LOG="$case_log" \
     LINUX_HOMEBREW_AVAILABLE_KB="$available_kb" \
     PATH="$case_bin:/usr/bin:/bin" \
@@ -273,47 +271,30 @@ homebrew_installer_failure_marker_text="$(cat "$homebrew_installer_failure_marke
 assert_contains "$homebrew_installer_failure_marker_text" "summary='Homebrew core install needs attention'" "macOS bootstrap Homebrew installer failure marker keeps the expected summary"
 assert_contains "$homebrew_installer_failure_marker_text" "guidance='Install Homebrew from https://brew.sh, then rerun tpod apply.'" "macOS bootstrap Homebrew installer failure marker keeps recovery guidance"
 
-homebrew_first_run_failure_state="$tmp_dir/homebrew-first-run-failure-state"
-homebrew_first_run_failure_home="$tmp_dir/homebrew-first-run-failure-home"
-homebrew_first_run_failure_log="$tmp_dir/homebrew-first-run-failure.log"
-mkdir -p "$homebrew_first_run_failure_home"
-
-if ! HOME="$homebrew_first_run_failure_home" XDG_STATE_HOME="$homebrew_first_run_failure_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_first_run_failure_log" PATH="$homebrew_installer_failure_bin:/usr/bin:/bin" \
-  TERRAPOD_FIRST_RUN_APPLY=1 sh "$homebrew_installer_failure_script" >"$tmp_dir/homebrew-first-run-failure.out" 2>"$tmp_dir/homebrew-first-run-failure.err"; then
-  fail "first-run macOS bootstrap should continue when the Homebrew installer command fails"
-fi
-pass "first-run macOS bootstrap continues when the Homebrew installer command fails"
-
-homebrew_first_run_failure_marker="$homebrew_first_run_failure_state/terrapod/install-warnings/homebrew-core"
-if [ ! -f "$homebrew_first_run_failure_marker" ]; then
-  fail "first-run macOS bootstrap records homebrew-core marker when the Homebrew installer command fails"
-fi
-pass "first-run macOS bootstrap records homebrew-core marker when the Homebrew installer command fails"
-
-homebrew_first_run_download_bin="$tmp_dir/homebrew-first-run-download-bin"
-homebrew_first_run_download_state="$tmp_dir/homebrew-first-run-download-state"
-homebrew_first_run_download_home="$tmp_dir/homebrew-first-run-download-home"
-homebrew_first_run_download_log="$tmp_dir/homebrew-first-run-download.log"
-mkdir -p "$homebrew_first_run_download_bin" "$homebrew_first_run_download_home"
-write_stub "$homebrew_first_run_download_bin/curl" \
+homebrew_download_failure_bin="$tmp_dir/homebrew-download-failure-bin"
+homebrew_download_failure_state="$tmp_dir/homebrew-download-failure-state"
+homebrew_download_failure_home="$tmp_dir/homebrew-download-failure-home"
+homebrew_download_failure_log="$tmp_dir/homebrew-download-failure.log"
+mkdir -p "$homebrew_download_failure_bin" "$homebrew_download_failure_home"
+write_stub "$homebrew_download_failure_bin/curl" \
   'printf "%s\n" "curl args:$*" >>"$HOMEBREW_INSTALLER_FAILURE_LOG"' \
   'exit 42'
 
-if ! HOME="$homebrew_first_run_download_home" XDG_STATE_HOME="$homebrew_first_run_download_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_first_run_download_log" PATH="$homebrew_first_run_download_bin:/usr/bin:/bin" \
-  TERRAPOD_FIRST_RUN_APPLY=1 sh "$homebrew_installer_failure_script" >"$tmp_dir/homebrew-first-run-download.out" 2>"$tmp_dir/homebrew-first-run-download.err"; then
-  fail "first-run macOS bootstrap should continue when the Homebrew installer download fails"
+if ! HOME="$homebrew_download_failure_home" XDG_STATE_HOME="$homebrew_download_failure_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_download_failure_log" PATH="$homebrew_download_failure_bin:/usr/bin:/bin" \
+  sh "$homebrew_installer_failure_script" >"$tmp_dir/homebrew-download-failure.out" 2>"$tmp_dir/homebrew-download-failure.err"; then
+  fail "macOS bootstrap should continue when the Homebrew installer download fails"
 fi
-if [ ! -f "$homebrew_first_run_download_state/terrapod/install-warnings/homebrew-core" ]; then
-  fail "first-run macOS bootstrap records homebrew-core marker when the Homebrew installer download fails"
+if [ ! -f "$homebrew_download_failure_state/terrapod/install-warnings/homebrew-core" ]; then
+  fail "macOS bootstrap records homebrew-core marker when the Homebrew installer download fails"
 fi
-pass "first-run macOS bootstrap continues and records a marker when the Homebrew installer download fails"
+pass "macOS bootstrap continues and records a marker when the Homebrew installer download fails"
 
-homebrew_first_run_not_found_bin="$tmp_dir/homebrew-first-run-not-found-bin"
-homebrew_first_run_not_found_state="$tmp_dir/homebrew-first-run-not-found-state"
-homebrew_first_run_not_found_home="$tmp_dir/homebrew-first-run-not-found-home"
-homebrew_first_run_not_found_log="$tmp_dir/homebrew-first-run-not-found.log"
-mkdir -p "$homebrew_first_run_not_found_bin" "$homebrew_first_run_not_found_home"
-write_stub "$homebrew_first_run_not_found_bin/curl" \
+homebrew_missing_after_install_bin="$tmp_dir/homebrew-missing-after-install-bin"
+homebrew_missing_after_install_state="$tmp_dir/homebrew-missing-after-install-state"
+homebrew_missing_after_install_home="$tmp_dir/homebrew-missing-after-install-home"
+homebrew_missing_after_install_log="$tmp_dir/homebrew-missing-after-install.log"
+mkdir -p "$homebrew_missing_after_install_bin" "$homebrew_missing_after_install_home"
+write_stub "$homebrew_missing_after_install_bin/curl" \
   'printf "%s\n" "curl args:$*" >>"$HOMEBREW_INSTALLER_FAILURE_LOG"' \
   'output_file=' \
   'while [ "$#" -gt 0 ]; do' \
@@ -322,14 +303,14 @@ write_stub "$homebrew_first_run_not_found_bin/curl" \
   'done' \
   'printf "%s\n" "exit 0" >"$output_file"'
 
-if ! HOME="$homebrew_first_run_not_found_home" XDG_STATE_HOME="$homebrew_first_run_not_found_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_first_run_not_found_log" PATH="$homebrew_first_run_not_found_bin:/usr/bin:/bin" \
-  TERRAPOD_FIRST_RUN_APPLY=1 sh "$homebrew_installer_failure_script" >"$tmp_dir/homebrew-first-run-not-found.out" 2>"$tmp_dir/homebrew-first-run-not-found.err"; then
-  fail "first-run macOS bootstrap should continue when brew is not found after installation"
+if ! HOME="$homebrew_missing_after_install_home" XDG_STATE_HOME="$homebrew_missing_after_install_state" HOMEBREW_INSTALLER_FAILURE_LOG="$homebrew_missing_after_install_log" PATH="$homebrew_missing_after_install_bin:/usr/bin:/bin" \
+  sh "$homebrew_installer_failure_script" >"$tmp_dir/homebrew-missing-after-install.out" 2>"$tmp_dir/homebrew-missing-after-install.err"; then
+  fail "macOS bootstrap should continue when brew is not found after installation"
 fi
-if [ ! -f "$homebrew_first_run_not_found_state/terrapod/install-warnings/homebrew-core" ]; then
-  fail "first-run macOS bootstrap records homebrew-core marker when brew is not found after installation"
+if [ ! -f "$homebrew_missing_after_install_state/terrapod/install-warnings/homebrew-core" ]; then
+  fail "macOS bootstrap records homebrew-core marker when brew is not found after installation"
 fi
-pass "first-run macOS bootstrap continues and records a marker when brew is not found after installation"
+pass "macOS bootstrap continues and records a marker when brew is not found after installation"
 
 homebrew_marker_write_failure_home="$tmp_dir/homebrew-marker-write-failure-home"
 homebrew_marker_write_failure_parent="$tmp_dir/homebrew-marker-write-failure-parent"

@@ -907,7 +907,7 @@ run_initial_apply() {
   snapshot_install_warnings_from_source "$source_dir" "$marker_snapshot_dir" ||
     fatal "failed to snapshot install warning markers"
 
-  if ! TERRAPOD_PROFILE="$profile" TERRAPOD_FIRST_RUN_APPLY=1 "$tpod_bin" apply; then
+  if ! TERRAPOD_PROFILE="$profile" "$tpod_bin" apply; then
     fatal "installed tpod apply failed"
   fi
 

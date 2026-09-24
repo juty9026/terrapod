@@ -175,20 +175,6 @@ if [ ! -f "$ubuntu_bootstrap_marker" ]; then
 fi
 pass "Ubuntu bootstrap records an ubuntu-bootstrap warning when routine APT prerequisite install fails"
 
-rm -rf "$HOME/.local/state/terrapod/install-warnings"
-: >"$BOOTSTRAP_TEST_LOG"
-if ! TERRAPOD_FIRST_RUN_APPLY=1 sh "$rendered" >"$tmp_dir/bootstrap-first-run-apt-failure.out" 2>"$tmp_dir/bootstrap-first-run-apt-failure.err"; then
-  unset BOOTSTRAP_APT_INSTALL_STATUS
-  fail "Ubuntu bootstrap should continue first-run apply when APT prerequisite install fails"
-fi
-pass "Ubuntu bootstrap continues first-run apply when APT prerequisite install fails"
-
-if [ ! -f "$ubuntu_bootstrap_marker" ]; then
-  unset BOOTSTRAP_APT_INSTALL_STATUS
-  fail "Ubuntu bootstrap should keep an ubuntu-bootstrap warning when first-run APT prerequisite install fails"
-fi
-pass "Ubuntu bootstrap keeps an ubuntu-bootstrap warning when first-run APT prerequisite install fails"
-
 ubuntu_bootstrap_marker_text="$(cat "$ubuntu_bootstrap_marker")"
 assert_contains "$ubuntu_bootstrap_marker_text" "guidance='Review APT install output for system and Homebrew prerequisites, then rerun tpod apply.'" "Ubuntu bootstrap marker preserves APT prerequisite failure guidance"
 
@@ -218,17 +204,10 @@ if ! sh "$unsupported_rendered" >"$tmp_dir/bootstrap-unsupported.out" 2>"$tmp_di
 fi
 pass "Ubuntu bootstrap continues routine apply on an unsupported release"
 
-rm -rf "$HOME/.local/state/terrapod/install-warnings"
-: >"$BOOTSTRAP_TEST_LOG"
-if ! TERRAPOD_FIRST_RUN_APPLY=1 sh "$unsupported_rendered" >"$tmp_dir/bootstrap-first-run-unsupported.out" 2>"$tmp_dir/bootstrap-first-run-unsupported.err"; then
-  fail "Ubuntu bootstrap should continue first-run apply on an unsupported release"
-fi
-pass "Ubuntu bootstrap continues first-run apply on an unsupported release"
-
 if [ ! -f "$ubuntu_bootstrap_marker" ]; then
-  fail "Ubuntu bootstrap should keep an ubuntu-bootstrap warning for an unsupported release during first-run apply"
+  fail "Ubuntu bootstrap should keep an ubuntu-bootstrap warning for an unsupported release"
 fi
-pass "Ubuntu bootstrap keeps an ubuntu-bootstrap warning for an unsupported release during first-run apply"
+pass "Ubuntu bootstrap keeps an ubuntu-bootstrap warning for an unsupported release"
 
 ubuntu_bootstrap_marker_text="$(cat "$ubuntu_bootstrap_marker")"
 assert_contains "$ubuntu_bootstrap_marker_text" "guidance='Run Terrapod on Ubuntu 24.04, or use tpod doctor for current platform guidance.'" "Ubuntu bootstrap marker preserves unsupported release guidance"

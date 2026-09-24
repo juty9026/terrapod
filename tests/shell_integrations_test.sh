@@ -249,22 +249,6 @@ if [ -f "$shell_integrations_marker" ]; then
 fi
 pass "shell integrations clears warning marker after successful rerun"
 
-rm -f "$shell_integrations_marker"
-rm -rf "$HOME/.oh-my-zsh"
-: >"$SHELL_INTEGRATIONS_TEST_LOG"
-SHELL_INTEGRATIONS_CURL_STATUS=23
-export SHELL_INTEGRATIONS_CURL_STATUS
-if ! TERRAPOD_FIRST_RUN_APPLY=1 sh "$rendered" >"$tmp_dir/shell-integrations-first-run-curl-failure.out" 2>"$tmp_dir/shell-integrations-first-run-curl-failure.err"; then
-  unset SHELL_INTEGRATIONS_CURL_STATUS
-  fail "first-run shell integrations should continue when the Oh My Zsh installer download warning is recorded"
-fi
-unset SHELL_INTEGRATIONS_CURL_STATUS
-
-if [ ! -f "$shell_integrations_marker" ]; then
-  fail "first-run shell integrations should record a warning marker when the Oh My Zsh installer download fails"
-fi
-pass "first-run shell integrations records a warning marker when the Oh My Zsh installer download fails"
-
 export HOME="$tmp_dir/scm-home"
 export XDG_STATE_HOME="$tmp_dir/scm-state"
 export SHELL_INTEGRATIONS_TEST_LOG="$tmp_dir/scm-shell-integrations.log"
