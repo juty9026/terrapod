@@ -14,141 +14,45 @@ set -eu
 
 {{ include "dot_local/lib/terrapod/install-warning-script.sh" }}
 
+{{ include "dot_local/lib/terrapod/homebrew-bundle.sh" }}
+
 {{ include "dot_local/lib/terrapod/homebrew-core-bundle.sh" }}
-
-desktop_app_package_records() {
-  brewfile="$1"
-
-  awk '
-    /^[[:space:]]*#[[:space:]]+.*[[:space:]]macOS App Group[[:space:]]*$/ {
-      group = $0
-      sub(/^[[:space:]]*#[[:space:]]+/, "", group)
-      sub(/[[:space:]]+macOS App Group[[:space:]]*$/, "", group)
-      next
-    }
-
-    /^[[:space:]]*(cask|brew)[[:space:]]+"/ {
-      declaration = $0
-      sub(/^[[:space:]]+/, "", declaration)
-      sub(/[[:space:]]+$/, "", declaration)
-
-      token = declaration
-      sub(/^(cask|brew)[[:space:]]+"/, "", token)
-      sub(/".*$/, "", token)
-
-      if (token != "") {
-        # Tab is IFS whitespace, so an empty leading field would be swallowed by
-        # the reader and shift token and declaration left. Emit a placeholder
-        # instead; the reader maps it back to "no App Group". The declaration
-        # stays last so a tab inside it cannot shift anything either.
-        group_field = group
-        if (group_field == "") {
-          group_field = "-"
-        }
-
-        printf "%s\t%s\t%s\n", group_field, token, declaration
-      }
-    }
-  ' "$brewfile"
-}
 
 desktop_app_failure_guidance_text=
 
-cleanup_desktop_app_bundle_temps() {
-  [ -z "${records_file:-}" ] || rm -f "$records_file"
-  [ -z "${failed_casks_file:-}" ] || rm -f "$failed_casks_file"
-  [ -z "${failed_groups_file:-}" ] || rm -f "$failed_groups_file"
-  [ -z "${single_package_brewfile:-}" ] || rm -f "$single_package_brewfile"
-}
-
 run_desktop_app_bundle() {
-  brewfile="$1"
   desktop_app_failure_guidance_text="Review Homebrew desktop app bundle output, fix app installation access, then rerun tpod apply."
-
-  if HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="$brewfile"; then
+  desktop_failures_file="$(mktemp "${TMPDIR:-/tmp}/terrapod-desktop-failures.XXXXXX")" || return 1
+  if terrapod_homebrew_bundle_run brew "$1" "$desktop_failures_file"; then
+    rm -f "$desktop_failures_file"
     return 0
   fi
 
-  records_file=
-  failed_casks_file=
-  failed_groups_file=
-  single_package_brewfile=
-
-  records_file="$(mktemp "${TMPDIR:-/tmp}/terrapod-macos-desktop-records.XXXXXX")" || return 1
-  failed_casks_file="$(mktemp "${TMPDIR:-/tmp}/terrapod-macos-desktop-failed-casks.XXXXXX")" || {
-    cleanup_desktop_app_bundle_temps
-    return 1
-  }
-  failed_groups_file="$(mktemp "${TMPDIR:-/tmp}/terrapod-macos-desktop-failed-groups.XXXXXX")" || {
-    cleanup_desktop_app_bundle_temps
-    return 1
-  }
-
-  if ! desktop_app_package_records "$brewfile" >"$records_file"; then
-    cleanup_desktop_app_bundle_temps
-    return 1
-  fi
-
-  if [ ! -s "$records_file" ]; then
-    cleanup_desktop_app_bundle_temps
-    return 1
-  fi
-
-  tab="$(printf '\t')"
-  # Keep the record list on fd 3 so a cask post-install step that reads stdin
-  # cannot consume the remaining packages and silently skip them.
-  while IFS="$tab" read -r app_group token declaration <&3; do
-    # "-" is the placeholder desktop_app_package_records emits for a declaration
-    # that precedes every macOS App Group header.
-    if [ "$app_group" = "-" ]; then
-      app_group=
+  failed_casks="$(terrapod_homebrew_bundle_join_names cask "$desktop_failures_file")"
+  failed_formulae="$(terrapod_homebrew_bundle_join_names brew "$desktop_failures_file")"
+  failed_groups="$(terrapod_homebrew_bundle_join_groups "$desktop_failures_file")"
+  rm -f "$desktop_failures_file"
+  if [ -n "$failed_casks" ] || [ -n "$failed_formulae" ]; then
+    detail=
+    if [ -n "$failed_casks" ]; then
+      detail="failed casks: $failed_casks"
     fi
-
-    single_package_brewfile="$(mktemp "${TMPDIR:-/tmp}/terrapod-macos-desktop-package.XXXXXX")" || {
-      cleanup_desktop_app_bundle_temps
-      return 1
-    }
-    if ! printf '%s\n' "$declaration" >"$single_package_brewfile"; then
-      cleanup_desktop_app_bundle_temps
-      return 1
-    fi
-
-    if ! HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="$single_package_brewfile"; then
-      if ! printf '%s\n' "$token" >>"$failed_casks_file"; then
-        cleanup_desktop_app_bundle_temps
-        return 1
-      fi
-      if [ -n "$app_group" ] && ! grep -Fx "$app_group" "$failed_groups_file" >/dev/null 2>&1; then
-        if ! printf '%s\n' "$app_group" >>"$failed_groups_file"; then
-          cleanup_desktop_app_bundle_temps
-          return 1
-        fi
+    if [ -n "$failed_formulae" ]; then
+      if [ -n "$detail" ]; then
+        detail="$detail; failed formulae: $failed_formulae"
+      else
+        detail="failed formulae: $failed_formulae"
       fi
     fi
-
-    rm -f "$single_package_brewfile"
-    single_package_brewfile=
-  done 3<"$records_file"
-
-  if [ -s "$failed_casks_file" ]; then
-    if ! failed_casks="$(terrapod_homebrew_core_join_lines_with_commas "$failed_casks_file")"; then
-      cleanup_desktop_app_bundle_temps
-      return 1
-    fi
-    if ! failed_groups="$(terrapod_homebrew_core_join_lines_with_commas "$failed_groups_file")"; then
-      cleanup_desktop_app_bundle_temps
-      return 1
-    fi
-    detail="failed casks: $failed_casks"
     if [ -n "$failed_groups" ]; then
       detail="$detail; App Groups: $failed_groups"
     fi
-    desktop_app_failure_guidance_text="Review Homebrew cask output for $detail, fix app installation access, then rerun tpod apply."
-    cleanup_desktop_app_bundle_temps
-    return 1
+    if [ -n "$failed_formulae" ]; then
+      desktop_app_failure_guidance_text="Review Homebrew desktop app bundle output for $detail, fix app installation access, then rerun tpod apply."
+    else
+      desktop_app_failure_guidance_text="Review Homebrew cask output for $detail, fix app installation access, then rerun tpod apply."
+    fi
   fi
-
-  cleanup_desktop_app_bundle_temps
   return 1
 }
 
@@ -163,18 +67,7 @@ case "$homebrew_arch" in
 esac
 {{ end -}}
 
-find_brew() {
-  brew_bin="$(terrapod_standard_homebrew_brew_path "{{ .chezmoi.os }}" || true)"
-
-  if [ -n "$brew_bin" ] && [ -x "$brew_bin" ]; then
-    printf '%s\n' "$brew_bin"
-    return 0
-  fi
-
-  return 1
-}
-
-brew_bin="$(find_brew || true)"
+brew_bin="$(terrapod_homebrew_find_standard_brew "{{ .chezmoi.os }}" || true)"
 
 if [ -z "$brew_bin" ]; then
 {{ if eq .chezmoi.os "linux" -}}
@@ -216,7 +109,7 @@ if [ -z "$brew_bin" ]; then
     exit_after_install_warning
   fi
   rm -f "$homebrew_installer"
-  brew_bin="$(find_brew || true)"
+  brew_bin="$(terrapod_homebrew_find_standard_brew "{{ .chezmoi.os }}" || true)"
 fi
 
 if [ -z "$brew_bin" ]; then
@@ -228,13 +121,7 @@ if [ -z "$brew_bin" ]; then
   exit_after_install_warning
 fi
 
-if ! brew_shellenv="$("$brew_bin" shellenv)"; then
-  mark_install_warning \
-    homebrew-core \
-    "Homebrew core install needs attention" \
-    "Fix Homebrew shellenv, then rerun tpod apply."
-  exit_after_install_warning
-elif ! eval "$brew_shellenv"; then
+if ! terrapod_homebrew_load_shellenv "$brew_bin"; then
   mark_install_warning \
     homebrew-core \
     "Homebrew core install needs attention" \

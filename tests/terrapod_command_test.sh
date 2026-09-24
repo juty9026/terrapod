@@ -340,6 +340,7 @@ copy_desktop_apply_source_fixture() {
   cp "$tpod_source" "$source_dir/dot_local/bin/symlink_tpod"
   cp "$repo_root/dot_local/lib/terrapod/config-toml.sh" "$source_dir/dot_local/lib/terrapod/config-toml.sh"
   cp "$repo_root/dot_local/lib/terrapod/homebrew-core-bundle.sh" "$source_dir/dot_local/lib/terrapod/homebrew-core-bundle.sh"
+  cp "$repo_root/dot_local/lib/terrapod/homebrew-bundle.sh" "$source_dir/dot_local/lib/terrapod/homebrew-bundle.sh"
   cp "$repo_root/dot_local/lib/terrapod/homebrew-paths.sh" "$source_dir/dot_local/lib/terrapod/homebrew-paths.sh"
   printf '%s\n' \
     '#!/bin/sh' \

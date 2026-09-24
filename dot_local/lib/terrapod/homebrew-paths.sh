@@ -54,6 +54,17 @@ terrapod_standard_homebrew_brew_path() {
   terrapod_standard_homebrew_tool_path "$1" brew
 }
 
+terrapod_homebrew_find_standard_brew() {
+  brew_path="$(terrapod_standard_homebrew_brew_path "$1")" || return 1
+  [ -x "$brew_path" ] || return 1
+  printf '%s\n' "$brew_path"
+}
+
+terrapod_homebrew_load_shellenv() {
+  brew_shellenv="$("$1" shellenv)" || return 1
+  eval "$brew_shellenv"
+}
+
 terrapod_standard_homebrew_mise_path() {
   terrapod_standard_homebrew_tool_path "$1" mise
 }

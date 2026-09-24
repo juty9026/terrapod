@@ -27,13 +27,14 @@ assert_contains \
   "macOS bootstrap always runs the core Brewfile through the core bundle helper"
 
 assert_contains "$ubuntu_homebrew_bootstrap" 'core_brewfile="' "Ubuntu renders the mandatory CLI bundle"
-assert_contains "$ubuntu_homebrew_bootstrap" 'HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade' "Ubuntu bundle apply disables automatic updates"
+assert_contains "$ubuntu_homebrew_bootstrap" 'HOMEBREW_NO_AUTO_UPDATE=1 "$terrapod_bundle_brew" bundle --no-upgrade' "Ubuntu bundle apply disables automatic updates"
 assert_not_contains "$ubuntu_homebrew_bootstrap" 'linux:arm64' "Ubuntu Homebrew bootstrap rejects the arm64 identifier"
 assert_contains "$ubuntu_homebrew_bootstrap" 'linux:x86_64|linux:aarch64)' "Ubuntu Homebrew reconciliation accepts exactly the supported Linux architecture identifiers"
 
 for bundle_source in \
   "$repo_root/.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl" \
-  "$repo_root/dot_local/lib/terrapod/homebrew-core-bundle.sh"
+  "$repo_root/dot_local/lib/terrapod/homebrew-core-bundle.sh" \
+  "$repo_root/dot_local/lib/terrapod/homebrew-bundle.sh"
 do
   unguarded_bundle_calls="$(grep 'brew bundle --no-upgrade' "$bundle_source" | grep -v 'HOMEBREW_NO_AUTO_UPDATE=1' || true)"
   if [ -n "$unguarded_bundle_calls" ]; then
@@ -652,23 +653,23 @@ cask "android-studio"
 brew "mobile-dev-inc/tap/maestro", trusted: true
 PROBE_BREWFILE
 
-sed -n '/^desktop_app_package_records()/,/^}/p' \
-  "$repo_root/.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl" \
+sed -n '/^terrapod_homebrew_bundle_records()/,/^}/p' \
+  "$repo_root/dot_local/lib/terrapod/homebrew-bundle.sh" \
   >"$package_records_probe"
-printf '%s\n' 'desktop_app_package_records "$1"' >>"$package_records_probe"
+printf '%s\n' 'terrapod_homebrew_bundle_records "$1"' >>"$package_records_probe"
 
 package_records_output="$(sh "$package_records_probe" "$package_records_brewfile")"
 
 expected_package_records="$(printf '%s\n' \
-  'development-apps	zed	cask "zed"' \
-  'development-apps	stablyai/orca/orca	cask "stablyai/orca/orca", trusted: true' \
-  'mobile-dev	android-studio	cask "android-studio"' \
-  'mobile-dev	mobile-dev-inc/tap/maestro	brew "mobile-dev-inc/tap/maestro", trusted: true')"
+  'cask	zed	development-apps	cask "zed"' \
+  'cask	stablyai/orca/orca	development-apps	cask "stablyai/orca/orca", trusted: true' \
+  'cask	android-studio	mobile-dev	cask "android-studio"' \
+  'brew	mobile-dev-inc/tap/maestro	mobile-dev	brew "mobile-dev-inc/tap/maestro", trusted: true')"
 
 assert_equals \
   "$package_records_output" \
   "$expected_package_records" \
-  "desktop app package records carry group, token, and the verbatim declaration for casks and tap formulae"
+  "bundle records carry kind, name, group, and the verbatim declaration for casks and tap formulae"
 
 headerless_records_brewfile="$tmp_dir/package-records-headerless-brewfile"
 cat >"$headerless_records_brewfile" <<'PROBE_BREWFILE'
@@ -681,8 +682,8 @@ PROBE_BREWFILE
 headerless_records_output="$(sh "$package_records_probe" "$headerless_records_brewfile")"
 
 expected_headerless_records="$(printf '%s\n' \
-  '-	ghostty	cask "ghostty"' \
-  'launcher	raycast	cask "raycast"')"
+  'cask	ghostty	-	cask "ghostty"' \
+  'cask	raycast	launcher	cask "raycast"')"
 
 assert_equals \
   "$headerless_records_output" \
@@ -691,12 +692,33 @@ assert_equals \
 
 assert_contains \
   "$macos_development_apps_bootstrap" \
-  'read -r app_group token declaration' \
+  'read -r terrapod_bundle_kind terrapod_bundle_name terrapod_bundle_group terrapod_bundle_declaration' \
   "per-package retry reads the declaration field alongside the group and token"
 assert_contains \
   "$macos_development_apps_bootstrap" \
-  '>"$single_package_brewfile"' \
+  '>"$terrapod_bundle_item_file"' \
   "per-package retry writes the recorded declaration so options such as trusted: true survive"
+
+core_options_bin="$tmp_dir/core-options-bin"
+core_options_log="$tmp_dir/core-options.log"
+core_options_brewfile="$tmp_dir/core-options.Brewfile"
+mkdir -p "$core_options_bin"
+printf '%s\n' 'brew "example/tap/tool", trusted: true' >"$core_options_brewfile"
+write_stub "$core_options_bin/brew" \
+  'case "$1" in' \
+  '  bundle)' \
+  '    for arg do case "$arg" in --file=*) file="${arg#--file=}" ;; esac; done' \
+  '    cat "$file" >>"$CORE_OPTIONS_LOG"' \
+  '    exit 42 ;;' \
+  '  --prefix) printf "%s\n" /missing-prefix ;;' \
+  'esac'
+core_options_guidance="$(CORE_OPTIONS_LOG="$core_options_log" PATH="$core_options_bin:/usr/bin:/bin" \
+  sh -c '. "$1"; . "$2"; terrapod_homebrew_core_run_bundle "$3" || printf "%s\n" "$TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT"' \
+  sh "$repo_root/dot_local/lib/terrapod/homebrew-bundle.sh" \
+  "$repo_root/dot_local/lib/terrapod/homebrew-core-bundle.sh" "$core_options_brewfile")"
+assert_contains "$core_options_guidance" "failed formulae: example/tap/tool" "core retry names a failed tap formula"
+assert_equals "$(wc -l <"$core_options_log" | tr -d ' ')" "2" "core bundle retries one declaration after bulk failure"
+assert_file_contains "$core_options_log" 'brew "example/tap/tool", trusted: true' "core retry preserves Brewfile declaration options"
 
 development_apps_failure_bin="$tmp_dir/development-apps-failure-prefix/bin"
 development_apps_failure_state="$tmp_dir/development-apps-failure-state"
@@ -748,6 +770,8 @@ pass "Maestro formula failure records a homebrew-desktop-apps marker"
 mobile_dev_failure_marker_text="$(cat "$mobile_dev_failure_marker")"
 assert_contains "$mobile_dev_failure_marker_text" "mobile-dev-inc/tap/maestro" \
   "a failed tap formula is named in the desktop app warning marker"
+assert_contains "$mobile_dev_failure_marker_text" "Review Homebrew desktop app bundle output for failed formulae:" \
+  "a failed tap formula points to bundle output rather than cask output"
 assert_contains "$mobile_dev_failure_marker_text" "App Groups: mobile-dev" \
   "a failed tap formula is attributed to its macOS App Group"
 
