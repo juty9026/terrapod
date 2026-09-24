@@ -104,8 +104,8 @@ cleanup_installers() {
 trap cleanup_installers EXIT HUP INT TERM
 
 setup_macos_brew() {
-  brew_bin="$(terrapod_standard_homebrew_brew_path darwin || true)"
-  if [ -n "$brew_bin" ] && [ -x "$brew_bin" ] && eval "$("$brew_bin" shellenv)"; then
+  brew_bin="$(terrapod_homebrew_find_standard_brew darwin || true)"
+  if [ -n "$brew_bin" ] && terrapod_homebrew_load_shellenv "$brew_bin"; then
     return
   fi
 

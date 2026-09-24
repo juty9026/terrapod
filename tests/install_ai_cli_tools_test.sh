@@ -23,7 +23,7 @@ assert_not_contains "$ai_cli_tools_installer" "HOMEBREW_NO_AUTO_UPDATE=1" "Ubunt
 assert_not_contains "$ai_cli_tools_installer" "install_ai_cli_bundle" "Ubuntu AI installer renders no Homebrew bundle step"
 assert_not_contains "$ai_cli_tools_installer" 'cask "codex"' "Ubuntu AI installer renders no macOS-only casks"
 assert_contains "$ai_cli_tools_installer" 'finish_install_warning_category' "Ubuntu AI installer clears stale optional AI CLI markers through the policy layer"
-assert_contains "$macos_ai_cli_tools_installer" 'terrapod_standard_homebrew_brew_path "darwin"' "macOS AI installer derives brew from the standard Homebrew prefix"
+assert_contains "$macos_ai_cli_tools_installer" 'terrapod_homebrew_find_standard_brew "darwin"' "macOS AI installer derives brew from the standard Homebrew prefix"
 assert_contains "$macos_ai_cli_tools_installer" "HOMEBREW_NO_AUTO_UPDATE=1" "AI bundle disables Homebrew auto-update"
 assert_contains "$macos_terminal_apps_bootstrap" "HOMEBREW_NO_AUTO_UPDATE=1" "desktop bundle disables Homebrew auto-update"
 
@@ -388,11 +388,11 @@ if [ ! -f "$claude_both_failure_marker" ]; then
   fail "a Homebrew bundle failure together with a Claude Code install failure records the optional-ai-cli-tools marker"
 fi
 claude_both_failure_marker_text="$(cat "$claude_both_failure_marker")"
-assert_contains "$claude_both_failure_marker_text" "Homebrew bundle" \
-  "a combined install failure names the Homebrew bundle in its marker"
+assert_contains "$claude_both_failure_marker_text" "antigravity-cli, codex" \
+  "a combined install failure names the observed Homebrew items in its marker"
 assert_contains "$claude_both_failure_marker_text" "Claude Code" \
   "a combined install failure names Claude Code in its marker"
-if ! grep -F "Failed: Homebrew bundle, Claude Code." "$claude_both_failure_marker" >/dev/null; then
+if ! grep -F "Failed: antigravity-cli, codex, Claude Code." "$claude_both_failure_marker" >/dev/null; then
   fail "a combined install failure names both sources on a single line"
 fi
 pass "a combined install failure records both sources on a single-line marker"
@@ -417,8 +417,48 @@ claude_bundle_failure_marker="$claude_bundle_failure_state/terrapod/install-warn
 if [ ! -f "$claude_bundle_failure_marker" ]; then
   fail "a Homebrew bundle failure records the optional-ai-cli-tools marker"
 fi
-assert_contains "$(cat "$claude_bundle_failure_marker")" "Homebrew bundle" \
-  "a Homebrew bundle failure names the bundle in its marker"
+assert_contains "$(cat "$claude_bundle_failure_marker")" "antigravity-cli, codex" \
+  "a Homebrew bundle failure names observed tools in its marker"
+
+ai_item_brew_bin="$tmp_dir/ai-item-prefix/bin"
+ai_item_home="$tmp_dir/ai-item-home"
+ai_item_state="$tmp_dir/ai-item-state"
+ai_item_log="$tmp_dir/ai-item-brew.log"
+mkdir -p "$ai_item_brew_bin" "$ai_item_home"
+write_stub "$ai_item_brew_bin/brew" \
+  'case "$1" in' \
+  '  shellenv) printf "export PATH=\"%s:$PATH\"\n" "$AI_ITEM_BREW_BIN" ;;' \
+  '  bundle)' \
+  '    for arg do case "$arg" in --file=*) file="${arg#--file=}" ;; esac; done' \
+  '    cat "$file" >>"$AI_ITEM_LOG"' \
+  '    [ "${HOMEBREW_NO_AUTO_UPDATE:-}" = 1 ] || exit 90' \
+  '    if grep -F "antigravity-cli" "$file" >/dev/null && grep -F "codex" "$file" >/dev/null; then exit 42; fi' \
+  '    if grep -F "antigravity-cli" "$file" >/dev/null && [ "${AI_ITEM_FAIL_MODE:-item}" = item ]; then exit 43; fi' \
+  '    cat >/dev/null' \
+  '    ;;' \
+  '  *) exit 64 ;;' \
+  'esac'
+write_claude_installer_stubs "$ai_item_brew_bin"
+render_template_with_homebrew_prefix_provider \
+  "$macos_ai_cli_tools_data" \
+  '.chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl' \
+  "$tmp_dir/ai-item-prefix" >"$tmp_dir/ai-item-installer.sh"
+HOME="$ai_item_home" XDG_STATE_HOME="$ai_item_state" \
+  AI_ITEM_BREW_BIN="$ai_item_brew_bin" AI_ITEM_LOG="$ai_item_log" CLAUDE_INSTALLER_FAIL=1 \
+  PATH="$ai_item_brew_bin:/usr/bin:/bin" sh "$tmp_dir/ai-item-installer.sh" </dev/null
+ai_item_marker="$(cat "$ai_item_state/terrapod/install-warnings/optional-ai-cli-tools")"
+assert_contains "$ai_item_marker" "antigravity-cli" "AI warning identifies a failed Homebrew item"
+assert_contains "$ai_item_marker" "Claude Code" "AI warning keeps the Claude Code failure beside the Homebrew item"
+assert_not_contains "$ai_item_marker" "codex" "AI warning excludes a successful Homebrew item"
+assert_contains "$(cat "$ai_item_log")" 'cask "codex"' "AI retry reaches the next declaration when brew reads stdin"
+
+ai_bulk_only_state="$tmp_dir/ai-bulk-only-state"
+HOME="$ai_item_home" XDG_STATE_HOME="$ai_bulk_only_state" \
+  AI_ITEM_BREW_BIN="$ai_item_brew_bin" AI_ITEM_LOG="$ai_item_log" AI_ITEM_FAIL_MODE=bulk-only \
+  PATH="$ai_item_brew_bin:/usr/bin:/bin" sh "$tmp_dir/ai-item-installer.sh" </dev/null
+ai_bulk_only_marker="$(cat "$ai_bulk_only_state/terrapod/install-warnings/optional-ai-cli-tools")"
+assert_contains "$ai_bulk_only_marker" "Homebrew bundle" "AI warning uses the bundle fallback when every item retry succeeds"
+assert_not_contains "$ai_bulk_only_marker" "antigravity-cli" "AI warning does not guess a failed tool from a bulk-only failure"
 
 if [ -e "$repo_root/dot_config/zsh/path.d/antigravity.zsh.tmpl" ]; then
   fail "legacy Antigravity app-bundle PATH snippet is no longer managed"

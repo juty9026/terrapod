@@ -16,7 +16,10 @@ declare_install_warning_category "$AI_CLI_WARNING_CATEGORY" "Optional AI CLI too
 {{ if not (and (eq .chezmoi.os "darwin") (or (default false (get . "enableAiCliTools")) (default false (get . "enableDevelopmentWorkspace")))) }}
 finish_install_warning_category
 {{ else }}
+{{ include "dot_local/lib/terrapod/homebrew-bundle.sh" }}
+
 ai_cli_brewfile=
+ai_cli_failures_file=
 claude_code_installer=
 
 CLAUDE_CODE_CANONICAL_EXECUTABLE="$HOME/.local/bin/claude"
@@ -24,23 +27,19 @@ CLAUDE_CODE_INSTALLER_URL=https://claude.ai/install.sh
 
 cleanup_ai_cli_install() {
   [ -z "$ai_cli_brewfile" ] || rm -f "$ai_cli_brewfile"
+  [ -z "$ai_cli_failures_file" ] || rm -f "$ai_cli_failures_file"
   [ -z "$claude_code_installer" ] || rm -f "$claude_code_installer"
 }
 
 trap cleanup_ai_cli_install EXIT HUP INT TERM
 
-standard_brew_path() {
-  terrapod_standard_homebrew_brew_path "{{ .chezmoi.os }}"
-}
-
 setup_brew_environment() {
-  brew_bin="$(standard_brew_path || true)"
-  if [ -z "$brew_bin" ] || [ ! -x "$brew_bin" ]; then
+  brew_bin="$(terrapod_homebrew_find_standard_brew "{{ .chezmoi.os }}" || true)"
+  if [ -z "$brew_bin" ]; then
     echo "Mandatory standard-prefix Homebrew is unavailable for the Optional AI Tool Stack." >&2
     return 1
   fi
-  brew_shellenv="$("$brew_bin" shellenv)" || return 1
-  eval "$brew_shellenv"
+  terrapod_homebrew_load_shellenv "$brew_bin"
 }
 
 install_ai_cli_bundle() {
@@ -50,7 +49,8 @@ install_ai_cli_bundle() {
 {{ includeTemplate "Brewfile.ai-cli-tools.tmpl" . }}
 BREWFILE
 
-  HOMEBREW_NO_AUTO_UPDATE=1 "$brew_bin" bundle --no-upgrade --file="$ai_cli_brewfile"
+  ai_cli_failures_file="$(mktemp "${TMPDIR:-/tmp}/terrapod-ai-cli-failures.XXXXXX")" || return 1
+  terrapod_homebrew_bundle_run "$brew_bin" "$ai_cli_brewfile" "$ai_cli_failures_file"
 }
 
 install_claude_code() {
@@ -73,7 +73,16 @@ install_claude_code() {
   [ -x "$CLAUDE_CODE_CANONICAL_EXECUTABLE" ]
 }
 
-install_ai_cli_bundle || note_failed_install_warning_item "Homebrew bundle"
+if ! install_ai_cli_bundle; then
+  if [ -n "$ai_cli_failures_file" ] && [ -s "$ai_cli_failures_file" ]; then
+    ai_cli_tab="$(printf '\t')"
+    while IFS="$ai_cli_tab" read -r ai_cli_kind ai_cli_name ai_cli_group <&3; do
+      note_failed_install_warning_item "$ai_cli_name"
+    done 3<"$ai_cli_failures_file"
+  else
+    note_failed_install_warning_item "Homebrew bundle"
+  fi
+fi
 install_claude_code || note_failed_install_warning_item "Claude Code"
 
 finish_install_warning_category "Failed: %s. Review the installer output and network access, then rerun tpod apply."
