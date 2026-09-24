@@ -633,11 +633,11 @@ if [ -n "$unsupported_override_output" ]; then
 fi
 pass "unsupported architecture does not print an overridden Homebrew prefix"
 
-test_hook_records_output="$(
-  TERRAPOD_PRINT_HOMEBREW_CLI_RECORDS=1 TERRAPOD_PROFILE=macos-terminal /bin/sh "$terrapod" status
-)"
-assert_line "$test_hook_records_output" "$(printf 'chezmoi\tchezmoi')" "the Homebrew CLI record hook answers ahead of any command"
-assert_not_contains "$test_hook_records_output" "Terrapod status" "the Homebrew CLI record hook does not also run the requested command"
+core_records_output="$("$executable_selection_helper" core-records)"
+assert_line "$core_records_output" "homebrew-formula|chezmoi|chezmoi" "executable selection exposes live Core Shell Stack records"
+assert_line "$core_records_output" "homebrew-formula|git-delta|delta" "executable selection exposes the git-delta command mapping"
+assert_line "$core_records_output" "homebrew-formula|neovim|nvim" "executable selection exposes the Neovim command mapping"
+assert_line "$core_records_output" "homebrew-formula|ripgrep|rg" "executable selection exposes the ripgrep command mapping"
 
 managed_keys_hook_output="$(
   TERRAPOD_PRINT_MANAGED_SETUP_KEYS=1 TERRAPOD_PROFILE=macos-terminal /bin/sh "$terrapod" status
@@ -646,12 +646,10 @@ assert_line "$managed_keys_hook_output" "profile" "the managed setup key hook an
 assert_not_contains "$managed_keys_hook_output" "Terrapod status" "the managed setup key hook does not also run the requested command"
 
 unset_hook_help_output="$(
-  TERRAPOD_PRINT_MANAGED_SETUP_KEYS=0 TERRAPOD_PRINT_HOMEBREW_CLI_RECORDS=0 \
-    TERRAPOD_PRINT_STANDARD_HOMEBREW_PREFIX=0 \
+  TERRAPOD_PRINT_MANAGED_SETUP_KEYS=0 TERRAPOD_PRINT_STANDARD_HOMEBREW_PREFIX=0 \
     TERRAPOD_PROFILE=macos-terminal /bin/sh "$terrapod" help
 )"
 assert_contains "$unset_hook_help_output" "Terrapod - a small landing pod for your dotfiles" "an unset test hook leaves normal command dispatch alone"
-assert_not_contains "$unset_hook_help_output" "$(printf 'chezmoi\tchezmoi')" "an unset test hook prints no Homebrew CLI records"
 assert_not_contains "$unset_hook_help_output" "enableMacosAppGroupMobileDev" "an unset test hook prints no managed setup keys"
 
 managed_targets="$(
@@ -1938,6 +1936,19 @@ assert_contains "$macos_status_output" "Profile: macOS Terminal Profile" "Terrap
 assert_contains "$macos_status_output" "Config: $status_config (present)" "Terrapod status reports explicit config path"
 assert_contains "$macos_status_output" "Optional Editor Stack         : enabled (rich Neovim configuration)" "Terrapod status reports enabled Optional Editor Stack state"
 assert_contains "$macos_status_output" "GitHub CLI Extension Set      : missing (missing extensions: github/gh-stack)" "Terrapod status reports a missing GitHub CLI Extension Set member"
+declared_extensions="$tmp_dir/declared-gh-extensions"
+status_extensions="$tmp_dir/status-gh-extensions"
+sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' "$repo_root/gh-extensions.tmpl" |
+  LC_ALL=C sort >"$declared_extensions"
+printf '%s\n' "$macos_status_output" |
+  sed -n 's/^GitHub CLI Extension Set *: missing (missing extensions: \(.*\))$/\1/p' |
+  tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' |
+  LC_ALL=C sort >"$status_extensions"
+if ! cmp -s "$declared_extensions" "$status_extensions"; then
+  diff -u "$declared_extensions" "$status_extensions" >&2 || true
+  fail "GitHub CLI Extension Set status checks every declared extension"
+fi
+pass "GitHub CLI Extension Set status checks every declared extension"
 assert_contains "$macos_status_output" "Optional AI Tool Stack        : enabled (tools available: agy, claude, codex)" "Terrapod status reports enabled Optional AI Tool Stack tool state"
 assert_contains "$macos_status_output" "Optional Development Workspace: enabled (development Zellij layouts)" "Terrapod status reports enabled Optional Development Workspace state"
 assert_contains "$macos_status_output" "terminal-apps                 : enabled (Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, and Noto Sans CJK KR)" "Terrapod status reports enabled terminal-apps macOS App Group with its terminal fonts"

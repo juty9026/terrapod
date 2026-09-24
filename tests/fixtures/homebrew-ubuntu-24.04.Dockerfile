@@ -21,9 +21,10 @@ RUN eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" \
 
 RUN eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" \
   && records=/tmp/homebrew-cli-records \
-  && TERRAPOD_PRINT_HOMEBREW_CLI_RECORDS=1 /workspace/dot_local/bin/executable_terrapod >"$records" \
+  && /workspace/dot_local/lib/terrapod/executable_executable-selection core-records >"$records" \
   && [ "$(wc -l <"$records")" -eq 20 ] \
-  && while IFS="$(printf '\t')" read -r formula command; do \
+  && while IFS='|' read -r provider formula command; do \
+       [ "$provider" = homebrew-formula ] || exit 1; \
        command_path="$(command -v "$command")"; \
        case "$command_path" in \
          /home/linuxbrew/.linuxbrew/*) ;; \

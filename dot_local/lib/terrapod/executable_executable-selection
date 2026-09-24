@@ -8,9 +8,9 @@ launcher_enabled="${4:-false}"
 show_payloads="${5:-false}"
 
 case "$mode" in
-  apply|status|doctor) ;;
+  apply|status|doctor|core-records) ;;
   *)
-    printf '%s\n' "usage: executable-selection {apply|status|doctor} <profile> <ai-enabled> <launcher-enabled> [show-payloads]" >&2
+    printf '%s\n' "usage: executable-selection {apply|status|doctor} <profile> <ai-enabled> <launcher-enabled> [show-payloads] | executable-selection core-records" >&2
     exit 2
     ;;
 esac
@@ -229,6 +229,11 @@ zellij zellij
 zoxide zoxide
 EOF
 }
+
+if [ "$mode" = core-records ]; then
+  core_records
+  exit 0
+fi
 
 runtime_records() {
   printf '%s\n' \
