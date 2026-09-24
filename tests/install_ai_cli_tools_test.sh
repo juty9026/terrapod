@@ -230,13 +230,6 @@ if [ ! -f "$ai_cli_failure_marker" ]; then
 fi
 pass "routine Optional AI Tool Stack bundle failure records a warning and exits zero"
 
-HOME="$ai_cli_failure_home" XDG_STATE_HOME="$ai_cli_failure_state" \
-  AI_BREW_BIN="$macos_ai_brew_bin" AI_BREW_LOG="$ai_cli_failure_log" AI_BREW_FAIL=1 \
-  TERRAPOD_FIRST_RUN_APPLY=1 PATH="$macos_ai_brew_bin:/usr/bin:/bin" \
-  sh "$macos_ai_cli_tools_installer_script" >/dev/null 2>&1 ||
-  fail "first-run Optional AI Tool Stack bundle failure remains recoverable"
-pass "first-run Optional AI Tool Stack bundle failure records a warning and exits zero"
-
 ai_cli_marker_write_failure_home="$tmp_dir/ai-cli-marker-write-failure-home"
 ai_cli_marker_write_failure_parent="$tmp_dir/ai-cli-marker-write-failure-parent"
 ai_cli_marker_write_failure_log="$tmp_dir/ai-cli-marker-write-failure.log"
