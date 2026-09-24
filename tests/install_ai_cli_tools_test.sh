@@ -180,7 +180,9 @@ assert_not_contains "$ai_cli_tools_installer" "https://claude.ai/install.sh" \
 assert_contains "$macos_ai_cli_tools_installer" 'bash "$claude_code_installer" </dev/null' \
   "Claude Code installer runs under bash with stdin detached"
 
-linux_ai_brew_bin="$tmp_dir/linux-ai-brew-bin"
+# The installer finds brew only through its standard prefix, so the fake lives
+# there: a Homebrew run would reach it and leave a log.
+linux_ai_brew_bin="$tmp_dir/linux-ai-prefix/bin"
 linux_ai_brew_home="$tmp_dir/linux-ai-brew-home"
 linux_ai_brew_state="$tmp_dir/linux-ai-brew-state"
 linux_ai_brew_log="$tmp_dir/linux-ai-brew.log"

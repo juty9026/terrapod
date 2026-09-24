@@ -25,6 +25,9 @@ macos_development_workspace_bootstrap="$(render_template "$macos_development_wor
 assert_bundle_calls_disable_auto_update() {
   bundle_log="$1"
   bundle_message="$2"
+  if [ ! -f "$bundle_log" ]; then
+    fail "$bundle_message: no brew call was recorded"
+  fi
   bundle_calls="$(grep -c '^brew auto-update:' "$bundle_log" || true)"
   guarded_bundle_calls="$(grep -cx 'brew auto-update:1' "$bundle_log" || true)"
   if [ "$bundle_calls" -eq 0 ]; then
@@ -99,6 +102,8 @@ run_linux_homebrew_arch_case() {
   write_stub "$case_bin/curl" \
     'printf "%s\n" "curl args:$*" >>"$LINUX_HOMEBREW_ARCH_LOG"' \
     'exit 97'
+  # shellenv puts the prefix on PATH, as the real one does, so the core bundle
+  # runs through this fake instead of failing on a missing brew.
   write_stub "$case_prefix/bin/brew" \
     'printf "%s\n" "brew args:$*" >>"$LINUX_HOMEBREW_ARCH_LOG"' \
     'case "$1" in' \
