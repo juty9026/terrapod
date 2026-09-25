@@ -269,6 +269,17 @@ if [ ! -f "$ubuntu_bootstrap_marker" ]; then
 fi
 pass "Ubuntu bootstrap retry keeps the ubuntu-bootstrap warning after a failed retry"
 
+ubuntu_bootstrap_marker_dir="${ubuntu_bootstrap_marker%/*}"
+: >"$BOOTSTRAP_TEST_LOG"
+retry_write_failure_status=0
+chmod 555 "$ubuntu_bootstrap_marker_dir"
+BOOTSTRAP_APT_INSTALL_STATUS=42 sh "$retry_rendered" \
+  >"$tmp_dir/retry-write-failure.out" 2>"$tmp_dir/retry-write-failure.err" ||
+  retry_write_failure_status=$?
+chmod 755 "$ubuntu_bootstrap_marker_dir"
+assert_status "$retry_write_failure_status" 1 \
+  "Ubuntu bootstrap retry fails when the install warning marker cannot be written"
+
 : >"$BOOTSTRAP_TEST_LOG"
 if ! sh "$retry_rendered" >"$tmp_dir/retry-success.out" 2>"$tmp_dir/retry-success.err"; then
   fail "Ubuntu bootstrap retry should succeed when the retried bootstrap succeeds"
@@ -298,3 +309,20 @@ if sh "$rendered_missing_lib" >/dev/null 2>&1; then
   fail "Ubuntu bootstrap stops when the install warning library is missing"
 fi
 pass "Ubuntu bootstrap stops when the install warning library is missing"
+
+# The install body lives once, in ubuntu-bootstrap.sh; both scripts call it.
+for ubuntu_pair_template in \
+  .chezmoiscripts/run_onchange_before_00-bootstrap-ubuntu.sh.tmpl \
+  .chezmoiscripts/run_before_01-retry-ubuntu-bootstrap.sh.tmpl; do
+  assert_file_contains \
+    "$repo_root/$ubuntu_pair_template" \
+    'terrapod_ubuntu_bootstrap_install "$os_id" "$version_id"' \
+    "Ubuntu script calls the shared install body: $ubuntu_pair_template"
+
+  for ubuntu_body_detail in declare_install_warning_category terrapod_ubuntu_bootstrap_run; do
+    assert_file_not_contains \
+      "$repo_root/$ubuntu_pair_template" \
+      "$ubuntu_body_detail" \
+      "Ubuntu script leaves $ubuntu_body_detail to the shared body: $ubuntu_pair_template"
+  done
+done

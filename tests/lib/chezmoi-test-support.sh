@@ -44,6 +44,19 @@ render_template() {
     --file "$repo_root/$file"
 }
 
+render_template_from_source() {
+  data="$1"
+  file="$2"
+  source="$3"
+
+  chezmoi \
+    --config "$chezmoi_config" \
+    --source "$source" \
+    execute-template \
+    --override-data "$data" \
+    --file "$source/$file"
+}
+
 render_template_with_homebrew_prefix_provider() {
   data="$1"
   file="$2"

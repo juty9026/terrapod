@@ -7,25 +7,14 @@ set -eu
 warnings_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warnings.sh"
 policy_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/install-warning-script.sh"
 status_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/jetendard-font-status.sh"
+install_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/jetendard-font-install.sh"
 font_helper="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/executable_jetendard-font"
 # Jetendard font helper checksum: {{ include "dot_local/lib/terrapod/executable_jetendard-font" | sha256sum }}
+# Jetendard font install body checksum: {{ include "dot_local/lib/terrapod/jetendard-font-install.sh" | sha256sum }}
 . "$warnings_lib"
 . "$policy_lib"
 . "$status_lib"
+. "$install_lib"
 
-declare_install_warning_category jetendard-font "Jetendard font install needs attention"
-
-if command -v python3 >/dev/null 2>&1; then
-  if python3 "$font_helper" install; then
-    printf '%s\n' "Jetendard is ready. Restart Ghostty or Zed if an existing window still uses a cached font."
-    finish_install_warning_category
-  else
-    # The helper's exit status names the failure; anything else is generic.
-    font_status=$?
-  fi
-else
-  font_status=127
-fi
-
-fail_install_warning_category "$(terrapod_jetendard_font_guidance "$font_status")"
+terrapod_jetendard_font_install "$font_helper"
 {{- end }}

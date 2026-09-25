@@ -26,18 +26,35 @@ assert_contains \
 
 assert_contains \
   "$macos_jetendard_installer" \
-  'python3 "$font_helper" install' \
-  "Jetendard installer invokes the helper install command"
+  "Jetendard font install body checksum:" \
+  "Jetendard installer tracks the install body checksum"
 
 assert_contains \
   "$macos_jetendard_retry" \
   'if ! terrapod_install_warning_existing_path jetendard-font >/dev/null 2>&1; then' \
   "Jetendard retry is gated by its warning marker"
 
-assert_contains \
-  "$macos_jetendard_retry" \
-  'python3 "$font_helper" install' \
-  "Jetendard retry invokes the helper install command"
+# The install body lives once, in jetendard-font-install.sh. The retry inlines
+# that library, so only the template source shows what the script itself says.
+for jetendard_pair_template in \
+  .chezmoiscripts/run_onchange_after_65-install-jetendard-font.sh.tmpl \
+  .chezmoiscripts/run_before_02-retry-jetendard-font.sh.tmpl; do
+  assert_file_contains \
+    "$repo_root/$jetendard_pair_template" \
+    'terrapod_jetendard_font_install "$font_helper"' \
+    "Jetendard script calls the shared install body: $jetendard_pair_template"
+
+  for jetendard_body_detail in \
+    'command -v python3' \
+    'python3 "$font_helper" install' \
+    'terrapod_jetendard_font_guidance' \
+    'declare_install_warning_category'; do
+    assert_file_not_contains \
+      "$repo_root/$jetendard_pair_template" \
+      "$jetendard_body_detail" \
+      "Jetendard script leaves $jetendard_body_detail to the shared body: $jetendard_pair_template"
+  done
+done
 
 jetendard_missing_lib_source="$tmp_dir/jetendard-onchange-missing-lib"
 mkdir -p "$jetendard_missing_lib_source"
@@ -72,7 +89,7 @@ terrapod_install_warning_clear() {
 terrapod_install_warning_write() {
   printf '%s\n' write >>"$JETENDARD_ADAPTER_LOG"
   printf '%s\n' "$3" >"$JETENDARD_ADAPTER_LOG.guidance"
-  return 0
+  [ "${JETENDARD_WRITE_FAIL:-0}" != 1 ]
 }
 SH
 cat >"$jetendard_helper_stub" <<'PY'
@@ -118,11 +135,30 @@ assert_equals "$(cat "$jetendard_adapter_log")" 'marker-check' \
   "Jetendard retry does not install without a warning marker"
 
 : >"$jetendard_adapter_log"
-JETENDARD_ADAPTER_LOG="$jetendard_adapter_log" JETENDARD_MARKER_EXISTS=1 JETENDARD_CLEAR_FAIL=0 sh "$jetendard_retry_fixture"
+JETENDARD_ADAPTER_LOG="$jetendard_adapter_log" JETENDARD_MARKER_EXISTS=1 JETENDARD_CLEAR_FAIL=0 sh "$jetendard_retry_fixture" >/dev/null
 assert_equals "$(cat "$jetendard_adapter_log")" 'marker-check
 helper
 clear' \
   "Jetendard retry checks the marker before install and clear"
+
+for adapter in "$jetendard_installer_fixture" "$jetendard_retry_fixture"; do
+  : >"$jetendard_adapter_log"
+  JETENDARD_ADAPTER_LOG="$jetendard_adapter_log" JETENDARD_MARKER_EXISTS=1 JETENDARD_CLEAR_FAIL=0 \
+    sh "$adapter" >"$jetendard_adapter_fixture/success.out" 2>&1 ||
+    fail "successful Jetendard install exits 0: $adapter"
+  assert_contains "$(cat "$jetendard_adapter_log")" 'helper
+clear' "successful Jetendard install clears its marker: $adapter"
+  assert_file_contains "$jetendard_adapter_fixture/success.out" "Jetendard is ready." \
+    "successful Jetendard install says the font is ready: $adapter"
+
+  : >"$jetendard_adapter_log"
+  jetendard_write_fail_status=0
+  JETENDARD_ADAPTER_LOG="$jetendard_adapter_log" JETENDARD_MARKER_EXISTS=1 JETENDARD_CLEAR_FAIL=0 \
+    JETENDARD_HELPER_EXIT=1 JETENDARD_WRITE_FAIL=1 \
+    sh "$adapter" >/dev/null 2>&1 || jetendard_write_fail_status=$?
+  assert_status "$jetendard_write_fail_status" 1 \
+    "failed Jetendard install exits 1 when its marker cannot be written: $adapter"
+done
 
 # The helper exit status, not its message, is what the wrappers branch on:
 # 2 rate limit, 3 unreachable GitHub, 4 unusable release, anything else generic.

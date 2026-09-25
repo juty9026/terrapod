@@ -164,6 +164,7 @@ macos_only_entries="
 .chezmoiscripts/run_onchange_after_65-install-jetendard-font.sh.tmpl
 dot_local/lib/terrapod/executable_jetendard-font
 dot_local/lib/terrapod/executable_jetendard-settings
+dot_local/lib/terrapod/jetendard-font-install.sh
 dot_local/lib/terrapod/jetendard-font-status.sh
 dot_config/ghostty
 dot_config/private_karabiner

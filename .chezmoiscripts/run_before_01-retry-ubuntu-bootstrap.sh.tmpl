@@ -16,11 +16,5 @@ ubuntu_bootstrap_lib="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/ubuntu-boo
 os_id="{{ get .chezmoi.osRelease "id" }}"
 version_id="{{ get .chezmoi.osRelease "versionID" }}"
 
-declare_install_warning_category ubuntu-bootstrap "$TERRAPOD_UBUNTU_BOOTSTRAP_SUMMARY"
-
-if terrapod_ubuntu_bootstrap_run "$os_id" "$version_id"; then
-  finish_install_warning_category
-fi
-
-fail_install_warning_category "$TERRAPOD_UBUNTU_BOOTSTRAP_GUIDANCE"
+terrapod_ubuntu_bootstrap_install "$os_id" "$version_id"
 {{- end }}
