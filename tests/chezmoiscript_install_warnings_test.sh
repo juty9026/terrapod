@@ -143,6 +143,7 @@ for warning_script in $path_sourced_warning_scripts; do
   case "$warning_script" in
     *bootstrap-ubuntu*) install_body_library=ubuntu-bootstrap.sh ;;
     *install-jetendard-font*) install_body_library=jetendard-font-install.sh ;;
+    *) fail "run_onchange script names its install body library: $warning_script" ;;
   esac
 
   assert_file_exists \

@@ -88,6 +88,7 @@ terrapod_install_warning_clear() {
 }
 terrapod_install_warning_write() {
   printf '%s\n' write >>"$JETENDARD_ADAPTER_LOG"
+  printf '%s\n' "$2" >"$JETENDARD_ADAPTER_LOG.summary"
   printf '%s\n' "$3" >"$JETENDARD_ADAPTER_LOG.guidance"
   [ "${JETENDARD_WRITE_FAIL:-0}" != 1 ]
 }
@@ -178,6 +179,8 @@ assert_jetendard_guidance() {
     fail "$label (adapter exited non-zero)"
 
   assert_equals "$(cat "$jetendard_adapter_log.guidance")" "$expected" "$label"
+  assert_equals "$(cat "$jetendard_adapter_log.summary")" "Jetendard font install needs attention" \
+    "$label (summary)"
 }
 
 for adapter in "$jetendard_installer_fixture" "$jetendard_retry_fixture"; do

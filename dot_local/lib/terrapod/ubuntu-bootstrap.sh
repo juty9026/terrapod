@@ -73,8 +73,11 @@ terrapod_ubuntu_bootstrap_run() {
   return 0
 }
 
-# The install body shared by the bootstrap-ubuntu installer and its retry: it
-# declares the ubuntu-bootstrap category, runs the bootstrap, and records or
+# The install body shared by the bootstrap-ubuntu installer and its retry.
+#
+#   terrapod_ubuntu_bootstrap_install <os_id> <version_id>
+#
+# Declares the ubuntu-bootstrap category, runs the bootstrap, and records or
 # clears the marker. It always ends the script through the install warning
 # policy layer, so call it from the script's own shell, not inside a command
 # substitution or pipeline. The caller loads install-warnings.sh and
