@@ -53,6 +53,10 @@ pass "brew fake does not match another package"
 MACOS_BREW_LOG="$case_call_log" MACOS_BREW_FAIL_CASKS=desktop "$case_bin/brew" bundle --file="$bundle" >/dev/null 2>&1 &&
   fail "brew fake matches an optioned cask"
 pass "brew fake matches an optioned cask"
+: >"$case_call_log"
+MACOS_BREW_LOG="$case_call_log" HOMEBREW_NO_AUTO_UPDATE=1 "$case_bin/brew" bundle --file="$bundle"
+MACOS_BREW_LOG="$case_call_log" "$case_bin/brew" --prefix >/dev/null
+assert_equals "$(grep '^brew auto-update:' "$case_call_log")" "brew auto-update:1" "brew fake records HOMEBREW_NO_AUTO_UPDATE for bundle calls only"
 
 responses="$case_dir/gum.responses"
 gum_log="$case_dir/gum.log"
