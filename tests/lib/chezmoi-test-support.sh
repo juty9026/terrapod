@@ -33,15 +33,20 @@ managed_target_paths_from_source() {
 }
 
 render_template() {
+  render_template_from_source "$1" "$2" "$repo_root"
+}
+
+render_template_from_source() {
   data="$1"
   file="$2"
+  source="$3"
 
   chezmoi \
     --config "$chezmoi_config" \
-    --source "$repo_root" \
+    --source "$source" \
     execute-template \
     --override-data "$data" \
-    --file "$repo_root/$file"
+    --file "$source/$file"
 }
 
 render_template_with_homebrew_prefix_provider() {

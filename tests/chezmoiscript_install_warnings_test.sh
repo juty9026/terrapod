@@ -110,3 +110,48 @@ for warning_script in $path_sourced_warning_scripts; do
     'if [ -f "$install_warnings_lib" ]; then' \
     "run_onchange script keeps no install warning loader guard: $warning_script"
 done
+
+# chezmoi reruns a run_onchange_ script when its rendered content changes, so
+# the rendered text decides which library edits re-trigger an installer. Each
+# installer's install body must be in that hash; the marker libraries, the
+# policy layer and the Jetendard guidance text must not be.
+content_hash_source="$tmp_dir/content-hash-source"
+mkdir -p "$content_hash_source"
+cp -R "$repo_root/." "$content_hash_source"
+
+render_after_library_edit() {
+  warning_script="$1"
+  library="$2"
+  library_path="$content_hash_source/dot_local/lib/terrapod/$library"
+
+  cp "$library_path" "$library_path.orig"
+  printf '%s\n' '# content hash probe' >>"$library_path"
+  render_template_from_source "$(warning_script_data "$warning_script")" "$warning_script" "$content_hash_source"
+  mv "$library_path.orig" "$library_path"
+}
+
+for warning_script in $path_sourced_warning_scripts; do
+  baseline_render="$(render_template_from_source "$(warning_script_data "$warning_script")" "$warning_script" "$content_hash_source")"
+
+  for unhashed_library in install-warnings.sh install-warning-script.sh jetendard-font-status.sh; do
+    assert_equals \
+      "$(render_after_library_edit "$warning_script" "$unhashed_library")" \
+      "$baseline_render" \
+      "run_onchange script content ignores edits to $unhashed_library: $warning_script"
+  done
+
+  case "$warning_script" in
+    *bootstrap-ubuntu*) install_body_library=ubuntu-bootstrap.sh ;;
+    *install-jetendard-font*) install_body_library=jetendard-font-install.sh ;;
+    *) fail "run_onchange script names its install body library: $warning_script" ;;
+  esac
+
+  assert_file_exists \
+    "$repo_root/dot_local/lib/terrapod/$install_body_library" \
+    "install body library exists: $install_body_library"
+
+  if [ "$(render_after_library_edit "$warning_script" "$install_body_library")" = "$baseline_render" ]; then
+    fail "run_onchange script content changes with its install body library $install_body_library: $warning_script"
+  fi
+  pass "run_onchange script content changes with its install body library $install_body_library: $warning_script"
+done
