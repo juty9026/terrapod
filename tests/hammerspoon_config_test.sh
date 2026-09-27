@@ -81,7 +81,8 @@ t	Ghostty	com.mitchellh.ghostty
 s	Slack	com.tinyspeck.slackmacgap
 d	Discord	com.hnc.Discord
 n	Notion	notion.id
-b	Google Chrome	com.google.Chrome
+b	Aside	at.studio.AsideBrowser
+c	Google Chrome	com.google.Chrome
 1	Orca	com.stablyai.orca
 2	Zed	dev.zed.Zed
 o	Obsidian	md.obsidian

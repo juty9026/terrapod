@@ -174,6 +174,7 @@ macOS desktop application은 machine-local data key로 제어되는 opt-in App G
 - `monitoring`: iStat Menus.
 - `development-apps`: Zed, Orca ADE(`stablyai/orca/orca`), OrbStack.
 - `mobile-dev`: Android Studio와 Maestro(`mobile-dev-inc/tap/maestro`).
+- `browsers`: Aside와 Google Chrome.
 
 Terrapod은 Orca를 설치할 때 fully-qualified `stablyai/orca/orca` cask만 trust하며, `stablyai/orca` tap 전체를 trust하지 않습니다.
 
@@ -326,6 +327,7 @@ Optional stack profile과 macOS App Group setting은 기본적으로 disabled입
 | `enableMacosAppGroupMonitoring` | `false` | monitoring macOS App Group인 iStat Menus를 설치합니다. |
 | `enableMacosAppGroupDevelopmentApps` | `false` | development-apps macOS App Group인 Zed, Orca ADE(`stablyai/orca/orca`), OrbStack을 설치합니다. |
 | `enableMacosAppGroupMobileDev` | `false` | mobile-dev macOS App Group인 Android Studio와 Maestro(`mobile-dev-inc/tap/maestro`)를 설치합니다. `ANDROID_HOME`과 `JAVA_HOME`도 함께 설정합니다. |
+| `enableMacosAppGroupBrowsers` | `false` | browsers macOS App Group인 Aside와 Google Chrome을 설치합니다. |
 
 `enableDevelopmentWorkspace`가 `true`이면 `enableEditorStack`이나 `enableAiCliTools`가 false로 기록되어 있어도 Optional Editor Stack과 Optional AI Tool Stack이 함께 활성화됩니다. 다만 VPS Shell Profile에서는 Optional AI Tool Stack이 macOS 전용이므로 이 묶음에서 빠집니다.
 
@@ -369,6 +371,7 @@ enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
 enableMacosAppGroupMobileDev = false
+enableMacosAppGroupBrowsers = false
 ```
 
 Editor-only machine:
