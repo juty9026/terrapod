@@ -345,7 +345,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Enabling the **Optional Development Workspace** does not enable the **macOS Desktop App Stack**.
 - **macOS App Groups** are configured during **Terrapod** setup and remain within the **macOS Desktop App Stack** boundary.
 - When **macOS App Group** settings change, `tpod apply` keeps Homebrew desktop app warning marker content aligned with currently enabled groups; failures for disabled groups are removed from readiness warnings while enabled group failures remain.
-- The implemented **macOS App Groups** are terminal-apps, automation, launcher, monitoring, development-apps, and mobile-dev.
+- The implemented **macOS App Groups** are terminal-apps, automation, launcher, monitoring, development-apps, mobile-dev, and browsers.
 - The terminal-apps **macOS App Group** contains Ghostty.
 - The terminal-apps **macOS App Group** also carries the terminal fonts `font-d2coding`, `font-hack-nerd-font`, `font-jetbrains-mono-nerd-font`, and `font-noto-sans-cjk-kr` installed as Homebrew casks, distinct from the Jetendard font installer owned by the **macOS Terminal Profile**.
 - cmux is outside the declared **macOS Desktop App Stack**; existing cmux installs or settings may remain on a machine unmanaged and are not removed by **Terrapod**.
@@ -363,6 +363,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - The managed `.zshenv` exports `ANDROID_HOME`, `ANDROID_SDK_ROOT`, and `JAVA_HOME` only when the mobile-dev **macOS App Group** is enabled, and renders them before the machine-local override loop so explicit overrides still run last.
 - `JAVA_HOME` resolves to the runtime bundled with Android Studio, so **Terrapod** declares no separate JDK.
 - Android SDK components and Xcode remain outside **Terrapod** ownership; the Android SDK Manager owns the former and the App Store distributes the latter.
+- The browsers **macOS App Group** contains Aside and Google Chrome.
 - `enableMacosAppGroupAiApps` is deprecated and is not an alias for `enableMacosAppGroupDevelopmentApps`; users must run explicit setup or configure migration.
 - The Hammerspoon app launcher maps Orca to `1` and Zed to `2`.
 - Orca's bundled `orca` CLI remains an artifact of the development-apps **macOS App Group** and is not a member of the cross-profile **Optional AI Tool Stack**.

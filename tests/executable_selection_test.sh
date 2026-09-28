@@ -629,6 +629,7 @@ enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
 enableMacosAppGroupMobileDev = false
+enableMacosAppGroupBrowsers = false
 EOF
 cat >"$integration_bin/chezmoi" <<'EOF'
 #!/bin/sh

@@ -181,6 +181,7 @@ installs that rendered bundle:
 - `monitoring`: iStat Menus.
 - `development-apps`: Zed, Orca ADE (`stablyai/orca/orca`), and OrbStack.
 - `mobile-dev`: Android Studio and Maestro (`mobile-dev-inc/tap/maestro`).
+- `browsers`: Aside and Google Chrome.
 
 When installing Orca, Terrapod trusts only the fully-qualified `stablyai/orca/orca` cask, not the entire `stablyai/orca` tap.
 
@@ -346,6 +347,7 @@ Optional stack profiles and macOS App Group settings are disabled by default.
 | `enableMacosAppGroupMonitoring` | `false` | Installs the monitoring macOS App Group: iStat Menus. |
 | `enableMacosAppGroupDevelopmentApps` | `false` | Installs the development-apps macOS App Group: Zed, Orca ADE (`stablyai/orca/orca`), and OrbStack. |
 | `enableMacosAppGroupMobileDev` | `false` | Installs the mobile-dev macOS App Group: Android Studio and Maestro (`mobile-dev-inc/tap/maestro`). It also sets `ANDROID_HOME` and `JAVA_HOME`. |
+| `enableMacosAppGroupBrowsers` | `false` | Installs the browsers macOS App Group: Aside and Google Chrome. |
 
 When `enableDevelopmentWorkspace` is `true`, it enables both the Optional Editor Stack and Optional AI Tool Stack
 even when `enableEditorStack` or `enableAiCliTools` are recorded as false. On the VPS Shell Profile the Optional
@@ -396,6 +398,7 @@ enableMacosAppGroupLauncher = false
 enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
 enableMacosAppGroupMobileDev = false
+enableMacosAppGroupBrowsers = false
 ```
 
 Editor-only machine:

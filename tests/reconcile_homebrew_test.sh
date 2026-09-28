@@ -14,6 +14,7 @@ launcher_apps_brewfile="$(render_template "$macos_launcher_apps_data" "Brewfile.
 monitoring_apps_brewfile="$(render_template "$macos_monitoring_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 development_apps_brewfile="$(render_template "$macos_development_apps_data" "Brewfile.macos-desktop-apps.tmpl")"
 mobile_dev_brewfile="$(render_template "$macos_mobile_dev_data" "Brewfile.macos-desktop-apps.tmpl")"
+browsers_brewfile="$(render_template '{"chezmoi":{"os":"darwin"},"enableMacosAppGroupBrowsers":true}' "Brewfile.macos-desktop-apps.tmpl")"
 macos_bootstrap="$(render_template "$macos_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
 macos_terminal_apps_bootstrap="$(render_template "$macos_terminal_apps_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
 macos_terminal_launcher_apps_bootstrap="$(render_template "$macos_terminal_launcher_apps_data" ".chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl")"
@@ -575,6 +576,19 @@ assert_equals \
   "$mobile_dev_packages" \
   "$expected_mobile_dev_packages" \
   "mobile-dev group renders exactly the expected packages"
+
+browsers_packages="$(
+  printf '%s\n' "$browsers_brewfile" |
+    awk '/^[[:space:]]*(cask|brew)[[:space:]]+"/ { print }'
+)"
+expected_browsers_packages='cask "aside"
+cask "google-chrome"'
+assert_equals \
+  "$browsers_packages" \
+  "$expected_browsers_packages" \
+  "browsers group renders exactly the expected packages"
+assert_not_contains "$macos_brewfile" 'cask "aside"' "macOS default does not render Aside"
+assert_not_contains "$macos_brewfile" 'cask "google-chrome"' "macOS default does not render Google Chrome"
 
 assert_not_contains "$macos_brewfile" 'cask "android-studio"' "macOS default does not render Android Studio"
 assert_not_contains "$macos_brewfile" 'mobile-dev-inc/tap/maestro' "macOS default does not render Maestro"

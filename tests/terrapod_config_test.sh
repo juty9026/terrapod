@@ -510,6 +510,7 @@ if ! run_terrapod_setup macos-terminal 'workstation
 
 
 
+
 y
 ' "$setup_workstation_home" "$setup_workstation_xdg" >"$tmp_dir/setup-workstation.out" 2>"$tmp_dir/setup-workstation.err"; then
   printf '%s\n' "setup stdout:" >&2
@@ -552,6 +553,7 @@ n
 y
 n
 y
+n
 n
 n
 y
@@ -609,6 +611,7 @@ n
 y
 n
 n
+n
 y
 ' "$gum_equivalent_home" "$gum_equivalent_xdg" >"$tmp_dir/gum-equivalent.out" 2>"$tmp_dir/gum-equivalent.err"; then
   printf '%s\n' "gum setup stdout:" >&2
@@ -646,6 +649,7 @@ gum_development_config="$gum_development_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$gum_development_home"
 
 if ! run_terrapod_setup macos-terminal 'development
+
 
 
 
@@ -724,6 +728,7 @@ n
 y
 n
 y
+n
 n
 y
 ' "$setup_leaf_home" "$setup_leaf_xdg" >"$tmp_dir/setup-leaf.out" 2>"$tmp_dir/setup-leaf.err"; then
@@ -863,6 +868,7 @@ if run_terrapod_setup macos-terminal 'development
 
 
 
+
 n
 ' "$setup_cancel_home" "$setup_cancel_xdg" >"$tmp_dir/setup-cancel.out" 2>"$tmp_dir/setup-cancel.err"; then
   fail "cancelled setup exits non-zero"
@@ -891,6 +897,7 @@ TOML
 cp "$setup_existing_cancel_config" "$tmp_dir/setup-existing-cancel-before.toml"
 
 if run_terrapod_setup macos-terminal 'development
+
 
 
 
@@ -949,6 +956,7 @@ enableEditorStack = false
 enableAiCliTools = false
 enableDevelopmentWorkspace = false
 enableMacosAppGroupMobileDev = true
+enableMacosAppGroupBrowsers = true
 enableMacosAppGroupAiApps = true
 enableMacosDesktopApps = true
 terrapodPreset = "minimal"

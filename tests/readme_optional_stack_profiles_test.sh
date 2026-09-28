@@ -134,7 +134,8 @@ for key in \
   enableMacosAppGroupLauncher \
   enableMacosAppGroupMonitoring \
   enableMacosAppGroupDevelopmentApps \
-  enableMacosAppGroupMobileDev
+  enableMacosAppGroupMobileDev \
+  enableMacosAppGroupBrowsers
 do
   assert_file_contains "$readme" "\`$key\`" "README documents $key option"
   if ! awk -F '|' -v key="\`$key\`" '$0 ~ key { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); if ($3 == "`false`") found=1 } END { exit found ? 0 : 1 }' "$readme"; then
@@ -192,6 +193,10 @@ assert_key_row_contains '`enableMacosAppGroupMobileDev`' 'Android Studio' \
   "README documents Android Studio on the mobile-dev option row"
 assert_key_row_contains '`enableMacosAppGroupMobileDev`' 'mobile-dev-inc/tap/maestro' \
   "README documents Maestro's fully-qualified formula source"
+assert_key_row_contains '`enableMacosAppGroupBrowsers`' 'browsers' \
+  "README documents browsers group on its option row"
+assert_key_row_contains '`enableMacosAppGroupBrowsers`' 'Aside and Google Chrome' \
+  "README documents Aside and Google Chrome on the browsers option row"
 assert_file_contains "$readme" 'Terrapod does not install Android SDK components or Xcode. Android Studio'"'"'s SDK Manager owns the SDK, and Xcode is distributed through the App Store.' \
   "README documents the mobile development scope boundary"
 

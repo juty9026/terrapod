@@ -81,6 +81,7 @@ enableMacosAppGroupLauncher|macos-app-group|launcher|macos-terminal|workstation|
 enableMacosAppGroupMonitoring|macos-app-group|monitoring|macos-terminal|workstation|iStat Menus
 enableMacosAppGroupDevelopmentApps|macos-app-group|development-apps|macos-terminal|workstation|Zed, Orca ADE, and OrbStack
 enableMacosAppGroupMobileDev|macos-app-group|mobile-dev|macos-terminal|workstation|Android Studio and Maestro
+enableMacosAppGroupBrowsers|macos-app-group|browsers|macos-terminal|workstation|Aside and Google Chrome
 ROWS
 }
 

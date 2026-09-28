@@ -33,3 +33,8 @@ cask "orbstack"
 cask "android-studio"
 brew "mobile-dev-inc/tap/maestro", trusted: true
 {{ end -}}
+{{ if default false (get . "enableMacosAppGroupBrowsers") -}}
+# browsers macOS App Group
+cask "aside"
+cask "google-chrome"
+{{ end -}}
