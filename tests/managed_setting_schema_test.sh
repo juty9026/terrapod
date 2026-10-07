@@ -59,6 +59,7 @@ terrapod|show_setup_option_block|enableDevelopmentWorkspace|per-key Setup notes:
 terrapod|show_setup_option_block|enableEditorStack|per-key Setup notes: the Includes list of the Optional Development Workspace
 terrapod|show_setup_option_block|enableAiCliTools|per-key Setup notes: the Includes list of the Optional Development Workspace
 terrapod|show_setup_option_block|enableMacosAppGroupDevelopmentApps|per-key Setup notes: cask trust note
+terrapod|show_setup_option_block|enableMacosAppGroupAiApps|per-key Setup notes: Gemini support requirements
 terrapod|show_setup_option_block|enableMacosAppGroupMobileDev|per-key Setup notes: environment, trust, and scope notes
 terrapod|ai_cli_tools_supported_profile|enableAiCliTools|profile applicability of the AI Tool Stack, asked of the schema
 terrapod|run_executable_selection|enableAiCliTools|the executable selection helper takes the evaluated AI Tool Stack state as an argument
@@ -161,7 +162,7 @@ pass "minimal appears in no schema row"
 
 # --- Retired keys are data, not literals -----------------------------------
 
-retired_keys="enableMacosAppGroupAiApps enableMacosDesktopApps terrapodPreset"
+retired_keys="enableMacosDesktopApps terrapodPreset"
 retired_reader_keys="$(
   sh -c '. "$1"; retired_managed_setting_keys' sh "$reader"
 )"

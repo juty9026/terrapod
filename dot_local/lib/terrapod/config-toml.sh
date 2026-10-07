@@ -82,6 +82,7 @@ enableMacosAppGroupMonitoring|macos-app-group|monitoring|macos-terminal|workstat
 enableMacosAppGroupDevelopmentApps|macos-app-group|development-apps|macos-terminal|workstation|Zed, Orca ADE, and OrbStack
 enableMacosAppGroupMobileDev|macos-app-group|mobile-dev|macos-terminal|workstation|Android Studio and Maestro
 enableMacosAppGroupBrowsers|macos-app-group|browsers|macos-terminal|workstation|Aside and Google Chrome
+enableMacosAppGroupAiApps|macos-app-group|ai-apps|macos-terminal|workstation|Claude, ChatGPT (including Codex), and Gemini
 ROWS
 }
 
@@ -90,7 +91,6 @@ ROWS
 # construction.
 retired_managed_setting_keys() {
   printf '%s\n' \
-    enableMacosAppGroupAiApps \
     enableMacosDesktopApps \
     terrapodPreset
 }

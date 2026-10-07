@@ -98,3 +98,32 @@ terrapod_homebrew_bundle_join_groups() {
     END { print groups }
   ' "$1"
 }
+
+# Filter before both bulk installation and per-package retries. Homebrew's
+# package listing then sees the same effective declarations as the installer.
+terrapod_homebrew_bundle_filter_gemini() {
+  gemini_brewfile="$1"
+  gemini_arch="$2"
+  if ! grep -Fx 'cask "google-gemini"' "$gemini_brewfile" >/dev/null; then
+    return 0
+  fi
+
+  gemini_macos_version="$(sw_vers -productVersion 2>/dev/null || true)"
+  gemini_macos_major="${gemini_macos_version%%.*}"
+  case "$gemini_arch:$gemini_macos_major" in
+    arm64:*|aarch64:*)
+      case "$gemini_macos_major" in
+        ''|*[!0-9]*) ;;
+        *) [ "$gemini_macos_major" -ge 15 ] && return 0 ;;
+      esac
+      ;;
+  esac
+
+  gemini_filtered_file="$(mktemp "${TMPDIR:-/tmp}/terrapod-gemini-filter.XXXXXX")" || return 1
+  if ! sed '/^cask "google-gemini"$/d' "$gemini_brewfile" >"$gemini_filtered_file" ||
+     ! mv "$gemini_filtered_file" "$gemini_brewfile"; then
+    rm -f "$gemini_filtered_file"
+    return 1
+  fi
+  printf '%s\n' 'Skipping google-gemini: not applicable (requires Apple Silicon and macOS 15 or later).'
+}

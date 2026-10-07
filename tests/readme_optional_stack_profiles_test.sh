@@ -329,8 +329,8 @@ assert_file_contains "$readme" 'brew upgrade --cask codex antigravity-cli' \
   "README documents targeted AI CLI upgrades"
 assert_file_contains "$readme" 'Claude Code updates itself and is not part of that command.' \
   "README documents who owns Claude Code freshness"
-assert_file_contains "$readme" '`enableMacosAppGroupAiApps` is deprecated and is not treated as an alias' \
-  "README documents explicit development-apps key migration"
+assert_file_contains "$readme" '`enableMacosAppGroupAiApps` is restored as the opt-in ai-apps key.' \
+  "README documents restored ai-apps key behavior"
 assert_file_contains "$readme" 'If another executable is selected first, Terrapod' \
   "README documents primary executable advisories"
 

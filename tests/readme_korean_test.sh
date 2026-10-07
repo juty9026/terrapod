@@ -174,8 +174,8 @@ assert_file_contains "$korean_readme" 'brew upgrade --cask codex antigravity-cli
   "README.ko.md documents targeted AI CLI upgrades"
 assert_file_contains "$korean_readme" 'Claude Code는 자체적으로 업데이트하며 이 명령의 대상이 아닙니다.' \
   "README.ko.md documents who owns Claude Code freshness"
-assert_file_contains "$korean_readme" '`enableMacosAppGroupAiApps`는 deprecated key이며 alias로 해석하지 않습니다.' \
-  "README.ko.md documents explicit development-apps key migration"
+assert_file_contains "$korean_readme" '`enableMacosAppGroupAiApps`는 ai-apps 선택 설치 키로 복원되었습니다.' \
+  "README.ko.md documents restored ai-apps key behavior"
 
 extract_headings "$readme" >"$tmp_dir/readme.headings"
 extract_headings "$korean_readme" >"$tmp_dir/readme-ko.headings"

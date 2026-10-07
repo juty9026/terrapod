@@ -547,6 +547,9 @@ show_setup_option_block() {
     enableMacosAppGroupDevelopmentApps)
       printf '%s\n' "  Trusts only the fully-qualified stablyai/orca/orca cask, not the entire stablyai/orca tap."
       ;;
+    enableMacosAppGroupAiApps)
+      printf '%s\n' "  Gemini requires Apple Silicon and macOS 15 or later; unsupported Macs skip Gemini."
+      ;;
     enableMacosAppGroupMobileDev)
       printf '%s\n' "  Sets ANDROID_HOME and JAVA_HOME for Android builds."
       printf '%s\n' "  Trusts only the fully-qualified mobile-dev-inc/tap/maestro formula, not the entire mobile-dev-inc/tap tap."

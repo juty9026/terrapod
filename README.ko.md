@@ -175,6 +175,9 @@ macOS desktop application은 machine-local data key로 제어되는 opt-in App G
 - `development-apps`: Zed, Orca ADE(`stablyai/orca/orca`), OrbStack.
 - `mobile-dev`: Android Studio와 Maestro(`mobile-dev-inc/tap/maestro`).
 - `browsers`: Aside와 Google Chrome.
+- `ai-apps`: Claude(`claude`), Codex를 포함한 ChatGPT(`chatgpt`), Gemini(`google-gemini`).
+
+Gemini가 지원되지 않는 Mac에서는 설치 목록에서 Gemini만 제외하고 그 이유를 출력합니다. Claude와 ChatGPT는 계속 설치합니다. [Google 공식 데스크톱 안내](https://gemini.google/desktop/)에서 Gemini의 요구 사항을 확인할 수 있습니다. 기존 `codex-app`은 deprecated cask이므로 [Homebrew가 권장하는 `chatgpt`](https://formulae.brew.sh/cask/codex-app)를 사용합니다.
 
 Terrapod은 Orca를 설치할 때 fully-qualified `stablyai/orca/orca` cask만 trust하며, `stablyai/orca` tap 전체를 trust하지 않습니다.
 
@@ -328,6 +331,7 @@ Optional stack profile과 macOS App Group setting은 기본적으로 disabled입
 | `enableMacosAppGroupDevelopmentApps` | `false` | development-apps macOS App Group인 Zed, Orca ADE(`stablyai/orca/orca`), OrbStack을 설치합니다. |
 | `enableMacosAppGroupMobileDev` | `false` | mobile-dev macOS App Group인 Android Studio와 Maestro(`mobile-dev-inc/tap/maestro`)를 설치합니다. `ANDROID_HOME`과 `JAVA_HOME`도 함께 설정합니다. |
 | `enableMacosAppGroupBrowsers` | `false` | browsers macOS App Group인 Aside와 Google Chrome을 설치합니다. |
+| `enableMacosAppGroupAiApps` | `false` | ai-apps macOS App Group인 Claude, Codex를 포함한 ChatGPT, Gemini를 설치합니다. Gemini는 Apple Silicon·macOS 15 이상에서만 설치합니다. |
 
 `enableDevelopmentWorkspace`가 `true`이면 `enableEditorStack`이나 `enableAiCliTools`가 false로 기록되어 있어도 Optional Editor Stack과 Optional AI Tool Stack이 함께 활성화됩니다. 다만 VPS Shell Profile에서는 Optional AI Tool Stack이 macOS 전용이므로 이 묶음에서 빠집니다.
 
@@ -345,7 +349,7 @@ advisory로 표시합니다. nonstandard Homebrew prefix도 advisory이며 clean
 `~/.local/share/zsh/site-functions`는 이미 managed `fpath`에 포함되어 있으므로, vendor
 installer가 이 경로를 추가해도 machine-local override가 필요하지 않습니다.
 
-`enableMacosAppGroupAiApps`는 deprecated key이며 alias로 해석하지 않습니다. 명시적으로 migrate하려면 `tpod setup` 또는 `terrapod configure <Preset>`를 실행합니다. Terrapod은 이전 선택만으로 Zed를 설치하지 않습니다.
+`enableMacosAppGroupAiApps`는 ai-apps 선택 설치 키로 복원되었습니다. 기존 `true` 값은 다음 `tpod apply`에서 새 세 앱을 설치 대상으로 선택합니다. 키가 없는 기존 설정은 `tpod setup` 또는 `terrapod configure <Preset>`로 완성합니다. `workstation` Preset은 이 그룹을 활성화하고, `minimal`·`development`는 비활성화합니다. development-apps와 AI CLI 선택은 독립적으로 유지됩니다.
 
 ### Zellij shortcuts
 
@@ -372,6 +376,7 @@ enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
 enableMacosAppGroupMobileDev = false
 enableMacosAppGroupBrowsers = false
+enableMacosAppGroupAiApps = false
 ```
 
 Editor-only machine:
