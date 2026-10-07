@@ -377,6 +377,7 @@ enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
 enableMacosAppGroupMobileDev = false
 enableMacosAppGroupBrowsers = false
+enableMacosAppGroupAiApps = false
 EOF
 }
 
@@ -1135,6 +1136,8 @@ write_stub "$fake_warning_bin/terrapod_install_warning_write" \
 
 fake_ai_cli_home="$tmp_dir/fake-ai-cli-home"
 mkdir -p "$fake_ai_cli_home/.local/bin"
+# These fixtures exercise warning handling, not the vendor installer.
+write_stub "$fake_ai_cli_home/.local/bin/claude" 'exit 0'
 write_stub "$fake_warning_bin/brew" \
   'case "$1" in' \
   '  shellenv) printf "%s\n" ":" ;;' \
@@ -1171,6 +1174,7 @@ pass "installer scripts ignore PATH fake install warning helpers"
 fake_ai_cli_write_failure_home="$tmp_dir/fake-ai-cli-write-failure-home"
 fake_ai_cli_warning_stub="$tmp_dir/fake-ai-cli-warning-stub.sh"
 mkdir -p "$fake_ai_cli_write_failure_home/.local/bin"
+write_stub "$fake_ai_cli_write_failure_home/.local/bin/claude" 'exit 0'
 cat >"$fake_ai_cli_warning_stub" <<'STUB'
 terrapod_install_warning_write() {
   printf "%s\n" "write failed:$*" >&2
@@ -1455,7 +1459,7 @@ setup_responses="$tmp_dir/setup.responses"
 setup_gum_log="$tmp_dir/setup-gum.log"
 setup_config="$setup_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$setup_home"
-write_gum_responses "$setup_responses" development yes yes yes yes yes yes yes yes yes
+write_gum_responses "$setup_responses" development yes yes yes yes yes yes yes yes yes yes
 
 if ! run_terrapod_setup_command macos-terminal "$setup_responses" "$setup_home" "$setup_xdg" "$setup_output" "$setup_gum_log"; then
   sed 's/^/  /' "$setup_output" >&2
@@ -1785,6 +1789,7 @@ enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = true
 enableMacosAppGroupMobileDev = true
 enableMacosAppGroupBrowsers = true
+enableMacosAppGroupAiApps = true
 TOML
 
 recovery_core_root="$tmp_dir/recovery-core-only"
@@ -1958,6 +1963,7 @@ assert_contains "$macos_status_output" "automation                    : enabled 
 assert_contains "$macos_status_output" "launcher                      : enabled (Raycast and 1Password CLI)" "Terrapod status reports enabled launcher macOS App Group"
 assert_contains "$macos_status_output" "monitoring                    : disabled" "Terrapod status reports disabled monitoring macOS App Group"
 assert_contains "$macos_status_output" "development-apps              : enabled (Zed, Orca ADE, and OrbStack)" "Terrapod status lists Zed, Orca ADE, and OrbStack in the enabled development-apps App Group"
+assert_contains "$macos_status_output" "ai-apps                       : enabled (Claude, ChatGPT (including Codex), and Gemini)" "Terrapod status honors the restored true ai-apps selection"
 assert_contains "$macos_status_output" "mobile-dev                    : enabled (Android Studio and Maestro)" "Terrapod status lists Android Studio and Maestro in the enabled mobile-dev App Group"
 assert_contains "$macos_status_output" "chezmoi                       : available" "Terrapod status reports chezmoi availability"
 assert_contains "$macos_status_output" "brew                          : available" "Terrapod status reports macOS Bootstrap Package Manager availability"
@@ -2032,6 +2038,7 @@ data.enableMacosAppGroupTerminalApps = true
 data.enableMacosAppGroupDevelopmentApps = true
 data.enableMacosAppGroupMobileDev = true
 data.enableMacosAppGroupBrowsers = true
+data.enableMacosAppGroupAiApps = true
 TOML
 
 dotted_status_path="$(status_doctor_path dotted chezmoi git zsh mise brew nvim agy claude codex zellij)"
@@ -2118,6 +2125,7 @@ enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
 enableMacosAppGroupMobileDev = false
 enableMacosAppGroupBrowsers = false
+enableMacosAppGroupAiApps = false
 TOML
 write_os_release "$status_ubuntu_os_release" ubuntu 24.04 "Ubuntu 24.04 LTS"
 
@@ -2348,6 +2356,7 @@ enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
 enableMacosAppGroupMobileDev = false
 enableMacosAppGroupBrowsers = false
+enableMacosAppGroupAiApps = false
 TOML
 chmod 000 "$status_unreadable_config"
 
@@ -2420,6 +2429,7 @@ enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
 enableMacosAppGroupMobileDev = false
 enableMacosAppGroupBrowsers = false
+enableMacosAppGroupAiApps = false
 TOML
 
 status_shadow_path="$(status_doctor_path shadow chezmoi git zsh mise nvim zellij apt brew agy claude codex)"
@@ -2522,6 +2532,7 @@ enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
 enableMacosAppGroupMobileDev = false
 enableMacosAppGroupBrowsers = false
+enableMacosAppGroupAiApps = false
 TOML
 write_os_release "$doctor_os_release" ubuntu 24.04 "Ubuntu 24.04 LTS"
 
@@ -2649,6 +2660,7 @@ enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
 enableMacosAppGroupMobileDev = false
 enableMacosAppGroupBrowsers = false
+enableMacosAppGroupAiApps = false
 TOML
 chmod 000 "$doctor_unreadable_config"
 
@@ -2858,6 +2870,7 @@ enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
 enableMacosAppGroupMobileDev = false
 enableMacosAppGroupBrowsers = false
+enableMacosAppGroupAiApps = false
 TOML
 
 if ! HOME="$update_home" XDG_CONFIG_HOME="$update_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
@@ -2976,6 +2989,7 @@ enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
 enableMacosAppGroupMobileDev = false
 enableMacosAppGroupBrowsers = false
+enableMacosAppGroupAiApps = false
 TOML
 
 rm -f "$CHEZMOI_CALL_FILE" "$CHEZMOI_INVOKED_FILE"
@@ -3177,6 +3191,7 @@ enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = true
 enableMacosAppGroupMobileDev = true
 enableMacosAppGroupBrowsers = true
+enableMacosAppGroupAiApps = true
 TOML
 
 if ! HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
@@ -3266,7 +3281,8 @@ launcher
 monitoring
 development-apps
 mobile-dev
-browsers"
+browsers
+ai-apps"
 
 status_macos_app_group_labels="$(macos_app_group_labels "$macos_status_output")"
 diff_macos_app_group_labels="$(macos_app_group_labels "$diff_output")"
@@ -3469,7 +3485,7 @@ fi
 
 apply_inline_config="$tmp_dir/apply-inline-table.toml"
 cat >"$apply_inline_config" <<'TOML'
-data = { profile = "vps-shell", enableEditorStack = false, enableAiCliTools = false, enableDevelopmentWorkspace = false, enableMacosAppGroupTerminalApps = false, enableMacosAppGroupAutomation = false, enableMacosAppGroupLauncher = false, enableMacosAppGroupMonitoring = false, enableMacosAppGroupDevelopmentApps = false, enableMacosAppGroupMobileDev = false, enableMacosAppGroupBrowsers = false }
+data = { profile = "vps-shell", enableEditorStack = false, enableAiCliTools = false, enableDevelopmentWorkspace = false, enableMacosAppGroupTerminalApps = false, enableMacosAppGroupAutomation = false, enableMacosAppGroupLauncher = false, enableMacosAppGroupMonitoring = false, enableMacosAppGroupDevelopmentApps = false, enableMacosAppGroupMobileDev = false, enableMacosAppGroupBrowsers = false, enableMacosAppGroupAiApps = false }
 TOML
 rm -f "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
 
@@ -4123,6 +4139,7 @@ enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = true
 enableMacosAppGroupMobileDev = true
 enableMacosAppGroupBrowsers = true
+enableMacosAppGroupAiApps = true
 TOML
 
 if [ -e "$lazy_lib" ]; then

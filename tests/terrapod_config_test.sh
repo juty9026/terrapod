@@ -511,6 +511,7 @@ if ! run_terrapod_setup macos-terminal 'workstation
 
 
 
+
 y
 ' "$setup_workstation_home" "$setup_workstation_xdg" >"$tmp_dir/setup-workstation.out" 2>"$tmp_dir/setup-workstation.err"; then
   printf '%s\n' "setup stdout:" >&2
@@ -556,6 +557,7 @@ y
 n
 n
 n
+
 y
 ' "$setup_custom_workspace_home" "$setup_custom_workspace_xdg" >"$tmp_dir/setup-custom-workspace.out" 2>"$tmp_dir/setup-custom-workspace.err"; then
   printf '%s\n' "setup stdout:" >&2
@@ -612,6 +614,7 @@ y
 n
 n
 n
+
 y
 ' "$gum_equivalent_home" "$gum_equivalent_xdg" >"$tmp_dir/gum-equivalent.out" 2>"$tmp_dir/gum-equivalent.err"; then
   printf '%s\n' "gum setup stdout:" >&2
@@ -649,6 +652,7 @@ gum_development_config="$gum_development_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$gum_development_home"
 
 if ! run_terrapod_setup macos-terminal 'development
+
 
 
 
@@ -730,6 +734,7 @@ n
 y
 n
 n
+
 y
 ' "$setup_leaf_home" "$setup_leaf_xdg" >"$tmp_dir/setup-leaf.out" 2>"$tmp_dir/setup-leaf.err"; then
   printf '%s\n' "setup stdout:" >&2
@@ -869,6 +874,7 @@ if run_terrapod_setup macos-terminal 'development
 
 
 
+
 n
 ' "$setup_cancel_home" "$setup_cancel_xdg" >"$tmp_dir/setup-cancel.out" 2>"$tmp_dir/setup-cancel.err"; then
   fail "cancelled setup exits non-zero"
@@ -897,6 +903,7 @@ TOML
 cp "$setup_existing_cancel_config" "$tmp_dir/setup-existing-cancel-before.toml"
 
 if run_terrapod_setup macos-terminal 'development
+
 
 
 
@@ -981,7 +988,7 @@ assert_data_key_once_with_value "$existing_config" "enableMacosAppGroupLauncher"
 assert_data_key_once_with_value "$existing_config" "enableMacosAppGroupMonitoring" "false" "development Preset disables monitoring macOS App Group exactly once in data"
 assert_data_key_once_with_value "$existing_config" "enableMacosAppGroupDevelopmentApps" "false" "development Preset writes development-apps exactly once in data"
 assert_data_key_once_with_value "$existing_config" "enableMacosAppGroupMobileDev" "false" "development Preset writes mobile-dev exactly once in data"
-assert_file_not_contains "$existing_config" "enableMacosAppGroupAiApps" "explicit config migration removes deprecated ai-apps key"
+assert_data_key_once_with_value "$existing_config" "enableMacosAppGroupAiApps" "false" "VPS configure writes the restored ai-apps key disabled exactly once"
 assert_file_not_contains "$existing_config" "enableMacosDesktopApps" "existing update removes the legacy all-in desktop app toggle"
 assert_file_not_contains "$existing_config" "terrapodPreset" "existing update removes stale dynamic Preset key"
 assert_single_backup_matches "$existing_config" "$tmp_dir/existing-before.toml" "existing update creates one backup before changing managed keys"

@@ -6,7 +6,8 @@
   (default false (get . "enableMacosAppGroupMonitoring"))
   (default false (get . "enableMacosAppGroupDevelopmentApps"))
   (default false (get . "enableMacosAppGroupMobileDev"))
-  (default false (get . "enableMacosAppGroupBrowsers")) -}}
+  (default false (get . "enableMacosAppGroupBrowsers"))
+  (default false (get . "enableMacosAppGroupAiApps")) -}}
 true
 {{- else -}}
 false

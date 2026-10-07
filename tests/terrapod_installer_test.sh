@@ -863,6 +863,7 @@ enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
 enableMacosAppGroupMobileDev = false
 enableMacosAppGroupBrowsers = false
+enableMacosAppGroupAiApps = false
 TOML
 }
 
@@ -893,6 +894,7 @@ data.enableMacosAppGroupMonitoring = false
 data.enableMacosAppGroupDevelopmentApps = false
 data.enableMacosAppGroupMobileDev = false
 data.enableMacosAppGroupBrowsers = false
+data.enableMacosAppGroupAiApps = false
 TOML
 }
 
@@ -913,6 +915,7 @@ write_quoted_complete_setup_config() {
 "enableMacosAppGroupDevelopmentApps" = false
 "enableMacosAppGroupMobileDev" = false
 "enableMacosAppGroupBrowsers" = false
+"enableMacosAppGroupAiApps" = false
 TOML
 }
 
@@ -933,6 +936,7 @@ enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
 enableMacosAppGroupMobileDev = false
 enableMacosAppGroupBrowsers = false
+enableMacosAppGroupAiApps = false
 TOML
 }
 
@@ -953,6 +957,7 @@ enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
 enableMacosAppGroupMobileDev = false
 enableMacosAppGroupBrowsers = false
+enableMacosAppGroupAiApps = false
 notes = """
 unsupported multiline value
 """
@@ -964,7 +969,7 @@ write_unsupported_inline_table_setup_config() {
 
   mkdir -p "$(dirname "$config_file")"
   cat >"$config_file" <<'TOML'
-data = { profile = "macos-terminal", enableEditorStack = false, enableAiCliTools = false, enableDevelopmentWorkspace = false, enableMacosAppGroupTerminalApps = false, enableMacosAppGroupAutomation = false, enableMacosAppGroupLauncher = false, enableMacosAppGroupMonitoring = false, enableMacosAppGroupDevelopmentApps = false, enableMacosAppGroupMobileDev = false, enableMacosAppGroupBrowsers = false }
+data = { profile = "macos-terminal", enableEditorStack = false, enableAiCliTools = false, enableDevelopmentWorkspace = false, enableMacosAppGroupTerminalApps = false, enableMacosAppGroupAutomation = false, enableMacosAppGroupLauncher = false, enableMacosAppGroupMonitoring = false, enableMacosAppGroupDevelopmentApps = false, enableMacosAppGroupMobileDev = false, enableMacosAppGroupBrowsers = false, enableMacosAppGroupAiApps = false }
 TOML
 }
 
@@ -985,6 +990,7 @@ enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
 enableMacosAppGroupMobileDev = false
 enableMacosAppGroupBrowsers = false
+enableMacosAppGroupAiApps = false
 matrix = [
 [1, 2]
 ]

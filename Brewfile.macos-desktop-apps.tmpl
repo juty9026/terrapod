@@ -38,3 +38,9 @@ brew "mobile-dev-inc/tap/maestro", trusted: true
 cask "aside"
 cask "google-chrome"
 {{ end -}}
+{{ if default false (get . "enableMacosAppGroupAiApps") -}}
+# ai-apps macOS App Group
+cask "claude"
+cask "chatgpt"
+cask "google-gemini"
+{{ end -}}

@@ -37,6 +37,7 @@ enableMacosAppGroupMonitoring = false
 enableMacosAppGroupDevelopmentApps = false
 enableMacosAppGroupMobileDev = false
 enableMacosAppGroupBrowsers = false
+enableMacosAppGroupAiApps = false
 EOF
 
 cat >"$stub_bin/chezmoi" <<'EOF'
