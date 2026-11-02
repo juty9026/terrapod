@@ -154,15 +154,16 @@ managed_setting_enabled_by_preset() {
   esac
 }
 
-config_data_value() {
-  config_file="$1"
-  key="$2"
-
-  if [ ! -f "$config_file" ]; then
-    return 1
-  fi
-
-  awk -v wanted_key="$key" '
+# The one pass over the managed [data] table. It prints, for each managed setup
+# key in the order handed to it, one line:
+#   missing <key>          the key is absent
+#   invalid <key>          a Managed Setting whose value is not a bare boolean
+#   value <key>=<value>    the interpreted value: true or false for a Managed
+#                          Setting, the plain string for a quoted profile
+# A profile that is not a quoted string prints no value line, so it never
+# matches a detected profile. The profile is not otherwise judged.
+managed_setup_config_scan() {
+  awk -v setting_keys="$2" '
     function strip_space(value) {
       sub(/^[[:space:]]*/, "", value)
       sub(/[[:space:]]*$/, "", value)
@@ -226,9 +227,30 @@ config_data_value() {
       return strip_space(strip_comment(value))
     }
 
+    # A TOML string token, "..." or literal, as its plain text; else "".
+    function string_value(value, quote) {
+      quote = substr(value, 1, 1)
+
+      if (length(value) >= 2 && (quote == "\"" || quote == "\047") && substr(value, length(value), 1) == quote) {
+        return substr(value, 2, length(value) - 2)
+      }
+
+      return ""
+    }
+
+    function remember(key, value) {
+      if (key in wanted) {
+        raw[key] = value
+        found[key] = 1
+      }
+    }
+
     BEGIN {
       in_root = 1
-      found = 0
+      key_count = split("profile " setting_keys, ordered_keys, " ")
+      for (i = 1; i <= key_count; i++) {
+        wanted[ordered_keys[i]] = 1
+      }
     }
 
     {
@@ -237,10 +259,7 @@ config_data_value() {
       }
 
       if (in_root && is_root_dotted_data_key($0)) {
-        if (dotted_data_key_name($0) == wanted_key) {
-          result = assignment_value($0)
-          found = 1
-        }
+        remember(dotted_data_key_name($0), assignment_value($0))
         next
       }
 
@@ -256,24 +275,37 @@ config_data_value() {
         next
       }
 
-      if (in_data && is_key_assignment($0) && assignment_key_name($0) == wanted_key) {
-        result = assignment_value($0)
-        found = 1
+      if (in_data && is_key_assignment($0)) {
+        remember(assignment_key_name($0), assignment_value($0))
       }
     }
 
     END {
-      if (!found) {
-        exit 1
-      }
+      for (i = 1; i <= key_count; i++) {
+        key = ordered_keys[i]
 
-      print result
+        if (!(key in found)) {
+          print "missing " key
+        } else if (key == "profile") {
+          profile = string_value(raw[key])
+          if (profile != "") {
+            print "value profile=" profile
+          }
+        } else if (raw[key] == "true" || raw[key] == "false") {
+          print "value " key "=" raw[key]
+        } else {
+          print "invalid " key
+        }
+      }
     }
-  ' "$config_file"
+  ' "$1"
 }
 
-config_data_key_present() {
-  config_data_value "$1" "$2" >/dev/null 2>&1
+unsupported_managed_setting_value_message() {
+  case "$1" in
+    *", "*) printf '%s\n' "unsupported Managed Setting values for $1 in config; rewrite them as bare true or false before running Terrapod commands: $2" ;;
+    *) printf '%s\n' "unsupported Managed Setting value for $1 in config; rewrite it as bare true or false before running Terrapod commands: $2" ;;
+  esac
 }
 
 config_has_unsupported_inline_data_table() {
@@ -486,73 +518,131 @@ unsupported_managed_config_problem_message() {
   return 1
 }
 
-# The managed setup keys the config lacks, ", "-joined in managed_setup_keys
-# order. A missing file lacks every one of them.
-managed_setup_missing_keys() {
-  missing_config_file="$1"
-  missing_keys=
-
-  for missing_key in $(managed_setup_keys); do
-    if ! config_data_key_present "$missing_config_file" "$missing_key"; then
-      if [ -z "$missing_keys" ]; then
-        missing_keys="$missing_key"
-      else
-        missing_keys="$missing_keys, $missing_key"
-      fi
-    fi
-  done
-
-  printf '%s\n' "$missing_keys"
-}
-
-# The verdict on the managed Terrapod Setup config at the path it is handed:
-# the one place the file state, then unsupported syntax, then missing keys
-# ladder is climbed. Callers capture it once with $(...) and decide how to print
-# it and what exit status it implies; it never calls fatal().
+# Reads the managed Terrapod Setup config at the path it is handed, once, and
+# leaves the answer in globals: the one place the file state, then unsupported
+# syntax or values, then missing keys ladder is climbed, and the one place a
+# Managed Setting value is interpreted. Call it directly, not in $(...), when
+# the values are needed too: a subshell drops the globals. It never calls
+# fatal(). The file is read a fixed number of times, whatever the schema holds.
 #
-# Two lines. The first is the state:
+# managed_setup_config_state is one of:
 #   missing      no file; every managed setup key is missing
 #   non-regular  not a regular file (a directory, or a dangling symlink)
 #   unreadable   a regular file the caller cannot read
-#   unsupported  syntax the reader cannot parse safely
+#   unsupported  syntax the reader cannot parse safely, or a Managed Setting
+#                value that is not a bare true or false
 #   incomplete   parseable, but a managed setup key is absent
-#   complete     `profile` and every current Managed Setting key are present
-# The second is the detail: the problem message for unsupported, the missing
-# keys (", "-joined, in schema order) for missing and incomplete, else empty.
+#   complete     `profile` and every current Managed Setting key are present,
+#                and every Managed Setting value is a bare boolean
+# managed_setup_config_detail is the problem message for unsupported, the
+# missing keys (", "-joined, in schema order) for missing and incomplete, else
+# empty. Read the values with managed_setting_enabled and
+# managed_setup_stored_profile.
 #
-# complete is the presence rule only. The first-run installer additionally
-# reruns Terrapod Setup when the stored profile differs from the detected one;
-# that is its rule, so the verdict does not take a profile.
-managed_setup_config_verdict() {
-  verdict_config_file="$1"
+# The value rule is schema-based, like completeness: a key that does not apply
+# to the stored profile is judged the same way. chezmoi's templates read the
+# same keys with Go truthiness, where the string "false" is on; tpod apply stops
+# on unsupported before it delegates, so they never see a rejected value.
+#
+# complete does not compare the stored profile. The first-run installer
+# additionally reruns Terrapod Setup when it differs from the detected one; that
+# is its rule, so the reader does not take a profile.
+managed_setup_config_load() {
+  load_config_file="$1"
+  managed_setup_config_state=
+  managed_setup_config_detail=
+  managed_setup_config_values="
+"
+  load_setting_keys=
+  for load_key in $(managed_setting_keys); do
+    load_setting_keys="${load_setting_keys:+$load_setting_keys }$load_key"
+  done
 
-  case "$(config_file_state "$verdict_config_file")" in
+  managed_setup_config_state="$(config_file_state "$load_config_file")"
+  case "$managed_setup_config_state" in
     missing)
-      printf '%s\n%s\n' "missing" "$(managed_setup_missing_keys "$verdict_config_file")"
+      for load_key in $(managed_setup_keys); do
+        managed_setup_config_detail="${managed_setup_config_detail:+$managed_setup_config_detail, }$load_key"
+      done
       return 0
       ;;
-    non-regular)
-      printf '%s\n\n' "non-regular"
-      return 0
-      ;;
-    unreadable)
-      printf '%s\n\n' "unreadable"
+    non-regular|unreadable)
       return 0
       ;;
   esac
 
-  if verdict_problem_message="$(unsupported_managed_config_problem_message "$verdict_config_file")"; then
-    printf '%s\n%s\n' "unsupported" "$verdict_problem_message"
-    return 0
-  fi
+  load_missing_keys=
+  load_invalid_keys=
+  while IFS= read -r load_line; do
+    case "$load_line" in
+      "missing "*)
+        load_missing_keys="${load_missing_keys:+$load_missing_keys, }${load_line#missing }"
+        ;;
+      "invalid "*)
+        load_invalid_keys="${load_invalid_keys:+$load_invalid_keys, }${load_line#invalid }"
+        ;;
+      "value "*)
+        managed_setup_config_values="$managed_setup_config_values${load_line#value }
+"
+        ;;
+    esac
+  done <<EOF
+$(managed_setup_config_scan "$load_config_file" "$load_setting_keys")
+EOF
 
-  verdict_missing_keys="$(managed_setup_missing_keys "$verdict_config_file")"
-
-  if [ -n "$verdict_missing_keys" ]; then
-    printf '%s\n%s\n' "incomplete" "$verdict_missing_keys"
+  if managed_setup_config_detail="$(unsupported_managed_config_problem_message "$load_config_file")"; then
+    managed_setup_config_state=unsupported
+  elif [ -n "$load_invalid_keys" ]; then
+    managed_setup_config_state=unsupported
+    managed_setup_config_detail="$(unsupported_managed_setting_value_message "$load_invalid_keys" "$load_config_file")"
+  elif [ -n "$load_missing_keys" ]; then
+    managed_setup_config_state=incomplete
+    managed_setup_config_detail="$load_missing_keys"
   else
-    printf '%s\n\n' "complete"
+    managed_setup_config_state=complete
+    managed_setup_config_detail=
   fi
+}
+
+# Whether the loaded config turns the Managed Setting on. Absent and rejected
+# values, and every value of a file that was not read, are off. A file with
+# unsupported syntax still answers with what the scan read, as status always
+# has. Parameter expansion only, like the verdict accessors.
+managed_setting_enabled() {
+  case "$managed_setup_config_values" in
+    *"
+$1=true
+"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The loaded config's stored profile as a plain string, quotes removed. Fails
+# when the profile is absent or not a quoted string.
+managed_setup_stored_profile() {
+  case "$managed_setup_config_values" in
+    *"
+profile="*)
+      stored_profile="${managed_setup_config_values#*"
+profile="}"
+      printf '%s\n' "${stored_profile%%"
+"*}"
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+# The verdict on the managed config at the path it is handed, as two lines: the
+# state, then the detail (see managed_setup_config_load). Callers that need no
+# values capture it once with $(...) and decide how to print it and what exit
+# status it implies.
+managed_setup_config_verdict() {
+  managed_setup_config_load "$1"
+  managed_setup_loaded_verdict
+}
+
+managed_setup_loaded_verdict() {
+  printf '%s\n%s\n' "$managed_setup_config_state" "$managed_setup_config_detail"
 }
 
 # Accessors for a captured verdict. $(...) drops the trailing newlines, so an
@@ -572,6 +662,9 @@ managed_setup_verdict_detail() {
   esac
 }
 
+# The config writer's guard: syntax only. A rejected Managed Setting value does
+# not stop a write, because the writer replaces every Managed Setting with a
+# bare boolean anyway.
 reject_unsupported_managed_config_syntax() {
   config_file="$1"
 

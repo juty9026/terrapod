@@ -964,6 +964,14 @@ unsupported multiline value
 TOML
 }
 
+write_quoted_setting_value_setup_config() {
+  config_file="$1"
+
+  write_literal_profile_complete_setup_config "$config_file"
+  sed 's/^enableEditorStack = .*/enableEditorStack = "false"/' "$config_file" >"$config_file.next"
+  mv "$config_file.next" "$config_file"
+}
+
 write_unsupported_inline_table_setup_config() {
   config_file="$1"
 
@@ -2273,6 +2281,22 @@ unsupported_multiline_array_config_log_text="$(cat "$unsupported_multiline_array
 assert_contains "$unsupported_multiline_array_config_stderr" "unsupported multiline array" "unsupported multiline array config gives syntax guidance"
 assert_not_contains "$unsupported_multiline_array_config_log_text" "terrapod args:setup" "unsupported multiline array config is not treated as missing setup config"
 assert_not_contains "$unsupported_multiline_array_config_log_text" "chezmoi args:apply" "unsupported multiline array config does not continue to apply"
+
+quoted_setting_value_case="$(make_case_dir quoted-setting-value-resume)"
+prepare_resumable_macos_case "$quoted_setting_value_case"
+quoted_setting_value_config="$quoted_setting_value_case/xdg-config/chezmoi/chezmoi.toml"
+write_quoted_setting_value_setup_config "$quoted_setting_value_config"
+quoted_setting_value_log="$quoted_setting_value_case/command-calls"
+TERRAPOD_STUB_CALL_LOG="$quoted_setting_value_log"
+export TERRAPOD_STUB_CALL_LOG
+run_installer_case "$quoted_setting_value_case"
+unset TERRAPOD_STUB_CALL_LOG
+assert_failure "$installer_status" "resume fails when a Managed Setting value is quoted"
+quoted_setting_value_stderr="$(cat "$quoted_setting_value_case/stderr")"
+quoted_setting_value_log_text="$(cat "$quoted_setting_value_log" 2>/dev/null || true)"
+assert_contains "$quoted_setting_value_stderr" "unsupported Managed Setting value for enableEditorStack in config; rewrite it as bare true or false before running Terrapod commands:" "a quoted Managed Setting value names the key and says to rewrite it as a bare boolean"
+assert_not_contains "$quoted_setting_value_log_text" "terrapod args:setup" "a quoted Managed Setting value is not treated as missing setup config"
+assert_not_contains "$quoted_setting_value_log_text" "chezmoi args:apply" "a quoted Managed Setting value does not continue to apply"
 
 incomplete_resume_case="$(make_case_dir incomplete-config-resume)"
 prepare_resumable_macos_case "$incomplete_resume_case"

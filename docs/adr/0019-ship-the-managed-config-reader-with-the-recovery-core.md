@@ -82,5 +82,17 @@ the installer resume from a config it never applies.
   the problem message or missing keys as its detail. `tpod` and the installer
   print and exit on that answer instead of each climbing the file-state,
   syntax, and missing-key ladder themselves, so "complete" has one definition.
-  The verdict is the presence rule only; the installer's stored-profile match
-  stays its own condition on a `complete` verdict.
+  The installer's stored-profile match stays its own condition on a
+  `complete` verdict.
+- The reader also owns how a Managed Setting value is interpreted. A value is
+  valid only as a bare `true` or `false`; anything else, such as `"false"`,
+  `'true'`, `True`, or `1`, makes the verdict `unsupported` and names the key,
+  even for a key that does not apply to the stored profile. Callers receive
+  on/off and a plain stored profile, never raw tokens, and the verdict and the
+  values come from one load of the file, a fixed number of passes whatever the
+  schema holds. The rule closes a divergence: `tpod` read the string `"false"`
+  as off while chezmoi's templates, which read `.data` with Go truthiness, read
+  it as on. The verdict rejects such values rather than the templates
+  normalizing them, so the templates stay untouched; `tpod apply` stops on
+  `unsupported` before it delegates, and a direct `chezmoi` invocation, the
+  documented escape hatch, keeps Go truthiness.
