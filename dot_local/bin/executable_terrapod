@@ -721,23 +721,10 @@ bool_state_label() {
   esac
 }
 
-# A Managed Setting's readiness state from the loaded managed config.
-loaded_setting_state() {
-  if managed_setting_enabled "$1"; then
-    printf '%s\n' "true"
-  else
-    printf '%s\n' "false"
-  fi
-}
-
 # The Optional Development Workspace turns on the optional stacks it bundles,
 # so every optional stack answers the same "own key or the workspace key" rule.
 effective_optional_stack_enabled() {
-  if managed_setting_enabled "$1" || managed_setting_enabled enableDevelopmentWorkspace; then
-    printf '%s\n' "true"
-  else
-    printf '%s\n' "false"
-  fi
+  managed_setting_enabled "$1" || managed_setting_enabled enableDevelopmentWorkspace
 }
 
 is_enabled() {
@@ -785,11 +772,14 @@ evaluate_readiness() {
   while IFS='|' read -r setting_key setting_kind setting_name setting_profile setting_presets setting_summary; do
     if managed_setting_applies_to_profile "$setting_key" "$readiness_profile"; then
       case "$setting_kind" in
-        optional-stack)
-          setting_state="$(effective_optional_stack_enabled "$setting_key")"
-          ;;
-        *) setting_state="$(loaded_setting_state "$setting_key")" ;;
+        optional-stack) setting_enabled_rule=effective_optional_stack_enabled ;;
+        *) setting_enabled_rule=managed_setting_enabled ;;
       esac
+      if "$setting_enabled_rule" "$setting_key"; then
+        setting_state=true
+      else
+        setting_state=false
+      fi
       if [ "$setting_kind" = macos-app-group ]; then
         readiness_app_groups_apply=true
       fi

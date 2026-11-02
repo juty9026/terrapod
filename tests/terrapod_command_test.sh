@@ -2372,25 +2372,27 @@ assert_contains "$status_quoted_value_output" "Config: $status_quoted_value_conf
 assert_contains "$status_quoted_value_output" "unsupported Managed Setting value for enableEditorStack in config; rewrite it as bare true or false before running Terrapod commands: $status_quoted_value_config" "Terrapod status names the quoted Managed Setting and says to rewrite it as a bare boolean"
 
 # One status run reads the managed config a fixed number of times, not once
-# per Managed Setting: an awk shim counts the passes that name the config.
+# per Managed Setting: an awk shim counts the passes that name the config. The
+# complete macOS config is the widest case, since every Managed Setting applies.
 counted_status_path="$tmp_dir/counted-status-path"
 rm -rf "$counted_status_path"
-cp -R "$ubuntu_status_path" "$counted_status_path"
+cp -R "$dotted_status_path" "$counted_status_path"
 rm -f "$counted_status_path/awk"
 status_real_awk="$(command -v awk)"
 cat >"$counted_status_path/awk" <<SH
 #!/bin/sh
 for arg do
-  [ "\$arg" = "$status_quoted_value_config" ] && printf '%s\n' pass >>"$tmp_dir/status-awk-count"
+  [ "\$arg" = "$status_dotted_config" ] && printf '%s\n' pass >>"$tmp_dir/status-awk-count"
 done
 exec "$status_real_awk" "\$@"
 SH
 chmod +x "$counted_status_path/awk"
 : >"$tmp_dir/status-awk-count"
-TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_quoted_value_config" PATH="$counted_status_path" \
+TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$status_dotted_config" PATH="$counted_status_path" \
   /bin/sh "$terrapod" status >/dev/null 2>&1 || true
 status_config_reads="$(wc -l <"$tmp_dir/status-awk-count" | tr -d ' ')"
 [ "$status_config_reads" -gt 0 ] || fail "the awk shim saw Terrapod status read the config"
+# Four: the three unsupported-syntax checks and the one scan of the values.
 [ "$status_config_reads" -le 4 ] ||
   fail "Terrapod status reads the managed config a fixed number of times, not once per key: $status_config_reads"
 pass "Terrapod status reads the managed config $status_config_reads times"

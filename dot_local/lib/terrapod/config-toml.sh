@@ -518,16 +518,6 @@ unsupported_managed_config_problem_message() {
   return 1
 }
 
-join_with_comma() {
-  joined_list="$1"
-
-  if [ -z "$joined_list" ]; then
-    joined_list="$2"
-  else
-    joined_list="$joined_list, $2"
-  fi
-}
-
 # Reads the managed Terrapod Setup config at the path it is handed, once, and
 # leaves the answer in globals: the one place the file state, then unsupported
 # syntax or values, then missing keys ladder is climbed, and the one place a
@@ -571,11 +561,9 @@ managed_setup_config_load() {
   managed_setup_config_state="$(config_file_state "$load_config_file")"
   case "$managed_setup_config_state" in
     missing)
-      joined_list=
       for load_key in $(managed_setup_keys); do
-        join_with_comma "$joined_list" "$load_key"
+        managed_setup_config_detail="${managed_setup_config_detail:+$managed_setup_config_detail, }$load_key"
       done
-      managed_setup_config_detail="$joined_list"
       return 0
       ;;
     non-regular|unreadable)
@@ -588,12 +576,10 @@ managed_setup_config_load() {
   while IFS= read -r load_line; do
     case "$load_line" in
       "missing "*)
-        join_with_comma "$load_missing_keys" "${load_line#missing }"
-        load_missing_keys="$joined_list"
+        load_missing_keys="${load_missing_keys:+$load_missing_keys, }${load_line#missing }"
         ;;
       "invalid "*)
-        join_with_comma "$load_invalid_keys" "${load_line#invalid }"
-        load_invalid_keys="$joined_list"
+        load_invalid_keys="${load_invalid_keys:+$load_invalid_keys, }${load_line#invalid }"
         ;;
       "value "*)
         managed_setup_config_values="$managed_setup_config_values${load_line#value }
@@ -618,8 +604,10 @@ EOF
   fi
 }
 
-# Whether the loaded config turns the Managed Setting on. Absent, rejected, and
-# unread values are off. Parameter expansion only, like the verdict accessors.
+# Whether the loaded config turns the Managed Setting on. Absent and rejected
+# values, and every value of a file that was not read, are off. A file with
+# unsupported syntax still answers with what the scan read, as status always
+# has. Parameter expansion only, like the verdict accessors.
 managed_setting_enabled() {
   case "$managed_setup_config_values" in
     *"
@@ -675,8 +663,8 @@ managed_setup_verdict_detail() {
 }
 
 # The config writer's guard: syntax only. A rejected Managed Setting value does
-# not stop a write, because an explicit `tpod configure` rewrites every managed
-# key as a bare boolean, and that is the non-manual way to repair one.
+# not stop a write, because the writer replaces every Managed Setting with a
+# bare boolean anyway.
 reject_unsupported_managed_config_syntax() {
   config_file="$1"
 

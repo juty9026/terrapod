@@ -342,6 +342,7 @@ count_config_reads() {
 current_reads="$(count_config_reads current "$reader")"
 grown_reads="$(count_config_reads grown "$grown_reader")"
 [ "$current_reads" -gt 0 ] || fail "the awk shim saw the reader read the config"
+# Four: the three unsupported-syntax checks and the one scan of the values.
 [ "$current_reads" -le 4 ] || fail "one load reads the config at most four times: $current_reads"
 [ "$grown_reads" = "$current_reads" ] ||
   fail "one more Managed Setting does not add a read: $current_reads, then $grown_reads"
