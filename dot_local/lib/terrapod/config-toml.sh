@@ -51,7 +51,7 @@ config_file_state() {
 # installer run before the full apply (ADR 0019).
 #
 # One row per Managed Setting, 'key|kind|name|profile|presets|summary':
-#   kind     optional-stack or macos-app-group
+#   kind     optional-stack, macos-app-group, or shell-environment
 #   name     the display name Setup, status, and doctor show
 #   profile  the one machine profile the setting applies to, or "all". A
 #            setting that does not apply is not offered by Setup and is
@@ -62,7 +62,8 @@ config_file_state() {
 #            summary is its app list: Setup says "Installs <summary>." and
 #            status reports the group by the same text. An optional stack
 #            summary is the sentence Setup opens with; its status and doctor
-#            details are hand-written, and worded differently
+#            details are hand-written, and worded differently. A shell
+#            environment preference uses its summary in all three places
 #
 # Row order is the write order of the TOML and the managed_setup_keys order.
 #
@@ -83,6 +84,7 @@ enableMacosAppGroupDevelopmentApps|macos-app-group|development-apps|macos-termin
 enableMacosAppGroupMobileDev|macos-app-group|mobile-dev|macos-terminal|workstation|Android Studio and Maestro
 enableMacosAppGroupBrowsers|macos-app-group|browsers|macos-terminal|workstation|Aside and Google Chrome
 enableMacosAppGroupAiApps|macos-app-group|ai-apps|macos-terminal|workstation|Claude, ChatGPT (including Codex), and Gemini
+enableColimaDockerHost|shell-environment|Colima Docker Host Selection|macos-terminal||DOCKER_HOST for the default Colima profile; no runtime installation or startup
 ROWS
 }
 

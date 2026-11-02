@@ -313,7 +313,7 @@ Raycast 변경사항을 workstation 간에 공유해야 할 때는 primary works
 Machine-local option은 이 repo 밖에서 `chezmoi edit-config`로 설정합니다. 여기에는 option name, default, example만 둡니다. workstation-specific value는 commit하지 않습니다.
 
 먼저 `tpod setup` 또는 `terrapod configure <Preset>`를 실행해 Terrapod이 complete managed setup config를 쓰게 합니다.
-Routine command는 `profile`과 모든 managed optional stack 및 macOS App Group key가 있어야 setup config를 complete로 봅니다.
+Routine command는 `profile`과 모든 Managed Setting key가 있어야 setup config를 complete로 봅니다.
 disabled key도 포함됩니다. 수동으로 편집할 때는 기존 `[data]` section의 값을 바꾸고, partial snippet으로 대체하지 않습니다.
 
 Optional stack profile과 macOS App Group setting은 기본적으로 disabled입니다.
@@ -332,6 +332,7 @@ Optional stack profile과 macOS App Group setting은 기본적으로 disabled입
 | `enableMacosAppGroupMobileDev` | `false` | mobile-dev macOS App Group인 Android Studio와 Maestro(`mobile-dev-inc/tap/maestro`)를 설치합니다. `ANDROID_HOME`과 `JAVA_HOME`도 함께 설정합니다. |
 | `enableMacosAppGroupBrowsers` | `false` | browsers macOS App Group인 Aside와 Google Chrome을 설치합니다. |
 | `enableMacosAppGroupAiApps` | `false` | ai-apps macOS App Group인 Claude, Codex를 포함한 ChatGPT, Gemini를 설치합니다. Gemini는 Apple Silicon·macOS 15 이상에서만 설치합니다. |
+| `enableColimaDockerHost` | `false` | macOS Terminal Profile에서 Colima 기본 profile의 `DOCKER_HOST`를 export합니다. Colima 설치·시작은 포함하지 않습니다. |
 
 `enableDevelopmentWorkspace`가 `true`이면 `enableEditorStack`이나 `enableAiCliTools`가 false로 기록되어 있어도 Optional Editor Stack과 Optional AI Tool Stack이 함께 활성화됩니다. 다만 VPS Shell Profile에서는 Optional AI Tool Stack이 macOS 전용이므로 이 묶음에서 빠집니다.
 
@@ -350,6 +351,16 @@ advisory로 표시합니다. nonstandard Homebrew prefix도 advisory이며 clean
 installer가 이 경로를 추가해도 machine-local override가 필요하지 않습니다.
 
 `enableMacosAppGroupAiApps`는 ai-apps 선택 설치 키로 복원되었습니다. 기존 `true` 값은 다음 `tpod apply`에서 새 세 앱을 설치 대상으로 선택합니다. 키가 없는 기존 설정은 `tpod setup` 또는 `terrapod configure <Preset>`로 완성합니다. `workstation` Preset은 이 그룹을 활성화하고, `minimal`·`development`는 비활성화합니다. development-apps와 AI CLI 선택은 독립적으로 유지됩니다.
+
+### Colima Docker Host Selection
+
+`enableColimaDockerHost`는 모든 Preset에서 `false`이며, development-apps와 Optional Development Workspace 선택에 영향을 받지 않습니다. macOS에서 `tpod setup`을 실행해 **Colima Docker Host Selection**을 켠 뒤 `tpod apply`를 실행하고 새 zsh를 시작하세요. 기존 설정 파일에 새 키가 없으면 setup 또는 configure로 설정을 완성해야 합니다. `tpod configure <Preset>`는 이 값을 다시 `false`로 저장하며, VPS Shell Profile은 선택 질문 없이 `false`를 저장합니다.
+
+활성화하면 관리형 `.zshenv`가 `DOCKER_HOST`를 export합니다. 기본 endpoint는 `unix://$HOME/.config/colima/default/docker.sock`입니다. [Colima의 설정 위치 규칙](https://github.com/abiosoft/colima/blob/main/docs/FAQ.md#specifying-the-config-location)에 따라 존재하는 `COLIMA_HOME` 디렉터리를 먼저 사용하고, 그다음 기존 `~/.colima`, 마지막으로 관리형 `XDG_CONFIG_HOME`을 사용합니다. 소켓이나 실행 파일이 없어도 설정하며, Colima가 중지되어 있어도 OrbStack으로 자동 전환하지 않습니다. Colima, Docker CLI, Supabase의 설치와 런타임 시작은 별도로 관리합니다.
+
+이미 설정된 `DOCKER_HOST`는 빈 문자열까지 보존하며, `~/.config/zsh/path.d/*.zsh`의 머신별 override는 마지막에 실행됩니다. 다른 Colima profile은 명시적인 `DOCKER_HOST` 또는 이 override로 선택하세요. OrbStack 설치·shell integration, Docker context, `DOCKER_CONTEXT`, 시스템 소켓 링크는 변경하지 않습니다. Docker 클라이언트의 명시적 context 옵션과 환경변수 우선순위는 클라이언트·버전에 따라 다를 수 있습니다.
+
+적용 범위는 일반 비대화형·대화형·login zsh와 그 환경을 상속하는 자식 프로세스입니다. 기존 부모 프로세스나 독립적으로 시작한 GUI/launchd 프로세스, 직접 시작한 sh, 사용자 시작 파일을 건너뛰는 `zsh -f`까지 자동 구성하지는 않습니다.
 
 ### Zellij shortcuts
 
@@ -377,6 +388,7 @@ enableMacosAppGroupDevelopmentApps = false
 enableMacosAppGroupMobileDev = false
 enableMacosAppGroupBrowsers = false
 enableMacosAppGroupAiApps = false
+enableColimaDockerHost = false
 ```
 
 Editor-only machine:

@@ -671,6 +671,10 @@ prompt_for_setup_settings() {
     printf '%s\n' "macOS App Groups: not applicable for $(profile_context_label)" >&2
   fi
 
+  for key in $(managed_setting_keys_of_kind shell-environment); do
+    ask_setup_setting "$key"
+  done
+
   printf '%s\n' "$setup_data"
 }
 
@@ -1010,6 +1014,28 @@ print_macos_app_group_status() {
   done
 }
 
+# Connection preferences report configured intent, not daemon health.
+print_shell_environment_status() {
+  environment_mode="$1"
+  print_section "Shell environment:"
+  while IFS='|' read -r environment_key environment_kind environment_name environment_state environment_summary; do
+    [ "$environment_kind" = shell-environment ] || continue
+    if [ "$environment_state" = not-applicable ]; then
+      if [ "$environment_mode" = doctor ]; then
+        doctor_ok "$environment_name is not applicable for $(profile_context_label)"
+      else
+        print_indented_colon_state_line "$environment_name" "not applicable" "($(profile_context_label))"
+      fi
+    elif [ "$environment_mode" = doctor ]; then
+      doctor_check_optional_setting "$environment_name" "$environment_state" "$environment_summary"
+    else
+      print_optional_setting_status "$environment_name" "$environment_state" "$environment_summary"
+    fi
+  done <<EOF
+$readiness_settings
+EOF
+}
+
 print_key_tool_status() {
   profile="$1"
 
@@ -1179,6 +1205,7 @@ run_status() {
   fi
   print_optional_setting_status "$(readiness_setting_field enableDevelopmentWorkspace name)" "$(readiness_setting_field enableDevelopmentWorkspace state)" "$(readiness_setting_detail "$(readiness_setting_field enableDevelopmentWorkspace summary)")"
   print_macos_app_group_status
+  print_shell_environment_status status
   print_key_tool_status "$profile"
   if [ "$profile" = "macos-terminal" ]; then
     print_jetendard_status
@@ -1234,6 +1261,7 @@ show_stack_context() {
     print_colon_state_line "$(readiness_setting_field enableAiCliTools name)" "not applicable" "($(profile_context_label))"
   fi
   print_colon_state_line "$(readiness_setting_field enableDevelopmentWorkspace name)" "$workspace_state"
+  print_shell_environment_status status
 
   if [ "$readiness_app_groups_apply" = false ]; then
     printf '%s\n' "macOS App Groups: not applicable for $(profile_context_label)"
@@ -1699,6 +1727,7 @@ run_doctor() {
     done
   fi
 
+  print_shell_environment_status doctor
   doctor_check_install_warnings
 
   evaluate_executable_selection doctor "$doctor_show_payloads"

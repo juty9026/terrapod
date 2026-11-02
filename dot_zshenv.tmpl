@@ -53,6 +53,22 @@ fi
 unset android_studio_jbr
 {{ end -}}
 
+{{ if and (eq .chezmoi.os "darwin") (default false (get . "enableColimaDockerHost")) -}}
+# Select the default Colima profile even before the runtime has started.
+# An explicit DOCKER_HOST, including an empty value, belongs to the caller.
+if (( ! ${+DOCKER_HOST} )); then
+  # Colima accepts COLIMA_HOME when it exists, then prefers the legacy root
+  # over XDG_CONFIG_HOME. No socket or executable needs to exist yet.
+  if [[ -n "${COLIMA_HOME:-}" && -d "$COLIMA_HOME" ]]; then
+    export DOCKER_HOST="unix://${COLIMA_HOME%/}/default/docker.sock"
+  elif [[ -d "$HOME/.colima" ]]; then
+    export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
+  else
+    export DOCKER_HOST="unix://$XDG_CONFIG_HOME/colima/default/docker.sock"
+  fi
+fi
+{{ end -}}
+
 # Explicit machine-local overrides run last.
 if [[ -d "$HOME/.config/zsh/path.d" ]]; then
   for path_snippet in "$HOME"/.config/zsh/path.d/*.zsh(N); do
