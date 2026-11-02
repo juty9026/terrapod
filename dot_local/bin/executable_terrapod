@@ -682,17 +682,6 @@ config_file_guidance_message() {
   printf '%s\n' "Fix the config path or permissions so it is a readable regular file."
 }
 
-config_data_bool() {
-  config_file="$1"
-  key="$2"
-
-  if [ "$(config_data_value "$config_file" "$key" 2>/dev/null || printf false)" = "true" ]; then
-    printf '%s\n' "true"
-  else
-    printf '%s\n' "false"
-  fi
-}
-
 managed_setup_guidance_message() {
   printf '%s\n' "Run 'tpod setup' or 'tpod configure <$(available_preset_args "$(current_profile)")>' to complete the managed setup config."
 }
@@ -732,18 +721,19 @@ bool_state_label() {
   esac
 }
 
-config_bool_state_label() {
-  bool_state_label "$(config_data_bool "$1" "$2")"
+# A Managed Setting's readiness state from the loaded managed config.
+loaded_setting_state() {
+  if managed_setting_enabled "$1"; then
+    printf '%s\n' "true"
+  else
+    printf '%s\n' "false"
+  fi
 }
 
 # The Optional Development Workspace turns on the optional stacks it bundles,
 # so every optional stack answers the same "own key or the workspace key" rule.
 effective_optional_stack_enabled() {
-  config_file="$1"
-  key="$2"
-
-  if [ "$(config_data_bool "$config_file" "$key")" = "true" ] ||
-    [ "$(config_data_bool "$config_file" enableDevelopmentWorkspace)" = "true" ]; then
+  if managed_setting_enabled "$1" || managed_setting_enabled enableDevelopmentWorkspace; then
     printf '%s\n' "true"
   else
     printf '%s\n' "false"
@@ -786,7 +776,9 @@ evaluate_readiness() {
   readiness_config_file="$1"
   readiness_profile="$2"
   readiness_check_install_warnings="${3:-true}"
-  readiness_config_verdict="$(managed_setup_config_verdict "$readiness_config_file")"
+  # Loaded in this shell, not in $(...), so the values survive for the rows.
+  managed_setup_config_load "$readiness_config_file"
+  readiness_config_verdict="$(managed_setup_loaded_verdict)"
   readiness_settings=""
   readiness_app_groups_apply=false
 
@@ -794,9 +786,9 @@ evaluate_readiness() {
     if managed_setting_applies_to_profile "$setting_key" "$readiness_profile"; then
       case "$setting_kind" in
         optional-stack)
-          setting_state="$(effective_optional_stack_enabled "$readiness_config_file" "$setting_key")"
+          setting_state="$(effective_optional_stack_enabled "$setting_key")"
           ;;
-        *) setting_state="$(config_data_bool "$readiness_config_file" "$setting_key")" ;;
+        *) setting_state="$(loaded_setting_state "$setting_key")" ;;
       esac
       if [ "$setting_kind" = macos-app-group ]; then
         readiness_app_groups_apply=true

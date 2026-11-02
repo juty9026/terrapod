@@ -2342,6 +2342,59 @@ assert_contains "$status_unsafe_multiline_output" "Config: $status_unsafe_multil
 assert_contains "$status_unsafe_multiline_output" "unsupported multiline string" "Terrapod status explains unsupported multiline config"
 assert_not_contains "$status_unsafe_multiline_output" "Config: $status_unsafe_multiline_config (present)" "Terrapod status does not trust managed keys inside multiline strings"
 
+# A Managed Setting value that is not a bare boolean is unsupported: chezmoi's
+# templates would read the string "false" as on while tpod read it as off.
+status_quoted_value_config="$tmp_dir/status-quoted-value.toml"
+cat >"$status_quoted_value_config" <<'TOML'
+[data]
+profile = "vps-shell"
+enableEditorStack = "false"
+enableAiCliTools = false
+enableDevelopmentWorkspace = false
+enableMacosAppGroupTerminalApps = false
+enableMacosAppGroupAutomation = false
+enableMacosAppGroupLauncher = false
+enableMacosAppGroupMonitoring = false
+enableMacosAppGroupDevelopmentApps = false
+enableMacosAppGroupMobileDev = false
+enableMacosAppGroupBrowsers = false
+enableMacosAppGroupAiApps = false
+TOML
+
+if ! status_quoted_value_output="$(
+  TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_quoted_value_config" PATH="$ubuntu_status_path" \
+    /bin/sh "$terrapod" status
+)"; then
+  fail "Terrapod status exits successfully when a Managed Setting value is quoted"
+fi
+
+assert_contains "$status_quoted_value_output" "Config: $status_quoted_value_config (unsupported managed setup config)" "Terrapod status reports a quoted Managed Setting value as unsupported managed setup config"
+assert_contains "$status_quoted_value_output" "unsupported Managed Setting value for enableEditorStack in config; rewrite it as bare true or false before running Terrapod commands: $status_quoted_value_config" "Terrapod status names the quoted Managed Setting and says to rewrite it as a bare boolean"
+
+# One status run reads the managed config a fixed number of times, not once
+# per Managed Setting: an awk shim counts the passes that name the config.
+counted_status_path="$tmp_dir/counted-status-path"
+rm -rf "$counted_status_path"
+cp -R "$ubuntu_status_path" "$counted_status_path"
+rm -f "$counted_status_path/awk"
+status_real_awk="$(command -v awk)"
+cat >"$counted_status_path/awk" <<SH
+#!/bin/sh
+for arg do
+  [ "\$arg" = "$status_quoted_value_config" ] && printf '%s\n' pass >>"$tmp_dir/status-awk-count"
+done
+exec "$status_real_awk" "\$@"
+SH
+chmod +x "$counted_status_path/awk"
+: >"$tmp_dir/status-awk-count"
+TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_quoted_value_config" PATH="$counted_status_path" \
+  /bin/sh "$terrapod" status >/dev/null 2>&1 || true
+status_config_reads="$(wc -l <"$tmp_dir/status-awk-count" | tr -d ' ')"
+[ "$status_config_reads" -gt 0 ] || fail "the awk shim saw Terrapod status read the config"
+[ "$status_config_reads" -le 4 ] ||
+  fail "Terrapod status reads the managed config a fixed number of times, not once per key: $status_config_reads"
+pass "Terrapod status reads the managed config $status_config_reads times"
+
 status_unreadable_config="$tmp_dir/status-unreadable.toml"
 cat >"$status_unreadable_config" <<'TOML'
 [data]
@@ -3527,6 +3580,23 @@ fi
 
 if [ -e "$CHEZMOI_MANAGED_ARGS_FILE" ]; then
   fail "Terrapod apply rejects unsupported multiline config before post-apply validation"
+fi
+
+rm -f "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
+
+if TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_quoted_value_config" PATH="$apply_incomplete_path" \
+  /bin/sh "$terrapod" apply >"$tmp_dir/apply-quoted-value.out" 2>"$tmp_dir/apply-quoted-value.err"; then
+  fail "Terrapod apply rejects a quoted Managed Setting value before chezmoi apply"
+fi
+
+apply_quoted_value_output="$(cat "$tmp_dir/apply-quoted-value.out")"
+apply_quoted_value_error="$(cat "$tmp_dir/apply-quoted-value.err")"
+
+assert_contains "$apply_quoted_value_output" "Config: $status_quoted_value_config (unsupported managed setup config)" "Terrapod apply reports a quoted Managed Setting value in the Config section"
+assert_contains "$apply_quoted_value_error" "unsupported Managed Setting value for enableEditorStack in config; rewrite it as bare true or false" "Terrapod apply names the quoted Managed Setting and says to rewrite it as a bare boolean"
+
+if [ -e "$CHEZMOI_APPLY_INVOKED_FILE" ]; then
+  fail "Terrapod apply rejects a quoted Managed Setting value before calling chezmoi apply"
 fi
 
 rm -f "$CHEZMOI_APPLY_ARGS_FILE" "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"

@@ -539,23 +539,17 @@ checked_out_terrapod() {
   printf '%s\n' "$terrapod_source"
 }
 
-toml_string_value_matches() {
-  value="$1"
-  expected="$2"
-
-  [ "$value" = "\"$expected\"" ] || [ "$value" = "'$expected'" ]
-}
-
 # First-run resume reuses a config only when the shared verdict is complete and
 # the stored profile is the detected one. The profile match is this rule's, not
 # the verdict's: tpod never compares them, but a config saved for another
-# profile would resume into settings that do not fit this machine.
+# profile would resume into settings that do not fit this machine. It reads the
+# config managed_setup_config_load last loaded; a profile that is not a quoted
+# string has no stored profile and never matches.
 managed_setup_config_profile_matches() {
-  config_file="$1"
-  expected_profile="$2"
+  expected_profile="$1"
 
-  setup_profile="$(config_data_value "$config_file" profile)" || return 1
-  toml_string_value_matches "$setup_profile" "$expected_profile"
+  setup_profile="$(managed_setup_stored_profile)" || return 1
+  [ "$setup_profile" = "$expected_profile" ]
 }
 
 print_setup_recovery() {
@@ -627,7 +621,10 @@ ensure_first_run_setup() {
   # so honouring one here would read a config the installer never applies.
   config_file="$(terrapod_default_chezmoi_config_file)"
 
-  config_verdict="$(managed_setup_config_verdict "$config_file")"
+  # Loaded in this shell, not in $(...), so the profile match reads the same
+  # pass as the verdict.
+  managed_setup_config_load "$config_file"
+  config_verdict="$(managed_setup_loaded_verdict)"
 
   case "$(managed_setup_verdict_state "$config_verdict")" in
     non-regular)
@@ -640,7 +637,7 @@ ensure_first_run_setup() {
       fatal "$(managed_setup_verdict_detail "$config_verdict")"
       ;;
     complete)
-      if managed_setup_config_profile_matches "$config_file" "$profile"; then
+      if managed_setup_config_profile_matches "$profile"; then
         printf '%s\n' "terrapod installer: Reusing complete managed Terrapod Setup config: $config_file"
         return 0
       fi
