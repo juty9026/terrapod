@@ -50,7 +50,7 @@ config_file_state() {
 # starts and mostly ends here. The reader owns it because Setup and the
 # installer run before the full apply (ADR 0019).
 #
-# One row per Managed Setting, 'key|kind|name|profile|presets|summary':
+# One row per Managed Setting, 'key|kind|name|profile|presets|summary|readiness-detail':
 #   kind     optional-stack, macos-app-group, or shell-environment
 #   name     the display name Setup, status, and doctor show
 #   profile  the one machine profile the setting applies to, or "all". A
@@ -61,9 +61,10 @@ config_file_state() {
 #   summary  the line Setup opens its explanation with. A macOS App Group
 #            summary is its app list: Setup says "Installs <summary>." and
 #            status reports the group by the same text. An optional stack
-#            summary is the sentence Setup opens with; its status and doctor
-#            details are hand-written, and worded differently. A shell
-#            environment preference uses its summary in all three places
+#            summary is the sentence Setup opens with. A shell environment
+#            preference uses its summary in all three places
+#   readiness-detail  optional explicit wording for status and doctor, falling
+#            back to summary when omitted; independent of Setup capitalization
 #
 # Row order is the write order of the TOML and the managed_setup_keys order.
 #
@@ -73,9 +74,9 @@ managed_setting_schema() {
   while IFS= read -r schema_row; do
     printf '%s\n' "$schema_row"
   done <<'ROWS'
-enableEditorStack|optional-stack|Optional Editor Stack|all|development,workstation|Rich Neovim configuration
+enableEditorStack|optional-stack|Optional Editor Stack|all|development,workstation|Rich Neovim configuration|rich Neovim configuration
 enableAiCliTools|optional-stack|Optional AI Tool Stack|macos-terminal|development,workstation|Antigravity CLI, Claude Code, and Codex
-enableDevelopmentWorkspace|optional-stack|Optional Development Workspace|all|development,workstation|Dev Zellij layouts
+enableDevelopmentWorkspace|optional-stack|Optional Development Workspace|all|development,workstation|Dev Zellij layouts|development Zellij layouts
 enableMacosAppGroupTerminalApps|macos-app-group|terminal-apps|macos-terminal|workstation|Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, and Noto Sans CJK KR
 enableMacosAppGroupAutomation|macos-app-group|automation|macos-terminal|workstation|Hammerspoon, Karabiner-Elements, and Scroll Reverser
 enableMacosAppGroupLauncher|macos-app-group|launcher|macos-terminal|workstation|Raycast and 1Password CLI
@@ -117,7 +118,7 @@ managed_setting_keys_of_kind() {
   done
 }
 
-# managed_setting_field <key> kind|name|profile|presets|summary. Prints nothing
+# managed_setting_field <key> kind|name|profile|presets|summary|readiness-detail. Prints nothing
 # for an unknown key. It reads every row rather than stopping at the match: a
 # reader that closes the pipe early makes the schema's printf fail with EPIPE,
 # and dash reports that as an I/O error when SIGPIPE is ignored.
@@ -125,13 +126,14 @@ managed_setting_field() {
   wanted_key="$1"
   wanted_field="$2"
 
-  managed_setting_schema | while IFS='|' read -r schema_key schema_kind schema_name schema_profile schema_presets schema_summary; do
+  managed_setting_schema | while IFS='|' read -r schema_key schema_kind schema_name schema_profile schema_presets schema_summary schema_detail; do
     if [ "$schema_key" = "$wanted_key" ]; then
       case "$wanted_field" in
         kind) printf '%s\n' "$schema_kind" ;;
         name) printf '%s\n' "$schema_name" ;;
         profile) printf '%s\n' "$schema_profile" ;;
         presets) printf '%s\n' "$schema_presets" ;;
+        readiness-detail) printf '%s\n' "${schema_detail:-$schema_summary}" ;;
         summary) printf '%s\n' "$schema_summary" ;;
       esac
     fi

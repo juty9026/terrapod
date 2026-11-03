@@ -185,6 +185,79 @@ ready_output="$(run_selection doctor)"
 assert_contains "$ready_output" "Canonical executable selection: ready" \
   "doctor accepts provider-installed commands that resolve to the canonical file"
 
+# Callers receive the exact PATH used for selection without parsing display text.
+selection_path_file="$tmp_dir/selection-path"
+TERRAPOD_EXECUTABLE_SELECTION_PATH_FILE="$selection_path_file" run_selection status >/dev/null
+assert_file_exists "$selection_path_file" "selection exports its computed PATH for readiness"
+assert_equals "$(cat "$selection_path_file")" "$path_dir:/usr/bin:/bin" \
+  "selection shares the exact Managed Default PATH with its caller"
+
+# Exercise the real command/helper boundary with a controlled login-shell PATH.
+# Runtime and macOS font-check execution are fixtures; PATH construction and
+# profile requirement evaluation are the production implementations.
+terrapod="$repo_root/dot_local/bin/executable_terrapod"
+bootstrap_path="$tmp_dir/bootstrap-path"
+mkdir -p "$bootstrap_path" "$tmp_dir/home"
+for utility in awk sed tr env; do
+  ln -s "$(command -v "$utility")" "$bootstrap_path/$utility"
+done
+ln -s "$mise_shims/python3" "$bootstrap_path/python3"
+cat >"$bootstrap_path/zsh" <<EOF
+#!/bin/sh
+printf '%s\\n' '$path_dir'
+EOF
+chmod +x "$bootstrap_path/zsh"
+prefix_lib="$tmp_dir/prefix.sh"
+cat >"$prefix_lib" <<EOF
+TERRAPOD_HOMEBREW_PREFIX_LOADED=1
+terrapod_standard_homebrew_prefix_for_os() { printf '%s\\n' '$prefix'; }
+EOF
+write_executable "$path_dir/brew"
+write_executable "$path_dir/apt"
+
+run_profile_readiness() {
+  readiness_test_profile="$1"
+  shift
+  HOME="$tmp_dir/home" TERRAPOD_PROFILE="$readiness_test_profile" \
+    TERRAPOD_CHEZMOI_CONFIG="$tmp_dir/$readiness_test_profile.toml" \
+    TERRAPOD_HOMEBREW_PREFIX_LIB="$prefix_lib" \
+    TERRAPOD_EXECUTABLE_SELECTION_HELPER="$selection" \
+    TERRAPOD_EXECUTABLE_SELECTION_INVENTORY_DIR="$inventory" \
+    TERRAPOD_MISE_SHIMS_DIR="$mise_shims" TERRAPOD_MANAGED_PATH= \
+    PATH="$bootstrap_path" /bin/sh "$terrapod" "$@"
+}
+
+for readiness_test_profile in macos-terminal vps-shell; do
+  HOME="$tmp_dir/home" TERRAPOD_PROFILE="$readiness_test_profile" \
+    TERRAPOD_CHEZMOI_CONFIG="$tmp_dir/$readiness_test_profile.toml" \
+    /bin/sh "$terrapod" configure minimal >/dev/null
+  profile_ready_output="$(run_profile_readiness "$readiness_test_profile" doctor)" ||
+    fail "$readiness_test_profile doctor accepts the real helper's computed login PATH"
+  assert_contains "$profile_ready_output" "ok - brew is available" \
+    "$readiness_test_profile uses the real helper's managed brew"
+  assert_contains "$profile_ready_output" "Canonical executable selection: ready" \
+    "$readiness_test_profile retains the real selection verdict under a restricted invoking PATH"
+  assert_not_contains "$profile_ready_output" "inherited PATH" \
+    "$readiness_test_profile probes the login PATH successfully"
+done
+
+# Inverting the two PATHs must invert readiness even though selection still
+# succeeds for every declared command.
+mv "$path_dir/brew" "$bootstrap_path/brew"
+mv "$path_dir/apt" "$bootstrap_path/apt"
+for readiness_test_profile in macos-terminal vps-shell; do
+  if run_profile_readiness "$readiness_test_profile" doctor >"$tmp_dir/managed-missing-$readiness_test_profile"; then
+    fail "$readiness_test_profile rejects ambient-only package managers with the real helper"
+  fi
+  assert_file_contains "$tmp_dir/managed-missing-$readiness_test_profile" "warn - brew is missing" \
+    "$readiness_test_profile does not inherit ambient brew availability"
+  if [ "$readiness_test_profile" = vps-shell ]; then
+    assert_file_contains "$tmp_dir/managed-missing-$readiness_test_profile" "warn - apt is missing" \
+      "VPS does not inherit ambient apt availability"
+  fi
+done
+rm -f "$bootstrap_path/brew" "$bootstrap_path/apt"
+
 rm -f "$path_dir/bat"
 ln -s "$prefix/bin/bat" "$path_dir/bat"
 same_file_output="$(run_selection doctor)"
@@ -326,6 +399,7 @@ fallback_output="$(
     TERRAPOD_EXECUTABLE_SELECTION_INVENTORY_DIR="$inventory" \
     TERRAPOD_STANDARD_HOMEBREW_PREFIX="$prefix" \
     TERRAPOD_MISE_SHIMS_DIR="$mise_shims" \
+    TERRAPOD_EXECUTABLE_SELECTION_PATH_FILE="$selection_path_file" \
     PATH="$inherited_path" \
     "$selection" doctor macos-terminal false false 2>&1 || true
 )"
@@ -334,6 +408,9 @@ assert_contains "$fallback_output" \
   "a failed login-shell probe names the PATH the verdict was computed from"
 assert_not_contains "$fallback_output" "failure -" \
   "the inherited-PATH fallback still resolves the declared commands"
+
+assert_equals "$(cat "$selection_path_file")" "$inherited_path" \
+  "the shared PATH preserves the existing login-probe failure fallback"
 
 managed_output="$(run_selection doctor)"
 assert_not_contains "$managed_output" "inherited PATH" \
@@ -645,6 +722,7 @@ chmod +x "$integration_bin/chezmoi"
 cat >"$integration_bin/executable-selection" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >>"$TERRAPOD_EXECUTABLE_SELECTION_LOG"
+printf '%s\n' "${TERRAPOD_MANAGED_PATH:-$PATH}" >"$TERRAPOD_EXECUTABLE_SELECTION_PATH_FILE"
 printf '%s\n' "  advisory - bat resolves to /legacy/bin/bat"
 exit 0
 EOF
