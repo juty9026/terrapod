@@ -19,7 +19,6 @@ finish_install_warning_category
 {{ include "dot_local/lib/terrapod/homebrew-bundle.sh" }}
 
 ai_cli_brewfile=
-ai_cli_failures_file=
 claude_code_installer=
 
 CLAUDE_CODE_CANONICAL_EXECUTABLE="$HOME/.local/bin/claude"
@@ -27,7 +26,6 @@ CLAUDE_CODE_INSTALLER_URL=https://claude.ai/install.sh
 
 cleanup_ai_cli_install() {
   [ -z "$ai_cli_brewfile" ] || rm -f "$ai_cli_brewfile"
-  [ -z "$ai_cli_failures_file" ] || rm -f "$ai_cli_failures_file"
   [ -z "$claude_code_installer" ] || rm -f "$claude_code_installer"
 }
 
@@ -43,14 +41,14 @@ setup_brew_environment() {
 }
 
 install_ai_cli_bundle() {
+  TERRAPOD_HOMEBREW_BUNDLE_FAILURE_DETAIL="Homebrew bundle"
   setup_brew_environment || return 1
   ai_cli_brewfile="$(mktemp "${TMPDIR:-/tmp}/terrapod-ai-cli-brewfile.XXXXXX")" || return 1
   cat >"$ai_cli_brewfile" <<'BREWFILE'
 {{ includeTemplate "Brewfile.ai-cli-tools.tmpl" . }}
 BREWFILE
 
-  ai_cli_failures_file="$(mktemp "${TMPDIR:-/tmp}/terrapod-ai-cli-failures.XXXXXX")" || return 1
-  terrapod_homebrew_bundle_run "$brew_bin" "$ai_cli_brewfile" "$ai_cli_failures_file"
+  terrapod_homebrew_bundle_step "$brew_bin" "$ai_cli_brewfile" "$(terrapod_homebrew_hardware_arch "{{ .chezmoi.os }}" || true)"
 }
 
 install_claude_code() {
@@ -74,14 +72,7 @@ install_claude_code() {
 }
 
 if ! install_ai_cli_bundle; then
-  if [ -n "$ai_cli_failures_file" ] && [ -s "$ai_cli_failures_file" ]; then
-    ai_cli_tab="$(printf '\t')"
-    while IFS="$ai_cli_tab" read -r ai_cli_kind ai_cli_name ai_cli_group <&3; do
-      note_failed_install_warning_item "$ai_cli_name"
-    done 3<"$ai_cli_failures_file"
-  else
-    note_failed_install_warning_item "Homebrew bundle"
-  fi
+  note_failed_install_warning_item "$TERRAPOD_HOMEBREW_BUNDLE_FAILURE_DETAIL"
 fi
 install_claude_code || note_failed_install_warning_item "Claude Code"
 

@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # Run a Brewfile once, then identify observed failures by retrying its original
-# declarations individually. The caller owns the result file and warning text.
+# declarations individually. The bundle step owns this internal record format.
 # Result records are: kind<TAB>name<TAB>macOS App Group (or "-").
 terrapod_homebrew_bundle_records() {
   awk '
@@ -77,26 +77,43 @@ terrapod_homebrew_bundle_run() {
   return 1
 }
 
-terrapod_homebrew_bundle_join_names() {
-  kind="$1"
-  records="$2"
-  awk -F '\t' -v kind="$kind" '
-    $1 == kind {
-      if (names != "") names = names ", "
-      names = names $2
-    }
-    END { print names }
-  ' "$records"
-}
+# Public bundle step: status is the installation outcome, and failure detail is
+# already attributed for category-specific recovery wording. Brew output remains
+# visible on its original streams. Success resets the detail to an empty string;
+# setup errors and unattributed bulk failures share the "Homebrew bundle" fallback.
+# Arguments: brew executable, source Brewfile, hardware architecture.
+terrapod_homebrew_bundle_step() {
+  TERRAPOD_HOMEBREW_BUNDLE_FAILURE_DETAIL="Homebrew bundle"
+  terrapod_step_dir="$(mktemp -d "${TMPDIR:-/tmp}/terrapod-bundle-step.XXXXXX")" || return 1
+  terrapod_step_status=1
 
-terrapod_homebrew_bundle_join_groups() {
-  awk -F '\t' '
-    $3 != "-" && $3 != "" && !seen[$3]++ {
-      if (groups != "") groups = groups ", "
-      groups = groups $3
-    }
-    END { print groups }
-  ' "$1"
+  # Applicability must not rewrite the caller's source Brewfile.
+  if cp "$2" "$terrapod_step_dir/Brewfile" &&
+     terrapod_homebrew_bundle_filter_gemini "$terrapod_step_dir/Brewfile" "$3"; then
+    if (export TMPDIR="$terrapod_step_dir"; terrapod_homebrew_bundle_run "$1" "$terrapod_step_dir/Brewfile" "$terrapod_step_dir/failures"); then
+      TERRAPOD_HOMEBREW_BUNDLE_FAILURE_DETAIL=
+      terrapod_step_status=0
+    else
+      if terrapod_step_detail="$(awk -F '\t' '
+        $1 == "brew" { formulae = formulae (formulae == "" ? "" : ", ") $2 }
+        $1 == "cask" { casks = casks (casks == "" ? "" : ", ") $2 }
+        $3 != "-" && $3 != "" && !seen[$3]++ {
+          groups = groups (groups == "" ? "" : ", ") $3
+        }
+        END {
+          if (formulae != "") detail = "failed formulae: " formulae
+          if (casks != "") detail = detail (detail == "" ? "" : "; ") "failed casks: " casks
+          if (detail != "" && groups != "") detail = detail "; App Groups: " groups
+          print detail
+        }
+      ' "$terrapod_step_dir/failures")"; then
+        TERRAPOD_HOMEBREW_BUNDLE_FAILURE_DETAIL="${terrapod_step_detail:-Homebrew bundle}"
+      fi
+    fi
+  fi
+
+  rm -rf "$terrapod_step_dir"
+  return "$terrapod_step_status"
 }
 
 # Filter before both bulk installation and per-package retries. Homebrew's

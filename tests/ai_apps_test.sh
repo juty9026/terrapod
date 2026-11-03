@@ -38,7 +38,8 @@ run_ai_apps_case() {
     '  shellenv) printf "export PATH=\"%s/bin:$PATH\"\n" "$AI_APPS_PREFIX" ;;' \
     '  analytics) exit 0 ;;' \
     '  bundle)' \
-    '    bundle_file=${3#--file=}' \
+    '    bundle_file=' \
+    '    for arg do case "$arg" in --file=*) bundle_file="${arg#--file=}" ;; esac; done' \
     '    count=$(grep -c "^cask " "$bundle_file" || true)' \
     '    [ "$count" -gt 0 ] || exit 0' \
     '    cat "$bundle_file" >>"$AI_APPS_LOG"' \
@@ -64,6 +65,10 @@ run_ai_apps_case() {
   if [ "$expect_gemini" = true ]; then
     assert_file_contains "$case_dir/brew.log" 'cask "google-gemini"' "$case_name installs Gemini"
     assert_file_not_contains "$case_dir/output" 'Skipping google-gemini' "$case_name does not skip supported Gemini"
+    if [ "$fail_claude" = 1 ]; then
+      assert_equals "$(grep -cx 'cask "google-gemini"' "$case_dir/brew.log")" 2 \
+        "$case_name keeps supported Gemini in both bulk installation and its retry"
+    fi
   else
     assert_file_not_contains "$case_dir/brew.log" 'google-gemini' "$case_name excludes Gemini from bulk and retries"
     assert_file_contains "$case_dir/output" 'Skipping google-gemini: not applicable' "$case_name explains the exclusion"
@@ -86,6 +91,7 @@ run_ai_apps_case rosetta-15 x86_64 15.2 1 true 0
 run_ai_apps_case future-macos arm64 27.0 0 true 0
 run_ai_apps_case unknown-version arm64 unknown 0 false 0
 run_ai_apps_case claude-failure x86_64 15.0 0 false 1
+run_ai_apps_case supported-retry arm64 15.0 0 true 1
 
 # The revived key is managed again; Presets deliberately choose a new concrete
 # value, while routine readers honor an existing true selection.

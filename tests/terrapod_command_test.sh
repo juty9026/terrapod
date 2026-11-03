@@ -339,7 +339,6 @@ copy_desktop_apply_source_fixture() {
   cp "$terrapod" "$source_dir/dot_local/bin/executable_terrapod"
   cp "$tpod_source" "$source_dir/dot_local/bin/symlink_tpod"
   cp "$repo_root/dot_local/lib/terrapod/config-toml.sh" "$source_dir/dot_local/lib/terrapod/config-toml.sh"
-  cp "$repo_root/dot_local/lib/terrapod/homebrew-core-bundle.sh" "$source_dir/dot_local/lib/terrapod/homebrew-core-bundle.sh"
   cp "$repo_root/dot_local/lib/terrapod/homebrew-bundle.sh" "$source_dir/dot_local/lib/terrapod/homebrew-bundle.sh"
   cp "$repo_root/dot_local/lib/terrapod/homebrew-paths.sh" "$source_dir/dot_local/lib/terrapod/homebrew-paths.sh"
   printf '%s\n' \
@@ -3806,7 +3805,7 @@ if [ "$host_os" = "Darwin" ]; then
 
   write_desktop_apply_config "$desktop_apply_config" "$desktop_apply_source" "$desktop_apply_home" true true
 
-  if ! HOME="$desktop_apply_home" XDG_STATE_HOME="$desktop_apply_state" TERRAPOD_CHEZMOI_CONFIG="$desktop_apply_config" MACOS_BREW_LOG="$desktop_apply_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty raycast" PATH="$desktop_apply_bin:/usr/bin:/bin" \
+  if ! HOME="$desktop_apply_home" XDG_STATE_HOME="$desktop_apply_state" TERRAPOD_CHEZMOI_CONFIG="$desktop_apply_config" MACOS_BREW_LOG="$desktop_apply_log" MACOS_BREW_FAIL_CASKS="ghostty raycast" PATH="$desktop_apply_bin:/usr/bin:/bin" \
     /bin/sh "$terrapod" apply >"$tmp_dir/desktop-apply-first.out" 2>"$tmp_dir/desktop-apply-first.err"; then
     printf '%s\n' "desktop apply first stdout:" >&2
     sed 's/^/  /' "$tmp_dir/desktop-apply-first.out" >&2
@@ -3834,7 +3833,7 @@ if [ "$host_os" = "Darwin" ]; then
   fi
   pass "Terrapod apply clears a desktop App Group marker after unchanged-settings retry succeeds"
 
-  if ! HOME="$desktop_apply_home" XDG_STATE_HOME="$desktop_apply_state" TERRAPOD_CHEZMOI_CONFIG="$desktop_apply_config" MACOS_BREW_LOG="$desktop_apply_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty raycast" PATH="$desktop_apply_bin:/usr/bin:/bin" \
+  if ! HOME="$desktop_apply_home" XDG_STATE_HOME="$desktop_apply_state" TERRAPOD_CHEZMOI_CONFIG="$desktop_apply_config" MACOS_BREW_LOG="$desktop_apply_log" MACOS_BREW_FAIL_CASKS="ghostty raycast" PATH="$desktop_apply_bin:/usr/bin:/bin" \
     /bin/sh "$terrapod" apply >"$tmp_dir/desktop-apply-recreate.out" 2>"$tmp_dir/desktop-apply-recreate.err"; then
     printf '%s\n' "desktop apply recreate stdout:" >&2
     sed 's/^/  /' "$tmp_dir/desktop-apply-recreate.out" >&2
@@ -3845,7 +3844,7 @@ if [ "$host_os" = "Darwin" ]; then
 
   write_desktop_apply_config "$desktop_apply_config" "$desktop_apply_source" "$desktop_apply_home" true false
 
-  if ! HOME="$desktop_apply_home" XDG_STATE_HOME="$desktop_apply_state" TERRAPOD_CHEZMOI_CONFIG="$desktop_apply_config" MACOS_BREW_LOG="$desktop_apply_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty raycast" PATH="$desktop_apply_bin:/usr/bin:/bin" \
+  if ! HOME="$desktop_apply_home" XDG_STATE_HOME="$desktop_apply_state" TERRAPOD_CHEZMOI_CONFIG="$desktop_apply_config" MACOS_BREW_LOG="$desktop_apply_log" MACOS_BREW_FAIL_CASKS="ghostty raycast" PATH="$desktop_apply_bin:/usr/bin:/bin" \
     /bin/sh "$terrapod" apply >"$tmp_dir/desktop-apply-terminal-only.out" 2>"$tmp_dir/desktop-apply-terminal-only.err"; then
     printf '%s\n' "desktop apply terminal-only stdout:" >&2
     sed 's/^/  /' "$tmp_dir/desktop-apply-terminal-only.out" >&2
@@ -3878,7 +3877,7 @@ ln -s "$real_chezmoi" "$core_apply_bin/chezmoi"
 write_brew_bundle_stub "$core_apply_bin/brew"
 write_desktop_apply_config "$core_apply_config" "$core_apply_source" "$core_apply_home" false false
 
-if ! HOME="$core_apply_home" XDG_STATE_HOME="$core_apply_state" TERRAPOD_CHEZMOI_CONFIG="$core_apply_config" MACOS_BREW_LOG="$core_apply_log" MACOS_BREW_PREFIX="$core_apply_prefix" MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_FORMULAE="gum" PATH="$core_apply_bin:/usr/bin:/bin" \
+if ! HOME="$core_apply_home" XDG_STATE_HOME="$core_apply_state" TERRAPOD_CHEZMOI_CONFIG="$core_apply_config" MACOS_BREW_LOG="$core_apply_log" MACOS_BREW_PREFIX="$core_apply_prefix" MACOS_BREW_FAIL_FORMULAE="gum" PATH="$core_apply_bin:/usr/bin:/bin" \
   /bin/sh "$terrapod" apply >"$tmp_dir/core-apply-first.out" 2>"$tmp_dir/core-apply-first.err"; then
   printf '%s\n' "core apply first stdout:" >&2
   sed 's/^/  /' "$tmp_dir/core-apply-first.out" >&2
@@ -3927,7 +3926,7 @@ HOME="$core_apply_home" XDG_STATE_HOME="$core_apply_state" sh -c \
   '. "$1"; terrapod_install_warning_write homebrew-core "Homebrew core install needs attention" "old apply core warning."' \
   sh "$install_warnings_lib"
 
-if ! HOME="$core_apply_home" XDG_STATE_HOME="$core_apply_state" TERRAPOD_CHEZMOI_CONFIG="$core_apply_config" MACOS_BREW_LOG="$core_apply_log" MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_FORMULAE="btop" PATH="$core_apply_bin:/usr/bin:/bin" \
+if ! HOME="$core_apply_home" XDG_STATE_HOME="$core_apply_state" TERRAPOD_CHEZMOI_CONFIG="$core_apply_config" MACOS_BREW_LOG="$core_apply_log" MACOS_BREW_FAIL_FORMULAE="btop" PATH="$core_apply_bin:/usr/bin:/bin" \
   /bin/sh "$terrapod" apply >"$tmp_dir/core-apply-retry-failure.out" 2>"$tmp_dir/core-apply-retry-failure.err"; then
   printf '%s\n' "core apply retry failure stdout:" >&2
   sed 's/^/  /' "$tmp_dir/core-apply-retry-failure.out" >&2

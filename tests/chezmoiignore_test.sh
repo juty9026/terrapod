@@ -107,7 +107,7 @@ assert_managed_paths_exclude_prefix \
 
 for entry in \
   .chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl \
-  dot_local/lib/terrapod/homebrew-core-bundle.sh
+  dot_local/lib/terrapod/homebrew-bundle.sh
 do
   printf '%s\n' "$ubuntu_managed" | grep -Fx "$entry" >/dev/null ||
     fail "Ubuntu manages cross-profile Homebrew entry: $entry"

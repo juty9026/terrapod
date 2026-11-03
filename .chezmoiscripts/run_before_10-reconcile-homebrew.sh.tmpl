@@ -16,45 +16,20 @@ set -eu
 
 {{ include "dot_local/lib/terrapod/homebrew-bundle.sh" }}
 
-{{ include "dot_local/lib/terrapod/homebrew-core-bundle.sh" }}
+terrapod_homebrew_core_permission_guidance() {
+  prefix="$(brew --prefix 2>/dev/null || true)"
 
-desktop_app_failure_guidance_text=
-
-run_desktop_app_bundle() {
-  desktop_app_failure_guidance_text="Review Homebrew desktop app bundle output, fix app installation access, then rerun tpod apply."
-  terrapod_homebrew_bundle_filter_gemini "$1" "$homebrew_arch" || return 1
-  desktop_failures_file="$(mktemp "${TMPDIR:-/tmp}/terrapod-desktop-failures.XXXXXX")" || return 1
-  if terrapod_homebrew_bundle_run brew "$1" "$desktop_failures_file"; then
-    rm -f "$desktop_failures_file"
-    return 0
+  if [ -n "$prefix" ] && [ -e "$prefix" ] && [ ! -w "$prefix" ]; then
+    printf '%s\n' "Homebrew prefix is not writable: $prefix. Fix Homebrew permissions for your user or ask the prefix owner/admin; avoid broad ownership changes."
+    return
   fi
 
-  failed_casks="$(terrapod_homebrew_bundle_join_names cask "$desktop_failures_file")"
-  failed_formulae="$(terrapod_homebrew_bundle_join_names brew "$desktop_failures_file")"
-  failed_groups="$(terrapod_homebrew_bundle_join_groups "$desktop_failures_file")"
-  rm -f "$desktop_failures_file"
-  if [ -n "$failed_casks" ] || [ -n "$failed_formulae" ]; then
-    detail=
-    if [ -n "$failed_casks" ]; then
-      detail="failed casks: $failed_casks"
-    fi
-    if [ -n "$failed_formulae" ]; then
-      if [ -n "$detail" ]; then
-        detail="$detail; failed formulae: $failed_formulae"
-      else
-        detail="failed formulae: $failed_formulae"
-      fi
-    fi
-    if [ -n "$failed_groups" ]; then
-      detail="$detail; App Groups: $failed_groups"
-    fi
-    if [ -n "$failed_formulae" ]; then
-      desktop_app_failure_guidance_text="Review Homebrew desktop app bundle output for $detail, fix app installation access, then rerun tpod apply."
-    else
-      desktop_app_failure_guidance_text="Review Homebrew cask output for $detail, fix app installation access, then rerun tpod apply."
-    fi
+  if [ -n "$prefix" ]; then
+    printf '%s\n' "If this was a permissions failure, check Homebrew permissions under $prefix without broad ownership changes."
+    return
   fi
-  return 1
+
+  printf '%s\n' "If this was a permissions failure, check Homebrew prefix permissions without broad ownership changes."
 }
 
 homebrew_arch="$(terrapod_homebrew_hardware_arch "{{ .chezmoi.os }}" || true)"
@@ -135,16 +110,14 @@ fi
 core_brewfile="{{ .chezmoi.sourceDir }}/Brewfile"
 
 if [ -f "$core_brewfile" ]; then
-  if terrapod_homebrew_core_run_bundle "$core_brewfile"; then
+  if terrapod_homebrew_bundle_step brew "$core_brewfile" "$homebrew_arch"; then
     clear_install_warning homebrew-core
   else
-    if [ -z "${TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT:-}" ]; then
-      TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT="Review Homebrew core bundle output, fix package access, then rerun tpod apply."
-    fi
+    permission_guidance="$(terrapod_homebrew_core_permission_guidance)"
     mark_install_warning \
       homebrew-core \
       "Homebrew core install needs attention" \
-      "$TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT"
+      "Review Homebrew core bundle output, fix package access, then rerun tpod apply. Failed: $TERRAPOD_HOMEBREW_BUNDLE_FAILURE_DETAIL. $permission_guidance"
     continue_after_core_install_warning
   fi
 fi
@@ -161,13 +134,13 @@ cat >"$desktop_brewfile" <<'BREWFILE'
 BREWFILE
 
 if [ -s "$desktop_brewfile" ]; then
-  if run_desktop_app_bundle "$desktop_brewfile"; then
+  if terrapod_homebrew_bundle_step brew "$desktop_brewfile" "$homebrew_arch"; then
     clear_install_warning homebrew-desktop-apps
   else
     mark_install_warning \
       homebrew-desktop-apps \
       "Homebrew desktop app install needs attention" \
-      "$desktop_app_failure_guidance_text"
+      "Review Homebrew desktop app bundle output for $TERRAPOD_HOMEBREW_BUNDLE_FAILURE_DETAIL, fix app installation access, then rerun tpod apply."
     exit_after_install_warning
   fi
 fi
