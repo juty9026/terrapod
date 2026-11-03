@@ -3,6 +3,7 @@ set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$repo_root/tests/lib/harness.sh"
+. "$repo_root/tests/lib/managed-config-fixtures.sh"
 . "$repo_root/tests/lib/test-support.sh"
 install_warnings_lib_template="$repo_root/dot_local/lib/terrapod/install-warnings.sh"
 export TERRAPOD_INSTALL_WARNINGS_LIB_TEMPLATE="$install_warnings_lib_template"
@@ -850,22 +851,7 @@ write_complete_setup_config_with_profile() {
   profile="$2"
 
   mkdir -p "$(dirname "$config_file")"
-  cat >"$config_file" <<TOML
-[data]
-profile = "$profile"
-enableEditorStack = false
-enableAiCliTools = false
-enableDevelopmentWorkspace = false
-enableMacosAppGroupTerminalApps = false
-enableMacosAppGroupAutomation = false
-enableMacosAppGroupLauncher = false
-enableMacosAppGroupMonitoring = false
-enableMacosAppGroupDevelopmentApps = false
-enableMacosAppGroupMobileDev = false
-enableMacosAppGroupBrowsers = false
-enableMacosAppGroupAiApps = false
-enableColimaDockerHost = false
-TOML
+  render_complete_config "$profile" >"$config_file"
 }
 
 write_incomplete_setup_config() {
@@ -883,90 +869,35 @@ write_root_dotted_complete_setup_config() {
   config_file="$1"
 
   mkdir -p "$(dirname "$config_file")"
-  cat >"$config_file" <<'TOML'
-data.profile = "macos-terminal"
-data.enableEditorStack = false
-data.enableAiCliTools = false
-data.enableDevelopmentWorkspace = false
-data.enableMacosAppGroupTerminalApps = false
-data.enableMacosAppGroupAutomation = false
-data.enableMacosAppGroupLauncher = false
-data.enableMacosAppGroupMonitoring = false
-data.enableMacosAppGroupDevelopmentApps = false
-data.enableMacosAppGroupMobileDev = false
-data.enableMacosAppGroupBrowsers = false
-data.enableMacosAppGroupAiApps = false
-data.enableColimaDockerHost = false
-TOML
+  render_complete_config macos-terminal | sed '1d; s/^/data./' >"$config_file"
 }
 
 write_quoted_complete_setup_config() {
   config_file="$1"
 
   mkdir -p "$(dirname "$config_file")"
-  cat >"$config_file" <<'TOML'
-["data"]
-"profile" = "macos-terminal" # active profile
-"enableEditorStack" = false
-"enableAiCliTools" = false
-"enableDevelopmentWorkspace" = false
-"enableMacosAppGroupTerminalApps" = false
-"enableMacosAppGroupAutomation" = false
-"enableMacosAppGroupLauncher" = false
-"enableMacosAppGroupMonitoring" = false
-"enableMacosAppGroupDevelopmentApps" = false
-"enableMacosAppGroupMobileDev" = false
-"enableMacosAppGroupBrowsers" = false
-"enableMacosAppGroupAiApps" = false
-"enableColimaDockerHost" = false
-TOML
+  render_complete_config macos-terminal | sed 's/^\[data\]$/["data"]/; s/^\([A-Za-z][A-Za-z]*\) =/"\1" =/; s/^"profile" = .*/& # active profile/' >"$config_file"
 }
 
 write_literal_profile_complete_setup_config() {
   config_file="$1"
 
   mkdir -p "$(dirname "$config_file")"
-  cat >"$config_file" <<'TOML'
-[data]
-profile = 'macos-terminal'
-enableEditorStack = false
-enableAiCliTools = false
-enableDevelopmentWorkspace = false
-enableMacosAppGroupTerminalApps = false
-enableMacosAppGroupAutomation = false
-enableMacosAppGroupLauncher = false
-enableMacosAppGroupMonitoring = false
-enableMacosAppGroupDevelopmentApps = false
-enableMacosAppGroupMobileDev = false
-enableMacosAppGroupBrowsers = false
-enableMacosAppGroupAiApps = false
-enableColimaDockerHost = false
-TOML
+  render_complete_config macos-terminal | sed 's/^profile = .*/profile = '\''macos-terminal'\''/' >"$config_file"
 }
 
 write_unsupported_multiline_setup_config() {
   config_file="$1"
 
   mkdir -p "$(dirname "$config_file")"
-  cat >"$config_file" <<'TOML'
-[data]
-profile = "macos-terminal"
-enableEditorStack = false
-enableAiCliTools = false
-enableDevelopmentWorkspace = false
-enableMacosAppGroupTerminalApps = false
-enableMacosAppGroupAutomation = false
-enableMacosAppGroupLauncher = false
-enableMacosAppGroupMonitoring = false
-enableMacosAppGroupDevelopmentApps = false
-enableMacosAppGroupMobileDev = false
-enableMacosAppGroupBrowsers = false
-enableMacosAppGroupAiApps = false
-enableColimaDockerHost = false
+  {
+    render_complete_config macos-terminal
+    cat <<'TOML'
 notes = """
 unsupported multiline value
 """
 TOML
+  } >"$config_file"
 }
 
 write_quoted_setting_value_setup_config() {
@@ -981,34 +912,26 @@ write_unsupported_inline_table_setup_config() {
   config_file="$1"
 
   mkdir -p "$(dirname "$config_file")"
-  cat >"$config_file" <<'TOML'
-data = { profile = "macos-terminal", enableEditorStack = false, enableAiCliTools = false, enableDevelopmentWorkspace = false, enableMacosAppGroupTerminalApps = false, enableMacosAppGroupAutomation = false, enableMacosAppGroupLauncher = false, enableMacosAppGroupMonitoring = false, enableMacosAppGroupDevelopmentApps = false, enableMacosAppGroupMobileDev = false, enableMacosAppGroupBrowsers = false, enableMacosAppGroupAiApps = false, enableColimaDockerHost = false }
-TOML
+  render_complete_config macos-terminal | awk '
+    NR == 1 { printf "data = { "; next }
+    NR > 2 { printf ", " }
+    { printf "%s", $0 }
+    END { print " }" }
+  ' >"$config_file"
 }
 
 write_unsupported_multiline_array_setup_config() {
   config_file="$1"
 
   mkdir -p "$(dirname "$config_file")"
-  cat >"$config_file" <<'TOML'
-[data]
-profile = "macos-terminal"
-enableEditorStack = false
-enableAiCliTools = false
-enableDevelopmentWorkspace = false
-enableMacosAppGroupTerminalApps = false
-enableMacosAppGroupAutomation = false
-enableMacosAppGroupLauncher = false
-enableMacosAppGroupMonitoring = false
-enableMacosAppGroupDevelopmentApps = false
-enableMacosAppGroupMobileDev = false
-enableMacosAppGroupBrowsers = false
-enableMacosAppGroupAiApps = false
-enableColimaDockerHost = false
+  {
+    render_complete_config macos-terminal
+    cat <<'TOML'
 matrix = [
 [1, 2]
 ]
 TOML
+  } >"$config_file"
 }
 
 prepare_resumable_macos_case() {

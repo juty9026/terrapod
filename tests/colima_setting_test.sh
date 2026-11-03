@@ -4,6 +4,7 @@ set -eu
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$repo_root/tests/lib/harness.sh"
 . "$repo_root/tests/lib/test-support.sh"
+. "$repo_root/dot_local/lib/terrapod/config-toml.sh"
 make_tmp_dir
 terrapod="$repo_root/dot_local/bin/executable_terrapod"
 mkdir -p "$tmp_dir/home"
@@ -22,11 +23,12 @@ done
 # Exercise the real Setup command through its terminal interface. Only gum,
 # the external prompt UI, is replaced with scripted answers.
 mkdir -p "$tmp_dir/bin"
-write_gum_stub "$tmp_dir/bin/gum" cancel default
-write_gum_responses "$tmp_dir/responses" minimal no no no no no no no no no no no yes yes
+write_gum_stub "$tmp_dir/bin/gum"
+write_gum_responses "$tmp_dir/responses" preset=minimal enableColimaDockerHost=yes write=yes
 command_text="env TERM=xterm HOME=$(shell_quote "$tmp_dir/home") XDG_CONFIG_HOME=$(shell_quote "$tmp_dir/xdg") TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG= sh $(shell_quote "$terrapod") setup"
 PATH="$tmp_dir/bin:$PATH" TERRAPOD_GUM_RESPONSES="$tmp_dir/responses" TERRAPOD_GUM_LOG="$tmp_dir/gum.log" \
   run_in_pty "$command_text" >"$tmp_dir/setup.out"
+assert_setup_questions "$tmp_dir/gum.log" macos-terminal false
 config="$tmp_dir/xdg/chezmoi/chezmoi.toml"
 assert_file_contains "$config" 'enableColimaDockerHost = true' "macOS Setup can explicitly enable Colima"
 assert_file_contains "$config" 'enableDevelopmentWorkspace = false' "Colima does not enable the Development Workspace"
@@ -72,9 +74,10 @@ pass "backup preserves the enabled Colima setting"
 
 test_profile=vps-shell
 assert_contains "$(run_tpod status | tr -s ' ')" 'Colima Docker Host Selection : not applicable' "VPS status marks Colima not applicable"
-write_gum_responses "$tmp_dir/responses" minimal no no yes
+write_gum_responses "$tmp_dir/responses" preset=minimal write=yes
 command_text="env TERM=xterm HOME=$(shell_quote "$tmp_dir/home") XDG_CONFIG_HOME=$(shell_quote "$tmp_dir/vps-xdg") TERRAPOD_PROFILE=vps-shell TERRAPOD_CHEZMOI_CONFIG= sh $(shell_quote "$terrapod") setup"
 PATH="$tmp_dir/bin:$PATH" TERRAPOD_GUM_RESPONSES="$tmp_dir/responses" TERRAPOD_GUM_LOG="$tmp_dir/vps-gum.log" \
   run_in_pty "$command_text" >"$tmp_dir/vps-setup.out"
+assert_setup_questions "$tmp_dir/vps-gum.log" vps-shell false
 assert_file_not_contains "$tmp_dir/vps-gum.log" 'Enable Colima Docker Host Selection?' "VPS Setup does not offer Colima"
 assert_file_contains "$tmp_dir/vps-xdg/chezmoi/chezmoi.toml" 'enableColimaDockerHost = false' "VPS Setup stores false"

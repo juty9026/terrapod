@@ -3,6 +3,7 @@ set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$repo_root/tests/lib/harness.sh"
+. "$repo_root/tests/lib/managed-config-fixtures.sh"
 terrapod="$repo_root/dot_local/bin/executable_terrapod"
 make_tmp_dir
 
@@ -24,21 +25,7 @@ cat >"$home_dir/.local/state/terrapod/jetendard/manifest.json" <<'JSON'
 JSON
 printf '%s\n' "test font" >"$home_dir/Library/Fonts/Jetendard-Regular.ttf"
 
-cat >"$config_file" <<'EOF'
-[data]
-profile = "macos-terminal"
-enableEditorStack = false
-enableAiCliTools = false
-enableDevelopmentWorkspace = false
-enableMacosAppGroupTerminalApps = false
-enableMacosAppGroupAutomation = false
-enableMacosAppGroupLauncher = false
-enableMacosAppGroupMonitoring = false
-enableMacosAppGroupDevelopmentApps = false
-enableMacosAppGroupMobileDev = false
-enableMacosAppGroupBrowsers = false
-enableMacosAppGroupAiApps = false
-EOF
+render_complete_config macos-terminal >"$config_file"
 
 cat >"$stub_bin/chezmoi" <<'EOF'
 #!/bin/sh

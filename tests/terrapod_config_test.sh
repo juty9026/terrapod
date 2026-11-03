@@ -289,12 +289,15 @@ run_terrapod_setup() {
 
   TERRAPOD_GUM_RESPONSES="$responses_file" TERRAPOD_GUM_LOG="$gum_log" \
     PATH="$tmp_dir/bin:/usr/bin:/bin:$PATH" \
-    run_setup_in_pty "$profile" xterm "$home_dir" "$xdg_config_home"
+    run_setup_in_pty "$profile" xterm "$home_dir" "$xdg_config_home" || return $?
+  setup_written_config="$xdg_config_home/chezmoi/chezmoi.toml"
+  setup_written_workspace="$(sed -n 's/^enableDevelopmentWorkspace = //p' "$setup_written_config")"
+  assert_setup_questions "$gum_log" "$profile" "$setup_written_workspace"
 }
 
 terrapod="$repo_root/dot_local/bin/executable_terrapod"
 mkdir -p "$tmp_dir/bin"
-write_gum_stub "$tmp_dir/bin/gum" cancel default
+write_gum_stub "$tmp_dir/bin/gum"
 no_gum_path="$tmp_dir/no-gum-bin"
 write_restricted_path "$no_gum_path" sh dirname mkdir mktemp awk sed mv rm cat chmod stat cp date
 
@@ -495,18 +498,8 @@ setup_workstation_xdg="$tmp_dir/setup-workstation-xdg"
 setup_workstation_config="$setup_workstation_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$setup_workstation_home"
 
-if ! run_terrapod_setup macos-terminal 'workstation
-
-
-
-
-
-
-
-
-
-
-y
+if ! run_terrapod_setup macos-terminal 'preset=workstation
+write=y
 ' "$setup_workstation_home" "$setup_workstation_xdg" >"$tmp_dir/setup-workstation.out" 2>"$tmp_dir/setup-workstation.err"; then
   printf '%s\n' "setup stdout:" >&2
   sed 's/^/  /' "$tmp_dir/setup-workstation.out" >&2
@@ -542,18 +535,16 @@ setup_custom_workspace_xdg="$tmp_dir/setup-custom-workspace-xdg"
 setup_custom_workspace_config="$setup_custom_workspace_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$setup_custom_workspace_home"
 
-if ! run_terrapod_setup macos-terminal 'minimal
-y
-n
-y
-n
-y
-n
-n
-n
-
-
-y
+if ! run_terrapod_setup macos-terminal 'preset=minimal
+enableDevelopmentWorkspace=y
+enableMacosAppGroupTerminalApps=n
+enableMacosAppGroupAutomation=y
+enableMacosAppGroupLauncher=n
+enableMacosAppGroupMonitoring=y
+enableMacosAppGroupDevelopmentApps=n
+enableMacosAppGroupMobileDev=n
+enableMacosAppGroupBrowsers=n
+write=y
 ' "$setup_custom_workspace_home" "$setup_custom_workspace_xdg" >"$tmp_dir/setup-custom-workspace.out" 2>"$tmp_dir/setup-custom-workspace.err"; then
   printf '%s\n' "setup stdout:" >&2
   sed 's/^/  /' "$tmp_dir/setup-custom-workspace.out" >&2
@@ -600,18 +591,16 @@ gum_equivalent_xdg="$tmp_dir/gum-equivalent-xdg"
 gum_equivalent_config="$gum_equivalent_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$gum_equivalent_home"
 
-if ! run_terrapod_setup macos-terminal 'minimal
-y
-n
-y
-n
-y
-n
-n
-n
-
-
-y
+if ! run_terrapod_setup macos-terminal 'preset=minimal
+enableDevelopmentWorkspace=y
+enableMacosAppGroupTerminalApps=n
+enableMacosAppGroupAutomation=y
+enableMacosAppGroupLauncher=n
+enableMacosAppGroupMonitoring=y
+enableMacosAppGroupDevelopmentApps=n
+enableMacosAppGroupMobileDev=n
+enableMacosAppGroupBrowsers=n
+write=y
 ' "$gum_equivalent_home" "$gum_equivalent_xdg" >"$tmp_dir/gum-equivalent.out" 2>"$tmp_dir/gum-equivalent.err"; then
   printf '%s\n' "gum setup stdout:" >&2
   sed 's/^/  /' "$tmp_dir/gum-equivalent.out" >&2
@@ -647,18 +636,8 @@ gum_development_xdg="$tmp_dir/gum-development-xdg"
 gum_development_config="$gum_development_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$gum_development_home"
 
-if ! run_terrapod_setup macos-terminal 'development
-
-
-
-
-
-
-
-
-
-
-y
+if ! run_terrapod_setup macos-terminal 'preset=development
+write=y
 ' "$gum_development_home" "$gum_development_xdg" >"$tmp_dir/gum-development.out" 2>"$tmp_dir/gum-development.err"; then
   printf '%s\n' "gum development stdout:" >&2
   sed 's/^/  /' "$tmp_dir/gum-development.out" >&2
@@ -681,10 +660,10 @@ gum_vps_xdg="$tmp_dir/gum-vps-xdg"
 gum_vps_config="$gum_vps_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$gum_vps_home"
 
-if ! run_terrapod_setup vps-shell 'minimal
-n
-y
-y
+if ! run_terrapod_setup vps-shell 'preset=minimal
+enableDevelopmentWorkspace=n
+enableEditorStack=y
+write=y
 ' "$gum_vps_home" "$gum_vps_xdg" >"$tmp_dir/gum-vps.out" 2>"$tmp_dir/gum-vps.err"; then
   printf '%s\n' "gum VPS stdout:" >&2
   sed 's/^/  /' "$tmp_dir/gum-vps.out" >&2
@@ -720,20 +699,18 @@ setup_leaf_xdg="$tmp_dir/setup-leaf-xdg"
 setup_leaf_config="$setup_leaf_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$setup_leaf_home"
 
-if ! run_terrapod_setup macos-terminal 'development
-n
-n
-y
-y
-n
-y
-n
-y
-n
-n
-
-
-y
+if ! run_terrapod_setup macos-terminal 'preset=development
+enableDevelopmentWorkspace=n
+enableEditorStack=n
+enableAiCliTools=y
+enableMacosAppGroupTerminalApps=y
+enableMacosAppGroupAutomation=n
+enableMacosAppGroupLauncher=y
+enableMacosAppGroupMonitoring=n
+enableMacosAppGroupDevelopmentApps=y
+enableMacosAppGroupMobileDev=n
+enableMacosAppGroupBrowsers=n
+write=y
 ' "$setup_leaf_home" "$setup_leaf_xdg" >"$tmp_dir/setup-leaf.out" 2>"$tmp_dir/setup-leaf.err"; then
   printf '%s\n' "setup stdout:" >&2
   sed 's/^/  /' "$tmp_dir/setup-leaf.out" >&2
@@ -769,10 +746,10 @@ setup_vps_custom_xdg="$tmp_dir/setup-vps-custom-xdg"
 setup_vps_custom_config="$setup_vps_custom_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$setup_vps_custom_home"
 
-if ! run_terrapod_setup vps-shell 'minimal
-n
-y
-y
+if ! run_terrapod_setup vps-shell 'preset=minimal
+enableDevelopmentWorkspace=n
+enableEditorStack=y
+write=y
 ' "$setup_vps_custom_home" "$setup_vps_custom_xdg" >"$tmp_dir/setup-vps-custom.out" 2>"$tmp_dir/setup-vps-custom.err"; then
   printf '%s\n' "setup stdout:" >&2
   sed 's/^/  /' "$tmp_dir/setup-vps-custom.out" >&2
@@ -819,8 +796,7 @@ setup_vps_workstation_error_xdg="$tmp_dir/setup-vps-workstation-error-xdg"
 setup_vps_workstation_error_config="$setup_vps_workstation_error_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$setup_vps_workstation_error_home"
 
-if run_terrapod_setup vps-shell 'workstation
-y
+if run_terrapod_setup vps-shell 'preset=workstation
 ' "$setup_vps_workstation_error_home" "$setup_vps_workstation_error_xdg" >"$tmp_dir/setup-vps-workstation-error.out" 2>"$tmp_dir/setup-vps-workstation-error.err"; then
   fail "VPS setup workstation rejection exits non-zero"
 fi
@@ -841,8 +817,8 @@ setup_setting_cancel_xdg="$tmp_dir/setup-setting-cancel-xdg"
 setup_setting_cancel_config="$setup_setting_cancel_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$setup_setting_cancel_home"
 
-if run_terrapod_setup macos-terminal 'minimal
-__CANCEL__
+if run_terrapod_setup macos-terminal 'preset=minimal
+enableDevelopmentWorkspace=__CANCEL__
 ' "$setup_setting_cancel_home" "$setup_setting_cancel_xdg" >"$tmp_dir/setup-setting-cancel.out" 2>"$tmp_dir/setup-setting-cancel.err"; then
   fail "setup setting cancellation exits non-zero"
 fi
@@ -863,18 +839,8 @@ setup_cancel_xdg="$tmp_dir/setup-cancel-xdg"
 setup_cancel_config="$setup_cancel_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$setup_cancel_home"
 
-if run_terrapod_setup macos-terminal 'development
-
-
-
-
-
-
-
-
-
-
-n
+if run_terrapod_setup macos-terminal 'preset=development
+write=n
 ' "$setup_cancel_home" "$setup_cancel_xdg" >"$tmp_dir/setup-cancel.out" 2>"$tmp_dir/setup-cancel.err"; then
   fail "cancelled setup exits non-zero"
 fi
@@ -901,18 +867,8 @@ enableEditorStack = false
 TOML
 cp "$setup_existing_cancel_config" "$tmp_dir/setup-existing-cancel-before.toml"
 
-if run_terrapod_setup macos-terminal 'development
-
-
-
-
-
-
-
-
-
-
-
+if run_terrapod_setup macos-terminal 'preset=development
+write=
 ' "$setup_existing_cancel_home" "$setup_existing_cancel_xdg" >"$tmp_dir/setup-existing-cancel.out" 2>"$tmp_dir/setup-existing-cancel.err"; then
   fail "empty final confirmation cancels setup"
 fi
