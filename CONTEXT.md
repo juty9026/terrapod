@@ -197,6 +197,10 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - Interactive setup asks before updating an existing chezmoi config.
 - Config writes use a conservative POSIX shell upsert for managed `[data]` keys instead of attempting to parse all TOML features.
 - Config writes back up an existing chezmoi config before changing managed `[data]` keys.
+- The shared managed-config module owns both reading and conservative writes, with one definition of the supported managed `[data]` dialect.
+- Read completeness and write eligibility are distinct: a readable regular-file symlink can be complete, while writing through any symlink is rejected. Read-only consumers, including routine apply, do not require config rewrite permissions.
+- **Terrapod Setup** checks write eligibility and supported syntax before invoking gum. This read-only check creates no directories, backups, or staging files; actual writes check again and preserve the caller's signal and exit handlers.
+- Unsupported syntax blocks config writes, but an explicitly confirmed rewrite may replace invalid **Managed Setting** values with valid bare booleans.
 - The **macOS Terminal Profile** and **VPS Shell Profile** are separate machine profiles in one **Terrapod Source Repository**.
 - The **VPS Shell Profile** targets exactly one **Supported Ubuntu Release**.
 - The **VPS Shell Profile** includes the **Core Shell Stack**.

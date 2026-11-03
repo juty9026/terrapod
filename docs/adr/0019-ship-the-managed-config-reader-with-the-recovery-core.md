@@ -23,6 +23,30 @@ what it belongs to.
 Only `config-toml.sh` joins the recovery core. The rest of
 `~/.local/lib/terrapod/` keeps arriving with the full declared-state apply.
 
+The module also owns the conservative managed-config upsert and its write
+preconditions. Reading and writing share the managed `[data]` grammar, so
+moving the writer here removes a second definition without adding a
+recovery-core file. Sourcing the module performs no writes and installs no
+traps; `install.sh` only uses its read API and does not need gum or a library
+from the full apply to load it.
+
+A read verdict does not promise write eligibility. Reading a symlink to a
+readable regular file remains supported, while writing through any symlink is
+rejected. The separate write preflight checks readability, supported syntax,
+and the directory permissions needed to create missing parents, stage a
+replacement, back up existing content, and replace the destination. It is
+read-only, and Terrapod Setup runs it before any gum invocation. A complete
+read verdict and routine `tpod apply` never acquire a rewrite requirement.
+Invalid Managed Setting values can be replaced by an explicitly confirmed
+write, even though they make the read verdict unsupported; unsupported syntax
+still prevents writes.
+
+The writer repeats preflight at the actual write boundary, checks filesystem
+operation failures, and stages next to the destination before replacement.
+It runs in a subshell so its cleanup and EXIT/HUP/INT/TERM traps cannot replace
+the caller's handlers. Only managed and retired keys are changed; unrelated
+content, existing mode, and backup behavior remain part of the write contract.
+
 `install.sh` sources the reader from the checked-out source directory and
 treats absence as fatal, the same rule ADR 0016 gives it for
 `install-warnings.sh`: a checkout missing the library is a broken clone.
