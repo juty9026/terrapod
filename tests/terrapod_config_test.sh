@@ -4,6 +4,7 @@ set -eu
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$repo_root/tests/lib/harness.sh"
 . "$repo_root/tests/lib/test-support.sh"
+. "$repo_root/dot_local/lib/terrapod/config-toml.sh"
 make_tmp_dir
 
 run_setup_in_pty() {
@@ -19,15 +20,7 @@ run_setup_in_pty() {
 extract_data_section() {
   file="$1"
 
-  awk '
-    function is_data_section(line) {
-      return line ~ "^[[:space:]]*\\[[[:space:]]*(data|\"data\"|\047data\047)[[:space:]]*\\][[:space:]]*($|#)"
-    }
-
-    function is_section(line) {
-      return line ~ /^[[:space:]]*(\[[^]]+\]|\[\[[^]]+\]\])[[:space:]]*($|#)/
-    }
-
+  awk "$(managed_config_awk_grammar)"'
     {
       if (is_data_section($0)) {
         in_data = 1
@@ -1733,3 +1726,15 @@ pass "invalid Preset leaves existing config unchanged"
 
 assert_backup_count "$invalid_config" 0 "invalid Preset does not create a backup"
 assert_no_terrapod_temp_files "$invalid_config" "invalid Preset leaves no Terrapod temp files"
+
+rewrite_home="$tmp_dir/rewrite-home"
+rewrite_xdg="$tmp_dir/rewrite-xdg"
+rewrite_config="$rewrite_xdg/chezmoi/chezmoi.toml"
+mkdir -p "$rewrite_home" "$(dirname "$rewrite_config")"
+printf '%s\n' '[data]' 'enableEditorStack = "false"' >"$rewrite_config"
+cp "$rewrite_config" "$tmp_dir/rewrite-before.toml"
+run_terrapod_configure_yes minimal "$rewrite_home" "$rewrite_xdg" >"$tmp_dir/rewrite.out"
+assert_data_key_once_with_value "$rewrite_config" enableEditorStack false "explicit configure consent permits replacing a rejected quoted boolean"
+managed_setup_config_load "$rewrite_config"
+assert_equals "$managed_setup_config_state" complete "configure repairs rejected values to a complete config"
+assert_single_backup_matches "$rewrite_config" "$tmp_dir/rewrite-before.toml" "configure backs up the rejected value before replacing it"

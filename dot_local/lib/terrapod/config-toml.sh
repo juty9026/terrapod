@@ -1,9 +1,10 @@
 #!/bin/sh
 
-# Shared reader for the Terrapod-managed chezmoi TOML config. Both the
+# Shared reader and writer for the Terrapod-managed chezmoi TOML config. Both the
 # first-run installer and the tpod command surface parse the same file with
 # the same rules, so the parser lives here instead of being copied into each.
-# Callers must define fatal() before any function here can report a problem.
+# Sourcing performs no writes and installs no traps. Read problems are verdicts;
+# write operations return failure with a diagnostic instead of calling fatal().
 
 TERRAPOD_CONFIG_TOML_LOADED=1
 
@@ -158,16 +159,9 @@ managed_setting_enabled_by_preset() {
   esac
 }
 
-# The one pass over the managed [data] table. It prints, for each managed setup
-# key in the order handed to it, one line:
-#   missing <key>          the key is absent
-#   invalid <key>          a Managed Setting whose value is not a bare boolean
-#   value <key>=<value>    the interpreted value: true or false for a Managed
-#                          Setting, the plain string for a quoted profile
-# A profile that is not a quoted string prints no value line, so it never
-# matches a detected profile. The profile is not otherwise judged.
-managed_setup_config_scan() {
-  awk -v setting_keys="$2" '
+# Shared awk grammar for the reader, syntax guards, and conservative upsert.
+managed_config_awk_grammar() {
+  printf '%s\n' '
     function strip_space(value) {
       sub(/^[[:space:]]*/, "", value)
       sub(/[[:space:]]*$/, "", value)
@@ -242,6 +236,19 @@ managed_setup_config_scan() {
       return ""
     }
 
+  '
+}
+
+# The one pass over the managed [data] table. It prints, for each managed setup
+# key in the order handed to it, one line:
+#   missing <key>          the key is absent
+#   invalid <key>          a Managed Setting whose value is not a bare boolean
+#   value <key>=<value>    the interpreted value: true or false for a Managed
+#                          Setting, the plain string for a quoted profile
+# A profile that is not a quoted string prints no value line, so it never
+# matches a detected profile. The profile is not otherwise judged.
+managed_setup_config_scan() {
+  awk -v setting_keys="$2" "$(managed_config_awk_grammar)"'
     function remember(key, value) {
       if (key in wanted) {
         raw[key] = value
@@ -319,11 +326,7 @@ config_has_unsupported_inline_data_table() {
     return 1
   fi
 
-  awk '
-    function is_section(line) {
-      return line ~ /^[[:space:]]*(\[[^]]+\]|\[\[[^]]+\]\])[[:space:]]*($|#)/
-    }
-
+  awk "$(managed_config_awk_grammar)"'
     function is_inline_data_table(line) {
       return line ~ "^[[:space:]]*(data|\"data\"|\047data\047)[[:space:]]*=[[:space:]]*\\{"
     }
@@ -351,14 +354,10 @@ config_has_unsupported_multiline_strings() {
     return 1
   fi
 
-  awk '
+  awk "$(managed_config_awk_grammar)"'
     BEGIN {
       multiline_literal = sprintf("%c%c%c", 39, 39, 39)
       multiline_basic = "\"\"\""
-    }
-
-    function is_comment(line) {
-      return line ~ "^[[:space:]]*#"
     }
 
     function has_multiline_string_marker(line) {
@@ -384,15 +383,7 @@ config_has_section_like_multiline_arrays() {
     return 1
   fi
 
-  awk '
-    function is_comment(line) {
-      return line ~ "^[[:space:]]*#"
-    }
-
-    function is_section(line) {
-      return line ~ /^[[:space:]]*(\[[^]]+\]|\[\[[^]]+\]\])[[:space:]]*($|#)/
-    }
-
+  awk "$(managed_config_awk_grammar)"'
     function array_balance_delta(line, start, i, ch, in_basic_string, in_literal_string, escaped, balance) {
       for (i = start; i <= length(line); i++) {
         ch = substr(line, i, 1)
@@ -666,13 +657,244 @@ managed_setup_verdict_detail() {
   esac
 }
 
-# The config writer's guard: syntax only. A rejected Managed Setting value does
-# not stop a write, because the writer replaces every Managed Setting with a
-# bare boolean anyway.
-reject_unsupported_managed_config_syntax() {
+# Parent lookup uses builtins so a missing-config preflight still works when
+# PATH contains only a shell (for example, before reporting missing gum).
+managed_config_parent_directory() (
+  parent_path="$1"
+  while [ "${parent_path%/}" != "$parent_path" ]; do
+    parent_path="${parent_path%/}"
+  done
+  case "$parent_path" in
+    */*)
+      parent_path="${parent_path%/*}"
+      while [ "${parent_path%/}" != "$parent_path" ]; do
+        parent_path="${parent_path%/}"
+      done
+      printf '%s\n' "${parent_path:-/}"
+      ;;
+    *) printf '%s\n' . ;;
+  esac
+)
+
+# BSD flags can prohibit replacement even when ordinary access checks pass.
+# stat is already used to preserve config mode. GNU stat has no %Sf file-flag
+# query, so an unsupported query is ignored; actual operations still must
+# succeed. This never adds a flag/permission requirement to the read API.
+managed_config_write_flags_preflight() (
+  if write_flags="$(stat -f %Sf "$1" 2>/dev/null)"; then
+    case ",$write_flags," in
+      *,uchg,*|*,schg,*|*,uappnd,*|*,sappnd,*)
+        printf 'terrapod: config destination is immutable or append-only (%s): %s\n' "$1" "$2" >&2
+        return 1
+        ;;
+    esac
+  fi
+)
+
+# A separate, read-only write capability check. A complete read verdict does
+# not imply this succeeds: regular-file symlinks are readable, but never
+# writable through this API. Invalid managed values are replaceable; only
+# unsupported syntax blocks a rewrite. No fatal() contract is needed here.
+# Returns zero when eligible, else one with the reason and path on stderr.
+managed_config_write_path_preflight() (
+  config_file="$1"
+
+  if [ -L "$config_file" ] || { [ -e "$config_file" ] && [ ! -f "$config_file" ]; }; then
+    printf 'terrapod: config path is not a regular file: %s\n' "$config_file" >&2
+    return 1
+  fi
+  if [ -f "$config_file" ] && [ ! -r "$config_file" ]; then
+    printf 'terrapod: config file is unreadable: %s\n' "$config_file" >&2
+    return 1
+  fi
+  if [ -f "$config_file" ]; then
+    managed_config_write_flags_preflight "$config_file" "$config_file" || return 1
+  fi
+
+  # Creating parents and staging/backing up/replacing all require write and
+  # search permission on the parent, or its nearest existing ancestor.
+  config_parent="$(managed_config_parent_directory "$config_file")" || return 1
+  while [ ! -e "$config_parent" ] && [ ! -L "$config_parent" ]; do
+    config_parent="$(managed_config_parent_directory "$config_parent")" || return 1
+  done
+  managed_config_write_flags_preflight "$config_parent" "$config_file" || return 1
+  if [ ! -d "$config_parent" ] || [ ! -w "$config_parent" ] || [ ! -x "$config_parent" ]; then
+    printf 'terrapod: config parent is not a writable, searchable directory (%s): %s\n' "$config_parent" "$config_file" >&2
+    return 1
+  fi
+)
+
+# The public preflight adds syntax eligibility to the filesystem checks.
+managed_setup_config_write_preflight() (
+  managed_config_write_path_preflight "$1" || return 1
   config_file="$1"
 
   if problem_message="$(unsupported_managed_config_problem_message "$config_file")"; then
-    fatal "$problem_message"
+    printf 'terrapod: %s\n' "$problem_message" >&2
+    return 1
   fi
+)
+
+file_mode() {
+  path="$1"
+
+  if mode="$(stat -c %a "$path" 2>/dev/null)"; then
+    printf '%s\n' "$mode"
+    return 0
+  fi
+
+  stat -f %Lp "$path"
 }
+
+backup_existing_config() {
+  config_file="$1"
+
+  if [ ! -f "$config_file" ]; then
+    return 0
+  fi
+
+  backup_stamp="$(date +%Y%m%d%H%M%S)" || return 1
+  backup_file="$config_file.terrapod-backup-$backup_stamp-$$"
+  cp "$config_file" "$backup_file"
+}
+
+cleanup_managed_config_temp() {
+  rm -f "${tmp_file:-}" "${managed_data_file:-}"
+}
+
+write_managed_settings() (
+  config_file="$1"
+  settings_data="$2"
+  config_dir="$(managed_config_parent_directory "$config_file")" || exit 1
+  tmp_file=
+  managed_data_file=
+
+  managed_setup_config_write_preflight "$config_file" || exit 1
+
+  mkdir -p "$config_dir" || exit 1
+  trap cleanup_managed_config_temp EXIT
+  trap 'cleanup_managed_config_temp; exit 1' HUP INT TERM
+
+  tmp_file="$(mktemp "$config_dir/.terrapod-config.XXXXXX")" || exit 1
+  managed_data_file="$(mktemp "$config_dir/.terrapod-data.XXXXXX")" || exit 1
+  printf '%s\n' "$settings_data" >"$managed_data_file" || exit 1
+  backup_existing_config "$config_file" || exit 1
+
+  if [ -f "$config_file" ]; then
+    config_mode="$(file_mode "$config_file")" || exit 1
+    # Every key the writer owns: the current keys, which it replaces, and the
+    # retired ones, which it only strips. Space-separated because the awk
+    # shipped with macOS rejects a newline in a -v value.
+    managed_names="$( { managed_setup_keys; retired_managed_setting_keys; } | tr '\n' ' ')" || exit 1
+
+    awk -v managed_data_file="$managed_data_file" -v managed_names="$managed_names" "$(managed_config_awk_grammar)"'
+      function is_managed_name(name) {
+        return name in managed_name_set
+      }
+
+      function is_managed_key(line) {
+        return is_key_assignment(line) && is_managed_name(assignment_key_name(line))
+      }
+
+      function is_root_dotted_managed_key(line) {
+        return is_root_dotted_data_key(line) && is_managed_name(dotted_data_key_name(line))
+      }
+
+      function print_managed_data(prefix, line, result) {
+        if (!printed_managed_data) {
+          while ((result = (getline line < managed_data_file)) > 0) {
+            print prefix line
+          }
+          if (result < 0) {
+            exit 1
+          }
+          close(managed_data_file)
+          printed_managed_data = 1
+        }
+      }
+
+      BEGIN {
+        in_root = 1
+
+        managed_name_count = split(managed_names, managed_name_list, " ")
+        for (i = 1; i <= managed_name_count; i++) {
+          managed_name_set[managed_name_list[i]] = 1
+        }
+      }
+
+      {
+        if (in_root && is_root_dotted_managed_key($0)) {
+          saw_root_data = 1
+          next
+        }
+
+        if (in_root && is_root_dotted_data_key($0)) {
+          saw_root_data = 1
+          print
+          next
+        }
+
+        if (is_data_section($0)) {
+          in_root = 0
+          in_data = 1
+          saw_data = 1
+          print
+          next
+        }
+
+        if (in_root && is_section($0)) {
+          if (saw_root_data) {
+            print_managed_data("data.")
+          }
+          in_root = 0
+          print
+          next
+        }
+
+        if (in_data && is_section($0)) {
+          print_managed_data()
+          in_data = 0
+          print
+          next
+        }
+
+        if (in_data && is_managed_key($0)) {
+          next
+        }
+
+        print
+      }
+
+      END {
+        if (in_data) {
+          print_managed_data()
+        } else if (!saw_data) {
+          if (saw_root_data) {
+            print_managed_data("data.")
+          } else {
+            if (NR > 0) {
+              print ""
+            }
+            print "[data]"
+            print_managed_data()
+          }
+        }
+      }
+    ' "$config_file" >"$tmp_file" || exit 1
+
+    chmod "$config_mode" "$tmp_file" || exit 1
+  else
+    {
+      printf '%s\n' "[data]"
+      cat "$managed_data_file"
+    } >"$tmp_file" || exit 1
+  fi
+
+  # Permissions or the destination type can change while staging. In
+  # particular, mv must never interpret a newly created directory as a target
+  # directory and strand a staged config inside it.
+  managed_config_write_path_preflight "$config_file" || exit 1
+  # Consent belongs to setup/configure. Suppress mv's mode-based prompt for
+  # a readable, read-only destination whose parent permits replacement.
+  mv -f "$tmp_file" "$config_file" || exit 1
+)

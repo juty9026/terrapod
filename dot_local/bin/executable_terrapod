@@ -230,17 +230,6 @@ fatal() {
   exit 1
 }
 
-file_mode() {
-  path="$1"
-
-  if mode="$(stat -c %a "$path" 2>/dev/null)"; then
-    printf '%s\n' "$mode"
-    return 0
-  fi
-
-  stat -f %Lp "$path"
-}
-
 os_release_file() {
   printf '%s\n' "${TERRAPOD_OS_RELEASE_FILE:-/etc/os-release}"
 }
@@ -1843,245 +1832,6 @@ confirm_existing_config_update() {
   esac
 }
 
-reject_unusable_config_path() {
-  config_file="$1"
-
-  if [ -L "$config_file" ] || { [ -e "$config_file" ] && [ ! -f "$config_file" ]; }; then
-    fatal "config path is not a regular file: $config_file"
-  fi
-}
-
-reject_unsupported_managed_config() {
-  config_file="$1"
-
-  reject_unusable_config_path "$config_file"
-  reject_unsupported_managed_config_syntax "$config_file"
-}
-
-backup_existing_config() {
-  config_file="$1"
-
-  if [ ! -f "$config_file" ]; then
-    return 0
-  fi
-
-  backup_file="$config_file.terrapod-backup-$(date +%Y%m%d%H%M%S)-$$"
-  cp "$config_file" "$backup_file"
-}
-
-cleanup_managed_config_temp() {
-  rm -f "${tmp_file:-}" "${managed_data_file:-}"
-}
-
-write_managed_settings() {
-  config_file="$1"
-  settings_data="$2"
-  config_dir="$(dirname -- "$config_file")"
-  tmp_file=
-  managed_data_file=
-
-  reject_unsupported_managed_config "$config_file"
-
-  mkdir -p "$config_dir"
-  trap cleanup_managed_config_temp EXIT
-  trap 'cleanup_managed_config_temp; exit 1' HUP INT TERM
-
-  tmp_file="$(mktemp "$config_dir/.terrapod-config.XXXXXX")"
-  managed_data_file="$(mktemp "$config_dir/.terrapod-data.XXXXXX")"
-  printf '%s\n' "$settings_data" >"$managed_data_file"
-  backup_existing_config "$config_file"
-
-  if [ -f "$config_file" ]; then
-    config_mode="$(file_mode "$config_file")"
-    # Every key the writer owns: the current keys, which it replaces, and the
-    # retired ones, which it only strips. Space-separated because the awk
-    # shipped with macOS rejects a newline in a -v value.
-    managed_names="$( { managed_setup_keys; retired_managed_setting_keys; } | tr '\n' ' ')"
-
-    awk -v managed_data_file="$managed_data_file" -v managed_names="$managed_names" '
-      function is_data_section(line) {
-        return line ~ "^[[:space:]]*\\[[[:space:]]*(data|\"data\"|\047data\047)[[:space:]]*\\][[:space:]]*($|#)"
-      }
-
-      function is_section(line) {
-        return line ~ /^[[:space:]]*(\[[^]]+\]|\[\[[^]]+\]\])[[:space:]]*($|#)/
-      }
-
-      function strip_space(value) {
-        sub(/^[[:space:]]*/, "", value)
-        sub(/[[:space:]]*$/, "", value)
-        return value
-      }
-
-      function unquote_key(value, quote) {
-        value = strip_space(value)
-        quote = substr(value, 1, 1)
-
-        if ((quote == "\"" || quote == "\047") && substr(value, length(value), 1) == quote) {
-          return substr(value, 2, length(value) - 2)
-        }
-
-        return value
-      }
-
-      function assignment_key_name(line, key) {
-        key = line
-        sub(/^[[:space:]]*/, "", key)
-        sub(/[[:space:]]*=.*/, "", key)
-        return unquote_key(key)
-      }
-
-      function dotted_data_key_name(line, key) {
-        key = line
-        sub(/^[[:space:]]*/, "", key)
-        sub(/[[:space:]]*=.*/, "", key)
-        sub("^[[:space:]]*(data|\"data\"|\047data\047)[[:space:]]*\\.[[:space:]]*", "", key)
-        return unquote_key(key)
-      }
-
-      function is_managed_name(name) {
-        return name in managed_name_set
-      }
-
-      function is_key_assignment(line) {
-        return line ~ "^[[:space:]]*(\"[^\"]+\"|\047[^\047]+\047|[A-Za-z0-9_-]+)[[:space:]]*="
-      }
-
-      function is_managed_key(line) {
-        return is_key_assignment(line) && is_managed_name(assignment_key_name(line))
-      }
-
-      function is_root_dotted_data_key(line) {
-        return line ~ "^[[:space:]]*(data|\"data\"|\047data\047)[[:space:]]*\\."
-      }
-
-      function is_root_dotted_managed_key(line) {
-        return is_root_dotted_data_key(line) && is_managed_name(dotted_data_key_name(line))
-      }
-
-      function print_managed_data(line) {
-        if (!printed_managed_data) {
-          while ((getline line < managed_data_file) > 0) {
-            print line
-          }
-          close(managed_data_file)
-          printed_managed_data = 1
-        }
-      }
-
-      function print_managed_dotted_data(line) {
-        if (!printed_managed_data) {
-          while ((getline line < managed_data_file) > 0) {
-            print "data." line
-          }
-          close(managed_data_file)
-          printed_managed_data = 1
-        }
-      }
-
-      BEGIN {
-        in_root = 1
-
-        managed_name_count = split(managed_names, managed_name_list, " ")
-        for (i = 1; i <= managed_name_count; i++) {
-          managed_name_set[managed_name_list[i]] = 1
-        }
-      }
-
-      {
-        if (in_root && is_root_dotted_managed_key($0)) {
-          saw_root_data = 1
-          next
-        }
-
-        if (in_root && is_root_dotted_data_key($0)) {
-          saw_root_data = 1
-          print
-          next
-        }
-
-        if (is_data_section($0)) {
-          in_root = 0
-          in_data = 1
-          saw_data = 1
-          print
-          next
-        }
-
-        if (in_root && is_section($0)) {
-          if (saw_root_data) {
-            print_managed_dotted_data()
-          }
-          in_root = 0
-          print
-          next
-        }
-
-        if (in_data && is_section($0)) {
-          print_managed_data()
-          in_data = 0
-          print
-          next
-        }
-
-        if (in_data && is_managed_key($0)) {
-          next
-        }
-
-        print
-      }
-
-      END {
-        if (in_data) {
-          print_managed_data()
-        } else if (!saw_data) {
-          if (saw_root_data) {
-            print_managed_dotted_data()
-          } else {
-            if (NR > 0) {
-              print ""
-            }
-            print "[data]"
-            print_managed_data()
-          }
-        }
-      }
-    ' "$config_file" >"$tmp_file"
-
-    chmod "$config_mode" "$tmp_file"
-  else
-    {
-      printf '%s\n' "[data]"
-      cat "$managed_data_file"
-    } >"$tmp_file"
-  fi
-
-  rm -f "$managed_data_file"
-  mv "$tmp_file" "$config_file"
-  trap - EXIT HUP INT TERM
-}
-
-write_managed_config() {
-  config_file="$1"
-  preset="$2"
-  profile="$3"
-
-  validate_preset "$preset"
-  write_managed_settings "$config_file" "$(render_preset_data "$preset" "$profile")"
-}
-
-write_preset_settings() {
-  config_file="$1"
-  preset="$2"
-  profile="$3"
-  assume_yes="$4"
-
-  validate_preset "$preset"
-  reject_unsupported_managed_config "$config_file"
-  confirm_existing_config_update "$config_file" "$assume_yes"
-  write_managed_config "$config_file" "$preset" "$profile"
-}
-
 run_setup() {
   if [ "$#" -ne 0 ]; then
     fail_usage "setup accepts no arguments"
@@ -2090,6 +1840,7 @@ run_setup() {
   profile="$(current_profile)"
   config_file="$(terrapod_chezmoi_config_file)"
 
+  managed_setup_config_write_preflight "$config_file" || return 1
   require_gum_setup
 
   show_setup_intro "$config_file"
@@ -2102,7 +1853,7 @@ run_setup() {
     return 1
   fi
 
-  write_managed_settings "$config_file" "$setup_settings_data"
+  write_managed_settings "$config_file" "$setup_settings_data" || return 1
   printf '%s\n' "Configured Terrapod Preset '$preset' in $config_file"
   printf '%s\n' "Run 'tpod apply' to apply these changes."
 }
@@ -2140,7 +1891,9 @@ run_configure() {
   config_file="$(terrapod_chezmoi_config_file)"
 
   validate_preset_for_profile "$preset" "$profile"
-  write_preset_settings "$config_file" "$preset" "$profile" "$assume_yes"
+  managed_setup_config_write_preflight "$config_file" || return 1
+  confirm_existing_config_update "$config_file" "$assume_yes"
+  write_managed_settings "$config_file" "$(render_preset_data "$preset" "$profile")" || return 1
   printf '%s\n' "Configured Terrapod Preset '$preset' in $config_file"
   printf '%s\n' "Run 'tpod apply' to apply these changes."
 }
