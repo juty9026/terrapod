@@ -515,6 +515,9 @@ install_warnings_lib="$repo_root/dot_local/lib/terrapod/install-warnings.sh"
 executable_selection_helper="$repo_root/dot_local/lib/terrapod/executable_executable-selection"
 executable_selection_stub="$tmp_dir/bin/executable-selection"
 write_stub "$executable_selection_stub" \
+  'if [ -n "${TERRAPOD_EXECUTABLE_SELECTION_PATH_FILE:-}" ]; then' \
+  '  printf "%s\n" "${TERRAPOD_MANAGED_PATH:-$PATH}" >"$TERRAPOD_EXECUTABLE_SELECTION_PATH_FILE"' \
+  'fi' \
   'if [ -n "${TERRAPOD_EXECUTABLE_SELECTION_ARGS_FILE:-}" ]; then' \
   '  printf "%s %s\n" "${1:-}" "${5:-unset}" >>"$TERRAPOD_EXECUTABLE_SELECTION_ARGS_FILE"' \
   'fi' \
@@ -1904,6 +1907,26 @@ assert_contains "$jetendard_doctor_output" "ok - terminal-apps is enabled (Ghost
 assert_contains "$jetendard_doctor_output" "ok - monitoring is disabled" "Terrapod doctor accepts a disabled macOS App Group without probing its apps"
 assert_not_contains "$jetendard_doctor_output" "macOS App Groups are not applicable" "Terrapod doctor applies macOS App Groups on macOS"
 
+# The macOS command boundary uses the helper's PATH even when the caller's
+# only available tools are bootstrap zsh and the config/font readers.
+macos_restricted_path="$(status_doctor_path macos-restricted zsh)"
+ln -s "$python3_path" "$macos_restricted_path/python3"
+macos_restricted_output="$(
+  HOME="$jetendard_home" TERRAPOD_PROFILE=macos-terminal TERRAPOD_MANAGED_PATH="$macos_status_path" \
+    TERRAPOD_CHEZMOI_CONFIG="$status_config" PATH="$macos_restricted_path" \
+    /bin/sh "$macos_terrapod" doctor
+)" || fail "macOS doctor accepts brew present only in the Managed Default PATH"
+assert_contains "$macos_restricted_output" "ok - brew is available" \
+  "macOS doctor consumes managed brew availability"
+assert_not_contains "$macos_restricted_output" "apt is" "macOS does not require apt"
+if HOME="$jetendard_home" TERRAPOD_PROFILE=macos-terminal TERRAPOD_MANAGED_PATH="$macos_restricted_path" \
+  TERRAPOD_CHEZMOI_CONFIG="$status_config" PATH="$macos_status_path" \
+  /bin/sh "$macos_terrapod" doctor >"$tmp_dir/macos-managed-missing.out"; then
+  fail "macOS doctor rejects brew present only on the invoking PATH"
+fi
+assert_file_contains "$tmp_dir/macos-managed-missing.out" "warn - brew is missing" \
+  "macOS doctor fails for genuinely missing managed brew"
+
 rm "$jetendard_home/Library/Fonts/Jetendard-Regular.ttf"
 missing_jetendard_status_output="$(
   HOME="$jetendard_home" TERRAPOD_PROFILE=macos-terminal TERRAPOD_CHEZMOI_CONFIG="$status_config" PATH="$macos_status_path" \
@@ -1957,7 +1980,7 @@ if ! cmp -s "$declared_extensions" "$status_extensions"; then
   fail "GitHub CLI Extension Set status checks every declared extension"
 fi
 pass "GitHub CLI Extension Set status checks every declared extension"
-assert_contains "$macos_status_output" "Optional AI Tool Stack        : enabled (tools available: agy, claude, codex)" "Terrapod status reports enabled Optional AI Tool Stack tool state"
+assert_contains "$macos_status_output" "Optional AI Tool Stack        : enabled (Antigravity CLI, Claude Code, and Codex)" "Terrapod status reports enabled Optional AI Tool Stack tool state"
 assert_contains "$macos_status_output" "Optional Development Workspace: enabled (development Zellij layouts)" "Terrapod status reports enabled Optional Development Workspace state"
 assert_contains "$macos_status_output" "terminal-apps                 : enabled (Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, and Noto Sans CJK KR)" "Terrapod status reports enabled terminal-apps macOS App Group with its terminal fonts"
 assert_contains "$macos_status_output" "automation                    : enabled (Hammerspoon, Karabiner-Elements, and Scroll Reverser)" "Terrapod status reports enabled automation macOS App Group"
@@ -1966,7 +1989,7 @@ assert_contains "$macos_status_output" "monitoring                    : disabled
 assert_contains "$macos_status_output" "development-apps              : enabled (Zed, Orca ADE, and OrbStack)" "Terrapod status lists Zed, Orca ADE, and OrbStack in the enabled development-apps App Group"
 assert_contains "$macos_status_output" "ai-apps                       : enabled (Claude, ChatGPT (including Codex), and Gemini)" "Terrapod status honors the restored true ai-apps selection"
 assert_contains "$macos_status_output" "mobile-dev                    : enabled (Android Studio and Maestro)" "Terrapod status lists Android Studio and Maestro in the enabled mobile-dev App Group"
-assert_contains "$macos_status_output" "chezmoi                       : available" "Terrapod status reports chezmoi availability"
+assert_not_contains "$macos_status_output" "chezmoi                       : available" "declared chezmoi availability belongs only to executable selection"
 assert_contains "$macos_status_output" "brew                          : available" "Terrapod status reports macOS Bootstrap Package Manager availability"
 assert_contains "$macos_status_output" "Warnings: none" "Terrapod status reports no warnings when enabled tools are present"
 assert_not_contains "$macos_status_output" "Warning:" "Terrapod status emits no warning lines when enabled tools are present"
@@ -2023,8 +2046,8 @@ assert_has_ansi_escape "$tty_macos_status_output" "TTY Terrapod status with conf
 assert_not_contains_colored_phrase "$tty_macos_status_output" "Profile: macOS Terminal Profile" "TTY Terrapod status keeps profile value out of the section style"
 assert_not_contains_colored_phrase "$tty_macos_status_output" "Config: $status_config" "TTY Terrapod status keeps config path neutral"
 assert_not_contains_colored_phrase "$tty_macos_status_output" "Optional Editor Stack         : enabled (rich Neovim configuration)" "TTY Terrapod status does not color optional-stack detail as one phrase"
-assert_not_contains_colored_phrase "$tty_macos_status_output" "Optional AI Tool Stack        : enabled (tools available: agy, claude, codex)" "TTY Terrapod status does not color optional-stack tool list as one phrase"
-assert_not_contains_colored_phrase "$tty_macos_status_output" "chezmoi                       : available" "TTY Terrapod status does not color tool names with state words"
+assert_not_contains_colored_phrase "$tty_macos_status_output" "Optional AI Tool Stack        : enabled (Antigravity CLI, Claude Code, and Codex)" "TTY Terrapod status does not color optional-stack tool list as one phrase"
+assert_not_contains_colored_phrase "$tty_macos_status_output" "brew                          : available" "TTY Terrapod status does not color tool names with state words"
 
 status_dotted_config="$tmp_dir/status-dotted.toml"
 cat >"$status_dotted_config" <<'TOML'
@@ -2051,7 +2074,7 @@ dotted_status_output="$(
 )"
 
 assert_contains "$dotted_status_output" "Optional Editor Stack         : enabled (rich Neovim configuration)" "Terrapod status reads root dotted data keys for effective editor stack state"
-assert_contains "$dotted_status_output" "Optional AI Tool Stack        : enabled (tools available: agy, claude, codex)" "Terrapod status reads root dotted data keys for effective AI stack state"
+assert_contains "$dotted_status_output" "Optional AI Tool Stack        : enabled (Antigravity CLI, Claude Code, and Codex)" "Terrapod status reads root dotted data keys for effective AI stack state"
 assert_contains "$dotted_status_output" "terminal-apps                 : enabled (Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, and Noto Sans CJK KR)" "Terrapod status reads root dotted data keys for the terminal-apps App Group with its terminal fonts"
 assert_contains "$dotted_status_output" "development-apps              : enabled (Zed, Orca ADE, and OrbStack)" "Terrapod status reads root dotted data keys for Zed, Orca ADE, and OrbStack in development-apps"
 assert_contains "$dotted_status_output" "mobile-dev                    : enabled (Android Studio and Maestro)" "Terrapod status reads root dotted data keys for the mobile-dev App Group"
@@ -2446,8 +2469,8 @@ core_missing_status_output="$(
 
 assert_contains "$core_missing_status_output" "Optional Editor Stack         : disabled" "Terrapod status keeps disabled Optional Editor Stack separate from missing core Neovim"
 assert_contains "$core_missing_status_output" "Optional Development Workspace: disabled" "Terrapod status keeps disabled Optional Development Workspace separate from missing core Zellij"
-assert_contains "$core_missing_status_output" "nvim                          : missing" "Terrapod status reports missing plain Neovim as a key tool"
-assert_contains "$core_missing_status_output" "zellij                        : missing" "Terrapod status reports missing Zellij as a key tool"
+assert_not_contains "$core_missing_status_output" "nvim                          : missing" "status does not judge Neovim a second time on the invoking PATH"
+assert_not_contains "$core_missing_status_output" "zellij                        : missing" "status does not judge Zellij a second time on the invoking PATH"
 assert_not_contains "$core_missing_status_output" "Warning: missing key tools: nvim, zellij" "Terrapod status leaves declared command readiness to executable selection"
 assert_contains "$core_missing_status_output" "failure - neovim is unavailable on PATH" "executable selection reports missing Neovim"
 assert_contains "$core_missing_status_output" "failure - zellij is unavailable on PATH" "executable selection reports missing Zellij"
@@ -2565,7 +2588,7 @@ macos_workspace_status_output="$(
 )"
 
 assert_contains "$macos_workspace_status_output" "Optional Editor Stack         : enabled (rich Neovim configuration)" "macOS Terrapod status treats Optional Development Workspace as enabling Optional Editor Stack"
-assert_contains "$macos_workspace_status_output" "Optional AI Tool Stack        : enabled (missing tools: agy, claude, codex)" "macOS Terrapod status treats Optional Development Workspace as enabling Optional AI Tool Stack"
+assert_contains "$macos_workspace_status_output" "Optional AI Tool Stack        : enabled (Antigravity CLI, Claude Code, and Codex)" "macOS Terrapod status treats Optional Development Workspace as enabling Optional AI Tool Stack"
 
 status_unsupported_os_release="$tmp_dir/status-unsupported-os-release"
 write_os_release "$status_unsupported_os_release" debian 12 "Debian GNU/Linux 12"
@@ -2609,6 +2632,47 @@ if ! doctor_ok_output="$(
 )"; then
   fail "Terrapod doctor succeeds when VPS prerequisites are present and optional stacks are disabled"
 fi
+# Required package managers can be absent from the invoking PATH.
+restricted_doctor_path="$(status_doctor_path restricted-doctor zsh)"
+restricted_doctor_output="$(
+  TERRAPOD_MANAGED_PATH="$doctor_ok_path" TERRAPOD_PROFILE=vps-shell \
+    TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$restricted_doctor_path" \
+    /bin/sh "$doctor_terrapod" doctor
+)" || fail "doctor accepts required tools present only in the Managed Default PATH"
+assert_contains "$restricted_doctor_output" "ok - apt is available" \
+  "doctor judges apt in the helper's Managed Default PATH"
+assert_contains "$restricted_doctor_output" "ok - brew is available" \
+  "doctor judges brew in the helper's Managed Default PATH"
+
+if TERRAPOD_MANAGED_PATH="$restricted_doctor_path" TERRAPOD_PROFILE=vps-shell \
+  TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_ok_path" \
+  /bin/sh "$doctor_terrapod" doctor >"$tmp_dir/vps-managed-missing.out"; then
+  fail "VPS doctor rejects package managers present only on the invoking PATH"
+fi
+assert_file_contains "$tmp_dir/vps-managed-missing.out" "warn - apt is missing" \
+  "VPS doctor checks apt in the managed PATH"
+assert_file_contains "$tmp_dir/vps-managed-missing.out" "warn - brew is missing" \
+  "VPS doctor checks brew in the managed PATH"
+vps_managed_missing_status="$(
+  TERRAPOD_MANAGED_PATH="$restricted_doctor_path" TERRAPOD_PROFILE=vps-shell \
+    TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_ok_path" \
+    /bin/sh "$doctor_terrapod" status
+)" || fail "status remains informational for missing managed package managers"
+assert_contains "$vps_managed_missing_status" "apt                           : missing" \
+  "status displays the same apt observation as doctor"
+assert_contains "$vps_managed_missing_status" "Warning: missing key tools: apt, brew" \
+  "status warnings reuse the displayed requirement observations"
+no_bootstrap_zsh_path="$(status_doctor_path no-bootstrap-zsh apt brew)"
+if TERRAPOD_MANAGED_PATH="$doctor_ok_path" TERRAPOD_PROFILE=vps-shell \
+  TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$no_bootstrap_zsh_path" \
+  /bin/sh "$doctor_terrapod" doctor >"$tmp_dir/missing-bootstrap-zsh.out"; then
+  fail "doctor requires bootstrap zsh even when managed zsh is available"
+fi
+assert_file_contains "$tmp_dir/missing-bootstrap-zsh.out" "warn - zsh is missing" \
+  "missing bootstrap zsh is a failed requirement"
+assert_file_contains "$tmp_dir/missing-bootstrap-zsh.out" "Install zsh and make it available on the invoking PATH" \
+  "doctor explains how to restore the login PATH prerequisite"
+
 doctor_helper_stderr_output="$(
   TERRAPOD_EXECUTABLE_SELECTION_STDERR='selection stderr' \
     TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_ok_path" \

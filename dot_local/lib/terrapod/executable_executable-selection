@@ -660,6 +660,12 @@ render_leftover_payloads() {
 initialize_mise_bin_paths
 initialize_managed_path
 
+# Optional machine-readable result for readiness consumers. Share the very
+# same PATH used below, including the existing login-probe failure fallback.
+if [ -n "${TERRAPOD_EXECUTABLE_SELECTION_PATH_FILE:-}" ]; then
+  printf '%s\n' "$managed_path_value" >"$TERRAPOD_EXECUTABLE_SELECTION_PATH_FILE" || exit 1
+fi
+
 # A verdict that cannot be made invocation-independent still has to be
 # interpretable, so the PATH it was computed from is named.
 if [ "$managed_path_inherited" -eq 1 ]; then

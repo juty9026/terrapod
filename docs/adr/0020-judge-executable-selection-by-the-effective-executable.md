@@ -6,6 +6,10 @@ Terrapod computes the managed default PATH itself rather than inheriting it. It 
 
 Canonical selection is a set of accepted locations rather than one path. `mise activate` and `mise activate --shims` are both supported resolution modes, so Development Runtime declarations accept the manager's active target, its bin directories, and the shims path. Other providers keep a single canonical location.
 
+Profile readiness uses that same computed PATH for `brew` on both supported profiles and `apt` on the VPS Shell Profile. The helper shares its computed PATH through an explicit machine-readable result; the command evaluates the profile requirements once and its printers consume those observations. These prerequisites are not new canonical-provider records. Declared core and enabled AI commands are judged only by executable selection.
+
+`zsh` is the bootstrap exception: its existing discovery on the invoking PATH precedes PATH computation, and missing bootstrap `zsh` fails doctor with installation guidance. The helper's login-probe failure fallback and inherited-PATH note remain unchanged. This does not introduce a second PATH-construction algorithm or scans of secondary PATH copies.
+
 Advisories group by the directory a command resolved through and print invariant guidance once per advisory block instead of once per package. Payloads under the Development Runtime Manager's install directory that no active declaration can reach are reported as one advisory line with a recovery command; Terrapod never runs it.
 
 This decision supersedes ADR 0012's definition of the compared executable as the one selected first on the ambient PATH, its singular expected executable, and its rule that only exact path matches and symlinks resolving to the same file count as canonical. It narrows ADR 0012's prohibition on suggesting provider-specific uninstall commands to cases where the provider is inferred; a payload inside a provider's own data directory establishes that provider by location. ADR 0012's non-destructive apply contract, advisory-only treatment of a non-canonical primary executable, and refusal to scan secondary PATH copies remain in force.

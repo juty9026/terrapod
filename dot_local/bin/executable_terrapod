@@ -761,7 +761,7 @@ run_executable_selection() {
     "$show_payloads"
 }
 
-# A captured readiness snapshot. Each row is key|kind|name|state|summary;
+# A captured readiness snapshot. Each setting row is key|kind|name|state|detail;
 # printers may format the facts differently without reading the config again.
 evaluate_readiness() {
   readiness_config_file="$1"
@@ -773,7 +773,7 @@ evaluate_readiness() {
   readiness_settings=""
   readiness_app_groups_apply=false
 
-  while IFS='|' read -r setting_key setting_kind setting_name setting_profile setting_presets setting_summary; do
+  while IFS='|' read -r setting_key setting_kind setting_name setting_profile setting_presets setting_summary setting_detail; do
     if managed_setting_applies_to_profile "$setting_key" "$readiness_profile"; then
       case "$setting_kind" in
         optional-stack) setting_enabled_rule=effective_optional_stack_enabled ;;
@@ -790,7 +790,7 @@ evaluate_readiness() {
     else
       setting_state=not-applicable
     fi
-    readiness_settings="${readiness_settings}${setting_key}|${setting_kind}|${setting_name}|${setting_state}|${setting_summary}
+    readiness_settings="${readiness_settings}${setting_key}|${setting_kind}|${setting_name}|${setting_state}|${setting_detail:-$setting_summary}
 "
   done <<EOF
 $(managed_setting_schema)
@@ -818,14 +818,42 @@ $readiness_settings
 EOF
 }
 
-# Setup summaries are capitalized and abbreviated for its menu. Preserve the
-# existing status/doctor wording while taking the description from the schema.
-readiness_setting_detail() {
-  case "$1" in
-    Rich\ *) printf 'r%s\n' "${1#R}" ;;
-    Dev\ *) printf 'development%s\n' "${1#Dev}" ;;
-    *) printf '%s\n' "$1" ;;
-  esac
+# Profile requirements are separate from provider declarations. zsh is needed
+# before a login probe can run; all other requirements use the helper's PATH.
+# Capture observations once so status and doctor never probe them in printers.
+evaluate_profile_requirements() {
+  readiness_requirements=""
+  readiness_missing_tools=""
+  while IFS='|' read -r requirement_command requirement_scope requirement_profiles; do
+    case ",$requirement_profiles," in
+      *,all,*|*,"$readiness_profile",*) ;;
+      *) continue ;;
+    esac
+    requirement_state=missing
+    if [ "$requirement_scope" = bootstrap ]; then
+      if command -v "$requirement_command" >/dev/null 2>&1; then
+        requirement_state=available
+      fi
+    elif [ -z "$readiness_managed_path" ]; then
+      requirement_state=unknown
+    elif (
+      PATH="$readiness_managed_path"
+      export PATH
+      hash -r 2>/dev/null || true
+      command -v "$requirement_command" >/dev/null 2>&1
+    ); then
+      requirement_state=available
+    fi
+    readiness_requirements="${readiness_requirements}${requirement_command}|${requirement_scope}|${requirement_state}
+"
+    if [ "$requirement_state" = missing ]; then
+      readiness_missing_tools="${readiness_missing_tools}${readiness_missing_tools:+, }$requirement_command"
+    fi
+  done <<'REQUIREMENTS'
+zsh|bootstrap|all
+apt|managed|vps-shell
+brew|managed|macos-terminal,vps-shell
+REQUIREMENTS
 }
 
 evaluate_executable_selection() {
@@ -834,57 +862,34 @@ evaluate_executable_selection() {
   readiness_selection_status=0
   readiness_selection_output=""
   readiness_selection_guidance=false
+  readiness_managed_path=""
 
   if ! executable_selection_helper_available; then
     readiness_selection_status=missing
+    evaluate_profile_requirements
     return
   fi
 
-  if [ "$selection_mode" != doctor ]; then
-    readiness_selection_output="$(
-      run_executable_selection "$selection_mode" "$selection_payloads"
-    )" || readiness_selection_status=failed
-    return
-  fi
-
-  selection_guidance_file="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/tpod-selection.XXXXXXXX")" || {
+  selection_result_dir="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/tpod-selection.XXXXXXXX")" || {
     readiness_selection_status=failed
+    evaluate_profile_requirements
     return
   }
   readiness_selection_output="$(
-    TERRAPOD_EXECUTABLE_SELECTION_GUIDANCE_FILE="$selection_guidance_file" \
+    TERRAPOD_EXECUTABLE_SELECTION_PATH_FILE="$selection_result_dir/path" \
+      TERRAPOD_EXECUTABLE_SELECTION_GUIDANCE_FILE="$selection_result_dir/guidance" \
       run_executable_selection "$selection_mode" "$selection_payloads"
   )" || readiness_selection_status=failed
-  if [ -s "$selection_guidance_file" ]; then
+  if [ -s "$selection_result_dir/path" ]; then
+    IFS= read -r readiness_managed_path <"$selection_result_dir/path" || true
+  else
+    readiness_selection_status=failed
+  fi
+  if [ -s "$selection_result_dir/guidance" ]; then
     readiness_selection_guidance=true
   fi
-  /bin/rm -f "$selection_guidance_file"
-}
-
-join_tools() {
-  joined=
-  for tool do
-    if [ -z "$joined" ]; then
-      joined="$tool"
-    else
-      joined="$joined, $tool"
-    fi
-  done
-  printf '%s\n' "$joined"
-}
-
-missing_tools() {
-  missing=
-  for tool do
-    if ! command -v "$tool" >/dev/null 2>&1; then
-      if [ -z "$missing" ]; then
-        missing="$tool"
-      else
-        missing="$missing, $tool"
-      fi
-    fi
-  done
-  printf '%s\n' "$missing"
+  /bin/rm -rf "$selection_result_dir"
+  evaluate_profile_requirements
 }
 
 # TERRAPOD_STANDARD_HOMEBREW_PREFIX is deliberately not consulted here: it is
@@ -954,23 +959,6 @@ print_github_cli_extension_set_status() {
   fi
 }
 
-print_stack_status() {
-  label="$1"
-  enabled="$2"
-  shift 2
-
-  if is_enabled "$enabled"; then
-    missing="$(missing_tools "$@")"
-    if [ -n "$missing" ]; then
-      print_indented_colon_state_line "$label" "enabled" "(missing tools: $missing)"
-    else
-      print_indented_colon_state_line "$label" "enabled" "(tools available: $(join_tools "$@"))"
-    fi
-  else
-    print_indented_colon_state_line "$label" "disabled"
-  fi
-}
-
 print_optional_setting_status() {
   label="$1"
   enabled="$2"
@@ -981,6 +969,30 @@ print_optional_setting_status() {
   else
     print_indented_colon_state_line "$label" "disabled"
   fi
+}
+
+# All optional-stack surfaces render the evaluated rows in schema order.
+print_optional_stacks() {
+  stack_mode="$1"
+  [ "$stack_mode" = doctor ] || print_section "Optional stacks:"
+  while IFS='|' read -r stack_key stack_kind stack_name stack_state stack_detail; do
+    [ "$stack_kind" = optional-stack ] || continue
+    if [ "$stack_state" = not-applicable ]; then
+      case "$stack_mode" in
+        doctor) doctor_ok "$stack_name is not applicable for $(profile_context_label)" ;;
+        context) print_colon_state_line "$stack_name" "not applicable" "($(profile_context_label))" ;;
+        status) print_indented_colon_state_line "$stack_name" "not applicable" "($(profile_context_label))" ;;
+      esac
+    else
+      case "$stack_mode" in
+        doctor) doctor_check_optional_setting "$stack_name" "$stack_state" "$stack_detail" ;;
+        context) print_colon_state_line "$stack_name" "$(bool_state_label "$stack_state")" ;;
+        status) print_optional_setting_status "$stack_name" "$stack_state" "$stack_detail" ;;
+      esac
+    fi
+  done <<EOF
+$readiness_settings
+EOF
 }
 
 # The macOS App Groups are one section: it is offered, reported, and skipped as
@@ -1036,39 +1048,14 @@ $readiness_settings
 EOF
 }
 
-print_key_tool_status() {
-  profile="$1"
-
-  print_section "Key tools:"
-  for tool in chezmoi git zsh mise nvim zellij; do
-    if command -v "$tool" >/dev/null 2>&1; then
-      print_indented_colon_state_line "$tool" "available"
-    else
-      print_indented_colon_state_line "$tool" "missing"
-    fi
-  done
-
-  case "$profile" in
-    macos-terminal)
-      if command -v brew >/dev/null 2>&1; then
-        print_indented_colon_state_line "brew" "available"
-      else
-        print_indented_colon_state_line "brew" "missing"
-      fi
-      ;;
-    vps-shell)
-      if command -v apt >/dev/null 2>&1; then
-        print_indented_colon_state_line "apt" "available"
-      else
-        print_indented_colon_state_line "apt" "missing"
-      fi
-      if command -v brew >/dev/null 2>&1; then
-        print_indented_colon_state_line "brew" "available"
-      else
-        print_indented_colon_state_line "brew" "missing"
-      fi
-      ;;
-  esac
+print_profile_requirement_status() {
+  print_section "Profile requirements:"
+  while IFS='|' read -r requirement_command requirement_scope requirement_state; do
+    [ -n "$requirement_command" ] || continue
+    print_indented_colon_state_line "$requirement_command" "$requirement_state"
+  done <<EOF
+$readiness_requirements
+EOF
 }
 
 print_jetendard_status() {
@@ -1077,38 +1064,6 @@ print_jetendard_status() {
   else
     print_colon_state_line "Jetendard font" "missing"
   fi
-}
-
-status_key_tool_warnings() {
-  profile="$1"
-  missing="$(missing_tools zsh)"
-
-  case "$profile" in
-    macos-terminal)
-      platform_missing="$(missing_tools brew)"
-      ;;
-    vps-shell)
-      platform_missing="$(missing_tools apt brew)"
-      ;;
-    *)
-      platform_missing=
-      ;;
-  esac
-
-  if [ -n "$platform_missing" ]; then
-    if [ -n "$missing" ]; then
-      missing="$missing, $platform_missing"
-    else
-      missing="$platform_missing"
-    fi
-  fi
-
-  if [ -n "$missing" ]; then
-    print_warning_line "missing key tools: $missing"
-    return 0
-  fi
-
-  return 1
 }
 
 print_status_warnings() {
@@ -1137,7 +1092,8 @@ print_status_warnings() {
     printed=1
   fi
 
-  if status_key_tool_warnings "$profile"; then
+  if [ -n "$readiness_missing_tools" ]; then
+    print_warning_line "missing key tools: $readiness_missing_tools"
     printed=1
   fi
 
@@ -1196,17 +1152,10 @@ run_status() {
   if [ "$readiness_selection_status" = failed ]; then
     print_warning_line "executable selection helper failed"
   fi
-  print_section "Optional stacks:"
-  print_optional_setting_status "$(readiness_setting_field enableEditorStack name)" "$(readiness_setting_field enableEditorStack state)" "$(readiness_setting_detail "$(readiness_setting_field enableEditorStack summary)")"
-  if [ "$(readiness_setting_field enableAiCliTools state)" != not-applicable ]; then
-    print_stack_status "$(readiness_setting_field enableAiCliTools name)" "$(readiness_setting_field enableAiCliTools state)" agy claude codex
-  else
-    print_indented_colon_state_line "$(readiness_setting_field enableAiCliTools name)" "not applicable" "($(profile_context_label))"
-  fi
-  print_optional_setting_status "$(readiness_setting_field enableDevelopmentWorkspace name)" "$(readiness_setting_field enableDevelopmentWorkspace state)" "$(readiness_setting_detail "$(readiness_setting_field enableDevelopmentWorkspace summary)")"
+  print_optional_stacks status
   print_macos_app_group_status
   print_shell_environment_status status
-  print_key_tool_status "$profile"
+  print_profile_requirement_status
   if [ "$profile" = "macos-terminal" ]; then
     print_jetendard_status
   fi
@@ -1250,17 +1199,7 @@ show_config_context() {
 }
 
 show_stack_context() {
-  print_section "Optional stacks:"
-  editor_state="$(bool_state_label "$(readiness_setting_field enableEditorStack state)")"
-  workspace_state="$(bool_state_label "$(readiness_setting_field enableDevelopmentWorkspace state)")"
-  print_colon_state_line "$(readiness_setting_field enableEditorStack name)" "$editor_state"
-  if [ "$(readiness_setting_field enableAiCliTools state)" != not-applicable ]; then
-    ai_state="$(bool_state_label "$(readiness_setting_field enableAiCliTools state)")"
-    print_colon_state_line "$(readiness_setting_field enableAiCliTools name)" "$ai_state"
-  else
-    print_colon_state_line "$(readiness_setting_field enableAiCliTools name)" "not applicable" "($(profile_context_label))"
-  fi
-  print_colon_state_line "$(readiness_setting_field enableDevelopmentWorkspace name)" "$workspace_state"
+  print_optional_stacks context
   print_shell_environment_status status
 
   if [ "$readiness_app_groups_apply" = false ]; then
@@ -1518,15 +1457,27 @@ doctor_guidance() {
   printf '  - %s\n' "$1"
 }
 
-doctor_check_command() {
-  tool="$1"
-
-  if command -v "$tool" >/dev/null 2>&1; then
-    doctor_ok "$tool is available"
-  else
-    doctor_warn "$tool is missing"
-    doctor_guidance "Install or apply the configured Core Shell Stack so '$tool' is available on PATH."
-  fi
+doctor_check_profile_requirements() {
+  while IFS='|' read -r requirement_command requirement_scope requirement_state; do
+    [ -n "$requirement_command" ] || continue
+    case "$requirement_state" in
+      available) doctor_ok "$requirement_command is available" ;;
+      missing)
+        doctor_warn "$requirement_command is missing"
+        if [ "$requirement_scope" = bootstrap ]; then
+          doctor_guidance "Install zsh and make it available on the invoking PATH so Terrapod can compute the Managed Default PATH."
+        else
+          doctor_guidance "Install or apply the configured Core Shell Stack so '$requirement_command' is available on the Managed Default PATH."
+        fi
+        ;;
+      unknown)
+        doctor_warn "$requirement_command availability could not be checked"
+        doctor_guidance "Run tpod apply to restore the Terrapod command helpers, then rerun tpod doctor."
+        ;;
+    esac
+  done <<EOF
+$readiness_requirements
+EOF
 }
 
 doctor_check_homebrew_prefix() {
@@ -1680,11 +1631,11 @@ run_doctor() {
       ;;
   esac
 
-  doctor_check_command zsh
+  evaluate_executable_selection doctor "$doctor_show_payloads"
+  doctor_check_profile_requirements
 
   case "$profile" in
     macos-terminal)
-      doctor_check_command brew
       doctor_check_homebrew_prefix
       doctor_check_jetendard_component "Jetendard font files" "$jetendard_font_helper" check
       doctor_check_jetendard_component "Ghostty font setting" "$jetendard_settings_helper" check-ghostty
@@ -1692,30 +1643,11 @@ run_doctor() {
       doctor_check_jetendard_component "Orca font settings" "$jetendard_settings_helper" check-orca
       ;;
     vps-shell)
-      doctor_check_command apt
-      doctor_check_command brew
       doctor_check_homebrew_prefix
       ;;
   esac
 
-  doctor_check_optional_setting \
-    "$(readiness_setting_field enableEditorStack name)" \
-    "$(readiness_setting_field enableEditorStack state)" \
-    "$(readiness_setting_detail "$(readiness_setting_field enableEditorStack summary)")"
-
-  if [ "$(readiness_setting_field enableAiCliTools state)" != not-applicable ]; then
-    doctor_check_optional_setting \
-      "$(readiness_setting_field enableAiCliTools name)" \
-      "$(readiness_setting_field enableAiCliTools state)" \
-      "$(readiness_setting_detail "$(readiness_setting_field enableAiCliTools summary)")"
-  else
-    doctor_ok "$(readiness_setting_field enableAiCliTools name) is not applicable for $(profile_context_label)"
-  fi
-
-  doctor_check_optional_setting \
-    "$(readiness_setting_field enableDevelopmentWorkspace name)" \
-    "$(readiness_setting_field enableDevelopmentWorkspace state)" \
-    "$(readiness_setting_detail "$(readiness_setting_field enableDevelopmentWorkspace summary)")"
+  print_optional_stacks doctor
 
   if [ "$readiness_app_groups_apply" = false ]; then
     print_section "macOS App Groups: not applicable for $(profile_context_label)"
@@ -1730,7 +1662,6 @@ run_doctor() {
   print_shell_environment_status doctor
   doctor_check_install_warnings
 
-  evaluate_executable_selection doctor "$doctor_show_payloads"
   if [ "$readiness_selection_status" != missing ]; then
     [ -z "$readiness_selection_output" ] || printf '%s\n' "$readiness_selection_output"
     if [ "$readiness_selection_guidance" = true ]; then

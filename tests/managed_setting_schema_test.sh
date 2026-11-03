@@ -64,15 +64,6 @@ terrapod|show_setup_option_block|enableMacosAppGroupMobileDev|per-key Setup note
 terrapod|ai_cli_tools_supported_profile|enableAiCliTools|profile applicability of the AI Tool Stack, asked of the schema
 terrapod|run_executable_selection|enableAiCliTools|the executable selection helper takes the evaluated AI Tool Stack state as an argument
 terrapod|run_executable_selection|enableMacosAppGroupLauncher|the executable selection helper takes the launcher state as an argument
-terrapod|run_status|enableEditorStack|status formats this setting from the shared readiness result
-terrapod|run_status|enableAiCliTools|status formats this setting and checks agy, claude, and codex from the shared readiness result
-terrapod|run_status|enableDevelopmentWorkspace|status formats this setting from the shared readiness result
-terrapod|show_stack_context|enableEditorStack|apply and diff context format this setting from the shared readiness result
-terrapod|show_stack_context|enableAiCliTools|apply and diff context format this setting from the shared readiness result
-terrapod|show_stack_context|enableDevelopmentWorkspace|apply and diff context format this setting from the shared readiness result
-terrapod|run_doctor|enableEditorStack|doctor formats this setting from the shared readiness result
-terrapod|run_doctor|enableAiCliTools|doctor formats this setting from the shared readiness result
-terrapod|run_doctor|enableDevelopmentWorkspace|doctor formats this setting from the shared readiness result
 terrapod|effective_optional_stack_enabled|enableDevelopmentWorkspace|the Workspace turns on every optional stack it bundles
 ALLOWLIST
 
@@ -260,3 +251,23 @@ TERRAPOD_CONFIG_TOML_LIB="$extra_lib_dir/config-toml.sh" \
   /bin/sh "$terrapod" configure development >/dev/null
 assert_file_contains "$probe_vps_config" "enableMacosAppGroupSchemaProbe = false" \
   "a schema row that does not apply to the profile is written false"
+
+# Setup wording can change independently of explicit readiness descriptions.
+wording_reader="$tmp_dir/wording-reader.sh"
+sed -e 's/|Rich Neovim configuration/|Customized editor setup/' \
+    -e 's/|Dev Zellij layouts/|Customized workspace setup/' \
+    "$reader" >"$wording_reader"
+wording_config="$tmp_dir/wording.toml"
+TERRAPOD_PROFILE=vps-shell TERRAPOD_CHEZMOI_CONFIG="$wording_config" \
+  /bin/sh "$terrapod" configure development >/dev/null
+for wording_command in status doctor; do
+  wording_output="$(
+    TERRAPOD_CONFIG_TOML_LIB="$wording_reader" TERRAPOD_PROFILE=vps-shell \
+      TERRAPOD_CHEZMOI_CONFIG="$wording_config" PATH=/usr/bin:/bin \
+      /bin/sh "$terrapod" "$wording_command" 2>&1 || true
+  )"
+  assert_contains "$wording_output" "rich Neovim configuration" \
+    "$wording_command retains explicit editor detail after Setup wording changes"
+  assert_contains "$wording_output" "development Zellij layouts" \
+    "$wording_command retains explicit workspace detail after Setup wording changes"
+done
