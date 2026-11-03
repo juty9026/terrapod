@@ -34,7 +34,6 @@ tests/**
 
 {{ if ne .chezmoi.os "darwin" }}
 # macOS Terminal Profile entries are not part of the VPS Shell Profile.
-.chezmoiscripts/02-retry-jetendard-font.sh
 .chezmoiscripts/50-open-karabiner-if-needed.sh
 .chezmoiscripts/65-install-jetendard-font.sh
 .chezmoiscripts/70-apply-jetendard-settings.sh

@@ -159,9 +159,8 @@ for ignored_chezmoiscript in $ignored_chezmoiscripts; do
 done
 
 macos_only_entries="
-.chezmoiscripts/run_before_02-retry-jetendard-font.sh.tmpl
 .chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl
-.chezmoiscripts/run_onchange_after_65-install-jetendard-font.sh.tmpl
+.chezmoiscripts/run_after_65-install-jetendard-font.sh.tmpl
 dot_local/lib/terrapod/executable_jetendard-font
 dot_local/lib/terrapod/executable_jetendard-settings
 dot_local/lib/terrapod/jetendard-font-install.sh

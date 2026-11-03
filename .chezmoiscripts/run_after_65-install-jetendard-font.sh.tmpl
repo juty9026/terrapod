@@ -1,0 +1,22 @@
+{{ if eq .chezmoi.os "darwin" -}}
+#!/bin/sh
+set -eu
+
+{{ include "dot_local/lib/terrapod/install-warnings.sh" }}
+
+{{ include "dot_local/lib/terrapod/install-warning-script.sh" }}
+
+{{ include "dot_local/lib/terrapod/install-source.sh" }}
+
+{{ include "dot_local/lib/terrapod/jetendard-font-status.sh" }}
+
+{{ include "dot_local/lib/terrapod/jetendard-font-install.sh" }}
+
+font_helper="{{ .chezmoi.sourceDir }}/dot_local/lib/terrapod/executable_jetendard-font"
+# The raw entry point, font helper and install body trigger installation.
+# Warning/policy/guidance edits and upstream releases do not.
+installation_fingerprint="{{ printf "%s:%s:%s" (include ".chezmoiscripts/run_after_65-install-jetendard-font.sh.tmpl" | sha256sum) (include "dot_local/lib/terrapod/executable_jetendard-font" | sha256sum) (include "dot_local/lib/terrapod/jetendard-font-install.sh" | sha256sum) | sha256sum }}"
+
+terrapod_install_if_changed jetendard-font "Jetendard font install needs attention" "$installation_fingerprint" \
+  terrapod_jetendard_font_install "$font_helper"
+{{- end }}
