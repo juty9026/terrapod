@@ -1,0 +1,21 @@
+{{- if eq .chezmoi.os "linux" -}}
+#!/bin/sh
+set -eu
+
+{{ include "dot_local/lib/terrapod/install-warnings.sh" }}
+
+{{ include "dot_local/lib/terrapod/install-warning-script.sh" }}
+
+{{ include "dot_local/lib/terrapod/install-source.sh" }}
+
+{{ include "dot_local/lib/terrapod/ubuntu-bootstrap.sh" }}
+
+os_id="{{ get .chezmoi.osRelease "id" }}"
+version_id="{{ get .chezmoi.osRelease "versionID" }}"
+# Hash the raw entry point, body and release inputs deliberately. Inlined
+# warning/policy bytes affect rendering, but do not trigger installation.
+installation_fingerprint="{{ printf "%s:%s:%s:%s" (include ".chezmoiscripts/run_before_00-bootstrap-ubuntu.sh.tmpl" | sha256sum) (include "dot_local/lib/terrapod/ubuntu-bootstrap.sh" | sha256sum) (get .chezmoi.osRelease "id") (get .chezmoi.osRelease "versionID") | sha256sum }}"
+
+terrapod_install_if_changed ubuntu-bootstrap "$TERRAPOD_UBUNTU_BOOTSTRAP_SUMMARY" "$installation_fingerprint" \
+  terrapod_ubuntu_bootstrap_install "$os_id" "$version_id"
+{{- end }}

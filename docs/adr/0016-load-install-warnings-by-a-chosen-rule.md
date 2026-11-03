@@ -8,16 +8,34 @@ Always-run chezmoi scripts inline the library with `{{ include }}`. Compile-time
 inlining is the default because it is the only rule under which the library
 cannot be missing, so no guard is needed and none can be reintroduced.
 
-The two `run_onchange_` scripts are the exception. They source the library by
-path, unguarded, under `set -e`. Chezmoi triggers `run_onchange_` scripts on
-rendered-content change, so inlining would put the library's bytes into the
-hash and re-run the work on every library edit — and neither piece of work is
-cheap. `install()` in `executable_jetendard-font` has no installed-state
-short-circuit: it always calls the GitHub releases API and downloads the full
-archive. `ubuntu-bootstrap.sh` always runs `apt-get update` and escalates
-through `sudo` for a non-root user. Both need network; one can raise an
-unexpected password prompt. Any future `run_onchange_` script that records
-install warnings follows this rule.
+Ubuntu bootstrap and Jetendard font installation each use one always-run entry
+point, in the before and after phases respectively. Both inline the warning
+library and exit policy under this default rule. Their former onchange/retry
+pairs could invoke the same installation twice within one apply, so each entry
+point now makes one decision: install when its installation-source fingerprint
+has no matching successful record, or when its warning marker exists.
+
+The fingerprint deliberately includes the raw entry-point source and shared
+install body, plus Ubuntu release inputs or the Jetendard font helper. It does
+not include expanded warning, policy or Jetendard guidance bytes. Inlining those
+libraries therefore cannot turn maintenance edits into APT/sudo work or font
+release lookups and downloads. Upstream font releases alone remain outside the
+trigger boundary in ADR 0009.
+
+Successful fingerprints are atomically published per category under
+`${XDG_STATE_HOME:-$HOME/.local/state}/terrapod/install-sources/`, outside the
+warning directory owned by ADR 0014/0018. Missing or invalid records trigger one
+attempt, including on migration from old chezmoi onchange state. The shared
+bodies terminate through the policy layer, so the coordinator runs each in its
+own shell and checks both its exit status and the authoritative warning lookup.
+A recorded failure's exit 0, an interruption, or a failed warning clear never
+advances successful state. A successful-state write failure records a category
+warning through the same exit policy; inability to write that warning is fatal.
+Subsequent unchanged, warning-free applies do no installation work.
+
+Any future `run_onchange_` script that records install warnings sources the
+library and policy by path, unguarded, under `set -e`, so unrelated warning
+library edits do not enter chezmoi's rendered-content hash.
 
 `tpod` resolves the library lazily at each call site. A decision made once at
 process start is always wrong during the first-run apply, because the library
@@ -43,12 +61,14 @@ scripts; the loading rules in this record remain unchanged.
 
 ## Considered Options
 
-- Inline everywhere, including the two `run_onchange_` scripts: rejected on the
-  cost above. `install-warnings.sh` changed seven times between `4d3a9dd` and
-  `f314327`, and its most common edit — a new name in
-  `terrapod_install_warning_categories()` — happens whenever a new install step
-  gains a warning category. Paying an `apt` run and a font download on every
-  machine for that is a worse trade than one documented exception.
+- Keep the onchange/retry pairs and suppress markers written in the same
+  apply: rejected because it retains two scheduling decisions and still needs
+  to coordinate changed-source installs with pre-existing warnings. A single
+  always-run entry point expresses both triggers together.
+- Inline the warning library into the former onchange installers: previously
+  rejected because every library edit would repeat expensive work. The explicit
+  installation-source fingerprint now makes inlining safe without widening the
+  trigger boundary.
 - Move `prune_retired_install_warnings` after the apply delegation so the
   first-run prune works: rejected because ADR 0014 fixes that ordering so the
   directory stays consistent when apply fails, and reversing it on unrelated
@@ -66,9 +86,13 @@ scripts; the loading rules in this record remain unchanged.
 - `mark_install_warning` never returns non-zero. Callers run under `set -e`, so
   a failing bare call would kill the script before its exit policy runs. Code
   that needs the outcome calls `install_warning_recorded`.
-- Editing `install-warnings.sh` does not re-run any `run_onchange_` script. A
-  future author who inlines it into one silently reintroduces that cost; the
-  loading-rule assertions in `tests/chezmoiignore_test.sh` fail if they do.
+- Editing warning/policy/guidance libraries does not repeat Ubuntu or Jetendard
+  installation. Real consecutive-apply tests enforce their trigger matrix;
+  loading-rule assertions enforce inlining for always-run scripts.
+- The first apply after migration attempts each applicable category once,
+  because old chezmoi exit-0 state cannot establish installation success.
+- The guarantee is one body invocation per category within an apply; independently
+  concurrent applies are not coordinated.
 - `install-warning-script.sh` deploys to `~/.local/lib/terrapod/` even though
   only chezmoi scripts use it, following `homebrew-core-bundle.sh`. Making it
   source-tree-only would need an unconditional `.chezmoiignore` entry, a shape

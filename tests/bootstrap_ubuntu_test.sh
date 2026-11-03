@@ -30,7 +30,7 @@ rendered="$tmp_dir/bootstrap-ubuntu.sh"
 "$chezmoi_bin" execute-template \
   --source "$repo_root" \
   --override-data '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableAiCliTools":false,"enableDevelopmentWorkspace":false}' \
-  --file "$repo_root/.chezmoiscripts/run_onchange_before_00-bootstrap-ubuntu.sh.tmpl" \
+  --file "$repo_root/.chezmoiscripts/run_before_00-bootstrap-ubuntu.sh.tmpl" \
   >"$rendered"
 sh -n "$rendered" || fail "rendered Ubuntu bootstrap script should be valid sh"
 pass "rendered Ubuntu bootstrap script is valid sh"
@@ -134,7 +134,7 @@ assert_not_contains "$bootstrap_log" "repo.charm.sh" "Ubuntu declared bootstrap 
 assert_not_contains "$bootstrap_log" "apt-get args:install -y mise" "Ubuntu declared bootstrap does not install mise through APT"
 assert_not_contains "$bootstrap_log" "apt-get args:install -y gum" "Ubuntu declared bootstrap does not install gum through APT"
 
-rm -rf "$HOME/.local/state/terrapod/install-warnings"
+rm -rf "$HOME/.local/state/terrapod/install-warnings" "$HOME/.local/state/terrapod/install-sources"
 : >"$BOOTSTRAP_TEST_LOG"
 CHSH_TEST_STATUS=23
 export CHSH_TEST_STATUS
@@ -159,7 +159,7 @@ pass "Ubuntu bootstrap does not write shell-integrations warnings for login shel
 ubuntu_bootstrap_marker_text="$(cat "$ubuntu_bootstrap_marker")"
 assert_contains "$ubuntu_bootstrap_marker_text" "guidance='Run chsh -s /usr/bin/zsh after fixing shell permission issues.'" "Ubuntu bootstrap marker preserves manual chsh guidance"
 
-rm -rf "$HOME/.local/state/terrapod/install-warnings"
+rm -rf "$HOME/.local/state/terrapod/install-warnings" "$HOME/.local/state/terrapod/install-sources"
 : >"$BOOTSTRAP_TEST_LOG"
 BOOTSTRAP_APT_INSTALL_STATUS=42
 export BOOTSTRAP_APT_INSTALL_STATUS
@@ -194,10 +194,10 @@ unsupported_rendered="$tmp_dir/bootstrap-ubuntu-unsupported.sh"
 "$chezmoi_bin" execute-template \
   --source "$repo_root" \
   --override-data '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"22.04"}},"enableAiCliTools":false,"enableDevelopmentWorkspace":false}' \
-  --file "$repo_root/.chezmoiscripts/run_onchange_before_00-bootstrap-ubuntu.sh.tmpl" \
+  --file "$repo_root/.chezmoiscripts/run_before_00-bootstrap-ubuntu.sh.tmpl" \
   >"$unsupported_rendered"
 
-rm -rf "$HOME/.local/state/terrapod/install-warnings"
+rm -rf "$HOME/.local/state/terrapod/install-warnings" "$HOME/.local/state/terrapod/install-sources"
 : >"$BOOTSTRAP_TEST_LOG"
 if ! sh "$unsupported_rendered" >"$tmp_dir/bootstrap-unsupported.out" 2>"$tmp_dir/bootstrap-unsupported.err"; then
   fail "Ubuntu bootstrap should continue routine apply on an unsupported release"
@@ -211,118 +211,3 @@ pass "Ubuntu bootstrap keeps an ubuntu-bootstrap warning for an unsupported rele
 
 ubuntu_bootstrap_marker_text="$(cat "$ubuntu_bootstrap_marker")"
 assert_contains "$ubuntu_bootstrap_marker_text" "guidance='Run Terrapod on Ubuntu 24.04, or use tpod doctor for current platform guidance.'" "Ubuntu bootstrap marker preserves unsupported release guidance"
-
-retry_rendered="$tmp_dir/retry-ubuntu-bootstrap.sh"
-"$chezmoi_bin" execute-template \
-  --source "$repo_root" \
-  --override-data '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableAiCliTools":false,"enableDevelopmentWorkspace":false}' \
-  --file "$repo_root/.chezmoiscripts/run_before_01-retry-ubuntu-bootstrap.sh.tmpl" \
-  >"$retry_rendered"
-sh -n "$retry_rendered" || fail "rendered Ubuntu bootstrap retry script should be valid sh"
-pass "rendered Ubuntu bootstrap retry script is valid sh"
-
-macos_retry_rendered="$tmp_dir/retry-ubuntu-bootstrap-macos.sh"
-"$chezmoi_bin" execute-template \
-  --source "$repo_root" \
-  --override-data '{"chezmoi":{"os":"darwin"},"enableAiCliTools":false,"enableDevelopmentWorkspace":false}' \
-  --file "$repo_root/.chezmoiscripts/run_before_01-retry-ubuntu-bootstrap.sh.tmpl" \
-  >"$macos_retry_rendered"
-if [ -n "$(tr -d '[:space:]' <"$macos_retry_rendered")" ]; then
-  fail "Ubuntu bootstrap retry script should render empty on macOS"
-fi
-pass "Ubuntu bootstrap retry script renders empty on macOS"
-
-rm -rf "$HOME/.local/state/terrapod/install-warnings"
-: >"$BOOTSTRAP_TEST_LOG"
-if ! sh "$retry_rendered" >"$tmp_dir/retry-no-marker.out" 2>"$tmp_dir/retry-no-marker.err"; then
-  fail "Ubuntu bootstrap retry should succeed when no ubuntu-bootstrap warning exists"
-fi
-pass "Ubuntu bootstrap retry succeeds when no ubuntu-bootstrap warning exists"
-
-if [ -s "$BOOTSTRAP_TEST_LOG" ]; then
-  fail "Ubuntu bootstrap retry should not run APT when no ubuntu-bootstrap warning exists"
-fi
-pass "Ubuntu bootstrap retry skips APT when no ubuntu-bootstrap warning exists"
-
-rm -rf "$HOME/.local/state/terrapod/install-warnings"
-: >"$BOOTSTRAP_TEST_LOG"
-BOOTSTRAP_APT_INSTALL_STATUS=42
-export BOOTSTRAP_APT_INSTALL_STATUS
-sh "$rendered" >"$tmp_dir/retry-seed.out" 2>"$tmp_dir/retry-seed.err" ||
-  fail "Ubuntu bootstrap should record a warning to seed the retry test"
-unset BOOTSTRAP_APT_INSTALL_STATUS
-
-: >"$BOOTSTRAP_TEST_LOG"
-BOOTSTRAP_APT_INSTALL_STATUS=42
-export BOOTSTRAP_APT_INSTALL_STATUS
-if ! sh "$retry_rendered" >"$tmp_dir/retry-failure.out" 2>"$tmp_dir/retry-failure.err"; then
-  unset BOOTSTRAP_APT_INSTALL_STATUS
-  fail "Ubuntu bootstrap retry should continue apply when the retried bootstrap fails again"
-fi
-unset BOOTSTRAP_APT_INSTALL_STATUS
-pass "Ubuntu bootstrap retry continues apply when the retried bootstrap fails again"
-
-assert_contains "$(cat "$BOOTSTRAP_TEST_LOG")" "apt-get args:install -y build-essential" "Ubuntu bootstrap retry reruns the APT prerequisite install"
-
-if [ ! -f "$ubuntu_bootstrap_marker" ]; then
-  fail "Ubuntu bootstrap retry should keep the ubuntu-bootstrap warning after a failed retry"
-fi
-pass "Ubuntu bootstrap retry keeps the ubuntu-bootstrap warning after a failed retry"
-
-ubuntu_bootstrap_marker_dir="${ubuntu_bootstrap_marker%/*}"
-: >"$BOOTSTRAP_TEST_LOG"
-retry_write_failure_status=0
-chmod 555 "$ubuntu_bootstrap_marker_dir"
-BOOTSTRAP_APT_INSTALL_STATUS=42 sh "$retry_rendered" \
-  >"$tmp_dir/retry-write-failure.out" 2>"$tmp_dir/retry-write-failure.err" ||
-  retry_write_failure_status=$?
-chmod 755 "$ubuntu_bootstrap_marker_dir"
-assert_status "$retry_write_failure_status" 1 \
-  "Ubuntu bootstrap retry fails when the install warning marker cannot be written"
-
-: >"$BOOTSTRAP_TEST_LOG"
-if ! sh "$retry_rendered" >"$tmp_dir/retry-success.out" 2>"$tmp_dir/retry-success.err"; then
-  fail "Ubuntu bootstrap retry should succeed when the retried bootstrap succeeds"
-fi
-pass "Ubuntu bootstrap retry succeeds when the retried bootstrap succeeds"
-
-if [ -e "$ubuntu_bootstrap_marker" ]; then
-  fail "Ubuntu bootstrap retry should clear the ubuntu-bootstrap warning after a successful retry"
-fi
-pass "Ubuntu bootstrap retry clears the ubuntu-bootstrap warning after a successful retry"
-
-missing_lib_source="$tmp_dir/onchange-missing-lib"
-mkdir -p "$missing_lib_source"
-cp -R "$repo_root/dot_local" "$missing_lib_source/dot_local"
-rm -f \
-  "$missing_lib_source/dot_local/lib/terrapod/install-warnings.sh" \
-  "$missing_lib_source/dot_local/lib/terrapod/install-warning-script.sh"
-
-rendered_missing_lib="$tmp_dir/onchange-missing-lib.sh"
-"$chezmoi_bin" execute-template \
-  --source "$repo_root" \
-  --override-data "{\"chezmoi\":{\"os\":\"linux\",\"sourceDir\":\"$missing_lib_source\",\"osRelease\":{\"id\":\"ubuntu\",\"versionID\":\"24.04\"}}}" \
-  --file "$repo_root/.chezmoiscripts/run_onchange_before_00-bootstrap-ubuntu.sh.tmpl" \
-  >"$rendered_missing_lib"
-
-if sh "$rendered_missing_lib" >/dev/null 2>&1; then
-  fail "Ubuntu bootstrap stops when the install warning library is missing"
-fi
-pass "Ubuntu bootstrap stops when the install warning library is missing"
-
-# The install body lives once, in ubuntu-bootstrap.sh; both scripts call it.
-for ubuntu_pair_template in \
-  .chezmoiscripts/run_onchange_before_00-bootstrap-ubuntu.sh.tmpl \
-  .chezmoiscripts/run_before_01-retry-ubuntu-bootstrap.sh.tmpl; do
-  assert_file_contains \
-    "$repo_root/$ubuntu_pair_template" \
-    'terrapod_ubuntu_bootstrap_install "$os_id" "$version_id"' \
-    "Ubuntu script calls the shared install body: $ubuntu_pair_template"
-
-  for ubuntu_body_detail in declare_install_warning_category terrapod_ubuntu_bootstrap_run; do
-    assert_file_not_contains \
-      "$repo_root/$ubuntu_pair_template" \
-      "$ubuntu_body_detail" \
-      "Ubuntu script leaves $ubuntu_body_detail to the shared body: $ubuntu_pair_template"
-  done
-done

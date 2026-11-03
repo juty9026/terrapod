@@ -158,7 +158,7 @@ Apple Silicon에서는 Homebrew를 `/opt/homebrew`에 설치하고, Intel Mac에
 
 Terrapod은 해당 Jetendard release의 모든 TTF를 설치하고 GitHub에서 제공하는 asset digest를 검증합니다. Terrapod은 managed font installer source가 변경되거나 실패한 설치를 재시도할 때만 최신 Jetendard release를 확인합니다. Ghostty, Zed buffer와 terminal, Orca terminal에서 사용하는 font-family key만 설정합니다. Jetendard 설정 적용이 보류되면 Orca를 종료한 뒤 `tpod apply`를 다시 실행합니다. Terrapod은 기존에 설치된 JetBrains Mono Nerd Font 또는 D2Coding을 제거하지 않습니다. 기존 window가 cached font를 계속 사용하면 Ghostty, Zed 또는 Orca를 다시 시작해야 할 수 있습니다.
 
-Jetendard는 managed font installer source가 바뀌기 전까지 Terrapod이 설치한 release에 고정됩니다. 상위 release가 새로 나와도 업그레이드하지 않고, `tpod apply`를 다시 실행해도 마찬가지입니다. install script는 rendered content가 바뀔 때만 다시 실행되고, retry script는 `jetendard-font` install warning이 기록되어 있을 때만 실행되기 때문입니다. 최신 안정 release로 직접 올리려면 installer helper를 실행합니다.
+Jetendard는 설치 소스가 바뀌거나 설치를 재시도하기 전까지 Terrapod이 설치한 release에 고정됩니다. 소스 변경과 경고가 없는 `tpod apply`는 새 상위 release가 나와도 업그레이드하지 않습니다. managed installer source가 바뀌었거나, `jetendard-font` 경고가 남아 있거나, 설치 성공 기록이 없으면 apply 한 번당 최대 한 번 설치를 시도합니다. 이 실행 규칙으로 전환한 뒤 첫 apply에서는 성공 기록을 남기기 위해 한 번 설치합니다. 최신 안정 release로 직접 올리려면 installer helper를 실행합니다.
 
 ```sh
 ~/.local/lib/terrapod/jetendard-font install
