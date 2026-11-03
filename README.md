@@ -331,8 +331,8 @@ do not commit workstation-specific values.
 
 Run `tpod setup` or `terrapod configure <Preset>` first so Terrapod writes a
 complete managed setup config. Routine commands treat the setup config as
-complete only when `profile` and every managed optional stack and macOS App
-Group key are present, including disabled keys. When editing manually, change
+complete only when `profile` and every Managed Setting key are present,
+including disabled keys. When editing manually, change
 values in the existing `[data]` section instead of replacing it with a partial
 snippet.
 
@@ -352,6 +352,7 @@ Optional stack profiles and macOS App Group settings are disabled by default.
 | `enableMacosAppGroupMobileDev` | `false` | Installs the mobile-dev macOS App Group: Android Studio and Maestro (`mobile-dev-inc/tap/maestro`). It also sets `ANDROID_HOME` and `JAVA_HOME`. |
 | `enableMacosAppGroupBrowsers` | `false` | Installs the browsers macOS App Group: Aside and Google Chrome. |
 | `enableMacosAppGroupAiApps` | `false` | Installs the ai-apps macOS App Group: Claude, ChatGPT including Codex, and Gemini. Gemini is installed only on Apple Silicon with macOS 15 or later. |
+| `enableColimaDockerHost` | `false` | Exports `DOCKER_HOST` for the default Colima profile on the macOS Terminal Profile, without installing or starting Colima. |
 
 When `enableDevelopmentWorkspace` is `true`, it enables both the Optional Editor Stack and Optional AI Tool Stack
 even when `enableEditorStack` or `enableAiCliTools` are recorded as false. On the VPS Shell Profile the Optional
@@ -376,6 +377,16 @@ prefixes are also advisory; cleanup and PATH changes remain manual.
 vendor installer that appends it needs no machine-local override.
 
 `enableMacosAppGroupAiApps` is restored as the opt-in ai-apps key. An existing `true` value selects the new three-app group on the next `tpod apply`. Existing configs without the key need `tpod setup` or `terrapod configure <Preset>` to become complete. The workstation Preset enables this group; minimal and development leave it disabled. The development-apps group and AI CLI selection remain independent.
+
+### Colima Docker Host Selection
+
+`enableColimaDockerHost` is `false` in every Preset and independent of development-apps and the Optional Development Workspace. On macOS, run `tpod setup`, enable **Colima Docker Host Selection**, then run `tpod apply` and start a new zsh. Existing configs missing this key need explicit setup or configure to become complete. `tpod configure <Preset>` resets it to `false`; the VPS Shell Profile stores `false` without offering the question.
+
+When enabled, the managed `.zshenv` exports `DOCKER_HOST`, normally `unix://$HOME/.config/colima/default/docker.sock`. Following [Colima's config location rules](https://github.com/abiosoft/colima/blob/main/docs/FAQ.md#specifying-the-config-location), an existing `COLIMA_HOME` directory wins, followed by an existing `~/.colima`, then the managed `XDG_CONFIG_HOME`. Neither a socket nor an executable needs to exist. Stopping Colima does not switch back to OrbStack. Install Colima, Docker CLI, and Supabase and manage runtime startup separately.
+
+An already-set `DOCKER_HOST`, including an empty value, is preserved. Machine-local `~/.config/zsh/path.d/*.zsh` overrides still run last; use an explicit `DOCKER_HOST` or one of these overrides for another Colima profile. OrbStack installation and shell integration, Docker contexts, `DOCKER_CONTEXT`, and system socket links stay unchanged. Explicit context options and environment-variable precedence depend on the client and version.
+
+This applies to ordinary non-interactive, interactive, and login zsh and processes inheriting their environment. It does not reconfigure existing parent processes, independently launched GUI/launchd processes, directly started sh, or `zsh -f` sessions that skip user startup files.
 
 ### Zellij shortcuts
 
@@ -404,6 +415,7 @@ enableMacosAppGroupDevelopmentApps = false
 enableMacosAppGroupMobileDev = false
 enableMacosAppGroupBrowsers = false
 enableMacosAppGroupAiApps = false
+enableColimaDockerHost = false
 ```
 
 Editor-only machine:
