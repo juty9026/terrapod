@@ -3,6 +3,7 @@ set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$repo_root/tests/lib/harness.sh"
+. "$repo_root/tests/lib/managed-config-fixtures.sh"
 . "$repo_root/tests/lib/test-support.sh"
 make_tmp_dir
 
@@ -360,25 +361,14 @@ write_desktop_apply_config() {
   terminal_apps="$4"
   launcher="$5"
 
-  cat >"$config_file" <<EOF
+  {
+    cat <<EOF
 sourceDir = "$source_dir"
 destDir = "$dest_dir"
 
-[data]
-profile = "macos-terminal"
-enableEditorStack = false
-enableAiCliTools = false
-enableDevelopmentWorkspace = false
-enableMacosAppGroupTerminalApps = $terminal_apps
-enableMacosAppGroupAutomation = false
-enableMacosAppGroupLauncher = $launcher
-enableMacosAppGroupMonitoring = false
-enableMacosAppGroupDevelopmentApps = false
-enableMacosAppGroupMobileDev = false
-enableMacosAppGroupBrowsers = false
-enableMacosAppGroupAiApps = false
-enableColimaDockerHost = false
 EOF
+    render_complete_config macos-terminal "enableMacosAppGroupTerminalApps=$terminal_apps" "enableMacosAppGroupLauncher=$launcher"
+  } >"$config_file"
 }
 
 status_doctor_path() {
@@ -505,7 +495,7 @@ assert_no_terrapod_artifacts_under() {
 
 mkdir -p "$tmp_dir/bin" "$tmp_dir/home"
 system_path="$PATH"
-write_gum_stub "$tmp_dir/bin/gum" cancel cancel
+write_gum_stub "$tmp_dir/bin/gum"
 no_gum_path="$tmp_dir/no-gum-bin"
 write_restricted_path "$no_gum_path" sh
 
@@ -1462,7 +1452,12 @@ setup_responses="$tmp_dir/setup.responses"
 setup_gum_log="$tmp_dir/setup-gum.log"
 setup_config="$setup_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$setup_home"
-write_gum_responses "$setup_responses" development yes yes yes yes yes yes yes yes yes no yes
+write_gum_responses "$setup_responses" preset=development write=yes \
+  enableDevelopmentWorkspace=yes \
+  enableMacosAppGroupTerminalApps=yes enableMacosAppGroupAutomation=yes \
+  enableMacosAppGroupLauncher=yes enableMacosAppGroupMonitoring=yes \
+  enableMacosAppGroupDevelopmentApps=yes enableMacosAppGroupMobileDev=yes \
+  enableMacosAppGroupBrowsers=yes enableMacosAppGroupAiApps=yes enableColimaDockerHost=no
 
 if ! run_terrapod_setup_command macos-terminal "$setup_responses" "$setup_home" "$setup_xdg" "$setup_output" "$setup_gum_log"; then
   sed 's/^/  /' "$setup_output" >&2
@@ -1472,6 +1467,7 @@ pass "macOS Terminal Profile setup uses gum prompts before final confirmation an
 
 setup_output_text="$(cat "$setup_output")"
 setup_gum_log_text="$(cat "$setup_gum_log")"
+assert_setup_questions "$setup_gum_log" macos-terminal true
 assert_contains "$setup_output_text" "🌱 Terrapod Setup" "gum setup prints a rich setup heading"
 assert_contains "$setup_output_text" "Profile  macOS Terminal Profile" "gum setup shows detected macOS profile in aligned setup context"
 assert_contains "$setup_output_text" "Choose a Preset" "gum setup labels the Preset choice section"
@@ -1545,7 +1541,7 @@ vps_setup_output="$tmp_dir/vps-setup.out"
 vps_setup_responses="$tmp_dir/vps-setup.responses"
 vps_setup_gum_log="$tmp_dir/vps-setup-gum.log"
 mkdir -p "$vps_setup_home"
-write_gum_responses "$vps_setup_responses" workstation
+write_gum_responses "$vps_setup_responses" preset=workstation
 
 if run_terrapod_setup_command vps-shell "$vps_setup_responses" "$vps_setup_home" "$vps_setup_xdg" "$vps_setup_output" "$vps_setup_gum_log"; then
   fail "VPS Shell Profile setup rejects workstation Preset"
@@ -1575,7 +1571,7 @@ preset_cancel_responses="$tmp_dir/preset-cancel.responses"
 preset_cancel_gum_log="$tmp_dir/preset-cancel-gum.log"
 preset_cancel_config="$preset_cancel_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$preset_cancel_home"
-write_gum_responses "$preset_cancel_responses" __CANCEL__
+write_gum_responses "$preset_cancel_responses" preset=__CANCEL__
 
 if run_terrapod_setup_command macos-terminal "$preset_cancel_responses" "$preset_cancel_home" "$preset_cancel_xdg" "$preset_cancel_output" "$preset_cancel_gum_log"; then
   fail "Preset selection cancellation exits non-zero"
@@ -1600,7 +1596,7 @@ gum_error_responses="$tmp_dir/gum-error.responses"
 gum_error_gum_log="$tmp_dir/gum-error-gum.log"
 gum_error_config="$gum_error_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$gum_error_home"
-write_gum_responses "$gum_error_responses" minimal __ERROR__
+write_gum_responses "$gum_error_responses" preset=minimal enableDevelopmentWorkspace=__ERROR__
 
 if run_terrapod_setup_command macos-terminal "$gum_error_responses" "$gum_error_home" "$gum_error_xdg" "$gum_error_output" "$gum_error_gum_log"; then
   fail "setup fails when gum returns an operational error"
@@ -1779,22 +1775,12 @@ assert_contains \
   "Terrapod explains missing raw chezmoi command"
 
 status_config="$tmp_dir/status-macos.toml"
-cat >"$status_config" <<'TOML'
-[data]
-profile = "macos-terminal"
-enableEditorStack = true
-enableAiCliTools = true
-enableDevelopmentWorkspace = true
-enableMacosAppGroupTerminalApps = true
-enableMacosAppGroupAutomation = true
-enableMacosAppGroupLauncher = true
-enableMacosAppGroupMonitoring = false
-enableMacosAppGroupDevelopmentApps = true
-enableMacosAppGroupMobileDev = true
-enableMacosAppGroupBrowsers = true
-enableMacosAppGroupAiApps = true
-enableColimaDockerHost = false
-TOML
+render_complete_config macos-terminal \
+  enableEditorStack=true enableAiCliTools=true \
+  enableDevelopmentWorkspace=true enableMacosAppGroupTerminalApps=true \
+  enableMacosAppGroupAutomation=true enableMacosAppGroupLauncher=true \
+  enableMacosAppGroupDevelopmentApps=true enableMacosAppGroupMobileDev=true \
+  enableMacosAppGroupBrowsers=true enableMacosAppGroupAiApps=true >"$status_config"
 
 recovery_core_root="$tmp_dir/recovery-core-only"
 mkdir -p "$recovery_core_root/bin" "$recovery_core_root/lib/terrapod"
@@ -2050,21 +2036,10 @@ assert_not_contains_colored_phrase "$tty_macos_status_output" "Optional AI Tool 
 assert_not_contains_colored_phrase "$tty_macos_status_output" "brew                          : available" "TTY Terrapod status does not color tool names with state words"
 
 status_dotted_config="$tmp_dir/status-dotted.toml"
-cat >"$status_dotted_config" <<'TOML'
-data.profile = "macos-terminal"
-data.enableEditorStack = false
-data.enableAiCliTools = false
-data.enableDevelopmentWorkspace = true
-data.enableMacosAppGroupAutomation = false
-data.enableMacosAppGroupLauncher = false
-data.enableMacosAppGroupMonitoring = false
-data.enableMacosAppGroupTerminalApps = true
-data.enableMacosAppGroupDevelopmentApps = true
-data.enableMacosAppGroupMobileDev = true
-data.enableMacosAppGroupBrowsers = true
-data.enableMacosAppGroupAiApps = true
-data.enableColimaDockerHost = false
-TOML
+render_complete_config macos-terminal \
+  enableDevelopmentWorkspace=true enableMacosAppGroupTerminalApps=true \
+  enableMacosAppGroupDevelopmentApps=true enableMacosAppGroupMobileDev=true \
+  enableMacosAppGroupBrowsers=true enableMacosAppGroupAiApps=true | sed '1d; s/^/data./' >"$status_dotted_config"
 
 dotted_status_path="$(status_doctor_path dotted chezmoi git zsh mise brew nvim agy claude codex zellij)"
 
@@ -2137,22 +2112,7 @@ EOF_NAMES
 
 status_ubuntu_config="$tmp_dir/status-ubuntu.toml"
 status_ubuntu_os_release="$tmp_dir/status-ubuntu-os-release"
-cat >"$status_ubuntu_config" <<'TOML'
-[data]
-profile = "vps-shell"
-enableEditorStack = false
-enableAiCliTools = false
-enableDevelopmentWorkspace = false
-enableMacosAppGroupTerminalApps = false
-enableMacosAppGroupAutomation = false
-enableMacosAppGroupLauncher = false
-enableMacosAppGroupMonitoring = false
-enableMacosAppGroupDevelopmentApps = false
-enableMacosAppGroupMobileDev = false
-enableMacosAppGroupBrowsers = false
-enableMacosAppGroupAiApps = false
-enableColimaDockerHost = false
-TOML
+render_complete_config vps-shell >"$status_ubuntu_config"
 write_os_release "$status_ubuntu_os_release" ubuntu 24.04 "Ubuntu 24.04 LTS"
 
 ubuntu_status_path="$(status_doctor_path ubuntu chezmoi git zsh mise nvim zellij apt)"
@@ -2371,22 +2331,7 @@ assert_not_contains "$status_unsafe_multiline_output" "Config: $status_unsafe_mu
 # A Managed Setting value that is not a bare boolean is unsupported: chezmoi's
 # templates would read the string "false" as on while tpod read it as off.
 status_quoted_value_config="$tmp_dir/status-quoted-value.toml"
-cat >"$status_quoted_value_config" <<'TOML'
-[data]
-profile = "vps-shell"
-enableEditorStack = "false"
-enableAiCliTools = false
-enableDevelopmentWorkspace = false
-enableMacosAppGroupTerminalApps = false
-enableMacosAppGroupAutomation = false
-enableMacosAppGroupLauncher = false
-enableMacosAppGroupMonitoring = false
-enableMacosAppGroupDevelopmentApps = false
-enableMacosAppGroupMobileDev = false
-enableMacosAppGroupBrowsers = false
-enableMacosAppGroupAiApps = false
-enableColimaDockerHost = false
-TOML
+render_complete_config vps-shell | sed 's/^enableEditorStack = .*/enableEditorStack = "false"/' >"$status_quoted_value_config"
 
 if ! status_quoted_value_output="$(
   TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$status_quoted_value_config" PATH="$ubuntu_status_path" \
@@ -2425,22 +2370,7 @@ status_config_reads="$(wc -l <"$tmp_dir/status-awk-count" | tr -d ' ')"
 pass "Terrapod status reads the managed config $status_config_reads times"
 
 status_unreadable_config="$tmp_dir/status-unreadable.toml"
-cat >"$status_unreadable_config" <<'TOML'
-[data]
-profile = "vps-shell"
-enableEditorStack = false
-enableAiCliTools = false
-enableDevelopmentWorkspace = false
-enableMacosAppGroupTerminalApps = false
-enableMacosAppGroupAutomation = false
-enableMacosAppGroupLauncher = false
-enableMacosAppGroupMonitoring = false
-enableMacosAppGroupDevelopmentApps = false
-enableMacosAppGroupMobileDev = false
-enableMacosAppGroupBrowsers = false
-enableMacosAppGroupAiApps = false
-enableColimaDockerHost = false
-TOML
+render_complete_config vps-shell >"$status_unreadable_config"
 chmod 000 "$status_unreadable_config"
 
 if ! status_unreadable_output="$(
@@ -2499,22 +2429,7 @@ assert_contains "$missing_status_output" "Warning: missing key tools: brew" "Ubu
 assert_not_contains "$missing_status_output" "Warning: Optional AI Tool Stack is enabled but missing tools" "Terrapod status avoids duplicate enabled AI tool warnings"
 
 status_shadow_config="$tmp_dir/status-shadow.toml"
-cat >"$status_shadow_config" <<'TOML'
-[data]
-profile = "vps-shell"
-enableEditorStack = false
-enableAiCliTools = true
-enableDevelopmentWorkspace = false
-enableMacosAppGroupTerminalApps = false
-enableMacosAppGroupAutomation = false
-enableMacosAppGroupLauncher = false
-enableMacosAppGroupMonitoring = false
-enableMacosAppGroupDevelopmentApps = false
-enableMacosAppGroupMobileDev = false
-enableMacosAppGroupBrowsers = false
-enableMacosAppGroupAiApps = false
-enableColimaDockerHost = false
-TOML
+render_complete_config vps-shell enableAiCliTools=true >"$status_shadow_config"
 
 status_shadow_path="$(status_doctor_path shadow chezmoi git zsh mise nvim zellij apt brew agy claude codex)"
 status_shadow_legacy="$tmp_dir/status-shadow-legacy"
@@ -2603,22 +2518,7 @@ assert_contains "$unsupported_status_output" "Warning: unsupported Linux release
 
 doctor_config="$tmp_dir/doctor-ok.toml"
 doctor_os_release="$tmp_dir/doctor-os-release"
-cat >"$doctor_config" <<'TOML'
-[data]
-profile = "vps-shell"
-enableEditorStack = false
-enableAiCliTools = false
-enableDevelopmentWorkspace = false
-enableMacosAppGroupTerminalApps = false
-enableMacosAppGroupAutomation = false
-enableMacosAppGroupLauncher = false
-enableMacosAppGroupMonitoring = false
-enableMacosAppGroupDevelopmentApps = false
-enableMacosAppGroupMobileDev = false
-enableMacosAppGroupBrowsers = false
-enableMacosAppGroupAiApps = false
-enableColimaDockerHost = false
-TOML
+render_complete_config vps-shell >"$doctor_config"
 write_os_release "$doctor_os_release" ubuntu 24.04 "Ubuntu 24.04 LTS"
 
 doctor_standard_brew_prefix="$standard_brew_prefix"
@@ -2773,22 +2673,7 @@ assert_contains "$doctor_unsafe_multiline_output" "warn - unsupported multiline 
 assert_not_contains "$doctor_unsafe_multiline_output" "Managed setup config is complete" "Terrapod doctor does not trust managed keys inside multiline strings"
 
 doctor_unreadable_config="$tmp_dir/doctor-unreadable.toml"
-cat >"$doctor_unreadable_config" <<'TOML'
-[data]
-profile = "vps-shell"
-enableEditorStack = false
-enableAiCliTools = false
-enableDevelopmentWorkspace = false
-enableMacosAppGroupTerminalApps = false
-enableMacosAppGroupAutomation = false
-enableMacosAppGroupLauncher = false
-enableMacosAppGroupMonitoring = false
-enableMacosAppGroupDevelopmentApps = false
-enableMacosAppGroupMobileDev = false
-enableMacosAppGroupBrowsers = false
-enableMacosAppGroupAiApps = false
-enableColimaDockerHost = false
-TOML
+render_complete_config vps-shell >"$doctor_unreadable_config"
 chmod 000 "$doctor_unreadable_config"
 
 if TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_unreadable_config" PATH="$doctor_ok_path" \
@@ -2984,22 +2869,7 @@ write_stub "$update_home/.local/bin/tpod" \
   'printf "%s\n" "$*" >"'"$update_handoff_file"'"' \
   'exit 0'
 
-cat >"$update_config" <<'TOML'
-[data]
-profile = "macos-terminal"
-enableEditorStack = true
-enableAiCliTools = false
-enableDevelopmentWorkspace = false
-enableMacosAppGroupTerminalApps = false
-enableMacosAppGroupAutomation = false
-enableMacosAppGroupLauncher = false
-enableMacosAppGroupMonitoring = false
-enableMacosAppGroupDevelopmentApps = false
-enableMacosAppGroupMobileDev = false
-enableMacosAppGroupBrowsers = false
-enableMacosAppGroupAiApps = false
-enableColimaDockerHost = false
-TOML
+render_complete_config macos-terminal enableEditorStack=true >"$update_config"
 
 if ! HOME="$update_home" XDG_CONFIG_HOME="$update_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
   sh "$terrapod" update >"$tmp_dir/update.out" 2>"$tmp_dir/update.err"; then
@@ -3104,22 +2974,7 @@ fi
 
 override_config="$tmp_dir/override-chezmoi.toml"
 
-cat >"$override_config" <<'TOML'
-[data]
-profile = "macos-terminal"
-enableEditorStack = false
-enableAiCliTools = true
-enableDevelopmentWorkspace = false
-enableMacosAppGroupTerminalApps = false
-enableMacosAppGroupAutomation = false
-enableMacosAppGroupLauncher = false
-enableMacosAppGroupMonitoring = false
-enableMacosAppGroupDevelopmentApps = false
-enableMacosAppGroupMobileDev = false
-enableMacosAppGroupBrowsers = false
-enableMacosAppGroupAiApps = false
-enableColimaDockerHost = false
-TOML
+render_complete_config macos-terminal enableAiCliTools=true >"$override_config"
 
 rm -f "$CHEZMOI_CALL_FILE" "$CHEZMOI_INVOKED_FILE"
 
@@ -3307,22 +3162,11 @@ diff_xdg="$tmp_dir/diff-xdg"
 diff_config="$diff_xdg/chezmoi/chezmoi.toml"
 mkdir -p "$diff_home" "$(dirname "$diff_config")"
 
-cat >"$diff_config" <<'TOML'
-[data]
-profile = "macos-terminal"
-enableEditorStack = false
-enableAiCliTools = false
-enableDevelopmentWorkspace = true
-enableMacosAppGroupTerminalApps = true
-enableMacosAppGroupAutomation = false
-enableMacosAppGroupLauncher = true
-enableMacosAppGroupMonitoring = false
-enableMacosAppGroupDevelopmentApps = true
-enableMacosAppGroupMobileDev = true
-enableMacosAppGroupBrowsers = true
-enableMacosAppGroupAiApps = true
-enableColimaDockerHost = false
-TOML
+render_complete_config macos-terminal \
+  enableDevelopmentWorkspace=true enableMacosAppGroupTerminalApps=true \
+  enableMacosAppGroupLauncher=true enableMacosAppGroupDevelopmentApps=true \
+  enableMacosAppGroupMobileDev=true enableMacosAppGroupBrowsers=true \
+  enableMacosAppGroupAiApps=true >"$diff_config"
 
 if ! HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" \
   sh "$terrapod" diff >"$tmp_dir/diff.out" 2>"$tmp_dir/diff.err"; then
@@ -3614,9 +3458,12 @@ if [ -e "$CHEZMOI_MANAGED_ARGS_FILE" ]; then
 fi
 
 apply_inline_config="$tmp_dir/apply-inline-table.toml"
-cat >"$apply_inline_config" <<'TOML'
-data = { profile = "vps-shell", enableEditorStack = false, enableAiCliTools = false, enableDevelopmentWorkspace = false, enableMacosAppGroupTerminalApps = false, enableMacosAppGroupAutomation = false, enableMacosAppGroupLauncher = false, enableMacosAppGroupMonitoring = false, enableMacosAppGroupDevelopmentApps = false, enableMacosAppGroupMobileDev = false, enableMacosAppGroupBrowsers = false, enableMacosAppGroupAiApps = false, enableColimaDockerHost = false }
-TOML
+render_complete_config vps-shell | awk '
+    NR == 1 { printf "data = { "; next }
+    NR > 2 { printf ", " }
+    { printf "%s", $0 }
+    END { print " }" }
+  ' >"$apply_inline_config"
 rm -f "$CHEZMOI_APPLY_INVOKED_FILE" "$CHEZMOI_MANAGED_ARGS_FILE"
 
 if TERRAPOD_OS_RELEASE_FILE="$status_ubuntu_os_release" TERRAPOD_CHEZMOI_CONFIG="$apply_inline_config" PATH="$apply_incomplete_path" \
@@ -4273,22 +4120,12 @@ lazy_config="$tmp_dir/lazy-lib-chezmoi.toml"
 mkdir -p "$lazy_home" "$lazy_state" "$lazy_bin" "$tmp_dir/lazy-lib"
 # A complete managed setup config, so the run reaches the delegated chezmoi
 # apply instead of failing preflight on missing managed setup keys.
-cat >"$lazy_config" <<'TOML'
-[data]
-profile = "macos-terminal"
-enableEditorStack = true
-enableAiCliTools = true
-enableDevelopmentWorkspace = true
-enableMacosAppGroupTerminalApps = true
-enableMacosAppGroupAutomation = true
-enableMacosAppGroupLauncher = true
-enableMacosAppGroupMonitoring = false
-enableMacosAppGroupDevelopmentApps = true
-enableMacosAppGroupMobileDev = true
-enableMacosAppGroupBrowsers = true
-enableMacosAppGroupAiApps = true
-enableColimaDockerHost = false
-TOML
+render_complete_config macos-terminal \
+  enableEditorStack=true enableAiCliTools=true \
+  enableDevelopmentWorkspace=true enableMacosAppGroupTerminalApps=true \
+  enableMacosAppGroupAutomation=true enableMacosAppGroupLauncher=true \
+  enableMacosAppGroupDevelopmentApps=true enableMacosAppGroupMobileDev=true \
+  enableMacosAppGroupBrowsers=true enableMacosAppGroupAiApps=true >"$lazy_config"
 
 if [ -e "$lazy_lib" ]; then
   fail "lazy library fixture starts without the install warning library"

@@ -3,6 +3,7 @@ set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$repo_root/tests/lib/harness.sh"
+. "$repo_root/tests/lib/managed-config-fixtures.sh"
 selection="$repo_root/dot_local/lib/terrapod/executable_executable-selection"
 make_tmp_dir
 
@@ -694,22 +695,7 @@ integration_bin="$tmp_dir/integration-bin"
 integration_config="$tmp_dir/integration-config/chezmoi.toml"
 selection_log="$tmp_dir/selection.log"
 mkdir -p "$integration_bin" "${integration_config%/*}"
-cat >"$integration_config" <<'EOF'
-[data]
-profile = "macos-terminal"
-enableEditorStack = false
-enableAiCliTools = false
-enableDevelopmentWorkspace = false
-enableMacosAppGroupTerminalApps = false
-enableMacosAppGroupAutomation = false
-enableMacosAppGroupLauncher = false
-enableMacosAppGroupMonitoring = false
-enableMacosAppGroupDevelopmentApps = false
-enableMacosAppGroupMobileDev = false
-enableMacosAppGroupBrowsers = false
-enableMacosAppGroupAiApps = false
-enableColimaDockerHost = false
-EOF
+render_complete_config macos-terminal >"$integration_config"
 cat >"$integration_bin/chezmoi" <<'EOF'
 #!/bin/sh
 case " $* " in

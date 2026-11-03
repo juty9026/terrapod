@@ -86,43 +86,13 @@ write_gum_responses() {
   done
 }
 
+# Responses are key=value lines: schema setting keys, preset, and write.
+# Missing setting answers accept gum's actual --default; actions require consent.
 write_gum_stub() {
-  test_support_path="$1"
-  test_support_choose_policy="${2:-cancel}"
-  test_support_confirm_policy="${3:-cancel}"
-  write_stub "$test_support_path" \
-    "TERRAPOD_GUM_EMPTY_CHOOSE_POLICY='$test_support_choose_policy'" \
-    "TERRAPOD_GUM_EMPTY_CONFIRM_POLICY='$test_support_confirm_policy'" \
+  write_stub "$1" \
     'set -eu' \
-    'log_file="${TERRAPOD_GUM_LOG:-${TERRAPOD_STUB_CALL_LOG:?}}"' \
-    'responses_file="${TERRAPOD_GUM_RESPONSES:?}"' \
-    'printf "%s" "gum args:" >>"$log_file"' \
-    'for arg do printf "%s" " $arg" >>"$log_file"; done' \
-    'printf "\\n" >>"$log_file"' \
-    'if [ "${1:-}" = "--version" ]; then printf "%s\\n" "gum test stub"; exit 0; fi' \
-    'next_response() { response="$(sed -n "1p" "$responses_file")"; sed "1d" "$responses_file" >"$responses_file.tmp"; mv "$responses_file.tmp" "$responses_file"; }' \
-    'confirm_default_status() { for arg do case "$arg" in --default=true) return 0 ;; --default=false) return 1 ;; esac; done; return 1; }' \
-    'case "${1:-}" in' \
-    '  choose)' \
-    '    if [ "${2:-}" = "--help" ]; then printf "%s\\n" "Usage: gum choose [<options> ...] [flags]" "      --label-delimiter=\"\""; exit 0; fi' \
-    '    while IFS= read -r option; do printf "%s\\n" "gum stdin: $option" >>"$log_file"; done' \
-    '    next_response' \
-    '    if [ -z "$response" ] && [ "$TERRAPOD_GUM_EMPTY_CHOOSE_POLICY" = cancel ]; then exit 130; fi' \
-    '    case "$response" in __CANCEL__) exit 130 ;; __ERROR__) printf "%s\\n" "simulated gum operational failure" >&2; exit 2 ;; esac' \
-    '    printf "%s\\n" "$response"' \
-    '    ;;' \
-    '  confirm)' \
-    '    next_response' \
-    '    case "$response" in' \
-    '      "") if [ "$TERRAPOD_GUM_EMPTY_CONFIRM_POLICY" = default ]; then shift; confirm_default_status "$@"; else exit 130; fi ;;' \
-    '      yes|y|true|enabled) exit 0 ;; no|n|false|disabled) exit 1 ;; __CANCEL__) exit 130 ;;' \
-    '      __ERROR__) printf "%s\\n" "simulated gum operational failure" >&2; exit 2 ;;' \
-    '      *) printf "%s\\n" "unexpected gum confirm response: $response" >&2; exit 2 ;;' \
-    '    esac' \
-    '    ;;' \
-    '  style) shift; for arg do case "$arg" in --*) ;; *) printf "%s\\n" "$arg" ;; esac; done ;;' \
-    '  *) printf "%s\\n" "unexpected gum command: ${1:-}" >&2; exit 2 ;;' \
-    'esac'
+    ". $(shell_quote "$repo_root/dot_local/lib/terrapod/config-toml.sh")" \
+    ". $(shell_quote "$repo_root/tests/lib/gum-stub.sh")"
 }
 
 write_brew_bundle_stub() {
@@ -182,3 +152,33 @@ run_in_pty() {
     script -q /dev/null sh -c "$test_support_command_text"
   fi
 }
+
+# Requires the managed-config reader. Observe real Setup's sequential gum calls.
+# The schema supplies identities and
+# applicability; the Workspace question/implication and final write order are
+# explicit contracts, independent of the answer lookup in the gum stub.
+assert_setup_questions() (
+  test_support_log="$1"
+  test_support_profile="$2"
+  test_support_workspace="$3"
+  test_support_expected="$(
+    printf '%s\n' preset enableDevelopmentWorkspace
+    if [ "$test_support_workspace" = false ]; then
+      printf '%s\n' enableEditorStack
+      if [ "$test_support_profile" = macos-terminal ]; then
+        printf '%s\n' enableAiCliTools
+      fi
+    fi
+    for test_support_kind in macos-app-group shell-environment; do
+      managed_setting_schema | while IFS='|' read -r test_support_key test_support_row_kind test_support_name test_support_row_profile test_support_rest; do
+        if [ "$test_support_kind" = "$test_support_row_kind" ] &&
+          { [ "$test_support_row_profile" = all ] || [ "$test_support_row_profile" = "$test_support_profile" ]; }; then
+          printf '%s\n' "$test_support_key"
+        fi
+      done
+    done
+    printf '%s\n' write
+  )"
+  test_support_actual="$(sed -n 's/^gum question: //p' "$test_support_log")"
+  assert_equals "$test_support_actual" "$test_support_expected" "Setup asks each applicable question sequentially before final write ($test_support_profile, Workspace $test_support_workspace)"
+)

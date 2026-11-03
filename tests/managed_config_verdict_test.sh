@@ -27,17 +27,7 @@ all_keys() {
   managed_setup_keys | tr '\n' ',' | sed 's/,$//; s/,/, /g'
 }
 
-# A config with every managed key present, from the schema itself so the test
-# does not keep its own copy of the key list.
-write_complete_config() {
-  {
-    printf '%s\n' '[data]'
-    printf '%s\n' 'profile = "macos-terminal"'
-    managed_setting_keys | while IFS= read -r key; do
-      printf '%s = false\n' "$key"
-    done
-  } >"$1"
-}
+. "$repo_root/tests/lib/managed-config-fixtures.sh"
 
 # --- missing ---------------------------------------------------------------
 

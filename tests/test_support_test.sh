@@ -60,25 +60,41 @@ assert_equals "$(grep '^brew auto-update:' "$case_call_log")" "brew auto-update:
 
 responses="$case_dir/gum.responses"
 gum_log="$case_dir/gum.log"
-write_gum_stub "$case_bin/gum" cancel default
-write_gum_responses "$responses" ''
-TERRAPOD_GUM_LOG="$gum_log" TERRAPOD_GUM_RESPONSES="$responses" "$case_bin/gum" choose item >/dev/null 2>&1 &&
-  fail "gum fake applies the configured empty choose cancellation policy"
-[ "$?" -eq 130 ] || fail "empty choose response exits 130"
-pass "gum fake applies the configured empty choose cancellation policy"
-write_gum_responses "$responses" ''
-TERRAPOD_GUM_LOG="$gum_log" TERRAPOD_GUM_RESPONSES="$responses" "$case_bin/gum" confirm --default=true
-pass "gum fake applies the confirm default for an empty response"
-write_gum_stub "$case_bin/gum-cancel" cancel cancel
-write_gum_responses "$responses" ''
-TERRAPOD_GUM_LOG="$gum_log" TERRAPOD_GUM_RESPONSES="$responses" "$case_bin/gum-cancel" confirm --default=true >/dev/null 2>&1 &&
-  fail "gum fake applies the configured empty confirm cancellation policy"
-[ "$?" -eq 130 ] || fail "empty confirm cancellation exits 130"
-pass "gum fake applies the configured empty confirm cancellation policy"
-write_gum_responses "$responses" __ERROR__
-TERRAPOD_GUM_LOG="$gum_log" TERRAPOD_GUM_RESPONSES="$responses" "$case_bin/gum" confirm >/dev/null 2>&1 &&
-  fail "gum fake exposes operational errors"
-[ "$?" -eq 2 ] || fail "gum operational error exits 2"
-pass "gum fake exposes operational errors"
+write_gum_stub "$case_bin/gum"
+write_gum_responses "$responses" preset=minimal enableEditorStack=yes write=no
+TERRAPOD_GUM_LOG="$gum_log" TERRAPOD_GUM_RESPONSES="$responses" "$case_bin/gum" confirm 'Enable Optional Editor Stack?' --default=false
+pass "gum fake finds a setting answer by identity before Preset selection"
+assert_equals "$(TERRAPOD_GUM_LOG="$gum_log" TERRAPOD_GUM_RESPONSES="$responses" "$case_bin/gum" choose --header Preset)" minimal "gum fake names Preset selection separately"
+TERRAPOD_GUM_LOG="$gum_log" TERRAPOD_GUM_RESPONSES="$responses" "$case_bin/gum" confirm 'Enable Colima Docker Host Selection?' --default=true
+pass "an omitted setting follows its actual enabled default"
+gum_status=0
+TERRAPOD_GUM_LOG="$gum_log" TERRAPOD_GUM_RESPONSES="$responses" "$case_bin/gum" confirm 'Enable Colima Docker Host Selection?' --default=false || gum_status=$?
+assert_status "$gum_status" 1 "an omitted setting follows its actual disabled default"
+for answer in no __CANCEL__ __ERROR__; do
+  case "$answer" in no) expected=1 ;; __CANCEL__) expected=130 ;; __ERROR__) expected=2 ;; esac
+  write_gum_responses "$responses" "enableEditorStack=$answer"
+  gum_status=0
+  TERRAPOD_GUM_LOG="$gum_log" TERRAPOD_GUM_RESPONSES="$responses" "$case_bin/gum" confirm 'Enable Optional Editor Stack?' --default=true 2>/dev/null || gum_status=$?
+  assert_status "$gum_status" "$expected" "keyed setting answer preserves $answer status"
+done
+write_gum_responses "$responses" enableEditorStack=yes
+gum_status=0
+TERRAPOD_GUM_LOG="$gum_log" TERRAPOD_GUM_RESPONSES="$responses" "$case_bin/gum" confirm 'Write these Terrapod settings to config?' --default=true || gum_status=$?
+assert_status "$gum_status" 130 "an omitted final write answer cannot imply consent"
+write_gum_responses "$responses" write=
+gum_status=0
+TERRAPOD_GUM_LOG="$gum_log" TERRAPOD_GUM_RESPONSES="$responses" "$case_bin/gum" confirm 'Write these Terrapod settings to config?' --default=false || gum_status=$?
+assert_status "$gum_status" 130 "an explicitly empty final write answer cancels"
+write_gum_responses "$responses" enableEditorStack=
+TERRAPOD_GUM_LOG="$gum_log" TERRAPOD_GUM_RESPONSES="$responses" "$case_bin/gum" confirm 'Enable Optional Editor Stack?' --default=true
+pass "an explicitly empty setting answer accepts its actual default"
+for answer in yes no __CANCEL__ __ERROR__; do
+  case "$answer" in yes) expected=0 ;; no) expected=1 ;; __CANCEL__) expected=130 ;; __ERROR__) expected=2 ;; esac
+  write_gum_responses "$responses" "write=$answer"
+  gum_status=0
+  TERRAPOD_GUM_LOG="$gum_log" TERRAPOD_GUM_RESPONSES="$responses" "$case_bin/gum" confirm 'Write these Terrapod settings to config?' --default=false 2>/dev/null || gum_status=$?
+  assert_status "$gum_status" "$expected" "named final confirmation preserves $answer status"
+done
+assert_file_contains "$gum_log" 'gum args: confirm Enable Optional Editor Stack?' "keyed lookup preserves observable gum arguments"
 
 assert_call_log_contains "$case_call_log" 'brew args:bundle' "common call log assertion observes command arguments"
