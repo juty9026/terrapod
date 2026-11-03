@@ -143,9 +143,8 @@ write_brew_bundle_stub() {
     '    [ "${MACOS_BREW_ECHO_OUTPUT:-0}" != 1 ] || printf "%s\\n" "visible brew bundle output: $*"' \
     '    for formula in ${MACOS_BREW_FAIL_FORMULAE:-}; do bundle_has brew "$formula" && exit 42; done' \
     '    for cask in ${MACOS_BREW_FAIL_CASKS:-}; do bundle_has cask "$cask" && exit 42; done' \
-    '    if [ "${MACOS_BREW_FAIL_CORE_BULK:-0}" = 1 ] && bundle_has brew mise && bundle_has brew btop; then exit 42; fi' \
-    '    if [ "${MACOS_BREW_FAIL_DESKTOP_BULK:-0}" = 1 ] && grep -Fx "# Rendered opt-in macOS Desktop App Stack." "$bundle_file" >/dev/null 2>&1; then exit 42; fi' \
-    '    if [ "${MACOS_BREW_FAIL_BULK:-0}" = 1 ] && grep -Fx "tap \"homebrew/cask\"" "$bundle_file" >/dev/null 2>&1; then exit 42; fi' \
+    '    bundle_call="$(grep -c "^brew auto-update:" "$log_file")"' \
+    '    for failed_call in ${MACOS_BREW_FAIL_BUNDLE_CALLS:-}; do [ "$bundle_call" != "$failed_call" ] || exit 42; done' \
     '    [ -z "${MACOS_BREW_INSTALLED_FILE:-}" ] || : >"$MACOS_BREW_INSTALLED_FILE"' \
     '    ;;' \
     '  *) exit 64 ;;' \

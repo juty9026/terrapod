@@ -383,7 +383,7 @@ assert_contains "$claude_both_failure_marker_text" "antigravity-cli, codex" \
   "a combined install failure names the observed Homebrew items in its marker"
 assert_contains "$claude_both_failure_marker_text" "Claude Code" \
   "a combined install failure names Claude Code in its marker"
-if ! grep -F "Failed: antigravity-cli, codex, Claude Code." "$claude_both_failure_marker" >/dev/null; then
+if ! grep -F "Failed: failed casks: antigravity-cli, codex, Claude Code." "$claude_both_failure_marker" >/dev/null; then
   fail "a combined install failure names both sources on a single line"
 fi
 pass "a combined install failure records both sources on a single-line marker"

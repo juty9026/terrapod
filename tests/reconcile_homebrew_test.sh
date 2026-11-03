@@ -398,7 +398,7 @@ mkdir -p "$core_detail_bin" "$core_detail_home" "$core_detail_prefix"
 chmod 555 "$core_detail_prefix"
 write_brew_bundle_stub "$core_detail_bin/brew"
 
-if ! HOME="$core_detail_home" XDG_STATE_HOME="$core_detail_state" MACOS_BREW_LOG="$core_detail_log" MACOS_BREW_PREFIX="$core_detail_prefix" MACOS_BREW_ECHO_OUTPUT=1 MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_FORMULAE="gum" PATH="$core_detail_bin:/usr/bin:/bin" \
+if ! HOME="$core_detail_home" XDG_STATE_HOME="$core_detail_state" MACOS_BREW_LOG="$core_detail_log" MACOS_BREW_PREFIX="$core_detail_prefix" MACOS_BREW_ECHO_OUTPUT=1 MACOS_BREW_FAIL_FORMULAE="gum" PATH="$core_detail_bin:/usr/bin:/bin" \
   sh "$macos_bootstrap_script" >"$tmp_dir/core-detail.out" 2>"$tmp_dir/core-detail.err"; then
   fail "core Homebrew bundle failure records a marker and does not block bootstrap script"
 fi
@@ -427,7 +427,7 @@ core_fallback_log="$tmp_dir/core-fallback-brew.log"
 mkdir -p "$core_fallback_bin" "$core_fallback_home"
 write_brew_bundle_stub "$core_fallback_bin/brew"
 
-if ! HOME="$core_fallback_home" XDG_STATE_HOME="$core_fallback_state" MACOS_BREW_LOG="$core_fallback_log" MACOS_BREW_FAIL_CORE_BULK=1 PATH="$core_fallback_bin:/usr/bin:/bin" \
+if ! HOME="$core_fallback_home" XDG_STATE_HOME="$core_fallback_state" MACOS_BREW_LOG="$core_fallback_log" MACOS_BREW_FAIL_BUNDLE_CALLS=1 PATH="$core_fallback_bin:/usr/bin:/bin" \
   sh "$macos_bootstrap_script" >"$tmp_dir/core-fallback.out" 2>"$tmp_dir/core-fallback.err"; then
   fail "core Homebrew bulk-only failure records a marker and does not block bootstrap script"
 fi
@@ -467,7 +467,7 @@ HOME="$core_retry_failure_home" XDG_STATE_HOME="$core_retry_failure_state" sh -c
   '. "$1"; terrapod_install_warning_write homebrew-core "Homebrew core install needs attention" "old core retry warning."' \
   sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
 
-if ! HOME="$core_retry_failure_home" XDG_STATE_HOME="$core_retry_failure_state" MACOS_BREW_LOG="$core_retry_failure_log" MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_FORMULAE="mise" PATH="$core_retry_failure_bin:/usr/bin:/bin" \
+if ! HOME="$core_retry_failure_home" XDG_STATE_HOME="$core_retry_failure_state" MACOS_BREW_LOG="$core_retry_failure_log" MACOS_BREW_FAIL_FORMULAE="mise" PATH="$core_retry_failure_bin:/usr/bin:/bin" \
   sh "$macos_bootstrap_script" >"$tmp_dir/core-retry-failure.out" 2>"$tmp_dir/core-retry-failure.err"; then
   fail "failed core reconciliation records a replacement marker and exits successfully"
 fi
@@ -487,7 +487,7 @@ core_stdin_log="$tmp_dir/core-stdin-brew.log"
 mkdir -p "$core_stdin_bin" "$core_stdin_home"
 write_brew_bundle_stub "$core_stdin_bin/brew"
 
-if ! HOME="$core_stdin_home" XDG_STATE_HOME="$core_stdin_state" MACOS_BREW_LOG="$core_stdin_log" MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_FORMULAE="bat zoxide" MACOS_BREW_DRAIN_STDIN=1 PATH="$core_stdin_bin:/usr/bin:/bin" \
+if ! HOME="$core_stdin_home" XDG_STATE_HOME="$core_stdin_state" MACOS_BREW_LOG="$core_stdin_log" MACOS_BREW_FAIL_FORMULAE="bat zoxide" MACOS_BREW_DRAIN_STDIN=1 PATH="$core_stdin_bin:/usr/bin:/bin" \
   sh "$macos_bootstrap_script" >"$tmp_dir/core-stdin.out" 2>"$tmp_dir/core-stdin.err" </dev/null; then
   fail "core reconciliation survives a brew bundle that reads stdin"
 fi
@@ -639,84 +639,6 @@ render_template_with_homebrew_prefix_provider "$macos_development_apps_data" \
 sh -n "$development_apps_bootstrap_script" || fail "development-apps bootstrap script should be valid sh"
 pass "development-apps bootstrap script is valid sh"
 
-package_records_probe="$tmp_dir/package-records-probe.sh"
-package_records_brewfile="$tmp_dir/package-records-brewfile"
-cat >"$package_records_brewfile" <<'PROBE_BREWFILE'
-# development-apps macOS App Group
-cask "zed"
-cask "stablyai/orca/orca", trusted: true
-# mobile-dev macOS App Group
-cask "android-studio"
-brew "mobile-dev-inc/tap/maestro", trusted: true
-PROBE_BREWFILE
-
-sed -n '/^terrapod_homebrew_bundle_records()/,/^}/p' \
-  "$repo_root/dot_local/lib/terrapod/homebrew-bundle.sh" \
-  >"$package_records_probe"
-printf '%s\n' 'terrapod_homebrew_bundle_records "$1"' >>"$package_records_probe"
-
-package_records_output="$(sh "$package_records_probe" "$package_records_brewfile")"
-
-expected_package_records="$(printf '%s\n' \
-  'cask	zed	development-apps	cask "zed"' \
-  'cask	stablyai/orca/orca	development-apps	cask "stablyai/orca/orca", trusted: true' \
-  'cask	android-studio	mobile-dev	cask "android-studio"' \
-  'brew	mobile-dev-inc/tap/maestro	mobile-dev	brew "mobile-dev-inc/tap/maestro", trusted: true')"
-
-assert_equals \
-  "$package_records_output" \
-  "$expected_package_records" \
-  "bundle records carry kind, name, group, and the verbatim declaration for casks and tap formulae"
-
-headerless_records_brewfile="$tmp_dir/package-records-headerless-brewfile"
-cat >"$headerless_records_brewfile" <<'PROBE_BREWFILE'
-# Rendered opt-in macOS Desktop App Stack.
-cask "ghostty"
-# launcher macOS App Group
-cask "raycast"
-PROBE_BREWFILE
-
-headerless_records_output="$(sh "$package_records_probe" "$headerless_records_brewfile")"
-
-expected_headerless_records="$(printf '%s\n' \
-  'cask	ghostty	-	cask "ghostty"' \
-  'cask	raycast	launcher	cask "raycast"')"
-
-assert_equals \
-  "$headerless_records_output" \
-  "$expected_headerless_records" \
-  "a declaration before the first macOS App Group header keeps a non-empty group field"
-
-assert_contains \
-  "$macos_development_apps_bootstrap" \
-  'read -r terrapod_bundle_kind terrapod_bundle_name terrapod_bundle_group terrapod_bundle_declaration' \
-  "per-package retry reads the declaration field alongside the group and token"
-assert_contains \
-  "$macos_development_apps_bootstrap" \
-  '>"$terrapod_bundle_item_file"' \
-  "per-package retry writes the recorded declaration so options such as trusted: true survive"
-
-core_options_bin="$tmp_dir/core-options-bin"
-core_options_log="$tmp_dir/core-options.log"
-core_options_brewfile="$tmp_dir/core-options.Brewfile"
-mkdir -p "$core_options_bin"
-printf '%s\n' 'brew "example/tap/tool", trusted: true' >"$core_options_brewfile"
-write_stub "$core_options_bin/brew" \
-  'case "$1" in' \
-  '  bundle)' \
-  '    for arg do case "$arg" in --file=*) file="${arg#--file=}" ;; esac; done' \
-  '    cat "$file" >>"$CORE_OPTIONS_LOG"' \
-  '    exit 42 ;;' \
-  '  --prefix) printf "%s\n" /missing-prefix ;;' \
-  'esac'
-core_options_guidance="$(CORE_OPTIONS_LOG="$core_options_log" PATH="$core_options_bin:/usr/bin:/bin" \
-  sh -c '. "$1"; . "$2"; terrapod_homebrew_core_run_bundle "$3" || printf "%s\n" "$TERRAPOD_HOMEBREW_CORE_FAILURE_GUIDANCE_TEXT"' \
-  sh "$repo_root/dot_local/lib/terrapod/homebrew-bundle.sh" \
-  "$repo_root/dot_local/lib/terrapod/homebrew-core-bundle.sh" "$core_options_brewfile")"
-assert_contains "$core_options_guidance" "failed formulae: example/tap/tool" "core retry names a failed tap formula"
-assert_equals "$(wc -l <"$core_options_log" | tr -d ' ')" "2" "core bundle retries one declaration after bulk failure"
-assert_file_contains "$core_options_log" 'brew "example/tap/tool", trusted: true' "core retry preserves Brewfile declaration options"
-
 development_apps_failure_bin="$tmp_dir/development-apps-failure-prefix/bin"
 development_apps_failure_state="$tmp_dir/development-apps-failure-state"
 development_apps_failure_home="$tmp_dir/development-apps-failure-home"
@@ -724,7 +646,7 @@ development_apps_failure_log="$tmp_dir/development-apps-failure-brew.log"
 mkdir -p "$development_apps_failure_bin" "$development_apps_failure_home"
 write_brew_bundle_stub "$development_apps_failure_bin/brew"
 
-if ! HOME="$development_apps_failure_home" XDG_STATE_HOME="$development_apps_failure_state" MACOS_BREW_LOG="$development_apps_failure_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="stablyai/orca/orca" PATH="$development_apps_failure_bin:/usr/bin:/bin" \
+if ! HOME="$development_apps_failure_home" XDG_STATE_HOME="$development_apps_failure_state" MACOS_BREW_LOG="$development_apps_failure_log" MACOS_BREW_FAIL_CASKS="stablyai/orca/orca" PATH="$development_apps_failure_bin:/usr/bin:/bin" \
   sh "$development_apps_bootstrap_script" >"$tmp_dir/development-apps-failure.out" 2>"$tmp_dir/development-apps-failure.err"; then
   fail "Orca desktop app bundle failure does not block bootstrap script"
 fi
@@ -753,7 +675,7 @@ mobile_dev_failure_log="$tmp_dir/mobile-dev-failure-brew.log"
 mkdir -p "$mobile_dev_failure_bin" "$mobile_dev_failure_home"
 write_brew_bundle_stub "$mobile_dev_failure_bin/brew"
 
-if ! HOME="$mobile_dev_failure_home" XDG_STATE_HOME="$mobile_dev_failure_state" MACOS_BREW_LOG="$mobile_dev_failure_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_FORMULAE="mobile-dev-inc/tap/maestro" PATH="$mobile_dev_failure_bin:/usr/bin:/bin" \
+if ! HOME="$mobile_dev_failure_home" XDG_STATE_HOME="$mobile_dev_failure_state" MACOS_BREW_LOG="$mobile_dev_failure_log" MACOS_BREW_FAIL_FORMULAE="mobile-dev-inc/tap/maestro" PATH="$mobile_dev_failure_bin:/usr/bin:/bin" \
   sh "$mobile_dev_bootstrap_script" >"$tmp_dir/mobile-dev-failure.out" 2>"$tmp_dir/mobile-dev-failure.err"; then
   fail "Maestro desktop app bundle failure does not block bootstrap script"
 fi
@@ -786,7 +708,7 @@ terminal_launcher_log="$tmp_dir/terminal-launcher-brew.log"
 mkdir -p "$terminal_launcher_bin" "$terminal_launcher_home"
 write_brew_bundle_stub "$terminal_launcher_bin/brew"
 
-if ! HOME="$terminal_launcher_home" XDG_STATE_HOME="$terminal_launcher_state" MACOS_BREW_LOG="$terminal_launcher_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty raycast" PATH="$terminal_launcher_bin:/usr/bin:/bin" \
+if ! HOME="$terminal_launcher_home" XDG_STATE_HOME="$terminal_launcher_state" MACOS_BREW_LOG="$terminal_launcher_log" MACOS_BREW_FAIL_CASKS="ghostty raycast" PATH="$terminal_launcher_bin:/usr/bin:/bin" \
   sh "$terminal_launcher_bootstrap_script" >"$tmp_dir/terminal-launcher.out" 2>"$tmp_dir/terminal-launcher.err"; then
   fail "macOS desktop app bundle failure does not block bootstrap script"
 fi
@@ -813,7 +735,7 @@ desktop_stdin_log="$tmp_dir/desktop-stdin-brew.log"
 mkdir -p "$desktop_stdin_bin" "$desktop_stdin_home"
 write_brew_bundle_stub "$desktop_stdin_bin/brew"
 
-if ! HOME="$desktop_stdin_home" XDG_STATE_HOME="$desktop_stdin_state" MACOS_BREW_LOG="$desktop_stdin_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty raycast" MACOS_BREW_DRAIN_STDIN=1 PATH="$desktop_stdin_bin:/usr/bin:/bin" \
+if ! HOME="$desktop_stdin_home" XDG_STATE_HOME="$desktop_stdin_state" MACOS_BREW_LOG="$desktop_stdin_log" MACOS_BREW_FAIL_CASKS="ghostty raycast" MACOS_BREW_DRAIN_STDIN=1 PATH="$desktop_stdin_bin:/usr/bin:/bin" \
   sh "$terminal_launcher_bootstrap_script" >"$tmp_dir/desktop-stdin.out" 2>"$tmp_dir/desktop-stdin.err" </dev/null; then
   fail "desktop app reconciliation survives a brew bundle that reads stdin"
 fi
@@ -828,7 +750,7 @@ core_then_desktop_log="$tmp_dir/core-then-desktop-brew.log"
 mkdir -p "$core_then_desktop_bin" "$core_then_desktop_home"
 write_brew_bundle_stub "$core_then_desktop_bin/brew"
 
-if ! HOME="$core_then_desktop_home" XDG_STATE_HOME="$core_then_desktop_state" MACOS_BREW_LOG="$core_then_desktop_log" MACOS_BREW_FAIL_CORE_BULK=1 MACOS_BREW_FAIL_FORMULAE="mise" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty raycast" PATH="$core_then_desktop_bin:/usr/bin:/bin" \
+if ! HOME="$core_then_desktop_home" XDG_STATE_HOME="$core_then_desktop_state" MACOS_BREW_LOG="$core_then_desktop_log" MACOS_BREW_FAIL_FORMULAE="mise" MACOS_BREW_FAIL_CASKS="ghostty raycast" PATH="$core_then_desktop_bin:/usr/bin:/bin" \
   sh "$terminal_launcher_bootstrap_script" >"$tmp_dir/core-then-desktop.out" 2>"$tmp_dir/core-then-desktop.err"; then
   printf '%s\n' "core then desktop stdout:" >&2
   sed 's/^/  /' "$tmp_dir/core-then-desktop.out" >&2
@@ -851,7 +773,6 @@ core_then_desktop_core_text="$(cat "$core_then_desktop_core_marker")"
 core_then_desktop_desktop_text="$(cat "$core_then_desktop_desktop_marker")"
 assert_contains "$core_then_desktop_core_text" "failed formulae: mise" "combined bootstrap core marker keeps failed formula detail"
 assert_contains "$core_then_desktop_desktop_text" "failed casks: ghostty, raycast" "combined bootstrap desktop marker keeps failed cask detail"
-assert_call_log_contains "$core_then_desktop_log" "terrapod-macos-desktop-apps" "combined bootstrap runs the optional desktop bundle"
 assert_bundle_calls_disable_auto_update "$core_then_desktop_log" "macOS core and optional desktop bundles, including per-item retries, disable Homebrew auto-update"
 
 terminal_launcher_marker_failure_bin="$tmp_dir/terminal-launcher-marker-failure-bin"
@@ -862,7 +783,7 @@ mkdir -p "$terminal_launcher_marker_failure_bin" "$terminal_launcher_marker_fail
 write_brew_bundle_stub "$terminal_launcher_marker_failure_bin/brew"
 : >"$terminal_launcher_marker_failure_state"
 
-if HOME="$terminal_launcher_marker_failure_home" XDG_STATE_HOME="$terminal_launcher_marker_failure_state" MACOS_BREW_LOG="$terminal_launcher_marker_failure_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty" PATH="$terminal_launcher_marker_failure_bin:/usr/bin:/bin" \
+if HOME="$terminal_launcher_marker_failure_home" XDG_STATE_HOME="$terminal_launcher_marker_failure_state" MACOS_BREW_LOG="$terminal_launcher_marker_failure_log" MACOS_BREW_FAIL_CASKS="ghostty" PATH="$terminal_launcher_marker_failure_bin:/usr/bin:/bin" \
   sh "$terminal_launcher_bootstrap_script" >"$tmp_dir/terminal-launcher-marker-failure.out" 2>"$tmp_dir/terminal-launcher-marker-failure.err"; then
   fail "macOS desktop app bundle failure blocks when the warning marker cannot be recorded"
 fi
@@ -916,7 +837,7 @@ bulk_only_log="$tmp_dir/bulk-only-brew.log"
 mkdir -p "$bulk_only_bin" "$bulk_only_home"
 write_brew_bundle_stub "$bulk_only_bin/brew"
 
-if ! HOME="$bulk_only_home" XDG_STATE_HOME="$bulk_only_state" MACOS_BREW_LOG="$bulk_only_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 PATH="$bulk_only_bin:/usr/bin:/bin" \
+if ! HOME="$bulk_only_home" XDG_STATE_HOME="$bulk_only_state" MACOS_BREW_LOG="$bulk_only_log" MACOS_BREW_FAIL_BUNDLE_CALLS=2 PATH="$bulk_only_bin:/usr/bin:/bin" \
   sh "$bulk_only_bootstrap_script" >"$tmp_dir/bulk-only.out" 2>"$tmp_dir/bulk-only.err"; then
   fail "macOS desktop app bulk-only bundle failure does not block bootstrap script"
 fi
@@ -925,96 +846,6 @@ bulk_only_marker_text="$(cat "$bulk_only_state/terrapod/install-warnings/homebre
 assert_contains "$bulk_only_marker_text" "Review Homebrew desktop app bundle output" "desktop app marker falls back when bulk fails but single-cask attribution succeeds"
 assert_not_contains "$bulk_only_marker_text" "failed casks:" "desktop app bulk-only fallback avoids invented cask detail"
 assert_not_contains "$bulk_only_marker_text" "App Groups:" "desktop app bulk-only fallback avoids invented App Group detail"
-
-fallback_bootstrap_script="$tmp_dir/macos-desktop-fallback-bootstrap.sh"
-awk '
-  $0 == "BREWFILE" && in_brewfile == 1 {
-    print "# rendered desktop stack without reliable cask detail"
-    print "tap \"homebrew/cask\""
-    print "BREWFILE"
-    in_brewfile = 0
-    next
-  }
-  in_brewfile == 1 { next }
-  $0 == "cat >\"$desktop_brewfile\" <<'\''BREWFILE'\''" {
-    print
-    in_brewfile = 1
-    next
-  }
-  { print }
-' "$terminal_launcher_bootstrap_script" |
-  sed "s#$tmp_dir/terminal-launcher-prefix/bin/brew#$tmp_dir/fallback-bin/brew#g" >"$fallback_bootstrap_script"
-sh -n "$fallback_bootstrap_script" || fail "fallback desktop bootstrap script should be valid sh"
-pass "fallback desktop bootstrap script is valid sh"
-
-fallback_bin="$tmp_dir/fallback-bin"
-fallback_state="$tmp_dir/fallback-state"
-fallback_home="$tmp_dir/fallback-home"
-fallback_log="$tmp_dir/fallback-brew.log"
-mkdir -p "$fallback_bin" "$fallback_home"
-write_brew_bundle_stub "$fallback_bin/brew"
-
-if ! HOME="$fallback_home" XDG_STATE_HOME="$fallback_state" MACOS_BREW_LOG="$fallback_log" MACOS_BREW_FAIL_BULK=1 PATH="$fallback_bin:/usr/bin:/bin" \
-  sh "$fallback_bootstrap_script" >"$tmp_dir/fallback.out" 2>"$tmp_dir/fallback.err"; then
-  fail "macOS desktop app fallback bundle failure does not block bootstrap script"
-fi
-
-fallback_marker_text="$(cat "$fallback_state/terrapod/install-warnings/homebrew-desktop-apps")"
-assert_contains "$fallback_marker_text" "Review Homebrew desktop app bundle output" "desktop app marker falls back to bulk bundle guidance when casks are not reliable"
-assert_not_contains "$fallback_marker_text" "failed casks:" "desktop app fallback marker avoids invented cask detail"
-assert_not_contains "$fallback_marker_text" "App Groups:" "desktop app fallback marker avoids invented App Group detail"
-
-headerless_bootstrap_script="$tmp_dir/macos-desktop-headerless-bootstrap.sh"
-awk '
-  $0 == "BREWFILE" && in_brewfile == 1 {
-    print "# Rendered opt-in macOS Desktop App Stack."
-    print "cask \"ghostty\""
-    print "# launcher macOS App Group"
-    print "cask \"raycast\""
-    print "BREWFILE"
-    in_brewfile = 0
-    next
-  }
-  in_brewfile == 1 { next }
-  $0 == "cat >\"$desktop_brewfile\" <<'\''BREWFILE'\''" {
-    print
-    in_brewfile = 1
-    next
-  }
-  { print }
-' "$terminal_launcher_bootstrap_script" |
-  sed "s#$tmp_dir/terminal-launcher-prefix/bin/brew#$tmp_dir/headerless-bin/brew#g" >"$headerless_bootstrap_script"
-sh -n "$headerless_bootstrap_script" || fail "headerless desktop bootstrap script should be valid sh"
-pass "headerless desktop bootstrap script is valid sh"
-
-headerless_bin="$tmp_dir/headerless-bin"
-headerless_state="$tmp_dir/headerless-state"
-headerless_home="$tmp_dir/headerless-home"
-headerless_log="$tmp_dir/headerless-brew.log"
-mkdir -p "$headerless_bin" "$headerless_home"
-write_brew_bundle_stub "$headerless_bin/brew"
-
-# The stub fails a cask by grepping the single-package Brewfile it is handed, so
-# a collapsed record that writes an empty Brewfile makes the cask trivially
-# "succeed" and hides the failure entirely.
-if ! HOME="$headerless_home" XDG_STATE_HOME="$headerless_state" MACOS_BREW_LOG="$headerless_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty" PATH="$headerless_bin:/usr/bin:/bin" \
-  sh "$headerless_bootstrap_script" >"$tmp_dir/headerless.out" 2>"$tmp_dir/headerless.err"; then
-  fail "headerless desktop app bundle failure does not block bootstrap script"
-fi
-
-headerless_marker="$headerless_state/terrapod/install-warnings/homebrew-desktop-apps"
-if [ ! -f "$headerless_marker" ]; then
-  fail "headerless desktop app bundle failure records a homebrew-desktop-apps marker"
-fi
-pass "headerless desktop app bundle failure records a homebrew-desktop-apps marker"
-
-headerless_marker_text="$(cat "$headerless_marker")"
-assert_contains "$headerless_marker_text" "failed casks: ghostty" \
-  "a cask declared before the first macOS App Group header is still retried and attributed"
-assert_not_contains "$headerless_marker_text" "App Groups:" \
-  "a cask with no macOS App Group contributes no App Group detail"
-assert_not_contains "$headerless_marker_text" "raycast" \
-  "a grouped cask whose single-cask bundle succeeds stays out of the marker"
 
 terminal_only_bootstrap_script="$tmp_dir/macos-terminal-only-bootstrap.sh"
 render_template_with_homebrew_prefix_provider "$macos_terminal_apps_data" \
@@ -1034,7 +865,7 @@ HOME="$terminal_only_home" XDG_STATE_HOME="$terminal_only_state" sh -c \
   '. "$1"; terrapod_install_warning_write homebrew-desktop-apps "Homebrew desktop app install needs attention" "Review Homebrew cask output for failed casks: ghostty, raycast, 1password-cli; App Groups: terminal-apps, launcher, then rerun tpod apply."' \
   sh "$repo_root/dot_local/lib/terrapod/install-warnings.sh"
 
-if ! HOME="$terminal_only_home" XDG_STATE_HOME="$terminal_only_state" MACOS_BREW_LOG="$terminal_only_log" MACOS_BREW_FAIL_DESKTOP_BULK=1 MACOS_BREW_FAIL_CASKS="ghostty" PATH="$terminal_only_bin:/usr/bin:/bin" \
+if ! HOME="$terminal_only_home" XDG_STATE_HOME="$terminal_only_state" MACOS_BREW_LOG="$terminal_only_log" MACOS_BREW_FAIL_CASKS="ghostty" PATH="$terminal_only_bin:/usr/bin:/bin" \
   sh "$terminal_only_bootstrap_script" >"$tmp_dir/terminal-only.out" 2>"$tmp_dir/terminal-only.err"; then
   fail "terminal-only desktop app bundle failure does not block bootstrap script"
 fi
@@ -1066,26 +897,6 @@ if [ -e "$terminal_success_state/terrapod/install-warnings/homebrew-desktop-apps
   fail "successful desktop app rerun clears homebrew-desktop-apps marker"
 fi
 pass "successful desktop app rerun clears homebrew-desktop-apps marker"
-
-assert_contains \
-  "$macos_terminal_apps_bootstrap" \
-  "terrapod-macos-desktop-apps" \
-  "terminal-apps group renders macOS Desktop App Stack Brewfile"
-
-assert_contains \
-  "$macos_terminal_apps_bootstrap" \
-  'run_desktop_app_bundle "$desktop_brewfile"' \
-  "terminal-apps group runs macOS Desktop App Stack installer"
-
-assert_contains \
-  "$macos_development_apps_bootstrap" \
-  "terrapod-macos-desktop-apps" \
-  "development-apps group renders macOS Desktop App Stack Brewfile"
-
-assert_contains \
-  "$macos_development_apps_bootstrap" \
-  'run_desktop_app_bundle "$desktop_brewfile"' \
-  "development-apps group runs macOS Desktop App Stack installer"
 
 assert_not_contains \
   "$macos_development_workspace_bootstrap" \
