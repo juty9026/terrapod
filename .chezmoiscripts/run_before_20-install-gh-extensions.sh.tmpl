@@ -10,6 +10,8 @@ set -eu
 
 {{ include "dot_local/lib/terrapod/install-warning-script.sh" }}
 
+{{ include "dot_local/lib/terrapod/github-cli-extension-set.sh" }}
+
 declare_install_warning_category gh-extensions "GitHub CLI Extension Set install needs attention"
 
 standard_gh_path() {
@@ -21,32 +23,6 @@ if [ -z "$gh_bin" ] || [ ! -x "$gh_bin" ]; then
   fail_install_warning_category "Install the mandatory Homebrew core bundle, then rerun tpod apply."
 fi
 
-gh_extension_installed() {
-  extension="$1"
-
-  "$gh_bin" extension list 2>/dev/null | awk -v want="$extension" '
-    {
-      for (i = 1; i <= NF; i++) {
-        if ($i == want) {
-          found = 1
-        }
-      }
-    }
-    END { exit !found }
-  '
-}
-
-install_gh_extension() {
-  extension="$1"
-
-  if gh_extension_installed "$extension"; then
-    return 0
-  fi
-
-  echo "Installing GitHub CLI extension $extension..."
-  "$gh_bin" extension install "$extension"
-}
-
 gh_extensions_list="$(mktemp "${TMPDIR:-/tmp}/terrapod-gh-extensions.XXXXXX")"
 
 cleanup_gh_extensions_list() {
@@ -55,16 +31,13 @@ cleanup_gh_extensions_list() {
 
 trap cleanup_gh_extensions_list EXIT HUP INT TERM
 
-cat >"$gh_extensions_list" <<'GH_EXTENSIONS'
-{{ includeTemplate "gh-extensions.tmpl" . }}
-GH_EXTENSIONS
+terrapod_observe_github_cli_extension_set "$gh_bin" >"$gh_extensions_list"
 
-while IFS= read -r declared_extension; do
-  case "$declared_extension" in
-    ''|'#'*) continue ;;
-  esac
+while IFS='|' read -r declared_extension extension_state; do
+  [ "$extension_state" = missing ] || continue
 
-  install_gh_extension "$declared_extension" || note_failed_install_warning_item "$declared_extension"
+  echo "Installing GitHub CLI extension $declared_extension..."
+  "$gh_bin" extension install "$declared_extension" || note_failed_install_warning_item "$declared_extension"
 done <"$gh_extensions_list"
 
 finish_install_warning_category "Failed to install: %s. Review gh output, fix authentication or network access, then rerun tpod apply."

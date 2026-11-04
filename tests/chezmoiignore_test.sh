@@ -70,15 +70,10 @@ assert_managed_paths_exclude_prefix \
   "Brewfile.ai-cli-tools.tmpl" \
   "Ubuntu does not manage the rendered AI CLI tools Brewfile"
 
-assert_managed_paths_exclude_prefix \
-  "$macos_managed" \
-  "gh-extensions.tmpl" \
-  "macOS does not manage the rendered GitHub CLI Extension Set list"
-
-assert_managed_paths_exclude_prefix \
-  "$ubuntu_managed" \
-  "gh-extensions.tmpl" \
-  "Ubuntu does not manage the rendered GitHub CLI Extension Set list"
+for extension_set_paths in "$macos_managed" "$ubuntu_managed"; do
+  assert_contains "$extension_set_paths" "dot_local/lib/terrapod/github-cli-extension-set.sh" \
+    "both profiles deploy the GitHub CLI Extension Set module"
+done
 
 for entry in \
   .chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl \
