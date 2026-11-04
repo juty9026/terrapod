@@ -18,7 +18,7 @@ assert_not_contains "$ai_apps_brewfile" 'cask "codex"' "ai-apps does not select 
 assert_not_contains "$ai_apps_brewfile" 'cask "zed"' "ai-apps stays independent of development-apps"
 assert_not_contains "$(render_template "$macos_data" Brewfile.macos-desktop-apps.tmpl)" 'cask "claude"' "ai-apps is opt-in"
 assert_contains "$(managed_source_paths "$ai_apps_data")" 'homebrew-bundle.sh' "ai-apps alone enables the desktop installer dependencies"
-assert_not_contains "$(render_template '{"chezmoi":{"os":"linux"},"enableMacosAppGroupAiApps":true}' .chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl)" '# ai-apps macOS App Group' "VPS never installs AI desktop apps"
+assert_not_contains "$(render_template '{"chezmoi":{"os":"linux"},"enableMacosAppGroupAiApps":true}' .chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl)" 'cask "claude"' "VPS never installs AI desktop apps"
 
 # Run the actual rendered installer with Homebrew stubbed. The Claude failure
 # case also exercises individual retries after the bulk bundle fails.

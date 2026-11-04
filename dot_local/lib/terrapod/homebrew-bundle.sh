@@ -2,13 +2,27 @@
 
 # Run a Brewfile once, then identify observed failures by retrying its original
 # declarations individually. The bundle step owns this internal record format.
-# Result records are: kind<TAB>name<TAB>macOS App Group (or "-").
+# Result records are: kind<TAB>name<TAB>macOS App Group (or "-")<TAB>declaration.
+# A machine-readable "# terrapod-macos-app-group: <setting-key>" annotation
+# applies to subsequent declarations until the next annotation. Resolve only
+# macOS App Group keys from managed_setting_schema; absent schema or unknown
+# keys leave items unattributed. Ordinary comments never supply group identity.
 terrapod_homebrew_bundle_records() {
-  awk '
-    /^[[:space:]]*#[[:space:]]+.*[[:space:]]macOS App Group[[:space:]]*$/ {
-      group = $0
-      sub(/^[[:space:]]*#[[:space:]]+/, "", group)
-      sub(/[[:space:]]+macOS App Group[[:space:]]*$/, "", group)
+  {
+    if command -v managed_setting_schema >/dev/null 2>&1; then
+      managed_setting_schema
+    fi
+  } | awk -F "|" '
+    FILENAME == "-" {
+      if ($2 == "macos-app-group") group_names[$1] = $3
+      next
+    }
+
+    /^[[:space:]]*#[[:space:]]*terrapod-macos-app-group:/ {
+      key = $0
+      sub(/^[[:space:]]*#[[:space:]]*terrapod-macos-app-group:[[:space:]]*/, "", key)
+      sub(/[[:space:]]+$/, "", key)
+      group = group_names[key]
       next
     }
 
@@ -27,7 +41,7 @@ terrapod_homebrew_bundle_records() {
         printf "%s\t%s\t%s\t%s\n", kind, name, group_field, declaration
       }
     }
-  ' "$1"
+  ' - "$1"
 }
 
 terrapod_homebrew_bundle_cleanup() {

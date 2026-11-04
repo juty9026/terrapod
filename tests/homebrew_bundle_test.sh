@@ -4,6 +4,7 @@ set -eu
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$repo_root/tests/lib/harness.sh"
 . "$repo_root/tests/lib/test-support.sh"
+. "$repo_root/dot_local/lib/terrapod/config-toml.sh"
 . "$repo_root/dot_local/lib/terrapod/homebrew-bundle.sh"
 make_tmp_dir
 
@@ -13,7 +14,7 @@ export MACOS_BREW_LOG="$tmp_dir/brew.log"
 export TMPDIR="$tmp_dir/scratch"
 brewfile="$tmp_dir/Brewfile"
 cat >"$brewfile" <<'BREWFILE'
-# mobile-dev macOS App Group
+# terrapod-macos-app-group: enableMacosAppGroupMobileDev
 brew "example/tap/tool", trusted: true
 cask "studio"
 BREWFILE
@@ -51,7 +52,7 @@ assert_equals "$(grep -c '^1 bundle --no-upgrade --file=' "$OPTIONS_ARGS_LOG")" 
 
 cat >"$brewfile" <<'BREWFILE'
 cask "ghostty"
-# launcher macOS App Group
+# terrapod-macos-app-group: enableMacosAppGroupLauncher
 cask "raycast"
 BREWFILE
 export MACOS_BREW_FAIL_CASKS=ghostty MACOS_BREW_DRAIN_STDIN=1
@@ -63,6 +64,33 @@ export MACOS_BREW_FAIL_CASKS='ghostty raycast'
 terrapod_homebrew_bundle_step "$tmp_dir/bin/brew" "$brewfile" arm64 </dev/null && fail "stdin-draining brew must still fail"
 assert_equals "$TERRAPOD_HOMEBREW_BUNDLE_FAILURE_DETAIL" 'failed casks: ghostty, raycast; App Groups: launcher' "stdin-draining brew cannot hide later failures"
 unset MACOS_BREW_FAIL_CASKS MACOS_BREW_DRAIN_STDIN
+
+# An unavailable group never inherits the preceding group's display name, nor
+# does a real setting from another kind become a macOS App Group.
+for unavailable_key in enableMissingGroup enableEditorStack ''; do
+  cat >"$brewfile" <<BREWFILE
+# terrapod-macos-app-group: enableMacosAppGroupLauncher
+cask "raycast"
+# terrapod-macos-app-group: $unavailable_key
+cask "studio"
+BREWFILE
+  MACOS_BREW_FAIL_CASKS=studio \
+    terrapod_homebrew_bundle_step "$tmp_dir/bin/brew" "$brewfile" arm64 &&
+    fail "an unresolvable group must preserve the observed failure"
+  assert_equals "$TERRAPOD_HOMEBREW_BUNDLE_FAILURE_DETAIL" 'failed casks: studio' \
+    "unresolvable group data ($unavailable_key) preserves item attribution without an invented name"
+done
+
+# Consumers without the schema still get reliable item-level attribution.
+missing_schema_detail="$(
+  MACOS_BREW_FAIL_CASKS=raycast /bin/sh -c '
+    . "$1"
+    terrapod_homebrew_bundle_step "$2" "$3" arm64 && exit 99
+    printf "%s\n" "$TERRAPOD_HOMEBREW_BUNDLE_FAILURE_DETAIL"
+  ' sh "$repo_root/dot_local/lib/terrapod/homebrew-bundle.sh" "$tmp_dir/bin/brew" "$brewfile"
+)"
+assert_equals "$missing_schema_detail" 'failed casks: raycast' \
+  "an unavailable schema preserves reliable failures without group names"
 
 # The fake fails an explicitly chosen invocation, independent of package names
 # or Brewfile comments. Retries then succeed, but the bulk outcome stays failed.
@@ -110,7 +138,7 @@ rm "$tmp_dir/bin/awk"
 unset MACOS_BREW_FAIL_CASKS
 
 cat >"$brewfile" <<'BREWFILE'
-# ai-apps macOS App Group
+# terrapod-macos-app-group: enableMacosAppGroupAiApps
 cask "claude"
 cask "chatgpt"
 cask "google-gemini"
