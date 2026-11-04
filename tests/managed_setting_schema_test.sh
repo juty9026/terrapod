@@ -18,16 +18,16 @@ app_group_partial="$repo_root/.chezmoitemplates/any-macos-app-group-enabled"
 reconcile_script="$repo_root/.chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl"
 karabiner_script="$repo_root/.chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl"
 
-# The command answers through its own test hook, so this list is whatever the
-# schema derives and not a second copy of it.
+# Read the schema directly, including augmented readers used below, rather
+# than keeping a second copy of the key list.
 print_setup_keys() {
-  TERRAPOD_PRINT_MANAGED_SETUP_KEYS=1 /bin/sh "$1"
+  /bin/sh -c '. "$1"; managed_setup_keys' sh "$1"
 }
 
-setup_keys="$(print_setup_keys "$terrapod")"
-[ -n "$setup_keys" ] || fail "managed setup keys are readable from the Terrapod command"
+setup_keys="$(print_setup_keys "$reader")"
+[ -n "$setup_keys" ] || fail "managed setup keys are readable from the managed-config reader"
 schema_keys="$(printf '%s\n' "$setup_keys" | grep -Fxv profile)"
-pass "managed setup keys are readable from the Terrapod command"
+pass "managed setup keys are readable from the managed-config reader"
 
 # --- Key literals live on their schema row ---------------------------------
 #
@@ -215,7 +215,7 @@ awk '
   { print }
 ' "$reader" >"$extra_lib_dir/config-toml.sh"
 
-probe_keys="$(TERRAPOD_CONFIG_TOML_LIB="$extra_lib_dir/config-toml.sh" print_setup_keys "$terrapod")"
+probe_keys="$(print_setup_keys "$extra_lib_dir/config-toml.sh")"
 assert_contains "$probe_keys" "enableMacosAppGroupSchemaProbe" \
   "a new schema row joins the managed setup keys"
 
