@@ -3378,6 +3378,9 @@ write_stub "$tmp_dir/bin/chezmoi" \
   '    done' \
   '    printf "%s\n" ".local/bin/terrapod"' \
   '    printf "%s\n" ".local/bin/tpod"' \
+  '    if [ "${TERRAPOD_TEST_OMIT_READER:-0}" != 1 ]; then' \
+  '      printf "%s\n" ".local/lib/terrapod/config-toml.sh"' \
+  '    fi' \
   '    exit 0' \
   '    ;;' \
   'esac' \
@@ -3962,6 +3965,9 @@ write_stub "$tmp_dir/bin/chezmoi" \
   '    done' \
   '    printf "%s\n" ".local/bin/terrapod"' \
   '    printf "%s\n" ".local/bin/tpod"' \
+  '    if [ "${TERRAPOD_TEST_OMIT_READER:-0}" != 1 ]; then' \
+  '      printf "%s\n" ".local/lib/terrapod/config-toml.sh"' \
+  '    fi' \
   '    exit 0' \
   '    ;;' \
   'esac' \
@@ -4028,6 +4034,28 @@ assert_contains \
   "$apply_symlink_output" \
   "Preflight: config file is readable" \
   "Terrapod apply treats symlinked config files as readable"
+
+# Startup already loaded the reader; post-apply inventory must still include it.
+for reader_config_override in "" "$diff_config"; do
+  if HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" \
+    TERRAPOD_CHEZMOI_CONFIG="$reader_config_override" TERRAPOD_TEST_OMIT_READER=1 \
+    PATH="$tmp_dir/bin:/usr/bin:/bin" \
+    sh "$terrapod" apply >"$tmp_dir/apply-reader.out" 2>"$tmp_dir/apply-reader.err"; then
+    fail "Terrapod apply fails when the managed config reader is not managed"
+  fi
+  reader_validation_error="$(cat "$tmp_dir/apply-reader.err")"
+  assert_contains "$reader_validation_error" \
+    "managed config reader is not managed (.local/lib/terrapod/config-toml.sh missing)" \
+    "Terrapod apply explains the missing managed config reader"
+  if [ -n "$reader_config_override" ]; then
+    reader_inspect_command="tpod chezmoi -- --config $reader_config_override managed"
+  else
+    reader_inspect_command="tpod chezmoi -- managed"
+  fi
+  assert_contains "$reader_validation_error" \
+    "Run '$reader_inspect_command' to inspect managed targets, then rerun 'tpod apply'." \
+    "missing reader guidance respects the selected config"
+done
 
 write_stub "$tmp_dir/bin/chezmoi" \
   'command_name=' \

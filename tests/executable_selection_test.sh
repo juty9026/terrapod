@@ -700,7 +700,7 @@ cat >"$integration_bin/chezmoi" <<'EOF'
 #!/bin/sh
 case " $* " in
   *" managed "*)
-    printf '%s\n' ".local/bin/terrapod" ".local/bin/tpod"
+    printf '%s\n' ".local/bin/terrapod" ".local/bin/tpod" ".local/lib/terrapod/config-toml.sh"
     ;;
 esac
 EOF
