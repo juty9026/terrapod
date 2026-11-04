@@ -456,6 +456,7 @@ render_terrapod_with_homebrew_prefix() {
   mkdir -p "$rendered_root/bin" "$rendered_root/lib/terrapod"
   cp "$terrapod" "$rendered_terrapod"
   cp "$repo_root/dot_local/lib/terrapod/homebrew-paths.sh" "$rendered_root/lib/terrapod/homebrew-paths.sh"
+  cp "$repo_root/dot_local/lib/terrapod/github-cli-extension-set.sh" "$rendered_root/lib/terrapod/github-cli-extension-set.sh"
   printf '%s\n' \
     '#!/bin/sh' \
     'TERRAPOD_HOMEBREW_PREFIX_LOADED=1' \
@@ -1946,19 +1947,6 @@ assert_contains "$macos_status_output" "Profile: macOS Terminal Profile" "Terrap
 assert_contains "$macos_status_output" "Config: $status_config (present)" "Terrapod status reports explicit config path"
 assert_contains "$macos_status_output" "Optional Editor Stack         : enabled (rich Neovim configuration)" "Terrapod status reports enabled Optional Editor Stack state"
 assert_contains "$macos_status_output" "GitHub CLI Extension Set      : missing (missing extensions: github/gh-stack)" "Terrapod status reports a missing GitHub CLI Extension Set member"
-declared_extensions="$tmp_dir/declared-gh-extensions"
-status_extensions="$tmp_dir/status-gh-extensions"
-sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' "$repo_root/gh-extensions.tmpl" |
-  LC_ALL=C sort >"$declared_extensions"
-printf '%s\n' "$macos_status_output" |
-  sed -n 's/^GitHub CLI Extension Set *: missing (missing extensions: \(.*\))$/\1/p' |
-  tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' |
-  LC_ALL=C sort >"$status_extensions"
-if ! cmp -s "$declared_extensions" "$status_extensions"; then
-  diff -u "$declared_extensions" "$status_extensions" >&2 || true
-  fail "GitHub CLI Extension Set status checks every declared extension"
-fi
-pass "GitHub CLI Extension Set status checks every declared extension"
 assert_contains "$macos_status_output" "Optional AI Tool Stack        : enabled (Antigravity CLI, Claude Code, and Codex)" "Terrapod status reports enabled Optional AI Tool Stack tool state"
 assert_contains "$macos_status_output" "Optional Development Workspace: enabled (development Zellij layouts)" "Terrapod status reports enabled Optional Development Workspace state"
 assert_contains "$macos_status_output" "terminal-apps                 : enabled (Ghostty, D2Coding, Hack Nerd Font, JetBrains Mono Nerd Font, and Noto Sans CJK KR)" "Terrapod status reports enabled terminal-apps macOS App Group with its terminal fonts"

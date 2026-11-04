@@ -897,36 +897,25 @@ homebrew_prefix() {
   brew --prefix 2>/dev/null
 }
 
-# Mirrors gh-extensions.tmpl; add a new extension in both places.
-github_cli_extension_set_members() {
-  printf '%s\n' github/gh-stack
-}
-
-github_cli_extension_installed() {
-  extension="$1"
-
-  gh extension list 2>/dev/null | awk -v want="$extension" '
-    {
-      for (i = 1; i <= NF; i++) {
-        if ($i == want) {
-          found = 1
-        }
-      }
-    }
-    END { exit !found }
-  '
-}
-
 print_github_cli_extension_set_status() {
   if ! command -v gh >/dev/null 2>&1; then
     print_colon_state_line "GitHub CLI Extension Set" "missing" "(gh is not installed)"
     return
   fi
 
+  # This library arrives with full apply, outside the recovery core. Resolve it
+  # only when displaying extensions, so help/setup/apply remain usable before it.
+  extension_set_lib="$command_dir/../lib/terrapod/github-cli-extension-set.sh"
+  if [ ! -f "$extension_set_lib" ]; then
+    print_colon_state_line "GitHub CLI Extension Set" "missing" "(extension checker is unavailable; run tpod apply)"
+    return
+  fi
+  . "$extension_set_lib"
+
   missing=
   available=
-  for extension in $(github_cli_extension_set_members); do
-    if github_cli_extension_installed "$extension"; then
+  while IFS='|' read -r extension extension_state; do
+    if [ "$extension_state" = available ]; then
       if [ -z "$available" ]; then
         available="$extension"
       else
@@ -939,7 +928,9 @@ print_github_cli_extension_set_status() {
         missing="$missing, $extension"
       fi
     fi
-  done
+  done <<EOF
+$(terrapod_observe_github_cli_extension_set "$(command -v gh)")
+EOF
 
   if [ -n "$missing" ]; then
     print_colon_state_line "GitHub CLI Extension Set" "missing" "(missing extensions: $missing)"
