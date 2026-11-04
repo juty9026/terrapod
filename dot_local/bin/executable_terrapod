@@ -1339,6 +1339,8 @@ run_post_apply_validation() {
     validation_status=1
   validate_managed_target "$managed_output" ".local/bin/tpod" "tpod alias" ||
     validation_status=1
+  validate_managed_target "$managed_output" ".local/lib/terrapod/config-toml.sh" "managed config reader" ||
+    validation_status=1
 
   return "$validation_status"
 }

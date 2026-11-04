@@ -12,10 +12,6 @@ user_local_bin_dir() {
   printf '%s\n' "$HOME/.local/bin"
 }
 
-user_local_terrapod_lib_dir() {
-  printf '%s\n' "$HOME/.local/lib/terrapod"
-}
-
 default_source_dir() {
   if [ "${XDG_DATA_HOME:-}" ]; then
     printf '%s\n' "$XDG_DATA_HOME/chezmoi"
@@ -197,23 +193,46 @@ source_dir_exists() {
   [ -e "$1" ] || [ -L "$1" ]
 }
 
-# Checkouts made before the dot_zprofile -> dot_zprofile.tmpl rename still carry
-# the untemplated name, so accept either one when judging resumability.
-source_has_zprofile_template() {
-  source_dir="$1"
-
-  [ -e "$source_dir/dot_zprofile.tmpl" ] || [ -e "$source_dir/dot_zprofile" ]
+# source | legacy source (or -) | home-relative target | install kind |
+# target profile (or all) | diagnostic label
+# Source completeness is profile-independent. Only shell target selection uses
+# the profile column; older checkouts may carry the legacy .zprofile spelling.
+# Keep this inline: resumability runs before clone and before any library loads.
+recovery_core_members() {
+  cat <<'EOF'
+dot_local/bin/executable_terrapod|-|.local/bin/terrapod|executable|all|Terrapod command
+dot_local/bin/symlink_tpod|-|.local/bin/tpod|symlink:terrapod|all|tpod alias
+dot_local/lib/terrapod/config-toml.sh|-|.local/lib/terrapod/config-toml.sh|file|all|managed config reader
+dot_zshenv.tmpl|-|.zshenv|shell|all|shell startup file
+dot_zprofile.tmpl|dot_zprofile|.zprofile|shell|macos-terminal|shell startup file
+dot_zshrc.tmpl|-|.zshrc|shell|all|shell startup file
+EOF
 }
 
 source_has_recovery_core_files() {
   source_dir="$1"
 
-  [ -x "$source_dir/dot_local/bin/executable_terrapod" ] &&
-    [ -e "$source_dir/dot_local/bin/symlink_tpod" ] &&
-    [ -e "$source_dir/dot_local/lib/terrapod/config-toml.sh" ] &&
-    [ -e "$source_dir/dot_zshenv.tmpl" ] &&
-    source_has_zprofile_template "$source_dir" &&
-    [ -e "$source_dir/dot_zshrc.tmpl" ]
+  while IFS='|' read -r rc_source rc_legacy rc_target rc_kind rc_profiles rc_label; do
+    if [ "$rc_kind" = executable ]; then
+      [ -x "$source_dir/$rc_source" ] || return 1
+    elif [ ! -e "$source_dir/$rc_source" ]; then
+      [ "$rc_legacy" != - ] && [ -e "$source_dir/$rc_legacy" ] || return 1
+    fi
+  done <<EOF
+$(recovery_core_members)
+EOF
+}
+
+recovery_core_shell_targets() {
+  shell_profile="$1"
+
+  while IFS='|' read -r rc_source rc_legacy rc_target rc_kind rc_profiles rc_label; do
+    [ "$rc_kind" = shell ] || continue
+    [ "$rc_profiles" = all ] || [ "$rc_profiles" = "$shell_profile" ] || continue
+    printf '%s\n' "$HOME/$rc_target"
+  done <<EOF
+$(recovery_core_members)
+EOF
 }
 
 source_has_terrapod_repository_identity() {
@@ -655,49 +674,67 @@ fail_command_surface_repair() {
   fatal "$message"
 }
 
+# Keep staging state private to each member. Prepare each replacement beside
+# its target before the final mv, leaving the previous file reachable on failure.
+install_recovery_core_member() (
+  member_source="$1"
+  member_target="$2"
+  member_kind="$3"
+  member_label="$4"
+  member_staged="$member_target.terrapod-new"
+
+  mkdir -p "${member_target%/*}" ||
+    fatal "failed to create recovery-core directory: ${member_target%/*}"
+  rm -f "$member_staged" ||
+    fatal "failed to clear staged $member_label at $member_staged"
+  case "$member_kind" in
+    symlink:*)
+      ln -s "${member_kind#symlink:}" "$member_staged" ||
+        fail_command_surface_repair "$member_staged" "failed to install $member_label at $member_target"
+      ;;
+    *)
+      cp "$member_source" "$member_staged" ||
+        fail_command_surface_repair "$member_staged" "failed to install $member_label at $member_target"
+      if [ "$member_kind" = executable ]; then
+        chmod +x "$member_staged" ||
+          fail_command_surface_repair "$member_staged" "failed to make $member_label executable: $member_target"
+      fi
+      ;;
+  esac
+  mv -f "$member_staged" "$member_target" ||
+    fail_command_surface_repair "$member_staged" "failed to install $member_label at $member_target"
+)
+
 apply_recovery_core_command_surface() {
   profile="$1"
   source_dir="$2"
   local_bin_dir="$3"
-  terrapod_source="$(checked_out_terrapod "$source_dir")"
-  terrapod_target="$local_bin_dir/terrapod"
-  tpod_target="$local_bin_dir/tpod"
-  terrapod_staged="$terrapod_target.terrapod-new"
-  tpod_staged="$tpod_target.terrapod-new"
-  config_toml_source="$source_dir/dot_local/lib/terrapod/config-toml.sh"
-  config_toml_dir="$(user_local_terrapod_lib_dir)"
-  config_toml_target="$config_toml_dir/config-toml.sh"
-  config_toml_staged="$config_toml_target.terrapod-new"
 
-  [ -f "$config_toml_source" ] ||
-    fatal "checked-out Terrapod config reader is missing: $config_toml_source"
+  # Check every command conflict and required file before replacing any member.
+  while IFS='|' read -r rc_source rc_legacy rc_target rc_kind rc_profiles rc_label; do
+    case "$rc_kind" in
+      executable|symlink:*)
+        if [ "$rc_kind" = executable ] && [ ! -x "$source_dir/$rc_source" ]; then
+          fatal "checked-out $rc_label executable is missing: $source_dir/$rc_source"
+        fi
+        ensure_command_surface_path_repairable "$HOME/$rc_target" "$source_dir" "$profile"
+        ;;
+      file)
+        [ -f "$source_dir/$rc_source" ] ||
+          fatal "checked-out $rc_label is missing: $source_dir/$rc_source"
+        ;;
+    esac
+  done <<EOF
+$(recovery_core_members)
+EOF
 
-  ensure_command_surface_path_repairable "$terrapod_target" "$source_dir" "$profile"
-  ensure_command_surface_path_repairable "$tpod_target" "$source_dir" "$profile"
-
-  rm -f "$terrapod_staged" "$tpod_staged" ||
-    fatal "failed to clear staged Terrapod command files under $local_bin_dir"
-  cp "$terrapod_source" "$terrapod_staged" ||
-    fail_command_surface_repair "$terrapod_staged" "failed to install Terrapod command at $terrapod_target"
-  chmod +x "$terrapod_staged" ||
-    fail_command_surface_repair "$terrapod_staged" "failed to make Terrapod command executable: $terrapod_target"
-  mv -f "$terrapod_staged" "$terrapod_target" ||
-    fail_command_surface_repair "$terrapod_staged" "failed to install Terrapod command at $terrapod_target"
-  ln -s terrapod "$tpod_staged" ||
-    fail_command_surface_repair "$tpod_staged" "failed to install tpod alias at $tpod_target"
-  mv -f "$tpod_staged" "$tpod_target" ||
-    fail_command_surface_repair "$tpod_staged" "failed to install tpod alias at $tpod_target"
-
-  # The installed command cannot read the managed config without this reader,
-  # so it ships with the command rather than waiting for the full apply.
-  mkdir -p "$config_toml_dir" ||
-    fatal "failed to create Terrapod library directory: $config_toml_dir"
-  rm -f "$config_toml_staged" ||
-    fatal "failed to clear the staged Terrapod config reader under $config_toml_dir"
-  cp "$config_toml_source" "$config_toml_staged" ||
-    fail_command_surface_repair "$config_toml_staged" "failed to install the Terrapod config reader at $config_toml_target"
-  mv -f "$config_toml_staged" "$config_toml_target" ||
-    fail_command_surface_repair "$config_toml_staged" "failed to install the Terrapod config reader at $config_toml_target"
+  while IFS='|' read -r rc_source rc_legacy rc_target rc_kind rc_profiles rc_label; do
+    [ "$rc_kind" = shell ] && continue
+    install_recovery_core_member "$source_dir/$rc_source" "$HOME/$rc_target" "$rc_kind" "$rc_label" ||
+      fatal "failed to install recovery-core $rc_label"
+  done <<EOF
+$(recovery_core_members)
+EOF
 
   validate_recovery_core_command_surface "$profile" "$local_bin_dir"
 }
@@ -705,17 +742,22 @@ apply_recovery_core_command_surface() {
 validate_recovery_core_command_surface() {
   profile="$1"
   local_bin_dir="$2"
-  terrapod_bin="$local_bin_dir/terrapod"
-  tpod_bin="$local_bin_dir/tpod"
-  config_toml_bin="$(user_local_terrapod_lib_dir)/config-toml.sh"
 
-  [ -x "$terrapod_bin" ] ||
-    fatal "terrapod was not installed at $terrapod_bin after recovery-core apply"
-  [ -x "$tpod_bin" ] ||
-    fatal "tpod was not installed at $tpod_bin after recovery-core apply"
-  [ -f "$config_toml_bin" ] ||
-    fatal "the Terrapod config reader was not installed at $config_toml_bin after recovery-core apply"
-  TERRAPOD_PROFILE="$profile" "$tpod_bin" help >/dev/null 2>&1 ||
+  while IFS='|' read -r rc_source rc_legacy rc_target rc_kind rc_profiles rc_label; do
+    case "$rc_kind" in
+      executable|symlink:*)
+        [ -x "$HOME/$rc_target" ] ||
+          fatal "$rc_label was not installed at $HOME/$rc_target after recovery-core apply"
+        ;;
+      file)
+        [ -f "$HOME/$rc_target" ] ||
+          fatal "$rc_label was not installed at $HOME/$rc_target after recovery-core apply"
+        ;;
+    esac
+  done <<EOF
+$(recovery_core_members)
+EOF
+  TERRAPOD_PROFILE="$profile" "$local_bin_dir/tpod" help >/dev/null 2>&1 ||
     fatal "tpod help failed after recovery-core apply"
 }
 
@@ -780,10 +822,7 @@ backup_recovery_core_shell_startup_files() {
   profile="$2"
   backup_paths=""
 
-  for target in "$HOME/.zshenv" "$HOME/.zprofile" "$HOME/.zshrc"; do
-    if [ "$target" = "$HOME/.zprofile" ] && [ "$profile" != "macos-terminal" ]; then
-      continue
-    fi
+  while IFS= read -r target; do
     if backup_path="$(backup_shell_startup_if_different "$chezmoi_bin" "$target")"; then
       if [ -n "$backup_path" ]; then
         backup_paths="$(append_line "$backup_paths" "$backup_path")"
@@ -791,7 +830,9 @@ backup_recovery_core_shell_startup_files() {
     else
       return 1
     fi
-  done
+  done <<EOF
+$(recovery_core_shell_targets "$profile")
+EOF
 
   printf '%s' "$backup_paths"
 }
@@ -819,13 +860,14 @@ apply_recovery_core_shell_startup_files() {
   fi
   report_shell_startup_backups "$backup_paths"
 
-  if [ "$profile" = "macos-terminal" ]; then
-    "$chezmoi_bin" apply --force "$HOME/.zshenv" "$HOME/.zprofile" "$HOME/.zshrc" ||
-      fatal "failed to apply recovery-core shell startup files"
-  else
-    "$chezmoi_bin" apply --force "$HOME/.zshenv" "$HOME/.zshrc" ||
-      fatal "failed to apply recovery-core shell startup files"
-  fi
+  set --
+  while IFS= read -r target; do
+    set -- "$@" "$target"
+  done <<EOF
+$(recovery_core_shell_targets "$profile")
+EOF
+  "$chezmoi_bin" apply --force "$@" ||
+    fatal "failed to apply recovery-core shell startup files"
 }
 
 # Returns 0 for a clean apply, 2 when install warning markers changed, and 3
@@ -932,6 +974,10 @@ dispatch_installer_test_hook() {
     fi
     installer_test_brew_absent="${TERRAPOD_TEST_BREW_ABSENT:-0}"
     case "${TERRAPOD_INSTALLER_TEST_HOOK:-}" in
+      print_recovery_core_members)
+        recovery_core_members
+        exit 0
+        ;;
       print_expected_homebrew_path)
         expected_homebrew_path "$hook_profile" "$(machine_arch)"
         exit 0

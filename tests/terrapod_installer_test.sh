@@ -13,7 +13,7 @@ make_tmp_dir
 safe_path_dir="$tmp_dir/safe-bin"
 
 mkdir -p "$safe_path_dir"
-for command_name in awk cat chmod cmp cp date df grep ln mkdir mktemp mv readlink rm sed; do
+for command_name in awk cat chmod cmp cp date df grep ln mkdir mktemp mv readlink rm sed uname; do
   command_path="$(command -v "$command_name")"
   ln -s "$command_path" "$safe_path_dir/$command_name"
 done
@@ -140,23 +140,29 @@ fi
 
 pass "install.sh is not managed into the home directory"
 
-# The resumability check in install.sh only protects reruns while the paths it
-# names still exist in the source tree. Renaming one of them silently disables
-# the check, so pin both sides here instead of relying on the fixtures.
-install_script_text="$(cat "$install_script")"
-for recovery_core_path in \
-  dot_local/bin/executable_terrapod \
-  dot_local/bin/symlink_tpod \
-  dot_zshenv.tmpl \
-  dot_zprofile.tmpl \
-  dot_zshrc.tmpl; do
-  if [ ! -e "$repo_root/$recovery_core_path" ]; then
-    fail "recovery-core file $recovery_core_path exists in the source tree"
+# Query the real entry point without a source checkout, libraries, or bootstrap
+# commands on PATH. Every declared source must exist in the real repository.
+mkdir -p "$tmp_dir/membership-data"
+printf '%s\n' "not a checkout" >"$tmp_dir/membership-data/chezmoi"
+recovery_core_members="$(HOME="$tmp_dir/membership-home" \
+  XDG_DATA_HOME="$tmp_dir/membership-data" PATH="$safe_path_dir" \
+  TERRAPOD_INSTALLER_TEST_HOOK=print_recovery_core_members /bin/sh "$install_script")"
+assert_contains "$recovery_core_members" "dot_local/lib/terrapod/config-toml.sh" \
+  "recovery-core membership includes the managed config reader"
+while IFS='|' read -r member_source member_legacy member_target member_kind member_profiles member_label; do
+  assert_file_exists "$repo_root/$member_source" "declared recovery-core source $member_source exists"
+  if [ "$member_kind" = executable ] && [ ! -x "$repo_root/$member_source" ]; then
+    fail "declared recovery-core executable $member_source is executable"
   fi
-
-  pass "recovery-core file $recovery_core_path exists in the source tree"
-  assert_contains "$install_script_text" "\$source_dir/$recovery_core_path" "install.sh resume check names $recovery_core_path"
-done
+done <<EOF
+$recovery_core_members
+EOF
+if [ -e "$tmp_dir/membership-home" ]; then
+  fail "membership query performs no installation work"
+fi
+pass "membership query performs no installation work"
+assert_equals "$(cat "$tmp_dir/membership-data/chezmoi")" "not a checkout" \
+  "membership query leaves the existing source path untouched"
 
 assert_failure() {
   actual="$1"
