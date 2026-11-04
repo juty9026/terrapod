@@ -32,6 +32,14 @@ chezmoi execute-template \
 sh -n "$rendered" || fail "rendered shell integrations script should be valid sh"
 pass "rendered shell integrations script is valid sh"
 
+. "$repo_root/tests/lib/chezmoi-test-support.sh"
+macos_rendered="$tmp_dir/macos-shell-integrations.sh"
+render_template_with_homebrew_prefix_provider '{"chezmoi":{"os":"darwin"}}' \
+  .chezmoiscripts/run_before_30-install-shell-integrations.sh.tmpl "$tmp_dir/macos" \
+  >"$macos_rendered"
+sh -n "$macos_rendered" || fail "rendered macOS shell integrations script should be valid sh"
+pass "rendered macOS shell integrations script is valid sh"
+
 write_stub "$tmp_dir/bin/curl" \
   'printf "%s\n" "curl args:$*" >>"$SHELL_INTEGRATIONS_TEST_LOG"' \
   'output_file=' \
@@ -313,3 +321,77 @@ if [ -f "$scm_shell_integrations_marker" ]; then
   fail "shell integrations should clear warning marker after SCM Breeze installer recovers"
 fi
 pass "shell integrations clears warning marker after SCM Breeze installer recovers"
+
+# Exclude the host's Git (including macOS's /usr/bin/git launcher) entirely.
+# Homebrew recovers Git into the same isolated bin directory used by shellenv.
+macos_bin="$tmp_dir/macos/bin"
+mkdir -p "$macos_bin"
+for command_name in cat chmod cp date mkdir mktemp mv rm sed sh; do
+  ln -s "$(command -v "$command_name")" "$macos_bin/$command_name"
+done
+ln -s "$tmp_dir/bin/curl" "$macos_bin/curl"
+write_stub "$macos_bin/brew" \
+  'case "$1" in' \
+  '  shellenv) printf "export PATH=\"%s\"\n" "$SHELL_INTEGRATIONS_MACOS_BIN" ;;' \
+  '  install)' \
+  '    printf "%s\n" "brew args:$* auto-update:${HOMEBREW_NO_AUTO_UPDATE-unset}" >>"$SHELL_INTEGRATIONS_TEST_LOG"' \
+  '    [ "$*" = "install git" ] || exit 64' \
+  '    [ "${SHELL_INTEGRATIONS_BREW_STATUS:-0}" = 0 ] || exit "$SHELL_INTEGRATIONS_BREW_STATUS"' \
+  '    cp "$SHELL_INTEGRATIONS_GIT_TEMPLATE" "$SHELL_INTEGRATIONS_MACOS_BIN/git"' \
+  '    ;;' \
+  '  *) exit 64 ;;' \
+  'esac'
+
+macos_log="$tmp_dir/macos-missing-git.log"
+HOME="$tmp_dir/macos-home" XDG_STATE_HOME="$tmp_dir/macos-state" \
+  PATH="$macos_bin" SHELL_INTEGRATIONS_MACOS_BIN="$macos_bin" \
+  SHELL_INTEGRATIONS_TEST_LOG="$macos_log" \
+  SHELL_INTEGRATIONS_GIT_TEMPLATE="$tmp_dir/bin/git" \
+  HOMEBREW_NO_AUTO_UPDATE=0 \
+  /bin/sh "$macos_rendered" >"$tmp_dir/macos-missing-git.out" 2>"$tmp_dir/macos-missing-git.err"
+assert_file_contains "$macos_log" 'brew args:install git auto-update:1' \
+  "macOS recovers missing Git with Homebrew auto-update disabled"
+assert_file_contains "$macos_log" 'git args:clone https://github.com/zdharma-continuum/zinit' \
+  "macOS continues shell integration installation with recovered Git"
+
+: >"$macos_log"
+HOME="$tmp_dir/macos-existing-git-home" XDG_STATE_HOME="$tmp_dir/macos-existing-git-state" \
+  PATH="$macos_bin" SHELL_INTEGRATIONS_MACOS_BIN="$macos_bin" \
+  SHELL_INTEGRATIONS_TEST_LOG="$macos_log" \
+  SHELL_INTEGRATIONS_BREW_STATUS=42 \
+  /bin/sh "$macos_rendered" >"$tmp_dir/macos-existing-git.out" 2>"$tmp_dir/macos-existing-git.err"
+assert_file_not_contains "$macos_log" 'brew args:install' \
+  "macOS leaves an existing Git installation alone"
+assert_file_contains "$macos_log" 'git args:clone https://github.com/zdharma-continuum/zinit' \
+  "macOS uses existing Git for shell integrations"
+
+rm "$macos_bin/git"
+: >"$macos_log"
+if ! HOME="$tmp_dir/macos-failed-git-home" XDG_STATE_HOME="$tmp_dir/macos-failed-git-state" \
+  PATH="$macos_bin" SHELL_INTEGRATIONS_MACOS_BIN="$macos_bin" \
+  SHELL_INTEGRATIONS_TEST_LOG="$macos_log" \
+  SHELL_INTEGRATIONS_BREW_STATUS=42 \
+  /bin/sh "$macos_rendered" >"$tmp_dir/macos-failed-git.out" 2>"$tmp_dir/macos-failed-git.err"; then
+  fail "macOS Git install failure continues after recording a warning"
+fi
+pass "macOS Git install failure continues after recording a warning"
+assert_file_contains "$macos_log" 'brew args:install git auto-update:1' \
+  "failed macOS Git recovery also disables Homebrew auto-update"
+assert_file_contains "$tmp_dir/macos-failed-git-state/terrapod/install-warnings/shell-integrations" \
+  'Install git with Homebrew, then rerun tpod apply.' \
+  "macOS Git install failure records recovery guidance"
+assert_file_not_contains "$macos_log" 'git args:clone' \
+  "macOS stops integration attempts when Git recovery fails"
+
+: >"$macos_log"
+if ! HOME="$tmp_dir/linux-missing-git-home" XDG_STATE_HOME="$tmp_dir/linux-missing-git-state" \
+  PATH="$macos_bin" SHELL_INTEGRATIONS_TEST_LOG="$macos_log" \
+  /bin/sh "$rendered" >"$tmp_dir/linux-missing-git.out" 2>"$tmp_dir/linux-missing-git.err"; then
+  fail "Linux missing Git continues after recording a warning"
+fi
+pass "Linux missing Git continues after recording a warning"
+assert_file_contains "$tmp_dir/linux-missing-git-state/terrapod/install-warnings/shell-integrations" \
+  'Install git, then rerun tpod apply.' \
+  "Linux missing Git records recovery guidance"
+assert_file_not_contains "$macos_log" 'brew args:' \
+  "Linux does not attempt Homebrew Git recovery"

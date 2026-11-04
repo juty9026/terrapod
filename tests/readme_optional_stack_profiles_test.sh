@@ -5,7 +5,7 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$repo_root/tests/lib/harness.sh"
 readme="$repo_root/README.md"
 korean_readme="$repo_root/README.ko.md"
-terrapod_command="$repo_root/dot_local/bin/executable_terrapod"
+reader="$repo_root/dot_local/lib/terrapod/config-toml.sh"
 
 assert_key_row_contains() {
   key="$1"
@@ -64,18 +64,16 @@ assert_raycast_restore_contains() {
   pass "$message"
 }
 
-# Derived from the command rather than restated here: a new managed key must
-# reach the Minimal VPS example, because routine commands call a config
-# complete only when every managed key is present, including disabled ones.
-# The command answers through its own test hook, so the list stays correct
-# wherever managed_setup_keys() happens to live.
+# Derived from the shared reader: a new managed key must reach the Minimal
+# VPS example, because routine commands call a config complete only when every
+# managed key is present, including disabled ones.
 managed_setup_keys="$(
-  TERRAPOD_PRINT_MANAGED_SETUP_KEYS=1 /bin/sh "$terrapod_command"
+  /bin/sh -c '. "$1"; managed_setup_keys' sh "$reader"
 )"
 
 printf '%s\n' "$managed_setup_keys" | grep -Fx profile >/dev/null ||
-  fail "managed setup key list is readable from the Terrapod command"
-pass "managed setup key list is readable from the Terrapod command"
+  fail "managed setup key list is readable from the managed-config reader"
+pass "managed setup key list is readable from the managed-config reader"
 
 minimal_vps_example() {
   awk '

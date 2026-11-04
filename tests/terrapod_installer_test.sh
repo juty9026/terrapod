@@ -1372,7 +1372,7 @@ nonstandard_brew="$nonstandard_prefix_case/opt/custom/bin/brew"
 mkdir -p "${nonstandard_brew%/brew}"
 write_stub "$nonstandard_brew" '#!/bin/sh' 'exit 0'
 TERRAPOD_HOMEBREW_CANDIDATE_PATHS="$nonstandard_brew"
-TERRAPOD_EXPECTED_HOMEBREW_PATH=
+TERRAPOD_EXPECTED_HOMEBREW_PATH="$nonstandard_prefix_case/opt/homebrew/bin/brew"
 TERRAPOD_TEST_BREW_ABSENT=1
 export TERRAPOD_HOMEBREW_CANDIDATE_PATHS TERRAPOD_EXPECTED_HOMEBREW_PATH TERRAPOD_TEST_BREW_ABSENT
 run_installer_case "$nonstandard_prefix_case"

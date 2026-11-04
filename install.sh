@@ -154,7 +154,7 @@ reject_nonstandard_homebrew() {
 
   # The installer invokes the standard brew by absolute path. A legacy brew on
   # PATH must not make a valid standard-prefix installation look unsupported.
-  if [ "${installer_test_brew_absent:-0}" != 1 ] && [ -x "$expected_brew" ]; then
+  if [ -x "$expected_brew" ]; then
     return 0
   fi
 
@@ -972,7 +972,6 @@ dispatch_installer_test_hook() {
     if [ -n "${TERRAPOD_HOMEBREW_CANDIDATE_PATHS:-}" ]; then
       installer_candidate_paths_overridden=1
     fi
-    installer_test_brew_absent="${TERRAPOD_TEST_BREW_ABSENT:-0}"
     case "${TERRAPOD_INSTALLER_TEST_HOOK:-}" in
       print_recovery_core_members)
         recovery_core_members
