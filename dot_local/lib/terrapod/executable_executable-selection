@@ -73,8 +73,8 @@ mise_bin_paths_value=""
 # every Development Runtime candidate set, and 'mise bin-paths' is not a cheap
 # command to run once per declaration.
 initialize_mise_bin_paths() {
-  command -v mise >/dev/null 2>&1 || return 0
-  mise_bin_paths_value="$(mise bin-paths 2>/dev/null || true)"
+  [ -x "$mise_executable" ] || return 0
+  mise_bin_paths_value="$("$mise_executable" bin-paths 2>/dev/null || true)"
 }
 
 mise_bin_paths() {
@@ -90,8 +90,8 @@ mise_shims_dir() {
 # error here: a tool mise knows about but no active config selects is exactly
 # the case this check exists to describe.
 mise_which() {
-  command -v mise >/dev/null 2>&1 || return 0
-  mise which "$1" 2>/dev/null || true
+  [ -x "$mise_executable" ] || return 0
+  "$mise_executable" which "$1" 2>/dev/null || true
 }
 
 managed_path_value=""
@@ -277,13 +277,32 @@ inventory_contains() {
   awk -v package="$package" '$0 == package { found = 1 } END { exit found ? 0 : 1 }' "$file"
 }
 
-homebrew_formulae=
-homebrew_casks=
-if [ -z "${TERRAPOD_EXECUTABLE_SELECTION_INVENTORY_DIR:-}" ] &&
-  command -v brew >/dev/null 2>&1; then
-  homebrew_formulae="$(brew list --formula --full-name 2>/dev/null || true)"
-  homebrew_casks="$(brew list --cask --full-name 2>/dev/null || true)"
-fi
+# Select providers before asking for runtime paths: mise contributes to the
+# Managed Default PATH, so discovering it through that PATH would be circular.
+# Both providers belong to the standard Homebrew installation even when the
+# Managed Default PATH selects another executable (an advisory of its own).
+# Keep identity, observations, and PATH initialization in one process context;
+# readers inside command substitutions must not initialize subshell-only state.
+initialize_observation_context() {
+  homebrew_prefix="$(standard_homebrew_prefix || true)"
+  brew_executable=""
+  mise_executable=""
+  if [ -n "$homebrew_prefix" ]; then
+    brew_executable="$homebrew_prefix/bin/brew"
+    mise_executable="$homebrew_prefix/bin/mise"
+  fi
+
+  initialize_mise_bin_paths
+  initialize_managed_path
+
+  homebrew_formulae=
+  homebrew_casks=
+  if [ -z "${TERRAPOD_EXECUTABLE_SELECTION_INVENTORY_DIR:-}" ] &&
+    [ -x "$brew_executable" ]; then
+    homebrew_formulae="$("$brew_executable" list --formula --full-name 2>/dev/null || true)"
+    homebrew_casks="$("$brew_executable" list --cask --full-name 2>/dev/null || true)"
+  fi
+}
 
 line_list_contains() {
   list="$1"
@@ -311,8 +330,8 @@ provider_has_package() {
       [ -x "$HOME/.local/bin/claude" ]
       ;;
     mise)
-      command -v mise >/dev/null 2>&1 &&
-        mise where "$package" >/dev/null 2>&1
+      [ -x "$mise_executable" ] &&
+        "$mise_executable" where "$package" >/dev/null 2>&1
       ;;
     *)
       return 1
@@ -346,8 +365,8 @@ canonical_candidates() {
 
   case "$provider" in
     homebrew-formula|homebrew-cask)
-      prefix="$(standard_homebrew_prefix)" || return 1
-      printf '%s/bin/%s\n' "$prefix" "$command"
+      [ -n "$homebrew_prefix" ] || return 1
+      printf '%s/bin/%s\n' "$homebrew_prefix" "$command"
       ;;
     claude-installer)
       printf '%s/.local/bin/%s\n' "$HOME" "$command"
@@ -542,13 +561,13 @@ render_advisories() {
 # and the finding is skipped rather than falling back to a second definition of
 # reachability.
 prunable_payloads() {
-  command -v mise >/dev/null 2>&1 || return 0
+  [ -x "$mise_executable" ] || return 0
   [ -d "${MISE_DATA_DIR:-$HOME/.local/share/mise}/installs" ] || return 0
 
   # A manager that decides to prompt would otherwise block on doctor's own
   # stdin, and its prompt text is lost under 2>/dev/null, leaving the process
   # hung with nothing printed to explain why.
-  prunable_listing="$(mise ls -C "$HOME" --prunable --no-header 2>/dev/null </dev/null)" ||
+  prunable_listing="$("$mise_executable" ls -C "$HOME" --prunable --no-header 2>/dev/null </dev/null)" ||
     return 0
   [ -n "$prunable_listing" ] || return 0
 
@@ -577,7 +596,7 @@ collect_prunable_rows() {
     # future subcommand behaviour -- would eat the remaining payload lines,
     # and because the count above comes from a separate awk pass, the summary
     # would then describe more payloads than the list beneath it shows.
-    prunable_path="$(mise where "$prunable_name" 2>/dev/null </dev/null || true)"
+    prunable_path="$("$mise_executable" where "$prunable_name" 2>/dev/null </dev/null || true)"
 
     # 0.0 MB already means something real: a payload symlinked outside the
     # data directory, like a rust toolchain, measures genuinely zero. A path
@@ -657,8 +676,7 @@ render_leftover_payloads() {
   printf '%s\n' "             'mise prune --tools' reclaims the disk; Terrapod does not remove them."
 }
 
-initialize_mise_bin_paths
-initialize_managed_path
+initialize_observation_context
 
 # Optional machine-readable result for readiness consumers. Share the very
 # same PATH used below, including the existing login-probe failure fallback.
