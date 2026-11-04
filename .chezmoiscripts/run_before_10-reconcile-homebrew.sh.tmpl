@@ -14,6 +14,10 @@ set -eu
 
 {{ include "dot_local/lib/terrapod/install-warning-script.sh" }}
 
+{{ if $enableMacosAppGroups -}}
+{{ include "dot_local/lib/terrapod/config-toml.sh" }}
+{{ end -}}
+
 {{ include "dot_local/lib/terrapod/homebrew-bundle.sh" }}
 
 terrapod_homebrew_core_permission_guidance() {

@@ -2070,15 +2070,11 @@ terminal_apps_display_name() {
   esac
 }
 
-# Reads a Brewfile template on stdin and prints the display name of every cask
-# in its terminal-apps block. Fails on a cask the map above does not know, so a
+# Reads the rendered terminal-apps Brewfile on stdin and prints every cask's
+# display name. Fails on a cask the map above does not know, so a
 # new cask cannot pass without its description being updated.
 terminal_apps_display_names() {
-  awk '
-    /^# terminal-apps macOS App Group$/ { in_block = 1; next }
-    in_block && /^\{\{ end/ { exit }
-    in_block && /^cask "/ { split($0, parts, "\""); print parts[2] }
-  ' | while IFS= read -r cask_token; do
+  awk '/^cask "/ { split($0, parts, "\""); print parts[2] }' | while IFS= read -r cask_token; do
     terminal_apps_display_name "$cask_token" || {
       printf 'unknown terminal-apps cask: %s\n' "$cask_token" >&2
       return 1
@@ -2086,14 +2082,20 @@ terminal_apps_display_names() {
   done
 }
 
-terminal_apps_names="$(terminal_apps_display_names <"$repo_root/Brewfile.macos-desktop-apps.tmpl")" \
+: >"$tmp_dir/terminal-apps-chezmoi.toml"
+terminal_apps_rendered="$(
+  PATH="$system_path" chezmoi --config "$tmp_dir/terminal-apps-chezmoi.toml" --source "$repo_root" \
+    execute-template --override-data '{"chezmoi":{"os":"darwin"},"enableMacosAppGroupTerminalApps":true}' \
+    --file "$repo_root/Brewfile.macos-desktop-apps.tmpl"
+)"
+terminal_apps_names="$(printf '%s\n' "$terminal_apps_rendered" | terminal_apps_display_names)" \
   || fail "every terminal-apps Brewfile cask has a display name in the drift test map"
 if [ -z "$terminal_apps_names" ]; then
   fail "the terminal-apps Brewfile block yields at least one cask"
 fi
 pass "the terminal-apps Brewfile block yields casks, all with a display name"
 
-if unknown_cask_output="$(printf '%s\n' '# terminal-apps macOS App Group' 'cask "ghostty"' 'cask "font-new-mystery"' '{{ end -}}' \
+if unknown_cask_output="$(printf '%s\n' 'cask "ghostty"' 'cask "font-new-mystery"' \
   | terminal_apps_display_names 2>&1)"; then
   fail "the drift test rejects a terminal-apps cask its map does not know"
 fi
