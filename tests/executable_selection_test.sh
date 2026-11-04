@@ -984,8 +984,8 @@ payload_row_count="$(
   fail "the detailed listing has exactly one row per counted payload (found $payload_row_count)"
 pass "the detailed listing has exactly one row per counted payload"
 
-# The whole check depends on mise to say what is reachable, so an absent mise
-# skips it rather than calling every payload prunable.
+# The whole check depends on the canonical mise to say what is reachable, so
+# its absence skips it even when an ambient manager can still answer.
 mise_absent_path_dir="$tmp_dir/mise-absent-path"
 mkdir -p "$mise_absent_path_dir"
 for path_entry in "$path_dir"/*; do
@@ -994,6 +994,9 @@ for path_entry in "$path_dir"/*; do
   esac
   ln -s "$path_entry" "$mise_absent_path_dir/${path_entry##*/}"
 done
+mv "$prefix/bin/mise" "$tmp_dir/canonical-mise"
+cp "$tmp_dir/canonical-mise" "$mise_absent_path_dir/mise"
 mise_absent_output="$(run_leftover_selection doctor "$mise_absent_path_dir")"
+mv "$tmp_dir/canonical-mise" "$prefix/bin/mise"
 assert_not_contains "$mise_absent_output" "mise payload" \
-  "an absent mise skips the payload check instead of reporting one"
+  "an absent canonical mise skips payloads even when an ambient mise can answer"
