@@ -185,6 +185,65 @@ EOF
 assert_contains "$hyper_trace" "app.activate com.mitchellh.ghostty" "the hyper chord focuses the app without the leader"
 assert_not_contains "$hyper_trace" "modal.enter" "the hyper chord does not enter the leader modal"
 
+# The number keys reach Orca, Paseo and Zed the same way on the leader modal
+# and on the hyper chord.
+number_keys_trace="$(run_scenario number_keys <<EOF
+$scenario_preamble
+harness.addApp("com.stablyai.orca")
+harness.addApp("sh.paseo.desktop")
+harness.addApp("dev.zed.Zed")
+for _, key in ipairs({ "1", "2", "3" }) do
+  harness.press("f18")
+  harness.press(key)
+  harness.release("f18")
+  harness.press(key, { "ctrl", "alt", "cmd", "shift" })
+end
+harness.printTrace()
+EOF
+)"
+
+cat >"$tmp_dir/number_keys.expected" <<'TRACE'
+press none f18
+modal.enter
+press none 1 (modal)
+app.activate com.stablyai.orca
+modal.exit
+release none f18
+press alt+cmd+ctrl+shift 1
+app.activate com.stablyai.orca
+press none f18
+modal.enter
+press none 2 (modal)
+app.activate sh.paseo.desktop
+modal.exit
+release none f18
+press alt+cmd+ctrl+shift 2
+app.activate sh.paseo.desktop
+press none f18
+modal.enter
+press none 3 (modal)
+app.activate dev.zed.Zed
+modal.exit
+release none f18
+press alt+cmd+ctrl+shift 3
+app.activate dev.zed.Zed
+TRACE
+
+if ! diff -u "$tmp_dir/number_keys.expected" "$tmp_dir/number_keys.out" >"$tmp_dir/number_keys.diff"; then
+  cat "$tmp_dir/number_keys.diff" >&2
+  fail "1, 2 and 3 focus Orca, Paseo and Zed on both the leader modal and the hyper chord"
+fi
+pass "1, 2 and 3 focus Orca, Paseo and Zed on both the leader modal and the hyper chord"
+
+help_trace="$(run_scenario help <<EOF
+$scenario_preamble
+harness.press("/", { "ctrl", "alt", "cmd", "shift" })
+harness.printTrace()
+EOF
+)"
+
+assert_contains "$help_trace" '\n1 : Orca\n2 : Paseo\n3 : Zed\n' "the help toast lists 1 : Orca, 2 : Paseo and 3 : Zed in order"
+
 # --- Ghostty input-source retry -------------------------------------------------
 
 # The stub's input source starts on a Korean layout, so every retry scenario
