@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Translation note (2026-11-05, #318):** This plan originally quoted some text in Korean, mostly copy for the since-removed `README.ko.md`. That text is translated into English here, so quoted Korean README copy and the test strings that matched it show their English meaning and no longer match any file literally. The plan is otherwise unchanged.
+
 **Goal:** Remove cmux from Terrapod's declared macOS Desktop App Stack while leaving existing user-installed cmux apps and settings untouched.
 
 **Architecture:** Keep the existing `enableMacosAppGroupTerminalApps` setting and macOS App Group flow, but change the terminal-apps group contents from Ghostty+cmux to Ghostty only. Stop managing cmux user settings by excluding `.config/cmux` from managed paths and removing the tracked cmux source file; do not add any uninstall, cleanup, or deletion behavior.
@@ -314,7 +316,7 @@ to:
 In `README.ko.md`, change:
 
 ```markdown
-- `terminal-apps`: Ghostty와 cmux.
+- `terminal-apps`: Ghostty and cmux.
 ```
 
 to:
@@ -326,13 +328,13 @@ to:
 Change:
 
 ```markdown
-| `enableMacosAppGroupTerminalApps` | `false` | terminal-apps macOS App Group인 Ghostty와 cmux를 설치합니다. |
+| `enableMacosAppGroupTerminalApps` | `false` | Installs the terminal-apps macOS App Group: Ghostty and cmux. |
 ```
 
 to:
 
 ```markdown
-| `enableMacosAppGroupTerminalApps` | `false` | terminal-apps macOS App Group인 Ghostty를 설치합니다. |
+| `enableMacosAppGroupTerminalApps` | `false` | Installs the terminal-apps macOS App Group: Ghostty. |
 ```
 
 - [ ] **Step 5: Update domain docs**

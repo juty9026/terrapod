@@ -51,7 +51,7 @@ managed_repository_docs="$(
     --source "$repo_root" \
     managed \
     --path-style source-relative |
-    grep -E '^(README(\.ko)?\.md|AGENTS\.md|CONTEXT\.md|docs/)' || true
+    grep -E '^(README\.md|AGENTS\.md|CONTEXT\.md|docs/)' || true
 )"
 
 if [ -n "$managed_repository_docs" ]; then

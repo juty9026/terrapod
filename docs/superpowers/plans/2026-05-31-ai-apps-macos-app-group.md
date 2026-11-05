@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Translation note (2026-11-05, #318):** This plan originally quoted some text in Korean, mostly copy for the since-removed `README.ko.md`. That text is translated into English here, so quoted Korean README copy and the test strings that matched it show their English meaning and no longer match any file literally. The plan is otherwise unchanged.
+
 **Goal:** Add an `ai-apps` macOS App Group that installs Claude Desktop, Codex Desktop, Antigravity 2.0, and Antigravity IDE through Homebrew casks without making the Optional Development Workspace own desktop apps.
 
 **Architecture:** Extend the existing macOS App Group pattern with one new machine-local data key, `enableMacosAppGroupAiApps`. The key participates in setup/config/status/diff/apply rendering only for macOS profiles, joins workstation defaults, stays disabled for `development`, and feeds the rendered Homebrew cask bundle. The desktop Codex cask is `codex-app`; the existing `codex` cask is a CLI cask and must not be used here.
@@ -485,7 +487,7 @@ In `README.ko.md`, extend the macOS App Group bullet list with:
 Add this table row after monitoring:
 
 ```markdown
-| `enableMacosAppGroupAiApps` | `false` | ai-apps macOS App Group인 Claude Desktop, Codex Desktop(`codex-app`), Antigravity 2.0, Antigravity IDE를 설치합니다. |
+| `enableMacosAppGroupAiApps` | `false` | Installs the ai-apps macOS App Group: Claude Desktop, Codex Desktop (`codex-app`), Antigravity 2.0, and Antigravity IDE. |
 ```
 
 - [ ] **Step 5: Run README tests**

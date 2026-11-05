@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Translation note (2026-11-05, #318):** This plan originally quoted some text in Korean, mostly copy for the since-removed `README.ko.md`. That text is translated into English here, so quoted Korean README copy and the test strings that matched it show their English meaning and no longer match any file literally. The plan is otherwise unchanged.
+
 **Goal:** Switch Terrapod's **Optional AI Tool Stack** from Gemini CLI/npm installation to Antigravity CLI, Claude Code, and Codex installed through official vendor installer scripts.
 
 **Architecture:** Keep the existing `enableAiCliTools` setting and effective-stack logic, but change the declared binary set to `agy`, `claude`, and `codex`. Run AI CLI vendor installers as a before-apply chezmoi script so any vendor shell-profile edits are overwritten by Terrapod's managed shell files, and remove the legacy Antigravity app-bundle PATH snippet from management.
@@ -409,13 +411,13 @@ Existing npm-installed AI CLIs are left unmanaged; Terrapod does not uninstall o
 Change the `enableAiCliTools` row in `README.ko.md` to:
 
 ```markdown
-| `enableAiCliTools` | `false` | official vendor installer를 통해 Antigravity CLI, Claude Code, Codex를 설치합니다. 기존 npm-installed AI CLI는 unmanaged 상태로 둡니다. |
+| `enableAiCliTools` | `false` | Installs Antigravity CLI, Claude Code, and Codex through their official vendor installers. Existing npm-installed AI CLIs are left unmanaged. |
 ```
 
 After the Korean optional stack opt-out sentence, add:
 
 ```markdown
-기존 npm-installed AI CLI는 unmanaged 상태로 남겨 둡니다. Terrapod은 해당 도구가 machine에 남아 있다는 이유만으로 uninstall하거나 warning을 내지 않습니다.
+Existing npm-installed AI CLIs are left unmanaged. Terrapod does not uninstall them or warn merely because they remain on a machine.
 ```
 
 - [ ] **Step 4: Update CONTEXT.md**
