@@ -379,7 +379,7 @@ _Avoid_: separate Korean introduction, independent README, self-labeled translat
 - The restored `enableMacosAppGroupAiApps` **Managed Setting** reuses an existing true value to select this three-app group; configs without the key require explicit setup or configure.
 - The workstation **Preset** enables ai-apps; minimal and development leave it disabled.
 - Gemini is excluded from installation and reported as not applicable on Macs without Apple Silicon or macOS 15 or later. Claude and ChatGPT remain selected.
-- The Hammerspoon app launcher maps Orca to `1` and Zed to `2`.
+- The Hammerspoon app launcher maps Orca to `1`, Paseo to `2`, and Zed to `3`.
 - Orca's bundled `orca` CLI remains an artifact of the development-apps **macOS App Group** and is not a member of the cross-profile **Optional AI Tool Stack**.
 - Removing ChatGPT Atlas from the Hammerspoon app launcher is part of the planned launcher change.
 - Individual macOS app toggles are excluded from the current **Terrapod** setup scope.

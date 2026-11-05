@@ -84,7 +84,8 @@ n	Notion	notion.id
 b	Aside	at.studio.AsideBrowser
 c	Google Chrome	com.google.Chrome
 1	Orca	com.stablyai.orca
-2	Zed	dev.zed.Zed
+2	Paseo	sh.paseo.desktop
+3	Zed	dev.zed.Zed
 o	Obsidian	md.obsidian
 p	Postman	com.postmanlabs.mac
 f	Figma	com.figma.Desktop
