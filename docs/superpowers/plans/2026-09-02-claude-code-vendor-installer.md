@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Translation note (2026-11-05, #318):** This plan originally quoted some text in Korean, mostly copy for the since-removed `README.ko.md`. That text is translated into English here; the plan is otherwise unchanged.
+
 **Goal:** Install Claude Code through its vendor-published install script instead of the `claude-code` Homebrew cask, because the cask lags vendor releases.
 
 **Architecture:** The **Optional AI Tool Stack** gains a second package source on the **macOS Terminal Profile**. `run_before_60-install-ai-cli-tools.sh.tmpl` keeps its Homebrew bundle step and gains an independent Claude Code step that runs the vendor script only when `$HOME/.local/bin/claude` is absent, so the no-upgrade contract holds and Claude Code's own updater owns freshness. `executable-selection` gains a fourth provider, `claude-installer`, so status and doctor keep reporting every declaration through one path. The stack keeps one warning category, one status line, and its macOS-only scope.
@@ -739,7 +741,7 @@ In `tests/readme_korean_test.sh` at lines 191-192:
 ```sh
 assert_contains "$korean_readme" 'brew upgrade --cask codex antigravity-cli' \
   "README.ko.md documents targeted AI CLI upgrades"
-assert_contains "$korean_readme" 'Claude Code는 자체적으로 업데이트하며 이 명령의 대상이 아닙니다.' \
+assert_contains "$korean_readme" 'Claude Code updates itself and is not part of that command.' \
   "README.ko.md documents who owns Claude Code freshness"
 ```
 
@@ -778,10 +780,10 @@ Replace the `enableAiCliTools` table row (line 316) with:
 Replace the upgrade block (currently lines 242-249) with:
 
 ````markdown
-CLI upgrade는 명시적인 Homebrew operation으로만 수행합니다. 모든 Homebrew-managed
-CLI를 올리려면 `brew update`와 `brew upgrade`를 사용하고, AI CLI cask만 의도한 경우
-대상을 지정합니다.
-Claude Code는 자체적으로 업데이트하며 이 명령의 대상이 아닙니다.
+CLI upgrades are performed only as explicit Homebrew operations. To upgrade all
+Homebrew-managed CLIs, use `brew update` and `brew upgrade`; when only the AI CLI
+casks are intended, target them.
+Claude Code updates itself and is not part of that command.
 
 ```sh
 brew update
@@ -792,7 +794,7 @@ brew upgrade --cask codex antigravity-cli
 Replace the `enableAiCliTools` table row (line 294) with:
 
 ```markdown
-| `enableAiCliTools` | `false` | Antigravity CLI, Claude Code, Codex를 설치합니다. Antigravity CLI와 Codex는 Homebrew cask `antigravity-cli`, `codex`로, Claude Code는 공식 installer로 설치합니다. macOS Terminal Profile 전용이며 VPS Shell Profile에서는 무시됩니다. |
+| `enableAiCliTools` | `false` | Installs Antigravity CLI, Claude Code, and Codex. Antigravity CLI and Codex are installed as the Homebrew casks `antigravity-cli` and `codex`, and Claude Code through its official installer. macOS Terminal Profile only; ignored on the VPS Shell Profile. |
 ```
 
 - [ ] **Step 5: Run the README tests to verify they pass**

@@ -6,7 +6,6 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 managed_config="$repo_root/dot_config/git/config"
 user_config_source="$repo_root/create_dot_gitconfig"
 readme="$repo_root/README.md"
-readme_ko="$repo_root/README.ko.md"
 make_tmp_dir
 
 if [ ! -f "$managed_config" ]; then
@@ -140,8 +139,6 @@ assert_file_not_contains "$readme" "gitAllowedSigners" \
   "README removes the managed Git signer option"
 assert_file_contains "$readme" "~/.gitconfig.local" \
   "README documents the machine-local Git include"
-assert_file_contains "$readme_ko" "~/.gitconfig.local" \
-  "Korean README documents the machine-local Git include"
 
 # The configured diff tool has to be one Terrapod actually installs; `vimdiff`
 # was not, so `git difftool` failed on the VPS Shell Profile and fell back to

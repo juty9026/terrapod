@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Translation note (2026-11-05, #318):** This plan originally quoted some text in Korean, mostly copy for the since-removed `README.ko.md`. That text is translated into English here; the plan is otherwise unchanged.
+
 **Goal:** Make first-run recovery-core shell startup overwrite safe by backing up different existing `.zshenv`, `.zprofile`, and `.zshrc` files before a bounded forced chezmoi apply, while keeping routine `tpod apply` interactive.
 
 **Architecture:** Keep the new behavior inside the POSIX first-run installer after **Terrapod Setup** and before full declared-state apply. Use `chezmoi cat` to render each recovery-core target for exact comparison, copy only different existing user content to timestamped sibling backups, then run `chezmoi apply --force` only for the three shell startup targets. Leave `dot_local/bin/executable_terrapod` routine `apply` unchanged so day-to-day `tpod apply` continues to delegate to normal interactive chezmoi behavior.
@@ -515,13 +517,13 @@ loaded by the managed `.zshenv`.
 Korean:
 
 ```md
-first-run에서만 Terrapod은 Terrapod Setup 이후 managed zsh startup file인
-`.zshenv`, `.zprofile`, `.zshrc`를 force-apply합니다. 해당 file에 다른 user
-content가 있으면 installer는 같은 위치에 timestamp가 붙은
-`.terrapod-backup-*` file을 남기고 backup path를 출력합니다. Terrapod은 이
-backup을 자동 merge/delete하지 않습니다. backup을 직접 확인하고 machine-local
-PATH snippet은 managed `.zshenv`가 load하는 `~/.config/zsh/path.d/*.zsh`로
-옮기세요.
+On first run only, Terrapod force-applies the managed zsh startup files
+`.zshenv`, `.zprofile`, and `.zshrc` after Terrapod Setup. If those files hold
+other user content, the installer leaves timestamped `.terrapod-backup-*`
+files in the same location and prints the backup paths. Terrapod does not
+merge or delete these backups automatically. Review the backups yourself and
+move machine-local PATH snippets into `~/.config/zsh/path.d/*.zsh`, which the
+managed `.zshenv` loads.
 ```
 
 - [ ] **Step 4: Run README parity test if docs changed**

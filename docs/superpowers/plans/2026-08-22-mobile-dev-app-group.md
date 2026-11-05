@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Translation note (2026-11-05, #318):** This plan originally quoted some text in Korean, mostly copy for the since-removed `README.ko.md`. That text is translated into English here; the plan is otherwise unchanged.
+
 **Goal:** Add a `mobile-dev` macOS App Group that installs Android Studio and Maestro and renders the Android and Java shell environment they need.
 
 **Architecture:** One new machine-local setting key, `enableMacosAppGroupMobileDev`, gates a new group in the rendered macOS Desktop App Stack Brewfile and a new block in `dot_zshenv.tmpl`. The reconcile script's per-package retry path is first generalized so it can attribute failures for tap formulae as well as casks.
@@ -689,11 +691,11 @@ assert_contains 'Terrapod does not install Android SDK components or Xcode. Andr
 In `tests/readme_korean_test.sh`, add after the development-apps assertions:
 
 ```sh
-assert_contains "$korean_readme" '`mobile-dev`: Android Studio와 Maestro(`mobile-dev-inc/tap/maestro`).' \
+assert_contains "$korean_readme" '`mobile-dev`: Android Studio and Maestro (`mobile-dev-inc/tap/maestro`).' \
   "README.ko.md documents Android Studio and Maestro in the mobile-dev inventory"
-assert_contains "$korean_readme" '| `enableMacosAppGroupMobileDev` | `false` | mobile-dev macOS App Group인 Android Studio와 Maestro(`mobile-dev-inc/tap/maestro`)를 설치합니다. |' \
+assert_contains "$korean_readme" '| `enableMacosAppGroupMobileDev` | `false` | Installs the mobile-dev macOS App Group: Android Studio and Maestro (`mobile-dev-inc/tap/maestro`). |' \
   "README.ko.md documents the mobile-dev option row"
-assert_contains "$korean_readme" 'Terrapod은 Android SDK component와 Xcode를 설치하지 않습니다. SDK는 Android Studio의 SDK Manager가 소유하고, Xcode는 App Store로 배포됩니다.' \
+assert_contains "$korean_readme" 'Terrapod does not install Android SDK components or Xcode. Android Studio'"'"'s SDK Manager owns the SDK, and Xcode is distributed through the App Store.' \
   "README.ko.md documents the mobile development scope boundary"
 ```
 
@@ -729,21 +731,21 @@ Terrapod does not install Android SDK components or Xcode. Android Studio's SDK 
 Add the matching bullet after the `development-apps` bullet:
 
 ```markdown
-- `mobile-dev`: Android Studio와 Maestro(`mobile-dev-inc/tap/maestro`).
+- `mobile-dev`: Android Studio and Maestro (`mobile-dev-inc/tap/maestro`).
 ```
 
 Add the matching settings row after the development-apps row:
 
 ```markdown
-| `enableMacosAppGroupMobileDev` | `false` | mobile-dev macOS App Group인 Android Studio와 Maestro(`mobile-dev-inc/tap/maestro`)를 설치합니다. `ANDROID_HOME`과 `JAVA_HOME`도 함께 설정합니다. |
+| `enableMacosAppGroupMobileDev` | `false` | Installs the mobile-dev macOS App Group: Android Studio and Maestro (`mobile-dev-inc/tap/maestro`). It also sets `ANDROID_HOME` and `JAVA_HOME`. |
 ```
 
 Add the matching paragraphs after the Orca trust sentence:
 
 ```markdown
-Terrapod은 fully-qualified `mobile-dev-inc/tap/maestro` formula만 trust하며, `mobile-dev-inc/tap` tap 전체를 trust하지 않습니다. homebrew-cask의 `maestro`는 다른 제품이므로 설치하지 않습니다.
+Terrapod trusts only the fully-qualified `mobile-dev-inc/tap/maestro` formula, not the entire `mobile-dev-inc/tap` tap. The homebrew-cask `maestro` is a different product, so Terrapod does not install it.
 
-Terrapod은 Android SDK component와 Xcode를 설치하지 않습니다. SDK는 Android Studio의 SDK Manager가 소유하고, Xcode는 App Store로 배포됩니다. `JAVA_HOME`은 별도로 선언한 JDK가 아니라 Android Studio가 번들한 runtime을 가리키므로, command line과 IDE가 항상 같은 Java version을 사용합니다.
+Terrapod does not install Android SDK components or Xcode. Android Studio's SDK Manager owns the SDK, and Xcode is distributed through the App Store. `JAVA_HOME` points to the runtime bundled with Android Studio rather than a separately declared JDK, so the command line and the IDE always use the same Java version.
 ```
 
 - [ ] **Step 5: Update CONTEXT.md**

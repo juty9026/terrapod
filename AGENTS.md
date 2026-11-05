@@ -12,6 +12,23 @@ Use the default five-label triage vocabulary. See `docs/agents/triage-labels.md`
 
 This repo uses a single-context domain docs layout. See `docs/agents/domain.md`.
 
+## Language
+
+Write everything you author for this repository in English: documents, code
+comments, test names and messages, and user-facing strings such as prompts,
+menu labels, and error messages. Korean text has no approved exceptions. This
+is a language rule, not an ASCII rule: emoji, symbols, and other non-ASCII
+characters stay allowed where they belong.
+
+The rule also covers project metadata written from now on: commit messages,
+and GitHub issue and pull request titles, bodies, and comments. PR bodies keep
+a respectful, polite tone, written in English. Existing commits, issues, and
+PRs stay as they were written.
+
+`tests/repository_language_test.sh` fails when any tracked text file contains
+Korean and lists each offending file and line. It does not scan commit history
+or GitHub metadata; the written rule alone governs those.
+
 ## Tests
 
 Run the whole suite from the repo root with `tests/run`. It executes every

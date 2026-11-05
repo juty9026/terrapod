@@ -5,7 +5,6 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$repo_root/tests/lib/harness.sh"
 managed_config="$repo_root/dot_config/gh/config.yml"
 readme="$repo_root/README.md"
-readme_ko="$repo_root/README.ko.md"
 make_tmp_dir
 chezmoi_config="$tmp_dir/chezmoi.toml"
 : >"$chezmoi_config"
@@ -119,7 +118,3 @@ assert_file_contains "$readme" '`~/.config/gh/config.yml`' \
   "README documents the managed GitHub CLI config path"
 assert_file_contains "$readme" '`~/.config/gh/hosts.yml`' \
   "README documents that GitHub CLI authentication stays machine-local"
-assert_file_contains "$readme_ko" '`~/.config/gh/config.yml`' \
-  "Korean README documents the managed GitHub CLI config path"
-assert_file_contains "$readme_ko" '`~/.config/gh/hosts.yml`' \
-  "Korean README documents that GitHub CLI authentication stays machine-local"

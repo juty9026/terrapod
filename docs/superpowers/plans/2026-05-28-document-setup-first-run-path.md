@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Translation note (2026-11-05, #318):** This plan originally quoted some text in Korean, mostly copy for the since-removed `README.ko.md`. That text is translated into English here; the plan is otherwise unchanged.
+
 **Goal:** Update the canonical and Korean README files so the public Quick Start and Preset documentation describe the Terrapod Setup first-run path from Issue #60.
 
 **Architecture:** Keep `README.md` as the source of truth and mirror its heading text and order exactly in `README.ko.md` to satisfy the heading drift check. Update only the Quick Start and Choose a Preset narrative, preserving Terrapod's existing boundaries around chezmoi, package-manager upgrades, routine command output, and the macOS App Group model.
@@ -116,13 +118,13 @@ git commit -m "docs: document setup first-run flow"
 
 - [ ] **Step 1: Replace the Korean Quick Start installer paragraph**
 
-In `README.ko.md`, replace the paragraph that starts `installer는 필요할 때` with this text:
+In `README.ko.md`, replace the paragraph that starts `When needed, the installer` with this text:
 
 ```md
-installer는 필요할 때 `chezmoi`를 `~/.local/bin`에 설치하고,
-`https://github.com/juty9026/terrapod.git`을 초기화한 뒤, checked-out source
-repository에서 Terrapod Setup을 실행합니다. setup이 성공한 다음에만 initial
-declared-state apply를 실행합니다.
+When needed, the installer installs `chezmoi` into `~/.local/bin`,
+initializes `https://github.com/juty9026/terrapod.git`, and then runs
+Terrapod Setup from the checked-out source repository. It runs the initial
+declared-state apply only after setup succeeds.
 ```
 
 - [ ] **Step 2: Insert the Korean Terrapod Setup explanation after that paragraph**
@@ -130,11 +132,12 @@ declared-state apply를 실행합니다.
 Immediately after the paragraph from Step 1, insert:
 
 ```md
-Terrapod Setup은 first-run review 단계입니다. Preset을 선택하게 한 뒤 그
-Preset이 쓸 구체적인 Terrapod-managed machine-local setting을 보여 주고,
-필요한 값을 customize한 다음, 확인을 받은 후에 설정을 씁니다. setup이
-cancel되거나 실패하면 installer는 initial apply 전에 멈추고, checked-out
-source repository에서 다시 시작할 resume command를 출력합니다.
+Terrapod Setup is the first-run review step. It has you choose a Preset,
+shows the concrete Terrapod-managed machine-local settings that Preset will
+write, lets you customize the values you need, and writes the settings after
+confirmation. If setup is canceled or fails, the installer stops before the
+initial apply and prints a resume command that starts again from the
+checked-out source repository.
 ```
 
 - [ ] **Step 3: Replace the Korean Choose a Preset opening paragraph**
@@ -142,15 +145,15 @@ source repository에서 다시 시작할 resume command를 출력합니다.
 In `README.ko.md`, replace:
 
 ```md
-Preset은 first-run setup 중 Terrapod이 machine에 펼쳐 놓을 형태입니다.
+A Preset is the shape Terrapod lays out on a machine during first-run setup.
 ```
 
 with:
 
 ```md
-Preset은 Terrapod Setup의 starting point입니다. machine에 쓸 구체적인
-machine-local setting을 제안하며, setup 중 그 값을 검토하고 customize한 뒤
-initial apply 전에 확정할 수 있습니다.
+A Preset is the starting point for Terrapod Setup. It proposes the concrete
+machine-local settings to write to the machine, and during setup you can
+review and customize those values and confirm them before the initial apply.
 ```
 
 - [ ] **Step 4: Replace the Korean post-table Preset paragraph**
@@ -158,15 +161,15 @@ initial apply 전에 확정할 수 있습니다.
 In `README.ko.md`, replace:
 
 ```md
-Preset은 구체적인 machine-local setting을 씁니다. 영구적인 mode가 아니므로, 나중에 Preset 정의가 바뀌어도 이미 설정된 machine이 조용히 다시 바뀌지는 않습니다.
+A Preset writes concrete machine-local settings. It is not a permanent mode, so a later change to a Preset definition does not silently change an already configured machine.
 ```
 
 with:
 
 ```md
-Setup은 확인을 받은 뒤 구체적인 machine-local setting을 씁니다. Preset은
-영구적인 mode가 아니므로, 나중에 Preset 정의가 바뀌어도 이미 설정된
-machine이 조용히 다시 바뀌지는 않습니다.
+Setup writes concrete machine-local settings after confirmation. A Preset
+is not a permanent mode, so a later change to a Preset definition does not
+silently change an already configured machine.
 ```
 
 - [ ] **Step 5: Verify Korean README expectations**

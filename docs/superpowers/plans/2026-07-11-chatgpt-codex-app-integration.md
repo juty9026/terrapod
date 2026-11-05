@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Translation note (2026-11-05, #318):** This plan originally quoted some text in Korean, mostly copy for the since-removed `README.ko.md`. That text is translated into English here; the plan is otherwise unchanged.
+
 **Goal:** Present the unified OpenAI desktop application as ChatGPT while preserving the `com.openai.codex` launcher identity and `codex-app` Homebrew installation token.
 
 **Architecture:** Keep OS-level identity and package-manager identity unchanged, and update only user-facing launcher, setup, status, and documentation copy. Record the temporary package-name mismatch next to the Brewfile declaration and enforce it with shell regression tests.
@@ -11,7 +13,7 @@
 ## Global Constraints
 
 - Hyper+1 displays `ChatGPT` and continues launching bundle ID `com.openai.codex`.
-- The `ai-apps` group describes the installed artifact as `Codex desktop app (updates to the unified ChatGPT desktop app)` in English and `Codex 데스크톱 앱(통합 ChatGPT 데스크톱 앱으로 업데이트)` in Korean.
+- The `ai-apps` group describes the installed artifact as `Codex desktop app (updates to the unified ChatGPT desktop app)` in English and with a Korean translation of that phrase in Korean.
 - The Homebrew token remains `codex-app`; `chatgpt` must not be added to the rendered `ai-apps` bundle.
 - Terrapod must not uninstall or warn about an existing unmanaged `chatgpt` cask.
 - Terrapod must not manage the unified application's default view.
@@ -78,7 +80,7 @@ Keep this cask and add an explanatory comment immediately above it:
 cask "codex-app"
 ```
 
-Change English inventories to `Codex desktop app (updates to the unified ChatGPT desktop app)` and Korean inventories to `Codex 데스크톱 앱(통합 ChatGPT 데스크톱 앱으로 업데이트)`, without changing the option key, bundle ID, or cask token.
+Change English inventories to `Codex desktop app (updates to the unified ChatGPT desktop app)` and Korean inventories to a Korean translation of that phrase, without changing the option key, bundle ID, or cask token.
 
 - [x] **Step 4: Run focused tests to verify they pass**
 

@@ -69,6 +69,10 @@ if [ "${1:-}" = "--zsh" ]; then
   exit 0
 fi
 
+if [ -n "${FZF_TEST_ARGS_LOG:-}" ]; then
+  printf '%s\n' "$@" >"$FZF_TEST_ARGS_LOG"
+fi
+
 if [ -n "${FZF_TEST_STDIN_LOG:-}" ]; then
   cat >"$FZF_TEST_STDIN_LOG"
 else
@@ -254,7 +258,7 @@ cd "$tmp_dir/plain" || fail "could not enter plain directory"
 if wcd >"$tmp_dir/wcd-not-git.out" 2>&1; then
   fail "wcd should fail outside a git repository"
 fi
-assert_file_contains "$tmp_dir/wcd-not-git.out" "이 디렉토리는 Git 저장소가 아닙니다." "wcd explains non-git directories"
+assert_file_contains "$tmp_dir/wcd-not-git.out" "This directory is not a Git repository." "wcd explains non-git directories"
 
 old_path="$PATH"
 PATH="$tmp_dir/git-only-bin"
@@ -262,7 +266,7 @@ if wcd >"$tmp_dir/wcd-missing-fzf.out" 2>&1; then
   fail "wcd should fail when fzf is unavailable"
 fi
 PATH="$old_path"
-assert_file_contains "$tmp_dir/wcd-missing-fzf.out" "fzf가 설치되어 있지 않습니다." "wcd explains missing fzf"
+assert_file_contains "$tmp_dir/wcd-missing-fzf.out" "fzf is not installed. Run mise install or brew install fzf." "wcd explains missing fzf"
 
 # `git worktree list` only emits a `bare` record for a bare main repository, so
 # the fixture's main is a bare clone and every checkout is a linked worktree.
@@ -382,6 +386,29 @@ if ! wcd >"$tmp_dir/wcd-cancel.out" 2>&1; then
 fi
 assert_pwd "$tmp_dir/worktree-main" "cancelled wcd should leave the current directory unchanged"
 pass "cancelled wcd keeps the current directory"
+
+# tools() offers each launcher entry as "command:label", shows only the label,
+# and runs the command of the selected entry. A stand-in duf records that the
+# selection was run rather than launching the real tool.
+function duf() {
+  print -r -- "duf ran" >"$tmp_dir/tools-ran.out"
+}
+export FZF_TEST_ARGS_LOG="$tmp_dir/tools-fzf-args.log"
+export FZF_TEST_STDIN_LOG="$tmp_dir/tools-fzf-stdin.log"
+export FZF_TEST_SELECTION="duf:💾 Disk usage"
+tools
+unset FZF_TEST_ARGS_LOG FZF_TEST_STDIN_LOG
+export FZF_TEST_SELECTION=""
+unfunction duf
+
+assert_file_contains "$tmp_dir/tools-fzf-stdin.log" "btop:🖥️  System monitor" "tools labels btop as the system monitor"
+assert_file_contains "$tmp_dir/tools-fzf-stdin.log" "lazygit:📦 Git UI" "tools labels lazygit as the Git UI"
+assert_file_contains "$tmp_dir/tools-fzf-stdin.log" "duf:💾 Disk usage" "tools labels duf as disk usage"
+assert_file_contains "$tmp_dir/tools-fzf-stdin.log" "dust:📁 Folder sizes" "tools labels dust as folder sizes"
+assert_file_contains "$tmp_dir/tools-fzf-stdin.log" "fastfetch:ℹ️  System info" "tools labels fastfetch as system info"
+assert_file_contains "$tmp_dir/tools-fzf-args.log" "--prompt=Select a tool: " "tools prompts for a tool in English"
+assert_file_contains "$tmp_dir/tools-fzf-args.log" "--with-nth=2" "tools shows only the label column"
+assert_file_contains "$tmp_dir/tools-ran.out" "duf ran" "tools runs the command of the selected entry"
 
 render_zshrc '{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableDevelopmentWorkspace":true}'
 source "$tmp_dir/home/.zshrc"

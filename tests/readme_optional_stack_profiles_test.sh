@@ -4,7 +4,6 @@ set -eu
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$repo_root/tests/lib/harness.sh"
 readme="$repo_root/README.md"
-korean_readme="$repo_root/README.ko.md"
 reader="$repo_root/dot_local/lib/terrapod/config-toml.sh"
 
 assert_key_row_contains() {
@@ -107,7 +106,6 @@ assert_minimal_vps_is_complete() {
 }
 
 assert_minimal_vps_is_complete "$readme" "README.md"
-assert_minimal_vps_is_complete "$korean_readme" "README.ko.md"
 
 assert_file_contains "$readme" '| `enableEditorStack` | `false` |' \
   "README documents enableEditorStack default"
@@ -305,6 +303,12 @@ assert_file_contains "$readme" 'Terrapod does not uninstall existing JetBrains M
   "README documents non-destructive legacy font migration"
 assert_file_contains "$readme" 'Quit Orca before rerunning `tpod apply` when Jetendard settings are deferred.' \
   "README documents Orca font-setting recovery"
+assert_file_contains "$readme" 'Jetendard stays pinned to the release Terrapod installed between installation-source changes and retries.' \
+  "README documents that Jetendard is pinned between installation-source changes and retries"
+assert_file_contains "$readme" '~/.local/lib/terrapod/jetendard-font install' \
+  "README documents the manual Jetendard upgrade command"
+assert_file_contains "$readme" 'Deleting that manifest is not an upgrade path' \
+  "README rules out manifest removal as an upgrade path"
 assert_file_contains "$readme" 'separate from `enableDevelopmentWorkspace`' \
   "README documents macOS Desktop App Stack separation from enableDevelopmentWorkspace"
 assert_file_contains "$readme" 'casks can affect shared applications' \

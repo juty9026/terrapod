@@ -31,13 +31,13 @@ if [[ -r "$ZSH/oh-my-zsh.sh" ]]; then
   source "$ZSH/oh-my-zsh.sh"
 fi
 
-# Starship 프롬프트
+# Starship prompt
 if command -v starship &>/dev/null; then
   eval "$(starship init zsh)"
 fi
 
 # ============================================
-# Zinit 플러그인 매니저
+# Zinit plugin manager
 # ============================================
 zinit_script="$HOME/.local/share/zinit/zinit.git/zinit.zsh"
 
@@ -134,13 +134,13 @@ fi
 # ============================================
 function tools() {
   local cmds=(
-    "btop:🖥️  시스템 모니터링"
+    "btop:🖥️  System monitor"
     "lazygit:📦 Git UI"
-    "duf:💾 디스크 사용량"
-    "dust:📁 폴더 크기 분석"
-    "fastfetch:ℹ️  시스템 정보"
+    "duf:💾 Disk usage"
+    "dust:📁 Folder sizes"
+    "fastfetch:ℹ️  System info"
   )
-  local selected=$(printf '%s\n' "${cmds[@]}" | fzf --delimiter=: --with-nth=2 --height=40% --reverse --border --prompt="도구 선택: ")
+  local selected=$(printf '%s\n' "${cmds[@]}" | fzf --delimiter=: --with-nth=2 --height=40% --reverse --border --prompt="Select a tool: ")
   local cmd="${selected%%:*}"
   [[ -n "$cmd" ]] && eval "$cmd"
 }
@@ -165,12 +165,12 @@ function zg() {
 # ============================================
 function wcd() {
   if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    echo "이 디렉토리는 Git 저장소가 아닙니다."
+    echo "This directory is not a Git repository."
     return 1
   fi
 
   if ! command -v fzf >/dev/null 2>&1; then
-    echo "fzf가 설치되어 있지 않습니다. mise install 또는 brew install fzf를 실행하세요."
+    echo "fzf is not installed. Run mise install or brew install fzf."
     return 1
   fi
 
