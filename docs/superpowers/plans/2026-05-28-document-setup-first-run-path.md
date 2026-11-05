@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **Translation note (2026-11-05, #318):** This plan originally quoted some text in Korean, mostly copy for the since-removed `README.ko.md`. That text is translated into English here; the plan is otherwise unchanged.
+> **Translation note (2026-11-05, #318):** This plan originally quoted some text in Korean, mostly copy for the since-removed `README.ko.md`. That text is translated into English here, so quoted Korean README copy and the test strings that matched it show their English meaning and no longer match any file literally. The plan is otherwise unchanged.
 
 **Goal:** Update the canonical and Korean README files so the public Quick Start and Preset documentation describe the Terrapod Setup first-run path from Issue #60.
 

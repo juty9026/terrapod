@@ -38,7 +38,7 @@ executable bit (mode 755) so each one also runs directly as
 `./tests/<name>_test.sh`; `tests/lib/harness.sh` is sourced, not executed,
 and stays 644.
 
-The suite needs `chezmoi`, `zsh`, `python3`, and `jq` on `PATH`.
+The suite needs `git`, `chezmoi`, `zsh`, `python3`, and `jq` on `PATH`.
 
 A Lua interpreter (`lua5.4`, `lua`, or `luajit`, in that order) is optional:
 `tests/hammerspoon_runtime_test.sh` loads `dot_hammerspoon/init.lua` through

@@ -31,10 +31,11 @@ import re
 import sys
 
 root = sys.argv[1]
-# Hangul Jamo, Compatibility Jamo, Jamo Extended-A, Syllables, Jamo
-# Extended-B, and the halfwidth Hangul forms.
+# Hangul Jamo, Compatibility Jamo, the parenthesized and circled Hangul in
+# Enclosed CJK, Jamo Extended-A, Syllables, Jamo Extended-B, and the halfwidth
+# Hangul forms.
 hangul = re.compile(
-    "[\u1100-\u11ff\u3130-\u318f\ua960-\ua97f\uac00-\ud7ff\uffa0-\uffdc]"
+    "[\u1100-\u11ff\u3130-\u318f\u3200-\u321e\u3260-\u327e\ua960-\ua97f\uac00-\ud7ff\uffa0-\uffdc]"
 )
 
 found = False
@@ -50,7 +51,7 @@ for path in sys.stdin.buffer.read().split(b"\0"):
     if b"\0" in data:
         continue
     text = data.decode("utf-8", "replace")
-    for number, line in enumerate(text.splitlines(), 1):
+    for number, line in enumerate(text.split("\n"), 1):
         if hangul.search(line):
             print(f"{name}:{number}: {line.strip()}")
             found = True
@@ -60,9 +61,8 @@ sys.exit(1 if found else 0)
 }
 
 new_fixture_repo() {
-  fixture="$tmp_dir/$1"
-  mkdir -p "$fixture"
-  git -C "$fixture" init --quiet
+  mkdir -p "$tmp_dir/$1"
+  git -C "$tmp_dir/$1" init --quiet
 }
 
 # A tracked file with Korean text fails the scan and is named in the report;
@@ -108,7 +108,10 @@ assert_status "$status" 0 "emoji, symbols, diacritics, and binary files pass the
 # Without a Git work tree the scan cannot pass by default.
 mkdir -p "$tmp_dir/not-a-repo"
 status=0
-report="$(GIT_CEILING_DIRECTORIES="$tmp_dir" scan_tracked_korean "$tmp_dir/not-a-repo")" || status=$?
+report="$(
+  export GIT_CEILING_DIRECTORIES="$tmp_dir"
+  scan_tracked_korean "$tmp_dir/not-a-repo"
+)" || status=$?
 assert_status "$status" 2 "the language check refuses a directory that is not a Git work tree"
 
 status=0
