@@ -69,14 +69,32 @@ assert_count() {
   pass "$message"
 }
 
+# Diffs $tmp_dir/<name>.expected against the scenario's trace and prints the
+# diff on mismatch. The optional third argument replaces the default
+# $tmp_dir/<name>.out when the scenario compares a filtered trace.
+assert_trace_matches() {
+  scenario_name="$1"
+  message="$2"
+  actual_file="${3:-$tmp_dir/$scenario_name.out}"
+
+  if ! diff -u "$tmp_dir/$scenario_name.expected" "$actual_file" >"$tmp_dir/$scenario_name.diff"; then
+    cat "$tmp_dir/$scenario_name.diff" >&2
+    fail "$message"
+  fi
+
+  pass "$message"
+}
+
 # Every scenario starts the same way: load the stub, load init.lua on top of
 # it, then discard the load-time trace so assertions see only what the
-# scenario itself triggers.
+# scenario itself triggers. `hyper` names the hyper chord's modifiers the way
+# init.lua does, declared here independently of it.
 scenario_preamble='
 local harness = dofile(arg[1])
 dofile(arg[2])
 local loadTrace = harness.trace
 harness.trace = {}
+local hyper = { "ctrl", "alt", "cmd", "shift" }
 '
 
 # --- Load-time side effects ---------------------------------------------------
@@ -118,11 +136,7 @@ modal.exit
 release none f18
 TRACE
 
-if ! diff -u "$tmp_dir/modal_launch.expected" "$tmp_dir/modal_launch.out" >"$tmp_dir/modal_launch.diff"; then
-  cat "$tmp_dir/modal_launch.diff" >&2
-  fail "holding the leader and pressing an app key enters the modal, focuses the app and exits the modal"
-fi
-pass "holding the leader and pressing an app key enters the modal, focuses the app and exits the modal"
+assert_trace_matches modal_launch "holding the leader and pressing an app key enters the modal, focuses the app and exits the modal"
 
 assert_count "$modal_trace" "modal.exit" 1 "releasing the leader after an app key does not exit the modal a second time"
 
@@ -177,7 +191,7 @@ assert_not_contains "$modal_inert_trace" "app.activate" "an app key without the 
 hyper_trace="$(run_scenario hyper <<EOF
 $scenario_preamble
 harness.addApp("com.mitchellh.ghostty")
-harness.press("t", { "ctrl", "alt", "cmd", "shift" })
+harness.press("t", hyper)
 harness.printTrace()
 EOF
 )"
@@ -196,7 +210,7 @@ for _, key in ipairs({ "1", "2", "3" }) do
   harness.press("f18")
   harness.press(key)
   harness.release("f18")
-  harness.press(key, { "ctrl", "alt", "cmd", "shift" })
+  harness.press(key, hyper)
 end
 harness.printTrace()
 EOF
@@ -229,15 +243,11 @@ press alt+cmd+ctrl+shift 3
 app.activate dev.zed.Zed
 TRACE
 
-if ! diff -u "$tmp_dir/number_keys.expected" "$tmp_dir/number_keys.out" >"$tmp_dir/number_keys.diff"; then
-  cat "$tmp_dir/number_keys.diff" >&2
-  fail "1, 2 and 3 focus Orca, Paseo and Zed on both the leader modal and the hyper chord"
-fi
-pass "1, 2 and 3 focus Orca, Paseo and Zed on both the leader modal and the hyper chord"
+assert_trace_matches number_keys "1, 2 and 3 focus Orca, Paseo and Zed on both the leader modal and the hyper chord"
 
 help_trace="$(run_scenario help <<EOF
 $scenario_preamble
-harness.press("/", { "ctrl", "alt", "cmd", "shift" })
+harness.press("/", hyper)
 harness.printTrace()
 EOF
 )"
@@ -268,11 +278,7 @@ timer.doAfter 0.35
 TRACE
 
 grep '^timer.doAfter' "$tmp_dir/retry_failing.out" >"$tmp_dir/retry_failing.timers" || true
-if ! diff -u "$tmp_dir/retry_failing.expected" "$tmp_dir/retry_failing.timers" >"$tmp_dir/retry_failing.diff"; then
-  cat "$tmp_dir/retry_failing.diff" >&2
-  fail "activating Ghostty schedules one retry per configured delay and nothing more"
-fi
-pass "activating Ghostty schedules one retry per configured delay and nothing more"
+assert_trace_matches retry_failing "activating Ghostty schedules one retry per configured delay and nothing more" "$tmp_dir/retry_failing.timers"
 
 assert_count "$retry_failing_trace" "keycodes.currentSourceID set com.apple.keylayout.ABC" 4 "a switch that keeps failing is requested once per retry"
 assert_count "$retry_failing_trace" "keycodes.setLayout ABC" 4 "a failed source switch falls back to the ABC layout on every retry"
