@@ -108,6 +108,10 @@ _Avoid_: option, flag, toggle, managed key
 The optional, unmanaged `~/.gitconfig.local` file that the seeded `~/.gitconfig` includes for Git settings that belong to one machine only.
 _Avoid_: managed Git config, user Git config, SSH allowed signers
 
+**1Password Service Account Helpers**:
+Terrapod-provided shell commands for registering machine-local service-account tokens and selecting a service account for an individual 1Password CLI invocation.
+_Avoid_: service-account login, global account switch
+
 **Canonical README**:
 The English `README.md` that defines the authoritative Terrapod README content.
 _Avoid_: primary docs, source README
@@ -411,6 +415,13 @@ _Avoid_: primary docs, source README
 - Error output avoids product metaphor and states the failed condition plus the next useful action.
 - Shared Git settings belong to the managed `~/.config/git/config`, identity and signing settings belong to the seeded `~/.gitconfig`, and per-machine overrides belong to the **Machine-Local Git Include**.
 - The seeded `~/.gitconfig` is created once, points at the **Machine-Local Git Include**, and is never re-applied, so an existing machine's `~/.gitconfig` is untouched by this seeding.
+- The **1Password Service Account Helpers** ([issue #322](https://github.com/juty9026/terrapod/issues/322)) bring `opx` and `opx-add` under **Terrapod** management; this work does not introduce a general-purpose local shell snippet loader.
+- The helpers keep tokens machine-local and outside the **Terrapod Source Repository**. Users register tokens separately on each machine; `opx` supplies the selected token only to the individual 1Password CLI invocation, without changing the parent shell's authentication environment.
+- The helpers are available in both machine profiles without a new **Managed Setting**. Their distribution does not change 1Password CLI installation ownership: the launcher **macOS App Group** remains its declared provider, and a missing `op` is reported when a helper requiring it is invoked, not during shell startup.
+- `opx-add` asks for confirmation before replacing an existing named token; cancellation preserves the existing token.
+- Both helpers accept account names matching `[A-Za-z0-9][A-Za-z0-9_-]*` only, so a name cannot select a path outside the token directory.
+- `opx` requires an account name and a command, validates required inputs, token availability, and `op` availability before execution, then forwards the remaining arguments, stdout, stderr, and exit status without adding success output.
+- Existing helpers appended to this workstation's `.zshrc` were removed once, after backing up that file, while keeping existing token files. Other users receive manual migration guidance rather than a general-purpose startup-file rewrite.
 
 ## Example Dialogue
 
