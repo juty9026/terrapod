@@ -78,6 +78,12 @@ fi
 # ============================================
 # Modern CLI aliases
 # ============================================
+# 1Password Service Account Helpers are shared by both machine profiles.
+# Recovery-oriented startup also works before the module has been applied.
+if [[ -r "$HOME/.config/zsh/1password-service-accounts.zsh" ]]; then
+  source "$HOME/.config/zsh/1password-service-accounts.zsh"
+fi
+
 alias ls="lsd"
 alias ll="lsd -la"
 alias lt="lsd --tree"

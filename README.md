@@ -388,6 +388,54 @@ An already-set `DOCKER_HOST`, including an empty value, is preserved. Machine-lo
 
 This applies to ordinary non-interactive, interactive, and login zsh and processes inheriting their environment. It does not reconfigure existing parent processes, independently launched GUI/launchd processes, directly started sh, or `zsh -f` sessions that skip user startup files.
 
+### 1Password Service Account Helpers
+
+Both the macOS Terminal Profile and VPS Shell Profile provide `opx` and
+`opx-add` in interactive zsh, independently of optional stacks and macOS App
+Groups. Apply Terrapod and start a new shell to load them.
+
+```sh
+opx-add work                  # Paste a token with terminal echo disabled
+opx work vault list
+opx work item get "Example" --format=json
+```
+
+Names must match `[A-Za-z0-9][A-Za-z0-9_-]*`. `opx-add <name>` takes exactly
+one name and asks for explicit confirmation before replacing a registration.
+Declining, empty or interrupted input, and failed saves preserve the previous
+token. Registration does not require `op` to be installed.
+
+Tokens belong to each machine: register them separately on each one. They
+remain unmanaged at `~/.config/op/sa/<name>`, with directory mode `700` and
+file mode `600`; existing registrations at this location work without
+conversion. Keep tokens out of the repository, setup data, and shell startup
+files. Terrapod manages only the helper definitions in
+`~/.config/zsh/1password-service-accounts.zsh` and their `.zshrc` loader.
+
+`opx <name> <op arguments...>` selects the token for that invocation alone,
+preserves the parent shell's authentication environment, and forwards the
+CLI's arguments, stdin, stdout, stderr, and exit status. Missing, unreadable,
+empty, or symlinked token files fail before execution with registration
+guidance. Loading the helpers does not read tokens or run `op`.
+
+1Password CLI installation still belongs to the launcher macOS App Group.
+These helpers do not enable launcher or add an Ubuntu installer. Install the
+CLI separately on machines where Terrapod does not provide it. A missing `op`
+is reported when invoking `opx`, without affecting shell startup.
+
+If you previously appended your own `opx` and `opx-add` definitions to
+`~/.zshrc`, back it up first:
+
+```sh
+cp -p ~/.zshrc ~/.zshrc.before-opx-migration."$(date +%Y%m%d%H%M%S)"
+```
+
+Remove only those old function definitions, preserving unrelated local edits
+and all token files. Review `tpod diff`, then run `tpod apply` and resolve any
+normal chezmoi conflicts while retaining your other changes. Start a new
+shell afterwards. Routine updates do not rewrite local snippets or
+force-overwrite modified startup files.
+
 ### Zellij shortcuts
 
 Terrapod-managed `.zshrc` exposes these Zellij helpers:

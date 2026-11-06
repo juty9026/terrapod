@@ -60,6 +60,15 @@ fi
 
 pass "repository documentation is ignored by chezmoi"
 
+for managed_paths in "$macos_managed" "$ubuntu_managed" \
+  "$macos_development_workspace_managed" "$development_workspace_managed"; do
+  assert_managed_paths_include_prefix "$managed_paths" \
+    'dot_config/zsh/1password-service-accounts.zsh' \
+    "both profiles manage 1Password Service Account Helpers regardless of optional stacks"
+  assert_managed_paths_exclude_prefix "$managed_paths" 'dot_config/op' \
+    "machine-local 1Password credentials stay outside managed source"
+done
+
 assert_managed_paths_exclude_prefix \
   "$macos_ai_cli_tools_managed" \
   "Brewfile.ai-cli-tools.tmpl" \
