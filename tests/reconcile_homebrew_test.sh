@@ -581,13 +581,11 @@ browsers_packages="$(
   printf '%s\n' "$browsers_brewfile" |
     awk '/^[[:space:]]*(cask|brew)[[:space:]]+"/ { print }'
 )"
-expected_browsers_packages='cask "aside"
-cask "google-chrome"'
+expected_browsers_packages='cask "google-chrome"'
 assert_equals \
   "$browsers_packages" \
   "$expected_browsers_packages" \
   "browsers group renders exactly the expected packages"
-assert_not_contains "$macos_brewfile" 'cask "aside"' "macOS default does not render Aside"
 assert_not_contains "$macos_brewfile" 'cask "google-chrome"' "macOS default does not render Google Chrome"
 
 assert_not_contains "$macos_brewfile" 'cask "android-studio"' "macOS default does not render Android Studio"

@@ -265,7 +265,7 @@ _Avoid_: primary docs, source README
 - Mandatory stack warning markers such as Homebrew core, Ubuntu bootstrap, shell integrations, mise tools, and the GitHub CLI Extension Set are cleared only by successful reruns because their desired state cannot be disabled by optional settings.
 - Optional stack or app-group warning marker content may be cleared or reduced when the corresponding desired optional setting is disabled.
 - Terrapod install warnings are updated by both first-run installation and routine `tpod apply` because routine apply is the recovery path for previously failed installer categories.
-- Terrapod install warning categories include stable filename slugs for Homebrew core bundle (`homebrew-core`), Homebrew desktop app bundle (`homebrew-desktop-apps`), Ubuntu bootstrap (`ubuntu-bootstrap`), shell integrations (`shell-integrations`), mise runtime tools (`mise-tools`), optional AI CLI tools (`optional-ai-cli-tools`), Jetendard fonts (`jetendard-font`), Jetendard settings (`jetendard-settings`), and the **GitHub CLI Extension Set** (`gh-extensions`); best-effort UI nudges such as opening Karabiner do not need install warning markers.
+- Terrapod install warning categories include stable filename slugs for Homebrew core bundle (`homebrew-core`), Homebrew desktop app bundle (`homebrew-desktop-apps`), Ubuntu bootstrap (`ubuntu-bootstrap`), shell integrations (`shell-integrations`), mise runtime tools (`mise-tools`), optional AI CLI tools (`optional-ai-cli-tools`), Jetendard fonts (`jetendard-font`), Jetendard settings (`jetendard-settings`), the **GitHub CLI Extension Set** (`gh-extensions`), and ego lite (`ego-lite`); best-effort UI nudges such as opening Karabiner do not need install warning markers.
 - Terrapod install warning markers use shell-friendly key/value content with stable category, summary, guidance, and `updated_at` fields instead of free-form logs or captured stack traces.
 - Terrapod install warning marker values stay single-line so shell parsing remains predictable; longer human-readable explanations belong in `tpod doctor` output.
 - Terrapod install warning marker `updated_at` values use UTC ISO 8601 timestamps such as `2026-06-02T03:12:45Z`.
@@ -278,7 +278,7 @@ _Avoid_: primary docs, source README
 - Terrapod install warning marker path resolution, atomic write, timestamp creation, and clear behavior should be implemented through shared shell helper logic rather than duplicated independently in each installer script.
 - Source-side installer scripts and installed `tpod` commands should share the same Terrapod install warning marker contract even if the helper file placement is decided during implementation.
 - The optional AI CLI tools warning marker keeps one category for the **Optional AI Tool Stack** across both of its package sources but includes the failed tool names in its summary or guidance fields.
-- The Homebrew desktop app warning marker keeps one category for the **macOS Desktop App Stack** but includes failed cask names and, when available, their **macOS App Group** names in its summary or guidance fields.
+- The Homebrew desktop app warning marker keeps one category for the Homebrew packages of the **macOS Desktop App Stack** but includes failed cask names and, when available, their **macOS App Group** names in its summary or guidance fields.
 - The Homebrew core warning marker includes failed formula or cask names only when they can be identified reliably; otherwise it records the core bundle failure summary and points users to the visible installer output and rerun guidance.
 - Terrapod install warning marker detail should reflect reliable observations only; bulk installers may record bulk failure summaries when failed item names cannot be identified without brittle output parsing.
 - `tpod doctor` treats current command availability checks and Terrapod install warning markers as separate signals; unresolved install warning markers remain actionable warnings even when some commands are currently available.
@@ -370,12 +370,15 @@ _Avoid_: primary docs, source README
 - The managed `.zshenv` exports `ANDROID_HOME`, `ANDROID_SDK_ROOT`, and `JAVA_HOME` only when the mobile-dev **macOS App Group** is enabled, and renders them before the machine-local override loop so explicit overrides still run last.
 - `JAVA_HOME` resolves to the runtime bundled with Android Studio, so **Terrapod** declares no separate JDK.
 - Android SDK components and Xcode remain outside **Terrapod** ownership; the Android SDK Manager owns the former and the App Store distributes the latter.
-- The browsers **macOS App Group** contains Aside and Google Chrome.
+- The browsers **macOS App Group** contains ego lite and Google Chrome.
+- The browsers **macOS App Group** installs Google Chrome as a Homebrew cask and ego lite from its official macOS DMG, because ego lite has no official cask. See ADR 0025.
+- Replacing Aside does not uninstall it; an existing Aside install stays on the machine unmanaged, with its data.
 - The ai-apps **macOS App Group** contains Claude, ChatGPT including Codex, and Gemini, independent of development-apps and the **Optional AI Tool Stack**.
 - The restored `enableMacosAppGroupAiApps` **Managed Setting** reuses an existing true value to select this three-app group; configs without the key require explicit setup or configure.
 - The workstation **Preset** enables ai-apps; minimal and development leave it disabled.
 - Gemini is excluded from installation and reported as not applicable on Macs without Apple Silicon or macOS 15 or later. Claude and ChatGPT remain selected.
 - The Hammerspoon app launcher maps Orca to `1`, Paseo to `2`, and Zed to `3`.
+- The Hammerspoon app launcher maps ego lite to `B` and Google Chrome to `C`.
 - Orca's bundled `orca` CLI remains an artifact of the development-apps **macOS App Group** and is not a member of the cross-profile **Optional AI Tool Stack**.
 - Removing ChatGPT Atlas from the Hammerspoon app launcher is part of the planned launcher change.
 - Individual macOS app toggles are excluded from the current **Terrapod** setup scope.

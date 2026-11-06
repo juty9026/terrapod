@@ -81,7 +81,7 @@ t	Ghostty	com.mitchellh.ghostty
 s	Slack	com.tinyspeck.slackmacgap
 d	Discord	com.hnc.Discord
 n	Notion	notion.id
-b	Aside	at.studio.AsideBrowser
+b	ego lite	com.citrolabs.ego.lite
 c	Google Chrome	com.google.Chrome
 1	Orca	com.stablyai.orca
 2	Paseo	sh.paseo.desktop

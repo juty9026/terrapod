@@ -35,6 +35,7 @@ tests/**
 .chezmoiscripts/50-open-karabiner-if-needed.sh
 .chezmoiscripts/65-install-jetendard-font.sh
 .chezmoiscripts/70-apply-jetendard-settings.sh
+.chezmoiscripts/80-install-ego-lite.sh
 .local/lib/terrapod/jetendard-font
 .local/lib/terrapod/jetendard-font-install.sh
 .local/lib/terrapod/jetendard-font-status.sh

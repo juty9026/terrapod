@@ -1,0 +1,124 @@
+{{ if eq .chezmoi.os "darwin" -}}
+#!/bin/sh
+set -eu
+
+{{ include "dot_local/lib/terrapod/install-warnings.sh" }}
+
+{{ include "dot_local/lib/terrapod/install-warning-script.sh" }}
+
+declare_install_warning_category ego-lite "ego lite install needs attention"
+
+{{ if not (default false (get . "enableMacosAppGroupBrowsers")) }}
+finish_install_warning_category
+{{ else }}
+{{ include "dot_local/lib/terrapod/homebrew-paths.sh" }}
+
+EGO_LITE_BUNDLE_ID=com.citrolabs.ego.lite
+EGO_LITE_APP="ego lite.app"
+# The override is the test seam that keeps the suite away from /Applications.
+EGO_LITE_APPLICATIONS_DIR="${TERRAPOD_MACOS_APPLICATIONS_DIR:-/Applications}"
+EGO_LITE_USER_APPLICATIONS_DIR="$HOME/Applications"
+EGO_LITE_DMG_URL_ARM64=https://cdn.ego.app/setup/macos/arm64/egolite-fHoqgZ74bOEM.dmg
+EGO_LITE_DMG_URL_X64=https://cdn.ego.app/setup/macos/x64/egolite-fHoqgZ74bOEM.dmg
+
+ego_lite_work_dir=
+ego_lite_stage_dir=
+ego_lite_mount_dir=
+# Names the step in progress, so the warning says why the app is missing.
+ego_lite_install_step=
+
+cleanup_ego_lite_install() {
+  cleanup_status=0
+
+  if [ -n "$ego_lite_stage_dir" ]; then
+    rm -rf "$ego_lite_stage_dir" || cleanup_status=1
+    ego_lite_stage_dir=
+  fi
+
+  if [ -n "$ego_lite_mount_dir" ]; then
+    mounted_dir="$ego_lite_mount_dir"
+    ego_lite_mount_dir=
+
+    if ! hdiutil detach "$mounted_dir" -quiet && ! hdiutil detach "$mounted_dir" -quiet -force; then
+      # The image is still mounted inside the work directory, so leave that
+      # directory for the operating system instead of deleting through a mount.
+      ego_lite_work_dir=
+      return 1
+    fi
+  fi
+
+  if [ -n "$ego_lite_work_dir" ]; then
+    rm -rf "$ego_lite_work_dir" || cleanup_status=1
+    ego_lite_work_dir=
+  fi
+
+  return "$cleanup_status"
+}
+
+trap 'cleanup_ego_lite_install || true' EXIT HUP INT TERM
+
+app_bundle_id() {
+  plutil -extract CFBundleIdentifier raw -o - "$1/Contents/Info.plist" 2>/dev/null
+}
+
+ego_lite_is_installed() {
+  for applications_dir in "$EGO_LITE_APPLICATIONS_DIR" "$EGO_LITE_USER_APPLICATIONS_DIR"; do
+    [ "$(app_bundle_id "$applications_dir/$EGO_LITE_APP")" != "$EGO_LITE_BUNDLE_ID" ] || return 0
+  done
+
+  return 1
+}
+
+ego_lite_dmg_url() {
+  case "$(terrapod_homebrew_hardware_arch darwin)" in
+    arm64) printf '%s\n' "$EGO_LITE_DMG_URL_ARM64" ;;
+    x86_64) printf '%s\n' "$EGO_LITE_DMG_URL_X64" ;;
+    *) return 1 ;;
+  esac
+}
+
+install_ego_lite() {
+  # Terrapod restores a missing app only. ego lite's own updater owns version
+  # freshness, so an existing install is never fetched for, replaced or opened.
+  ! ego_lite_is_installed || return 0
+
+  destination="$EGO_LITE_APPLICATIONS_DIR/$EGO_LITE_APP"
+  if [ -e "$destination" ]; then
+    ego_lite_install_step="$destination is not ego lite; move it aside"
+    return 1
+  fi
+
+  ego_lite_install_step="unsupported architecture"
+  dmg_url="$(ego_lite_dmg_url)" || return 1
+
+  # Staging beside the destination keeps the final move a same-volume rename, so
+  # an interrupted copy can never leave a partial app at the destination. It
+  # comes first because an unwritable directory must not cost a download.
+  ego_lite_install_step="write access to $EGO_LITE_APPLICATIONS_DIR"
+  ego_lite_stage_dir="$(mktemp -d "$EGO_LITE_APPLICATIONS_DIR/.terrapod-ego-lite.XXXXXX")" || return 1
+
+  echo "Installing ego lite..."
+  ego_lite_install_step="download"
+  ego_lite_work_dir="$(mktemp -d "${TMPDIR:-/tmp}/terrapod-ego-lite.XXXXXX")" || return 1
+  curl -fsSL --retry 3 "$dmg_url" -o "$ego_lite_work_dir/ego-lite.dmg" || return 1
+
+  ego_lite_install_step="DMG mount"
+  mount_dir="$ego_lite_work_dir/mount"
+  mkdir "$mount_dir" || return 1
+  hdiutil attach "$ego_lite_work_dir/ego-lite.dmg" -nobrowse -noautoopen -readonly -mountpoint "$mount_dir" >/dev/null || return 1
+  ego_lite_mount_dir="$mount_dir"
+
+  ego_lite_install_step="DMG identity check"
+  [ "$(app_bundle_id "$mount_dir/$EGO_LITE_APP")" = "$EGO_LITE_BUNDLE_ID" ] || return 1
+
+  ego_lite_install_step="copy"
+  ditto "$mount_dir/$EGO_LITE_APP" "$ego_lite_stage_dir/$EGO_LITE_APP" || return 1
+  mv "$ego_lite_stage_dir/$EGO_LITE_APP" "$destination" || return 1
+}
+
+install_ego_lite || note_failed_install_warning_item "ego lite ($ego_lite_install_step)"
+cleanup_ego_lite_install || note_failed_install_warning_item "ego lite DMG cleanup"
+
+finish_install_warning_category "Failed: %s. Review the installer output, then rerun tpod apply."
+{{ end }}
+{{- end }}

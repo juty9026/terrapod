@@ -42,7 +42,6 @@ brew "mobile-dev-inc/tap/maestro", trusted: true
 {{ $groupKey := "enableMacosAppGroupBrowsers" -}}
 {{ if default false (get . $groupKey) -}}
 # terrapod-macos-app-group: {{ $groupKey }}
-cask "aside"
 cask "google-chrome"
 {{ end -}}
 {{ $groupKey := "enableMacosAppGroupAiApps" -}}
