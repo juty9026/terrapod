@@ -41,7 +41,8 @@ terrapod_install_warning_categories() {
     optional-ai-cli-tools \
     jetendard-font \
     jetendard-settings \
-    gh-extensions
+    gh-extensions \
+    ego-lite
 }
 
 terrapod_install_warning_is_category() {

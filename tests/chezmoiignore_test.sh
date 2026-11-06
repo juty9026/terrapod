@@ -131,6 +131,7 @@ done
 macos_only_entries="
 .chezmoiscripts/run_onchange_after_50-open-karabiner-if-needed.sh.tmpl
 .chezmoiscripts/run_after_65-install-jetendard-font.sh.tmpl
+.chezmoiscripts/run_after_80-install-ego-lite.sh.tmpl
 dot_local/lib/terrapod/executable_jetendard-font
 dot_local/lib/terrapod/executable_jetendard-settings
 dot_local/lib/terrapod/jetendard-font-install.sh

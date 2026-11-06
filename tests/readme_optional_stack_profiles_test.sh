@@ -191,8 +191,8 @@ assert_key_row_contains '`enableMacosAppGroupMobileDev`' 'mobile-dev-inc/tap/mae
   "README documents Maestro's fully-qualified formula source"
 assert_key_row_contains '`enableMacosAppGroupBrowsers`' 'browsers' \
   "README documents browsers group on its option row"
-assert_key_row_contains '`enableMacosAppGroupBrowsers`' 'Aside and Google Chrome' \
-  "README documents Aside and Google Chrome on the browsers option row"
+assert_key_row_contains '`enableMacosAppGroupBrowsers`' 'ego lite and Google Chrome' \
+  "README documents ego lite and Google Chrome on the browsers option row"
 assert_file_contains "$readme" 'Terrapod does not install Android SDK components or Xcode. Android Studio'"'"'s SDK Manager owns the SDK, and Xcode is distributed through the App Store.' \
   "README documents the mobile development scope boundary"
 

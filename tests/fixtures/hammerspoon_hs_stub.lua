@@ -20,6 +20,9 @@ local harness = {
   appWatchers = {},
   windowSubscriptions = {},
   apps = {},
+  -- Bundle IDs that launch successfully while not running. Any other app that
+  -- is not running fails to launch.
+  launchable = {},
   frontmost = nil,
   currentSourceID = "com.apple.inputmethod.Korean.2SetKorean",
   -- hs.keycodes.currentSourceID(id) and hs.keycodes.setLayout(name) report
@@ -226,7 +229,7 @@ end
 
 function hs.application.launchOrFocusByBundleID(bundleID)
   record("application.launchOrFocusByBundleID " .. bundleID)
-  return harness.apps[bundleID] ~= nil
+  return harness.apps[bundleID] ~= nil or harness.launchable[bundleID] == true
 end
 
 function hs.application.frontmostApplication()

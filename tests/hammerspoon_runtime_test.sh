@@ -253,6 +253,86 @@ EOF
 )"
 
 assert_contains "$help_trace" '\n1 : Orca\n2 : Paseo\n3 : Zed\n' "the help toast lists 1 : Orca, 2 : Paseo and 3 : Zed in order"
+assert_contains "$help_trace" '\nB : ego lite\n' "the help toast names ego lite for B"
+assert_not_contains "$help_trace" 'Aside' "the help toast no longer names Aside"
+
+# Both B entry points reach ego lite through the shared launcher contract.
+browser_running_trace="$(run_scenario browser_running <<EOF
+$scenario_preamble
+harness.addApp("com.citrolabs.ego.lite")
+harness.press("f18")
+harness.press("b")
+harness.release("f18")
+harness.press("b", hyper)
+harness.printTrace()
+EOF
+)"
+
+cat >"$tmp_dir/browser_running.expected" <<'TRACE'
+press none f18
+modal.enter
+press none b (modal)
+app.activate com.citrolabs.ego.lite
+modal.exit
+release none f18
+press alt+cmd+ctrl+shift b
+app.activate com.citrolabs.ego.lite
+TRACE
+
+assert_trace_matches browser_running "B activates a running ego lite on both the leader modal and the hyper chord, and the leader exits"
+
+browser_hidden_trace="$(run_scenario browser_hidden <<EOF
+$scenario_preamble
+harness.addApp("com.citrolabs.ego.lite", { hidden = true })
+harness.press("f18")
+harness.press("b")
+harness.release("f18")
+harness.printTrace()
+EOF
+)"
+
+assert_contains "$browser_hidden_trace" "app.unhide com.citrolabs.ego.lite" "leader B unhides a hidden ego lite"
+assert_contains "$browser_hidden_trace" "app.activate com.citrolabs.ego.lite" "leader B activates a hidden ego lite"
+
+browser_hidden_hyper_trace="$(run_scenario browser_hidden_hyper <<EOF
+$scenario_preamble
+harness.addApp("com.citrolabs.ego.lite", { hidden = true })
+harness.press("b", hyper)
+harness.printTrace()
+EOF
+)"
+
+assert_contains "$browser_hidden_hyper_trace" "app.unhide com.citrolabs.ego.lite" "hyper B unhides a hidden ego lite"
+assert_contains "$browser_hidden_hyper_trace" "app.activate com.citrolabs.ego.lite" "hyper B activates a hidden ego lite"
+
+browser_stopped_trace="$(run_scenario browser_stopped <<EOF
+$scenario_preamble
+harness.launchable["com.citrolabs.ego.lite"] = true
+harness.press("f18")
+harness.press("b")
+harness.release("f18")
+harness.press("b", hyper)
+harness.printTrace()
+EOF
+)"
+
+assert_count "$browser_stopped_trace" "application.launchOrFocusByBundleID com.citrolabs.ego.lite" 2 "both B entry points launch a stopped ego lite by bundle ID"
+assert_not_contains "$browser_stopped_trace" "alert.show" "a successful ego lite launch shows no alert"
+assert_count "$browser_stopped_trace" "modal.exit" 1 "the leader exits after launching a stopped ego lite"
+
+browser_failed_trace="$(run_scenario browser_failed <<EOF
+$scenario_preamble
+harness.press("f18")
+harness.press("b")
+harness.release("f18")
+harness.press("b", hyper)
+harness.printTrace()
+EOF
+)"
+
+assert_count "$browser_failed_trace" "alert.show Could not launch ego lite" 2 "both B entry points name ego lite when its launch fails"
+assert_count "$browser_failed_trace" "modal.exit" 1 "the leader exits after a failed ego lite launch"
+assert_not_contains "$browser_failed_trace" "at.studio.AsideBrowser" "neither B entry point reaches Aside"
 
 # --- Ghostty input-source retry -------------------------------------------------
 

@@ -179,10 +179,12 @@ installs that rendered bundle:
 - `monitoring`: iStat Menus.
 - `development-apps`: Zed, Orca ADE (`stablyai/orca/orca`), and OrbStack.
 - `mobile-dev`: Android Studio and Maestro (`mobile-dev-inc/tap/maestro`).
-- `browsers`: Aside and Google Chrome.
+- `browsers`: ego lite and Google Chrome.
 - `ai-apps`: Claude (`claude`), ChatGPT including Codex (`chatgpt`), and Gemini (`google-gemini`).
 
 On unsupported Macs, Terrapod excludes only Gemini from the installation bundle and prints the reason; Claude and ChatGPT still install. See [Google’s desktop requirements](https://gemini.google/desktop/). The legacy `codex-app` cask is deprecated; Terrapod uses [Homebrew’s recommended `chatgpt` replacement](https://formulae.brew.sh/cask/codex-app).
+
+Google Chrome is a Homebrew cask. ego lite has no official cask, so it is the one desktop app Terrapod installs directly: a separate step downloads the official macOS DMG for the Mac's architecture and copies the app to `/Applications`. That step runs only while `ego lite.app` is missing from `/Applications` and `~/Applications`, never opens the app, and never asks for `sudo`. ego lite's own updater owns its version, and a failed install records a warning that the next `tpod apply` retries. Earlier Terrapod releases declared Aside in this group; an existing Aside install stays on the machine unmanaged.
 
 When installing Orca, Terrapod trusts only the fully-qualified `stablyai/orca/orca` cask, not the entire `stablyai/orca` tap.
 
@@ -348,7 +350,7 @@ Optional stack profiles and macOS App Group settings are disabled by default.
 | `enableMacosAppGroupMonitoring` | `false` | Installs the monitoring macOS App Group: iStat Menus. |
 | `enableMacosAppGroupDevelopmentApps` | `false` | Installs the development-apps macOS App Group: Zed, Orca ADE (`stablyai/orca/orca`), and OrbStack. |
 | `enableMacosAppGroupMobileDev` | `false` | Installs the mobile-dev macOS App Group: Android Studio and Maestro (`mobile-dev-inc/tap/maestro`). It also sets `ANDROID_HOME` and `JAVA_HOME`. |
-| `enableMacosAppGroupBrowsers` | `false` | Installs the browsers macOS App Group: Aside and Google Chrome. |
+| `enableMacosAppGroupBrowsers` | `false` | Installs the browsers macOS App Group: ego lite and Google Chrome. |
 | `enableMacosAppGroupAiApps` | `false` | Installs the ai-apps macOS App Group: Claude, ChatGPT including Codex, and Gemini. Gemini is installed only on Apple Silicon with macOS 15 or later. |
 | `enableColimaDockerHost` | `false` | Exports `DOCKER_HOST` for the default Colima profile on the macOS Terminal Profile, without installing or starting Colima. |
 

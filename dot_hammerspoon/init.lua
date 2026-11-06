@@ -21,7 +21,7 @@ local appBindings = {
   { key = "s", label = "Slack", bundleID = "com.tinyspeck.slackmacgap" },
   { key = "d", label = "Discord", bundleID = "com.hnc.Discord" },
   { key = "n", label = "Notion", bundleID = "notion.id" },
-  { key = "b", label = "Aside", bundleID = "at.studio.AsideBrowser" },
+  { key = "b", label = "ego lite", bundleID = "com.citrolabs.ego.lite" },
   { key = "c", label = "Google Chrome", bundleID = "com.google.Chrome" },
   { key = "1", label = "Orca", bundleID = "com.stablyai.orca" },
   { key = "2", label = "Paseo", bundleID = "sh.paseo.desktop" },

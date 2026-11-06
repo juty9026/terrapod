@@ -15,6 +15,7 @@ inlined_warning_scripts="
 .chezmoiscripts/run_before_60-install-ai-cli-tools.sh.tmpl
 .chezmoiscripts/run_after_20-install-mise-tools.sh.tmpl
 .chezmoiscripts/run_after_70-apply-jetendard-settings.sh.tmpl
+.chezmoiscripts/run_after_80-install-ego-lite.sh.tmpl
 "
 
 warning_script_data() {
