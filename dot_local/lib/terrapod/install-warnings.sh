@@ -326,27 +326,10 @@ terrapod_install_warning_change_status() {
   return 0
 }
 
-terrapod_install_warning_value() {
-  category="$1"
-  field="$2"
-
-  marker_path="$(terrapod_install_warning_existing_path "$category")" || return 1
-
-  case "$field" in
-    category|summary|guidance|updated_at)
-      ;;
-    *)
-      printf '%s\n' "terrapod install warning: unknown field: $field" >&2
-      return 1
-      ;;
-  esac
-
-  if [ "$field" = category ] && terrapod_install_warning_path_is_legacy "$category" "$marker_path"; then
-    printf '%s\n' "$category"
-    return
-  fi
-
-  awk -F= -v wanted="$field" '
+# Decode data from stdin, never as shell code. Both single-field compatibility
+# reads and observations use the same quote and missing-field rules.
+terrapod_install_warning_decode_value() {
+  awk -F= -v wanted="$1" '
     $1 == wanted {
       value = $0
       sub("^[^=]*=", "", value)
@@ -363,5 +346,70 @@ terrapod_install_warning_value() {
     END {
       exit found ? 0 : 1
     }
-  ' "$marker_path"
+  '
+}
+
+terrapod_install_warning_value() {
+  category="$1"
+  field="$2"
+
+  marker_path="$(terrapod_install_warning_existing_path "$category")" || return 1
+
+  case "$field" in
+    category|summary|guidance|updated_at) ;;
+    *)
+      printf '%s\n' "terrapod install warning: unknown field: $field" >&2
+      return 1
+      ;;
+  esac
+
+  if [ "$field" = category ] && terrapod_install_warning_path_is_legacy "$category" "$marker_path"; then
+    printf '%s\n' "$category"
+    return
+  fi
+
+  terrapod_install_warning_decode_value "$field" <"$marker_path"
+}
+
+# Filesystem adapter: an observation resolves presence before calling this
+# seam exactly once. Tests can replace it to interleave deletion or read failure.
+terrapod_install_warning_read_content() {
+  awk '{ print }' "$1"
+}
+
+# An observation is five single-line values: canonical category, summary,
+# guidance, updated_at, and read status (readable or unreadable). Missing fields
+# and failed reads become unknown here. A category absent at path selection
+# emits nothing; a selected path that disappears still emits an unreadable
+# record. The final status line preserves empty fields across $(...) capture.
+terrapod_install_warning_observe() (
+  observation_category="$1"
+  observation_path="$(terrapod_install_warning_existing_path "$observation_category" 2>/dev/null)" || return 0
+
+  printf '%s\n' "$observation_category"
+  if observation_content="$(terrapod_install_warning_read_content "$observation_path" 2>/dev/null)"; then
+    for observation_field in summary guidance updated_at; do
+      observation_value="$(printf '%s\n' "$observation_content" | terrapod_install_warning_decode_value "$observation_field")" || observation_value=unknown
+      printf '%s\n' "$observation_value"
+    done
+    printf '%s\n' readable
+  else
+    printf '%s\n' unknown unknown unknown unreadable
+  fi
+)
+
+terrapod_install_warning_observations() {
+  for observation_category in $(terrapod_install_warning_categories); do
+    terrapod_install_warning_observe "$observation_category"
+  done
+}
+
+# Consume one captured record from stdin without consulting the filesystem.
+terrapod_install_warning_record_next() {
+  IFS= read -r warning_record_category &&
+    [ -n "$warning_record_category" ] &&
+    IFS= read -r warning_record_summary &&
+    IFS= read -r warning_record_guidance &&
+    IFS= read -r warning_record_updated_at &&
+    IFS= read -r warning_record_status
 }
