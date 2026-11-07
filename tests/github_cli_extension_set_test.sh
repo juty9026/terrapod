@@ -96,11 +96,11 @@ unmanaged/gh-extra"
   deployed="$tmp_dir/deployed-$os"
   mkdir -p "$deployed/.local/bin" "$deployed/.local/lib"
   cp -R "$source_dir/dot_local/lib/terrapod" "$deployed/.local/lib/terrapod"
-  chezmoi --config "$chezmoi_config" --source "$source_dir" --destination "$deployed" \
+  run_test_chezmoi "$source_dir" "$deployed" \
     --override-data "{\"chezmoi\":{\"os\":\"$os\"}}" \
     cat "$deployed/.local/lib/terrapod/github-cli-extension-set.sh" \
     >"$deployed/.local/lib/terrapod/github-cli-extension-set.sh"
-  chezmoi --config "$chezmoi_config" --source "$source_dir" --destination "$deployed" \
+  run_test_chezmoi "$source_dir" "$deployed" \
     --override-data "{\"chezmoi\":{\"os\":\"$os\"}}" \
     cat "$deployed/.local/bin/terrapod" >"$deployed/.local/bin/terrapod"
   status_command="$deployed/.local/bin/terrapod"
