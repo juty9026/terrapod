@@ -787,7 +787,7 @@ EOF
 
   readiness_install_warnings=""
   if [ "$readiness_check_install_warnings" = true ] && ensure_install_warnings_loaded; then
-    readiness_install_warnings="$(terrapod_install_warning_list 2>/dev/null || true)"
+    readiness_install_warnings="$(terrapod_install_warning_observations)"
   fi
 }
 
@@ -1086,14 +1086,17 @@ print_status_warnings() {
 
 install_warning_categories_csv() {
   categories=
+  [ -n "$readiness_install_warnings" ] || return 0
 
-  for category in $readiness_install_warnings; do
+  while terrapod_install_warning_record_next; do
     if [ -z "$categories" ]; then
-      categories="$category"
+      categories="$warning_record_category"
     else
-      categories="$categories, $category"
+      categories="$categories, $warning_record_category"
     fi
-  done
+  done <<EOF
+$readiness_install_warnings
+EOF
 
   printf '%s\n' "$categories"
 }
@@ -1506,40 +1509,26 @@ doctor_check_optional_setting() {
   fi
 }
 
-install_warning_value_or_unknown() {
-  category="$1"
-  field="$2"
-
-  if value="$(terrapod_install_warning_value "$category" "$field" 2>/dev/null)"; then
-    printf '%s\n' "$value"
-  else
-    printf '%s\n' "unknown"
-  fi
-}
-
 doctor_check_install_warnings() {
   if ! ensure_install_warnings_loaded; then
     doctor_ok "No install warning marker reader is installed"
     return
   fi
 
-  categories="$readiness_install_warnings"
-  if [ -z "$categories" ]; then
+  if [ -z "$readiness_install_warnings" ]; then
     doctor_ok "No install warning markers remain"
     return
   fi
 
-  for category in $categories; do
-    summary="$(install_warning_value_or_unknown "$category" summary)"
-    guidance="$(install_warning_value_or_unknown "$category" guidance)"
-    updated_at="$(install_warning_value_or_unknown "$category" updated_at)"
-
-    doctor_warn "install warning marker remains: $category"
-    printf '    Summary: %s\n' "$summary"
-    printf '    Guidance: %s\n' "$guidance"
-    printf '    Updated: %s\n' "$updated_at"
-    doctor_guidance "$guidance"
-  done
+  while terrapod_install_warning_record_next; do
+    doctor_warn "install warning marker remains: $warning_record_category"
+    printf '    Summary: %s\n' "$warning_record_summary"
+    printf '    Guidance: %s\n' "$warning_record_guidance"
+    printf '    Updated: %s\n' "$warning_record_updated_at"
+    doctor_guidance "$warning_record_guidance"
+  done <<EOF
+$readiness_install_warnings
+EOF
 }
 
 print_remaining_install_warnings() {
@@ -1547,18 +1536,20 @@ print_remaining_install_warnings() {
     return
   fi
 
-  categories="$(terrapod_install_warning_list 2>/dev/null || true)"
-  if [ -z "$categories" ]; then
+  # Apply may have installed the reader or changed any marker. These records
+  # belong to the post-apply state, independent of the readiness observation.
+  remaining_install_warnings="$(terrapod_install_warning_observations)"
+  if [ -z "$remaining_install_warnings" ]; then
     return
   fi
 
   print_section "Remaining install warnings:"
-  for category in $categories; do
-    summary="$(install_warning_value_or_unknown "$category" summary)"
-    guidance="$(install_warning_value_or_unknown "$category" guidance)"
-    printf '  - %s: %s\n' "$category" "$summary"
-    printf '    Guidance: %s\n' "$guidance"
-  done
+  while terrapod_install_warning_record_next; do
+    printf '  - %s: %s\n' "$warning_record_category" "$warning_record_summary"
+    printf '    Guidance: %s\n' "$warning_record_guidance"
+  done <<EOF
+$remaining_install_warnings
+EOF
 }
 
 run_doctor() {

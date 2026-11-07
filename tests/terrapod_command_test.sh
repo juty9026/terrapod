@@ -2763,6 +2763,37 @@ if [ "$doctor_marker_after" != "$doctor_marker_before" ]; then
 fi
 pass "Terrapod doctor is read-only for install warning markers"
 
+warning_reader_fixture="$repo_root/tests/lib/install-warning-reader-fixture.sh"
+for read_mode in fail delete replace; do
+  observation_state="$tmp_dir/doctor-observation-$read_mode"
+  XDG_STATE_HOME="$observation_state" sh -c \
+    '. "$1"; terrapod_install_warning_write homebrew-core "captured summary" "captured guidance"' \
+    sh "$install_warnings_lib"
+  observation_status=0
+  observation_output="$(
+    TERRAPOD_TEST_WARNING_LIB="$install_warnings_lib" TERRAPOD_TEST_WARNING_READ_MODE="$read_mode" \
+      TERRAPOD_INSTALL_WARNINGS_LIB="$warning_reader_fixture" TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" \
+      TERRAPOD_CHEZMOI_CONFIG="$doctor_config" XDG_STATE_HOME="$observation_state" PATH="$doctor_ok_path:/usr/bin:/bin" \
+      /bin/sh "$doctor_terrapod" doctor
+  )" || observation_status=$?
+  assert_status "$observation_status" 1 "doctor retains its warning exit policy after $read_mode"
+  assert_contains "$observation_output" "warn - install warning marker remains: homebrew-core" \
+    "doctor retains the warning category after $read_mode"
+  if [ "$read_mode" = replace ]; then
+    assert_contains "$observation_output" "Summary: captured summary" "doctor renders the captured summary after replacement"
+    assert_contains "$observation_output" "Guidance: captured guidance" "doctor renders guidance from the same captured version"
+    assert_not_contains "$observation_output" "replacement guidance" "doctor never rereads fields after capture"
+    current_summary="$(XDG_STATE_HOME="$observation_state" sh -c \
+      '. "$1"; terrapod_install_warning_value homebrew-core summary' sh "$install_warnings_lib")"
+    assert_equals "$current_summary" "replacement summary" "doctor observation interleaves a real atomic replacement"
+  else
+    assert_contains "$observation_output" "Summary: unknown" "doctor renders an unreadable summary after $read_mode"
+    assert_contains "$observation_output" "Guidance: unknown" "doctor renders unreadable guidance after $read_mode"
+    assert_contains "$observation_output" "Updated: unknown" "doctor renders an unreadable timestamp after $read_mode"
+    assert_not_contains "$observation_output" "No install warning markers remain" "doctor never reports a clean state after $read_mode"
+  fi
+done
+
 rm -f "$fake_warning_calls"
 if ! doctor_missing_lib_output="$(
   FAKE_INSTALL_WARNING_CALLS="$fake_warning_calls" TERRAPOD_INSTALL_WARNINGS_LIB="$tmp_dir/missing-install-warnings-lib" TERRAPOD_OS_RELEASE_FILE="$doctor_os_release" TERRAPOD_CHEZMOI_CONFIG="$doctor_config" PATH="$doctor_ok_path:$fake_warning_bin" \
@@ -3665,6 +3696,66 @@ assert_contains \
 
 assert_no_ansi_escape "$apply_output" "captured Terrapod apply is plain without ANSI escapes"
 assert_no_routine_emoji "$apply_output" "captured Terrapod apply has no routine emoji"
+
+cp "$tmp_dir/bin/chezmoi" "$tmp_dir/chezmoi-before-observation"
+write_stub "$tmp_dir/bin/chezmoi" \
+  'for arg do' \
+  '  case "$arg" in' \
+  '    apply)' \
+  '      . "$TERRAPOD_TEST_WARNING_LIB"' \
+  '      terrapod_install_warning_clear ubuntu-bootstrap' \
+  '      terrapod_install_warning_write homebrew-core "post-apply summary" "post-apply guidance"' \
+  '      terrapod_install_warning_write mise-tools "new marker summary" "new marker guidance"' \
+  '      exit "$TERRAPOD_TEST_APPLY_EXIT"' \
+  '      ;;' \
+  '    managed)' \
+  '      printf "%s\n" .local/bin/terrapod .local/bin/tpod .local/lib/terrapod/config-toml.sh' \
+  '      exit 0' \
+  '      ;;' \
+  '  esac' \
+  'done' \
+  'exit 92'
+
+for apply_exit in 0 91; do
+  for read_mode in fail delete replace read; do
+    observation_state="$tmp_dir/apply-observation-$apply_exit-$read_mode"
+    XDG_STATE_HOME="$observation_state" sh -c \
+      '. "$1"; terrapod_install_warning_write homebrew-core "pre-apply summary" "pre-apply guidance"; terrapod_install_warning_write ubuntu-bootstrap "cleared summary" "cleared guidance"' \
+      sh "$install_warnings_lib"
+    observation_status=0
+    observation_output="$(
+      HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" XDG_STATE_HOME="$observation_state" \
+        TERRAPOD_TEST_WARNING_LIB="$install_warnings_lib" TERRAPOD_TEST_WARNING_READ_MODE="$read_mode" \
+        TERRAPOD_INSTALL_WARNINGS_LIB="$warning_reader_fixture" TERRAPOD_TEST_APPLY_EXIT="$apply_exit" \
+        PATH="$tmp_dir/bin:/usr/bin:/bin" sh "$terrapod" apply 2>&1
+    )" || observation_status=$?
+    expected_status=0
+    [ "$apply_exit" = 0 ] || expected_status=1
+    assert_status "$observation_status" "$expected_status" "apply preserves exit policy for apply=$apply_exit and read=$read_mode"
+    assert_contains "$observation_output" "Remaining install warnings:" "apply reports fresh observations for apply=$apply_exit and read=$read_mode"
+    assert_not_contains "$observation_output" "pre-apply summary" "apply discards pre-apply observations for apply=$apply_exit and read=$read_mode"
+    assert_not_contains "$observation_output" "ubuntu-bootstrap:" "apply does not display a marker cleared during apply=$apply_exit and read=$read_mode"
+    case "$read_mode" in
+      fail|delete)
+        assert_contains "$observation_output" "homebrew-core: unknown" "apply retains an unreadable replaced marker for apply=$apply_exit and read=$read_mode"
+        assert_contains "$observation_output" "mise-tools: unknown" "apply retains an unreadable new marker for apply=$apply_exit and read=$read_mode"
+        assert_contains "$observation_output" "Guidance: unknown" "apply reports unknown guidance for apply=$apply_exit and read=$read_mode"
+        ;;
+      *)
+        assert_contains "$observation_output" "homebrew-core: post-apply summary" "apply captures a marker replaced during apply=$apply_exit and read=$read_mode"
+        assert_contains "$observation_output" "Guidance: post-apply guidance" "apply renders guidance from the captured version for apply=$apply_exit and read=$read_mode"
+        assert_contains "$observation_output" "mise-tools: new marker summary" "apply captures a marker written during apply=$apply_exit and read=$read_mode"
+        assert_not_contains "$observation_output" "replacement guidance" "apply never rereads captured fields for apply=$apply_exit and read=$read_mode"
+        ;;
+    esac
+    if [ "$read_mode" = replace ]; then
+      current_summary="$(XDG_STATE_HOME="$observation_state" sh -c \
+        '. "$1"; terrapod_install_warning_value homebrew-core summary' sh "$install_warnings_lib")"
+      assert_equals "$current_summary" "replacement summary" "post-apply observation interleaves atomic replacement after apply=$apply_exit"
+    fi
+  done
+done
+cp "$tmp_dir/chezmoi-before-observation" "$tmp_dir/bin/chezmoi"
 
 tty_apply_output="$(
   run_command_in_pty xterm unset env HOME="$diff_home" XDG_CONFIG_HOME="$diff_xdg" PATH="$tmp_dir/bin:/usr/bin:/bin" sh "$terrapod" apply
