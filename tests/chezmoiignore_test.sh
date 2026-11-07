@@ -30,12 +30,9 @@ assert_managed_paths_include_prefix() {
 
   pass "$message"
 }
+repository_managed="$(managed_source_paths '{}')"
 managed_tests="$(
-  chezmoi \
-    --config "$chezmoi_config" \
-    --source "$repo_root" \
-    managed \
-    --path-style source-relative |
+  printf '%s\n' "$repository_managed" |
     grep '^tests/' || true
 )"
 
@@ -46,11 +43,7 @@ fi
 pass "development tests are ignored by chezmoi"
 
 managed_repository_docs="$(
-  chezmoi \
-    --config "$chezmoi_config" \
-    --source "$repo_root" \
-    managed \
-    --path-style source-relative |
+  printf '%s\n' "$repository_managed" |
     grep -E '^(README\.md|AGENTS\.md|CONTEXT\.md|docs/)' || true
 )"
 
@@ -60,6 +53,10 @@ fi
 
 pass "repository documentation is ignored by chezmoi"
 
+ubuntu_managed="$(managed_source_paths "$ubuntu_data")"
+macos_managed="$(managed_source_paths "$macos_data")"
+macos_development_workspace_managed="$(managed_source_paths "$macos_development_workspace_data")"
+development_workspace_managed="$(managed_source_paths "$development_workspace_data")"
 for managed_paths in "$macos_managed" "$ubuntu_managed" \
   "$macos_development_workspace_managed" "$development_workspace_managed"; do
   assert_managed_paths_include_prefix "$managed_paths" \
@@ -69,11 +66,13 @@ for managed_paths in "$macos_managed" "$ubuntu_managed" \
     "machine-local 1Password credentials stay outside managed source"
 done
 
+macos_ai_cli_tools_managed="$(managed_source_paths "$macos_ai_cli_tools_data")"
 assert_managed_paths_exclude_prefix \
   "$macos_ai_cli_tools_managed" \
   "Brewfile.ai-cli-tools.tmpl" \
   "macOS does not manage the rendered AI CLI tools Brewfile"
 
+ai_cli_tools_managed="$(managed_source_paths "$ai_cli_tools_data")"
 assert_managed_paths_exclude_prefix \
   "$ai_cli_tools_managed" \
   "Brewfile.ai-cli-tools.tmpl" \
@@ -178,11 +177,13 @@ for entry in $linux_only_entries; do
 done
 
 pass "macOS ignores VPS-only entries"
+macos_managed_targets="$(managed_target_paths "$macos_data")"
 assert_managed_paths_exclude_prefix \
   "$macos_managed_targets" \
   "Brewfile.macos-desktop-apps" \
   "macOS default does not manage rendered macOS Desktop App Stack Brewfile target"
 
+macos_terminal_apps_managed_targets="$(managed_target_paths "$macos_terminal_apps_data")"
 assert_managed_paths_exclude_prefix \
   "$macos_terminal_apps_managed_targets" \
   "Brewfile.macos-desktop-apps" \
@@ -209,6 +210,7 @@ assert_managed_paths_include_prefix \
   ".chezmoiscripts/run_after_70-apply-jetendard-settings.sh.tmpl" \
   "macOS default applies Jetendard app settings"
 
+macos_development_apps_managed="$(managed_source_paths "$macos_development_apps_data")"
 assert_managed_paths_include_prefix \
   "$macos_development_apps_managed" \
   ".chezmoiscripts/run_after_70-apply-jetendard-settings.sh.tmpl" \
@@ -302,6 +304,8 @@ assert_managed_paths_exclude_prefix \
   "dot_config/zsh/path.d/antigravity.zsh.tmpl" \
   "macOS development-apps group does not restore legacy Antigravity PATH snippet"
 
+editor_stack_data='{"chezmoi":{"os":"linux","osRelease":{"id":"ubuntu","versionID":"24.04"}},"enableEditorStack":true,"enableAiCliTools":false,"enableDevelopmentWorkspace":false}'
+editor_stack_managed="$(managed_source_paths "$editor_stack_data")"
 assert_managed_paths_include_prefix \
   "$editor_stack_managed" \
   "dot_config/nvim" \
