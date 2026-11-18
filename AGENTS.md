@@ -23,11 +23,17 @@ characters stay allowed where they belong.
 The rule also covers project metadata written from now on: commit messages,
 and GitHub issue and pull request titles, bodies, and comments. PR bodies keep
 a respectful, polite tone, written in English. Existing commits, issues, and
-PRs stay as they were written.
+PRs stay as they were written. The automated language check covers tracked
+files. The written rule applies to commit history and GitHub metadata.
 
-`tests/repository_language_test.sh` fails when any tracked text file contains
-Korean and lists each offending file and line. It does not scan commit history
-or GitHub metadata; the written rule alone governs those.
+## Repository checks
+
+| Rule | Enforcement |
+| --- | --- |
+| Write tracked text in English. | `tests/repository_language_test.sh` reports Hangul by file and line. |
+| Keep test entry points executable and the shared harness source-only. | `tests/test_file_modes_test.sh` checks both file modes. |
+| Run the suite with a real Python interpreter. | `tests/run` rejects mise shims for `python3`. |
+| Declare mandatory Homebrew formulae in `dot_local/lib/terrapod/core.Brewfile`. | The root `Brewfile` points to this managed file. `tests/homebrew_manifests_test.sh` checks the link and runs the installed executable-selection helper against a changed declaration. |
 
 ## Tests
 
