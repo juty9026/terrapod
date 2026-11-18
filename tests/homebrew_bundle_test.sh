@@ -5,6 +5,7 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$repo_root/tests/lib/harness.sh"
 . "$repo_root/tests/lib/test-support.sh"
 . "$repo_root/dot_local/lib/terrapod/config-toml.sh"
+. "$repo_root/dot_local/lib/terrapod/homebrew-install.sh"
 . "$repo_root/dot_local/lib/terrapod/homebrew-bundle.sh"
 make_tmp_dir
 
@@ -85,9 +86,11 @@ done
 missing_schema_detail="$(
   MACOS_BREW_FAIL_CASKS=raycast /bin/sh -c '
     . "$1"
-    terrapod_homebrew_bundle_step "$2" "$3" arm64 && exit 99
+    . "$2"
+    terrapod_homebrew_bundle_step "$3" "$4" arm64 && exit 99
     printf "%s\n" "$TERRAPOD_HOMEBREW_BUNDLE_FAILURE_DETAIL"
-  ' sh "$repo_root/dot_local/lib/terrapod/homebrew-bundle.sh" "$tmp_dir/bin/brew" "$brewfile"
+  ' sh "$repo_root/dot_local/lib/terrapod/homebrew-install.sh" \
+    "$repo_root/dot_local/lib/terrapod/homebrew-bundle.sh" "$tmp_dir/bin/brew" "$brewfile"
 )"
 assert_equals "$missing_schema_detail" 'failed casks: raycast' \
   "an unavailable schema preserves reliable failures without group names"

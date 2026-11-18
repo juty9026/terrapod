@@ -34,6 +34,7 @@ files. The written rule applies to commit history and GitHub metadata.
 | Keep test entry points executable and the shared harness source-only. | `tests/test_file_modes_test.sh` checks both file modes. |
 | Run the suite with a real Python interpreter. | `tests/run` rejects mise shims for `python3`. |
 | Declare mandatory Homebrew formulae in `dot_local/lib/terrapod/core.Brewfile`. | The root `Brewfile` points to this managed file. `tests/homebrew_manifests_test.sh` checks the link and runs the installed executable-selection helper against a changed declaration. |
+| Use `terrapod_homebrew_install` in scripts that install Homebrew packages during `tpod apply`. | `tests/homebrew_apply_policy_test.sh` catches direct install and bundle calls. The bundle and shell integration tests check the arguments and environment passed to Homebrew. |
 
 ## Tests
 

@@ -10,6 +10,10 @@ set -eu
 
 {{ include "dot_local/lib/terrapod/install-warning-script.sh" }}
 
+{{ if eq .chezmoi.os "darwin" -}}
+{{ include "dot_local/lib/terrapod/homebrew-install.sh" }}
+{{ end -}}
+
 declare_install_warning_category shell-integrations "Shell integration setup needs attention"
 
 shell_integrations_warning_exists() {
@@ -119,7 +123,7 @@ ensure_git() {
   fi
 
 {{ if eq .chezmoi.os "darwin" }}
-  if ! HOMEBREW_NO_AUTO_UPDATE=1 brew install git; then
+  if ! terrapod_homebrew_install brew install git; then
     fail_install_warning_category "Install git with Homebrew, then rerun tpod apply."
   fi
 {{ else }}

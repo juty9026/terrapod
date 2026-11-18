@@ -18,6 +18,8 @@ set -eu
 {{ include "dot_local/lib/terrapod/config-toml.sh" }}
 {{ end -}}
 
+{{ include "dot_local/lib/terrapod/homebrew-install.sh" }}
+
 {{ include "dot_local/lib/terrapod/homebrew-bundle.sh" }}
 
 terrapod_homebrew_core_permission_guidance() {

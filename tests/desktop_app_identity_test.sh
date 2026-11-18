@@ -51,6 +51,7 @@ assert_file_contains "$fixture_marker" 'App Groups: mobile-dev-renamed' \
   "the desktop warning follows the same schema-only App Group rename as status"
 
 . "$repo_root/dot_local/lib/terrapod/config-toml.sh"
+. "$repo_root/dot_local/lib/terrapod/homebrew-install.sh"
 . "$repo_root/dot_local/lib/terrapod/homebrew-bundle.sh"
 write_stub "$tmp_dir/failing-brew" 'exit 42'
 

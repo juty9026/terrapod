@@ -55,7 +55,7 @@ terrapod_homebrew_bundle_run() {
   terrapod_bundle_failures="$3"
   : >"$terrapod_bundle_failures" || return 1
 
-  if HOMEBREW_NO_AUTO_UPDATE=1 "$terrapod_bundle_brew" bundle --no-upgrade --file="$terrapod_bundle_brewfile"; then
+  if terrapod_homebrew_install "$terrapod_bundle_brew" bundle "$terrapod_bundle_brewfile"; then
     return 0
   fi
 
@@ -77,7 +77,7 @@ terrapod_homebrew_bundle_run() {
       terrapod_homebrew_bundle_cleanup
       return 1
     fi
-    if ! HOMEBREW_NO_AUTO_UPDATE=1 "$terrapod_bundle_brew" bundle --no-upgrade --file="$terrapod_bundle_item_file"; then
+    if ! terrapod_homebrew_install "$terrapod_bundle_brew" bundle "$terrapod_bundle_item_file"; then
       if ! printf '%s\t%s\t%s\n' "$terrapod_bundle_kind" "$terrapod_bundle_name" "$terrapod_bundle_group" >>"$terrapod_bundle_failures"; then
         terrapod_homebrew_bundle_cleanup
         return 1
