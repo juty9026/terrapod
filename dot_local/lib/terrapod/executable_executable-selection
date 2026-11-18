@@ -204,35 +204,34 @@ effective_executable() {
 }
 
 core_records() {
-  while IFS=' ' read -r package command; do
-    printf '%s|%s|%s\n' homebrew-formula "$package" "$command"
-  done <<'EOF'
-bat bat
-btop btop
-chezmoi chezmoi
-dust dust
-duf duf
-fastfetch fastfetch
-fd fd
-fzf fzf
-gh gh
-git git
-git-delta delta
-gum gum
-lazygit lazygit
-lsd lsd
-mise mise
-neovim nvim
-ripgrep rg
-starship starship
-zellij zellij
-zoxide zoxide
-EOF
+  core_brewfile="$script_dir/core.Brewfile"
+  if ! awk -F '"' '
+    BEGIN {
+      commands["git-delta"] = "delta"
+      commands["neovim"] = "nvim"
+      commands["ripgrep"] = "rg"
+    }
+    /^[[:space:]]*(#|$)/ { next }
+    !/^[[:space:]]*brew[[:space:]]+"[a-zA-Z0-9_.+@-]+"[[:space:]]*$/ {
+      invalid = 1
+      next
+    }
+    {
+      package = $2
+      command = package in commands ? commands[package] : package
+      printf "homebrew-formula|%s|%s\n", package, command
+      count++
+    }
+    END { exit (invalid || !count) }
+  ' "$core_brewfile"; then
+    printf '  failure - cannot read Core Shell Stack formulae from %s. Run tpod apply to restore the managed Brewfile.\n' "$core_brewfile" >&2
+    return 1
+  fi
 }
 
 if [ "$mode" = core-records ]; then
   core_records
-  exit 0
+  exit "$?"
 fi
 
 runtime_records() {
@@ -257,7 +256,7 @@ optional_records() {
 }
 
 active_records() {
-  core_records
+  core_records || return 1
   runtime_records
   optional_records
 }
@@ -692,7 +691,7 @@ fi
 
 failure_found=0
 issue_found=0
-records="$(active_records)"
+records="$(active_records)" || exit 1
 
 while IFS='|' read -r provider package command; do
   [ -n "$provider" ] || continue

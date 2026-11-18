@@ -3,6 +3,7 @@ set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$repo_root/tests/lib/harness.sh"
+. "$repo_root/tests/lib/chezmoi-test-support.sh"
 make_tmp_dir
 
 expected_formulae="$tmp_dir/expected-formulae"
@@ -38,17 +39,34 @@ if ! cmp -s "$expected_formulae" "$actual_formulae"; then
 fi
 pass "root Brewfile declares exactly the mandatory cross-profile CLI formulae"
 
-records="$tmp_dir/records"
-"$repo_root/dot_local/lib/terrapod/executable_executable-selection" core-records >"$records"
-awk -F '|' '$1 != "homebrew-formula" || NF != 3 || $2 == "" || $3 == "" { exit 1 }' "$records" ||
-  fail "core executable selection records have a Homebrew formula and command"
-cut -d '|' -f2 "$records" | LC_ALL=C sort >"$tmp_dir/record-formulae"
-sed 's/^brew "//; s/"$//' "$actual_formulae" >"$tmp_dir/brewfile-formulae"
-if ! cmp -s "$tmp_dir/brewfile-formulae" "$tmp_dir/record-formulae"; then
-  diff -u "$tmp_dir/brewfile-formulae" "$tmp_dir/record-formulae" >&2 || true
-  fail "doctor command ownership records stay synchronized with Brewfile"
+selection_source="$tmp_dir/selection-source"
+selection_lib="$selection_source/dot_local/lib/terrapod"
+selection_home="$tmp_dir/selection-home"
+mkdir -p "$selection_lib" "$selection_home/.local/lib"
+cp "$repo_root/dot_local/lib/terrapod/executable_executable-selection" \
+  "$repo_root/dot_local/lib/terrapod/homebrew-paths.sh" \
+  "$repo_root/dot_local/lib/terrapod/homebrew-prefix.sh" "$selection_lib/"
+printf '%s\n' 'brew "bat"' 'brew "git-delta"' 'brew "neovim"' 'brew "ripgrep"' 'brew "fixture-tool"' \
+  >"$selection_lib/core.Brewfile"
+run_test_chezmoi "$selection_source" "$selection_home" apply \
+  "$selection_home/.local/lib/terrapod"
+printf '%s\n' \
+  'homebrew-formula|bat|bat' \
+  'homebrew-formula|git-delta|delta' \
+  'homebrew-formula|neovim|nvim' \
+  'homebrew-formula|ripgrep|rg' \
+  'homebrew-formula|fixture-tool|fixture-tool' >"$tmp_dir/deployed-expected"
+"$selection_home/.local/lib/terrapod/executable-selection" core-records >"$tmp_dir/deployed-records"
+if ! cmp -s "$tmp_dir/deployed-expected" "$tmp_dir/deployed-records"; then
+  diff -u "$tmp_dir/deployed-expected" "$tmp_dir/deployed-records" >&2 || true
+  fail "executable selection must read the installed Core Shell Stack Brewfile beside the helper"
 fi
-pass "doctor command ownership records stay synchronized with Brewfile"
+pass "the installed helper checks exactly the Core Shell Stack formulae in its Brewfile"
+
+if [ ! "$repo_root/Brewfile" -ef "$repo_root/dot_local/lib/terrapod/core.Brewfile" ]; then
+  fail "Brewfile must link to dot_local/lib/terrapod/core.Brewfile so brew bundle and executable selection share one declaration"
+fi
+pass "the root and managed Brewfile names refer to the same declaration"
 
 expected_ai_casks="$tmp_dir/expected-ai-casks"
 actual_ai_casks="$tmp_dir/actual-ai-casks"

@@ -16,6 +16,8 @@ declare_install_warning_category "$AI_CLI_WARNING_CATEGORY" "Optional AI CLI too
 {{ if not (and (eq .chezmoi.os "darwin") (or (default false (get . "enableAiCliTools")) (default false (get . "enableDevelopmentWorkspace")))) }}
 finish_install_warning_category
 {{ else }}
+{{ include "dot_local/lib/terrapod/homebrew-install.sh" }}
+
 {{ include "dot_local/lib/terrapod/homebrew-bundle.sh" }}
 
 ai_cli_brewfile=
