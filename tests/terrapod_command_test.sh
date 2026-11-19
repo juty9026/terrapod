@@ -1955,7 +1955,7 @@ assert_contains "$macos_status_output" "automation                    : enabled 
 assert_contains "$macos_status_output" "launcher                      : enabled (Raycast and 1Password CLI)" "Terrapod status reports enabled launcher macOS App Group"
 assert_contains "$macos_status_output" "monitoring                    : disabled" "Terrapod status reports disabled monitoring macOS App Group"
 assert_contains "$macos_status_output" "development-apps              : enabled (Zed, Orca ADE, and OrbStack)" "Terrapod status lists Zed, Orca ADE, and OrbStack in the enabled development-apps App Group"
-assert_contains "$macos_status_output" "ai-apps                       : enabled (Claude, ChatGPT (including Codex), and Gemini)" "Terrapod status honors the restored true ai-apps selection"
+assert_contains "$macos_status_output" "ai-apps                       : enabled (Claude, ChatGPT (including Codex), Gemini, and Grok Bot)" "Terrapod status honors the restored true ai-apps selection"
 assert_contains "$macos_status_output" "mobile-dev                    : enabled (Android Studio and Maestro)" "Terrapod status lists Android Studio and Maestro in the enabled mobile-dev App Group"
 assert_not_contains "$macos_status_output" "chezmoi                       : available" "declared chezmoi availability belongs only to executable selection"
 assert_contains "$macos_status_output" "brew                          : available" "Terrapod status reports macOS Bootstrap Package Manager availability"

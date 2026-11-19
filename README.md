@@ -180,7 +180,7 @@ installs that rendered bundle:
 - `development-apps`: Zed, Orca ADE (`stablyai/orca/orca`), and OrbStack.
 - `mobile-dev`: Android Studio and Maestro (`mobile-dev-inc/tap/maestro`).
 - `browsers`: ego lite and Google Chrome.
-- `ai-apps`: Claude (`claude`), ChatGPT including Codex (`chatgpt`), and Gemini (`google-gemini`).
+- `ai-apps`: Claude (`claude`), ChatGPT including Codex (`chatgpt`), Gemini (`google-gemini`), and Grok Bot (`grok-bot`).
 
 On unsupported Macs, Terrapod excludes only Gemini from the installation bundle and prints the reason; Claude and ChatGPT still install. See [Google’s desktop requirements](https://gemini.google/desktop/). The legacy `codex-app` cask is deprecated; Terrapod uses [Homebrew’s recommended `chatgpt` replacement](https://formulae.brew.sh/cask/codex-app).
 
@@ -351,7 +351,7 @@ Optional stack profiles and macOS App Group settings are disabled by default.
 | `enableMacosAppGroupDevelopmentApps` | `false` | Installs the development-apps macOS App Group: Zed, Orca ADE (`stablyai/orca/orca`), and OrbStack. |
 | `enableMacosAppGroupMobileDev` | `false` | Installs the mobile-dev macOS App Group: Android Studio and Maestro (`mobile-dev-inc/tap/maestro`). It also sets `ANDROID_HOME` and `JAVA_HOME`. |
 | `enableMacosAppGroupBrowsers` | `false` | Installs the browsers macOS App Group: ego lite and Google Chrome. |
-| `enableMacosAppGroupAiApps` | `false` | Installs the ai-apps macOS App Group: Claude, ChatGPT including Codex, and Gemini. Gemini is installed only on Apple Silicon with macOS 15 or later. |
+| `enableMacosAppGroupAiApps` | `false` | Installs the ai-apps macOS App Group: Claude, ChatGPT including Codex, Gemini, and Grok Bot. Gemini is installed only on Apple Silicon with macOS 15 or later. |
 | `enableColimaDockerHost` | `false` | Exports `DOCKER_HOST` for the default Colima profile on the macOS Terminal Profile, without installing or starting Colima. |
 
 When `enableDevelopmentWorkspace` is `true`, it enables both the Optional Editor Stack and Optional AI Tool Stack
@@ -376,7 +376,7 @@ prefixes are also advisory; cleanup and PATH changes remain manual.
 `~/.local/share/zsh/site-functions` is already on the managed `fpath`, so a
 vendor installer that appends it needs no machine-local override.
 
-`enableMacosAppGroupAiApps` is restored as the opt-in ai-apps key. An existing `true` value selects the new three-app group on the next `tpod apply`. Existing configs without the key need `tpod setup` or `terrapod configure <Preset>` to become complete. The workstation Preset enables this group; minimal and development leave it disabled. The development-apps group and AI CLI selection remain independent.
+`enableMacosAppGroupAiApps` is restored as the opt-in ai-apps key. An existing `true` value selects the four-app group on the next `tpod apply`. Existing configs without the key need `tpod setup` or `terrapod configure <Preset>` to become complete. The workstation Preset enables this group; minimal and development leave it disabled. The development-apps group and AI CLI selection remain independent.
 
 ### Colima Docker Host Selection
 

@@ -88,6 +88,7 @@ c	Google Chrome	com.google.Chrome
 o	Obsidian	md.obsidian
 p	Postman	com.postmanlabs.mac
 f	Figma	com.figma.Desktop
+g	Grok Bot	com.anysphere.sand
 BINDINGS
 
 if ! diff -u "$tmp_dir/expected" "$tmp_dir/actual" >"$tmp_dir/bindings.diff"; then

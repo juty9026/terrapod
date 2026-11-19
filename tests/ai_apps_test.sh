@@ -9,7 +9,7 @@ make_tmp_dir
 
 ai_apps_data='{"chezmoi":{"os":"darwin"},"enableMacosAppGroupAiApps":true}'
 ai_apps_brewfile="$(render_template "$ai_apps_data" Brewfile.macos-desktop-apps.tmpl)"
-for app in claude chatgpt google-gemini; do
+for app in claude chatgpt google-gemini grok-bot; do
   assert_contains "$ai_apps_brewfile" "cask \"$app\"" "ai-apps declares $app"
 done
 
@@ -18,6 +18,10 @@ assert_not_contains "$ai_apps_brewfile" 'cask "codex"' "ai-apps does not select 
 assert_not_contains "$ai_apps_brewfile" 'cask "zed"' "ai-apps stays independent of development-apps"
 assert_not_contains "$(render_template "$macos_data" Brewfile.macos-desktop-apps.tmpl)" 'cask "claude"' "ai-apps is opt-in"
 assert_not_contains "$(render_template '{"chezmoi":{"os":"linux"},"enableMacosAppGroupAiApps":true}' .chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl)" 'cask "claude"' "VPS never installs AI desktop apps"
+
+assert_not_contains "$(render_template "$macos_data" Brewfile.macos-desktop-apps.tmpl)" 'cask "grok-bot"' "Grok Bot is opt-in"
+assert_not_contains "$(render_template '{"chezmoi":{"os":"darwin"},"enableMacosAppGroupAiApps":false}' Brewfile.macos-desktop-apps.tmpl)" 'cask "grok-bot"' "disabled ai-apps excludes Grok Bot"
+assert_not_contains "$(render_template '{"chezmoi":{"os":"linux"},"enableMacosAppGroupAiApps":true}' .chezmoiscripts/run_before_10-reconcile-homebrew.sh.tmpl)" 'cask "grok-bot"' "VPS never installs Grok Bot"
 
 # Run the actual rendered installer with Homebrew stubbed. The Claude failure
 # case also exercises individual retries after the bulk bundle fails.
@@ -61,6 +65,7 @@ run_ai_apps_case() {
     }
   assert_file_contains "$case_dir/brew.log" 'cask "claude"' "$case_name still attempts Claude"
   assert_file_contains "$case_dir/brew.log" 'cask "chatgpt"' "$case_name still attempts ChatGPT"
+  assert_file_contains "$case_dir/brew.log" 'cask "grok-bot"' "$case_name still attempts Grok Bot"
   if [ "$expect_gemini" = true ]; then
     assert_file_contains "$case_dir/brew.log" 'cask "google-gemini"' "$case_name installs Gemini"
     assert_file_not_contains "$case_dir/output" 'Skipping google-gemini' "$case_name does not skip supported Gemini"
