@@ -323,6 +323,36 @@ assert_count "$browser_failed_trace" "alert.show Could not launch ego lite" 2 "b
 assert_count "$browser_failed_trace" "modal.exit" 1 "the leader exits after a failed ego lite launch"
 assert_not_contains "$browser_failed_trace" "at.studio.AsideBrowser" "neither B entry point reaches Aside"
 
+grok_running_trace="$(run_scenario grok_running <<EOF
+$scenario_preamble
+harness.addApp("com.anysphere.sand")
+harness.press("f18")
+harness.press("g")
+harness.release("f18")
+harness.press("g", hyper)
+harness.printTrace()
+EOF
+)"
+
+assert_count "$grok_running_trace" "app.activate com.anysphere.sand" 2 "both G entry points activate Grok Bot"
+assert_count "$grok_running_trace" "modal.exit" 1 "the leader exits after focusing Grok Bot"
+assert_contains "$help_trace" '\nG : Grok Bot\n' "the help toast lists Grok Bot on G"
+
+grok_stopped_trace="$(run_scenario grok_stopped <<EOF
+$scenario_preamble
+harness.launchable["com.anysphere.sand"] = true
+harness.press("f18")
+harness.press("g")
+harness.release("f18")
+harness.press("g", hyper)
+harness.printTrace()
+EOF
+)"
+
+assert_count "$grok_stopped_trace" "application.launchOrFocusByBundleID com.anysphere.sand" 2 "both G entry points launch a stopped Grok Bot"
+assert_not_contains "$grok_stopped_trace" "alert.show" "a successful Grok Bot launch shows no alert"
+assert_count "$grok_stopped_trace" "modal.exit" 1 "the leader exits after launching Grok Bot"
+
 # --- Ghostty input-source retry -------------------------------------------------
 
 # The stub's input source starts on a Korean layout, so every retry scenario

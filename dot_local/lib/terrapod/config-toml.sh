@@ -85,7 +85,7 @@ enableMacosAppGroupMonitoring|macos-app-group|monitoring|macos-terminal|workstat
 enableMacosAppGroupDevelopmentApps|macos-app-group|development-apps|macos-terminal|workstation|Zed, Orca ADE, and OrbStack
 enableMacosAppGroupMobileDev|macos-app-group|mobile-dev|macos-terminal|workstation|Android Studio and Maestro
 enableMacosAppGroupBrowsers|macos-app-group|browsers|macos-terminal|workstation|ego lite and Google Chrome
-enableMacosAppGroupAiApps|macos-app-group|ai-apps|macos-terminal|workstation|Claude, ChatGPT (including Codex), and Gemini
+enableMacosAppGroupAiApps|macos-app-group|ai-apps|macos-terminal|workstation|Claude, ChatGPT (including Codex), Gemini, and Grok Bot
 enableColimaDockerHost|shell-environment|Colima Docker Host Selection|macos-terminal||DOCKER_HOST for the default Colima profile; no runtime installation or startup
 ROWS
 }

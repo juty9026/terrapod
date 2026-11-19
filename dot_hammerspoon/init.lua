@@ -28,6 +28,7 @@ local appBindings = {
   { key = "o", label = "Obsidian", bundleID = "md.obsidian" },
   { key = "p", label = "Postman", bundleID = "com.postmanlabs.mac" },
   { key = "f", label = "Figma", bundleID = "com.figma.Desktop" },
+  { key = "g", label = "Grok Bot", bundleID = "com.anysphere.sand" },
 }
 local helpToastID
 local ghosttyRetryTimers = {}
