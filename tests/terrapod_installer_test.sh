@@ -13,10 +13,11 @@ make_tmp_dir
 safe_path_dir="$tmp_dir/safe-bin"
 
 mkdir -p "$safe_path_dir"
-for command_name in awk cat chmod cmp cp date df grep ln mkdir mktemp mv readlink rm sed uname; do
+for command_name in awk cat chmod cmp cp date df grep ln mkdir mktemp mv readlink rm sed; do
   command_path="$(command -v "$command_name")"
   ln -s "$command_path" "$safe_path_dir/$command_name"
 done
+write_uname_stub "$safe_path_dir/uname" "Darwin"
 
 assert_line() {
   haystack="$1"
@@ -1359,7 +1360,7 @@ rosetta_shadow_brew="$rosetta_arch_case/usr/local/bin/brew"
 mkdir -p "${rosetta_standard_brew%/brew}" "${rosetta_shadow_brew%/brew}"
 write_stub "$rosetta_standard_brew" '#!/bin/sh' 'exit 0'
 write_stub "$rosetta_shadow_brew" '#!/bin/sh' 'exit 0'
-if ! PATH="${rosetta_shadow_brew%/brew}:/usr/bin:/bin" \
+if ! PATH="$rosetta_arch_case/bin:${rosetta_shadow_brew%/brew}:/usr/bin:/bin" \
   TERRAPOD_EXPECTED_HOMEBREW_PATH="$rosetta_standard_brew" \
   TERRAPOD_INSTALLER_TEST_HOOK=reject_nonstandard_homebrew sh "$install_script"; then
   fail "Rosetta installer accepts an existing standard Apple Silicon Homebrew despite an Intel PATH shadow"
