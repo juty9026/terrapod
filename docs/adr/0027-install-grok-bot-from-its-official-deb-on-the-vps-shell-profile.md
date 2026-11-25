@@ -60,8 +60,10 @@ temporary directory, compares the sha256 digest, and installs through the shared
   download, but it does not authenticate the publisher beyond the address.
 - A release published between the index read and the download shows up as a
   recorded download or checksum failure, and the next apply retries.
-- The package declares `Conflicts`, `Provides` and `Replaces` for a package
-  named `sand`. Terrapod does not manage that package, so APT resolves it.
+- The package declares `Conflicts`, `Provides` and `Replaces` for `sand`, the
+  app's internal name (its bundle identifier is `com.anysphere.sand`), so an
+  install under the old package name is replaced. Terrapod does not manage
+  `sand`.
 - The systemd user service and the Xvfb display that run Grok Bot headless stay
   outside Terrapod. The script installs the package and does not start, enable
   or restart anything.
