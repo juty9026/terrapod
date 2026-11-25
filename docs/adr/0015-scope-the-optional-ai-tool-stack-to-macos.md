@@ -18,6 +18,13 @@ formula counterpart, and Homebrew on Linux does not install casks. Handing that
 manifest to `brew bundle` on Ubuntu failed on every apply, permanently recorded an
 `optional-ai-cli-tools` install warning, and kept `tpod doctor` failing.
 
+ADR 0017 corrected that reason for Claude Code. It no longer holds for the
+other two tools either. On 2026-11-25, Homebrew 7.0.16 on the **VPS Shell
+Profile** host (Ubuntu 24.04 `aarch64`) had `antigravity-cli` and `codex`
+installed from their Linux builds, outside Terrapod. The stack stays scoped to
+the **macOS Terminal Profile** for all three tools as a profile decision, not a
+consequence of the package source.
+
 ## Considered Options
 
 - Add a Linux install path through vendor installers or npm: rejected because it

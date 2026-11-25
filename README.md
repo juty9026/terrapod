@@ -245,10 +245,10 @@ top of the profile floor. A failed install records an `orca-ide` or `grok-bot`
 warning that the next `tpod apply` retries. The commands are `orca-ide` and
 `grok-bot`. Running either headless, for example under Xvfb as a systemd user
 service, stays outside Terrapod.
-The Optional AI Tool Stack is also macOS-only, because Homebrew publishes
-Antigravity CLI and Codex as casks and Homebrew on Linux does not install
-casks. Claude Code stays macOS-only as a profile decision rather than a
-consequence of its package source. Setup does not offer the stack on a VPS,
+The Optional AI Tool Stack is also macOS-only, as a profile decision rather
+than a consequence of its package sources. Linux Homebrew installs the
+Antigravity CLI and Codex casks, which ship Linux builds, and the Claude Code
+installer supports Linux. Setup does not offer the stack on a VPS,
 the `development` Preset writes it disabled there, and `tpod status` and
 `tpod doctor` report it as not applicable.
 Only configure GitHub authentication on a VPS if write access is needed later.

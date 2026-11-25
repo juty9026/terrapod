@@ -217,13 +217,13 @@ _Avoid_: primary docs, source README
 - pnpm belongs to the **Development Runtime Stack** through Node.js Corepack, not as a mise-managed tool.
 - Rich Neovim configuration belongs to the **Optional Editor Stack**, not the **Core Shell Stack**, and is opt-in for every machine profile.
 - Antigravity CLI, Claude Code, and Codex belong to the **Optional AI Tool Stack**, not the **Core Shell Stack**.
-- The **Optional AI Tool Stack** installs Homebrew casks `antigravity-cli` and `codex` and installs Claude Code through the **Claude Code Installer**, on the **macOS Terminal Profile** only; Homebrew publishes those two as casks, which Linux Homebrew does not install.
+- The **Optional AI Tool Stack** installs Homebrew casks `antigravity-cli` and `codex` and installs Claude Code through the **Claude Code Installer**, on the **macOS Terminal Profile** only.
 - The **Optional AI Tool Stack** is not applicable on the **VPS Shell Profile**. Terrapod Setup does not offer it there, the development **Preset** writes it disabled there, and `tpod status` and `tpod doctor` report it as not applicable rather than missing.
 - `Brewfile.ai-cli-tools.tmpl` is the canonical declaration for the **Optional AI Tool Stack**'s Homebrew packages and renders empty outside the **macOS Terminal Profile**.
 - The **Modern CLI Provider** installs the 20 mandatory formulae declared in `Brewfile` on both supported profiles and owns the two Optional AI Tool Stack casks on macOS when that stack is enabled.
 - The **Claude Code Installer** is the canonical provider for Claude Code; its canonical executable is `$HOME/.local/bin/claude`.
 - `tpod apply` runs the **Claude Code Installer** only when that canonical executable is absent. Claude Code's own updater owns version freshness, occupying the same place as the no-upgrade contract for Homebrew packages.
-- Claude Code stays scoped to the **macOS Terminal Profile** even though the **Claude Code Installer** supports Linux; stack applicability is a profile decision, not a consequence of the package source.
+- The **Optional AI Tool Stack** stays scoped to the **macOS Terminal Profile** even though Linux Homebrew installs the `antigravity-cli` and `codex` casks, which ship Linux builds, and the **Claude Code Installer** supports Linux; stack applicability is a profile decision, not a consequence of the package source.
 - The **VPS Shell Profile** installs Homebrew at `/home/linuxbrew/.linuxbrew` for every **Preset** on supported `x86_64` and `aarch64` systems.
 - The **VPS Shell Profile** supports one non-root management user with initial sudo access; it does not manage multi-user Homebrew prefix ownership.
 - The recommended **VPS Shell Profile** floor is 1 vCPU, 1 GiB RAM, and 3 GiB free disk, with 2 GiB RAM comfortable; the installer warns below 3 GiB but does not make this recommendation a hard gate.
