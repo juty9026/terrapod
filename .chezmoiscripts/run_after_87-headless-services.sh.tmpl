@@ -1,0 +1,16 @@
+{{- if eq .chezmoi.os "linux" -}}
+#!/bin/sh
+set -eu
+
+{{ include "dot_local/lib/terrapod/install-warnings.sh" }}
+
+{{ include "dot_local/lib/terrapod/install-warning-script.sh" }}
+
+declare_install_warning_category headless-services "Headless services need attention"
+
+if ! "$HOME/.local/lib/terrapod/headless-services" apply; then
+  note_failed_install_warning_item "Headless services (see docs/headless-services.md)"
+fi
+
+finish_install_warning_category "Failed: %s. Review the output and docs/headless-services.md, then rerun tpod apply."
+{{ end -}}

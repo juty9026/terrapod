@@ -75,7 +75,7 @@ resets the environment.
   the dependency downloads on a machine whose bootstrap did not rerun.
 - The `.deb` is installed from a private temporary directory by absolute path. On
   Ubuntu 24.04, APT installs from that directory without sandbox options.
-- The hand-made `orca-remote.service` that runs Orca headless stays outside
-  Terrapod. The script installs the package and does not start, enable or
-  restart anything.
+- ADR 0028 supersedes this decision's exclusion of headless service
+  management. The package script still does not start, enable, or restart
+  anything. A separate opt-in step manages the user service.
 - The Linux command is `orca-ide`.

@@ -44,7 +44,8 @@ terrapod_install_warning_categories() {
     gh-extensions \
     ego-lite \
     orca-ide \
-    grok-bot
+    grok-bot \
+    headless-services
 }
 
 terrapod_install_warning_is_category() {

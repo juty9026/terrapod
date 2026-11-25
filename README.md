@@ -243,8 +243,11 @@ never upgraded or replaced. Orca announces new releases itself and hands you the
 repository, so `apt upgrade` updates it. Expect about 700 MB of disk for Orca on
 top of the profile floor. A failed install records an `orca-ide` or `grok-bot`
 warning that the next `tpod apply` retries. The commands are `orca-ide` and
-`grok-bot`. Running either headless, for example under Xvfb as a systemd user
-service, stays outside Terrapod.
+`grok-bot`. Opt-in systemd user services run Orca headless and Grok Bot under
+Xvfb. Host-local configuration selects each service, Orca's port, and Grok
+Bot's display. Apply starts stopped services without restarting running apps.
+See [Run Orca and Grok Bot headless](docs/headless-services.md) for lingering,
+legacy-unit migration, Orca pairing, and temporary VNC sign-in.
 The Optional AI Tool Stack is also macOS-only, as a profile decision rather
 than a consequence of its package sources. Linux Homebrew installs the
 Antigravity CLI and Codex casks, which ship Linux builds, and the Claude Code
