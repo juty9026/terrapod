@@ -42,7 +42,8 @@ terrapod_install_warning_categories() {
     jetendard-font \
     jetendard-settings \
     gh-extensions \
-    ego-lite
+    ego-lite \
+    orca-ide
 }
 
 terrapod_install_warning_is_category() {

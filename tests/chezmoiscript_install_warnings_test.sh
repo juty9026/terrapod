@@ -16,11 +16,12 @@ inlined_warning_scripts="
 .chezmoiscripts/run_after_20-install-mise-tools.sh.tmpl
 .chezmoiscripts/run_after_70-apply-jetendard-settings.sh.tmpl
 .chezmoiscripts/run_after_80-install-ego-lite.sh.tmpl
+.chezmoiscripts/run_after_85-install-orca-ide.sh.tmpl
 "
 
 warning_script_data() {
   case "$1" in
-    *run_before_00*)
+    *run_before_00*|*run_after_85*)
       printf '%s' "$ubuntu_data"
       ;;
     *)

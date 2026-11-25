@@ -28,6 +28,7 @@ tests/**
 {{ if ne .chezmoi.os "linux" }}
 # VPS Shell Profile entries are not part of the macOS Terminal Profile.
 .local/lib/terrapod/ubuntu-bootstrap.sh
+.chezmoiscripts/85-install-orca-ide.sh
 {{ end }}
 
 {{ if ne .chezmoi.os "darwin" }}
