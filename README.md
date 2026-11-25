@@ -228,18 +228,23 @@ On Ubuntu, the initial apply runs setup scripts for the VPS shell profile:
 - pnpm through Node.js Corepack
 - Login shell switch to zsh
 - Orca (`orca-ide`) from its official `.deb`, only while it is missing
+- Grok Bot (`grok-bot`) from its official `.deb`, only while it is missing
 
 The VPS Shell Profile is headless: macOS App Groups and other GUI applications
 remain in the optional macOS Desktop App Stack and are never installed on Ubuntu.
-Orca is the one exception, because Homebrew cannot install it on Linux. A final
-step reads the latest release manifest for the machine's architecture, downloads
-the `.deb` it names, checks its sha512 digest, and installs it with `apt-get`
-under `sudo`, pulling in Orca's desktop libraries. That step runs only while the
-`orca-ide` package is not installed, so an installed Orca triggers no download
-and is never upgraded or replaced. Orca announces new releases itself and
-hands you the `apt` command to install them. Expect
-about 700 MB of disk on top of the profile floor. A failed install records an
-`orca-ide` warning that the next `tpod apply` retries. The command is `orca-ide`.
+Orca and Grok Bot are the exceptions, because Homebrew cannot install them on
+Linux. Two final steps, one per app, each read the vendor's release manifest or
+package index for the machine's architecture, download the `.deb` it names,
+check its digest, and install it with `apt-get` under `sudo`, pulling in the
+app's desktop libraries. A step runs only while its package (`orca-ide` or
+`grok-bot`) is not installed, so an installed app triggers no download and is
+never upgraded or replaced. Orca announces new releases itself and hands you the
+`apt` command to install them. Grok Bot's package registers the vendor's APT
+repository, so `apt upgrade` updates it. Expect about 700 MB of disk for Orca on
+top of the profile floor. A failed install records an `orca-ide` or `grok-bot`
+warning that the next `tpod apply` retries. The commands are `orca-ide` and
+`grok-bot`. Running either headless, for example under Xvfb as a systemd user
+service, stays outside Terrapod.
 The Optional AI Tool Stack is also macOS-only, because Homebrew publishes
 Antigravity CLI and Codex as casks and Homebrew on Linux does not install
 casks. Claude Code stays macOS-only as a profile decision rather than a

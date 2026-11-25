@@ -9,9 +9,13 @@ mandatory on the VPS profile and has no setting of its own.
 
 This is a narrow exception to APT being the **Bootstrap Package Manager** that
 installs only system and Homebrew bootstrap prerequisites, for the `orca-ide`
-package alone. It does not make a release `.deb` an approved package source for
-other tools, and the step stays a single script rather than a general `.deb`
-installer. The `.deb` pulls about twenty desktop libraries and helpers from the
+package and, since ADR 0027, the `grok-bot` package. It does not make a release
+`.deb` an approved package source for other tools. The two installers share one
+inlined library, `dot_local/lib/terrapod/vendor-deb-install.sh`, for the
+privilege check, the private work directory with its cleanup, and the
+`apt-get update` and `apt-get install` tail. Each script keeps its own release
+lookup, parsing, digest algorithm and file name validation, so the library is
+for these two named packages and not a general `.deb` installer. The `.deb` pulls about twenty desktop libraries and helpers from the
 Ubuntu archive, such as `libgtk-3-0`, `xvfb` and `python3`, as ordinary APT
 dependencies of that one package.
 
