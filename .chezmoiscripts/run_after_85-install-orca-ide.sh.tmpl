@@ -6,34 +6,18 @@ set -eu
 
 {{ include "dot_local/lib/terrapod/install-warning-script.sh" }}
 
+{{ include "dot_local/lib/terrapod/vendor-deb-install.sh" }}
+
 declare_install_warning_category orca-ide "Orca install needs attention"
 
 ORCA_IDE_PACKAGE=orca-ide
 ORCA_IDE_RELEASE_URL=https://github.com/stablyai/orca/releases/latest/download
 
-orca_ide_work_dir=
-orca_ide_manifest=
-orca_ide_deb_arch=
-orca_ide_sudo=
-# Names the step in progress, so the warning says why Orca is missing.
-orca_ide_install_step=
-
-cleanup_orca_ide_install() {
-  [ -n "$orca_ide_work_dir" ] || return 0
-
-  work_dir="$orca_ide_work_dir"
-  orca_ide_work_dir=
-  rm -rf "$work_dir"
-}
-
-trap 'cleanup_orca_ide_install || true' EXIT
+trap 'vendor_deb_cleanup || true' EXIT
 trap 'exit 1' HUP INT TERM
 
-orca_ide_is_installed() {
-  # A removed package that kept its configuration reports config-files, which
-  # is not installed.
-  [ "$(dpkg-query -W -f='${db:Status-Status}' "$ORCA_IDE_PACKAGE" 2>/dev/null)" = installed ]
-}
+orca_ide_manifest=
+orca_ide_deb_arch=
 
 select_orca_ide_release() {
   case "$(uname -m)" in
@@ -68,32 +52,21 @@ orca_ide_manifest_deb() {
 install_orca_ide() {
   # Terrapod installs a missing Orca only. Orca's own updater owns version
   # freshness, so an installed Orca is never looked up, downloaded or replaced.
-  ! orca_ide_is_installed || return 0
+  ! vendor_deb_is_installed "$ORCA_IDE_PACKAGE" || return 0
 
-  orca_ide_install_step="unsupported architecture"
+  vendor_deb_install_step="unsupported architecture"
   select_orca_ide_release || return 1
 
-  # Privileges come first because a machine that cannot run APT must not cost a
-  # download of roughly 200 MB.
-  if [ "$(id -u)" -eq 0 ]; then
-    orca_ide_sudo=""
-  elif command -v sudo >/dev/null 2>&1; then
-    orca_ide_sudo="sudo"
-  else
-    printf '%s\n' "sudo is required to install Orca." >&2
-    orca_ide_install_step="sudo is required; install sudo or run as root"
-    return 1
-  fi
+  vendor_deb_require_privileges Orca || return 1
 
   echo "Installing Orca..."
-  orca_ide_install_step="work directory"
-  orca_ide_work_dir="$(mktemp -d "${TMPDIR:-/tmp}/terrapod-orca-ide.XXXXXX")" || return 1
+  vendor_deb_make_work_dir orca-ide || return 1
 
-  orca_ide_install_step="release manifest download"
-  manifest_path="$orca_ide_work_dir/$orca_ide_manifest"
+  vendor_deb_install_step="release manifest download"
+  manifest_path="$vendor_deb_work_dir/$orca_ide_manifest"
   curl -fsSL --retry 3 "$ORCA_IDE_RELEASE_URL/$orca_ide_manifest" -o "$manifest_path" || return 1
 
-  orca_ide_install_step="release manifest"
+  vendor_deb_install_step="release manifest"
   deb_entry="$(orca_ide_manifest_deb "$manifest_path")" || return 1
   deb_name="${deb_entry% *}"
   deb_sha512="${deb_entry#* }"
@@ -102,11 +75,11 @@ install_orca_ide() {
   printf '%s\n' "$deb_name" | grep -Eq "^orca-ide_[0-9A-Za-z.+~-]+_${orca_ide_deb_arch}\\.deb\$" || return 1
   [ -n "$deb_sha512" ] || return 1
 
-  orca_ide_install_step="download"
-  deb_path="$orca_ide_work_dir/$deb_name"
+  vendor_deb_install_step="download"
+  deb_path="$vendor_deb_work_dir/$deb_name"
   curl -fsSL --retry 3 "$ORCA_IDE_RELEASE_URL/$deb_name" -o "$deb_path" || return 1
 
-  orca_ide_install_step="checksum"
+  vendor_deb_install_step="checksum"
   actual_sha512="$(sha512sum "$deb_path")" || return 1
   actual_sha512="${actual_sha512%% *}"
   # The manifest carries base64, so compare in hex without needing openssl. A
@@ -114,17 +87,11 @@ install_orca_ide() {
   expected_sha512="$(printf '%s' "$deb_sha512" | base64 -d | od -An -vtx1 | tr -d ' \n')"
   [ -n "$expected_sha512" ] && [ "$actual_sha512" = "$expected_sha512" ] || return 1
 
-  # The package indexes can be stale on a machine whose bootstrap did not rerun,
-  # and Orca's desktop dependencies come from them.
-  orca_ide_install_step="apt update"
-  $orca_ide_sudo env DEBIAN_FRONTEND=noninteractive apt-get update -y || return 1
-
-  orca_ide_install_step="apt install"
-  $orca_ide_sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y "$deb_path" || return 1
+  vendor_deb_apt_install "$deb_path" || return 1
 }
 
-install_orca_ide || note_failed_install_warning_item "Orca ($orca_ide_install_step)"
-cleanup_orca_ide_install || note_failed_install_warning_item "Orca download cleanup"
+install_orca_ide || note_failed_install_warning_item "Orca ($vendor_deb_install_step)"
+vendor_deb_cleanup || note_failed_install_warning_item "Orca download cleanup"
 
 finish_install_warning_category "Failed: %s. Review the installer output, then rerun tpod apply."
 {{- end }}
