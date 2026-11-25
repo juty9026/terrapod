@@ -236,7 +236,8 @@ step reads the latest release manifest for the machine's architecture, downloads
 the `.deb` it names, checks its sha512 digest, and installs it with `apt-get`
 under `sudo`, pulling in Orca's desktop libraries. That step runs only while the
 `orca-ide` package is not installed, so an installed Orca triggers no download
-and is never upgraded or replaced; Orca's own updater owns its version. Expect
+and is never upgraded or replaced. Orca announces new releases itself and
+hands you the `apt` command to install them. Expect
 about 700 MB of disk on top of the profile floor. A failed install records an
 `orca-ide` warning that the next `tpod apply` retries. The command is `orca-ide`.
 The Optional AI Tool Stack is also macOS-only, because Homebrew publishes

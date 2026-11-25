@@ -18,7 +18,9 @@ dependencies of that one package.
 The step runs only while `dpkg-query` does not report `orca-ide` as installed.
 An installed Orca exits the script before any network access, so there is no
 release lookup on a machine that already has Orca. Terrapod never upgrades or
-replaces an installed Orca, and Orca's own update flow owns version freshness.
+replaces an installed Orca. Orca's own update flow owns version freshness. For a
+`.deb` install it announces a new release and hands over the `apt` command,
+because it never raises privileges itself.
 This keeps the rule that routine apply does no release lookup for software that
 is already present.
 
