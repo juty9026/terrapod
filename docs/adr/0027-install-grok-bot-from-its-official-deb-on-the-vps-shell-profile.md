@@ -64,7 +64,7 @@ temporary directory, compares the sha256 digest, and installs through the shared
   app's internal name (its bundle identifier is `com.anysphere.sand`), so an
   install under the old package name is replaced. Terrapod does not manage
   `sand`.
-- The systemd user service and the Xvfb display that run Grok Bot headless stay
-  outside Terrapod. The script installs the package and does not start, enable
-  or restart anything.
+- ADR 0028 supersedes this decision's exclusion of headless service
+  management. The package script still does not start, enable, or restart
+  anything. A separate opt-in step manages the user service and Xvfb display.
 - The Linux command is `grok-bot`.

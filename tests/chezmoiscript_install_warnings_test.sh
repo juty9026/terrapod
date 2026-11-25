@@ -18,11 +18,12 @@ inlined_warning_scripts="
 .chezmoiscripts/run_after_80-install-ego-lite.sh.tmpl
 .chezmoiscripts/run_after_85-install-orca-ide.sh.tmpl
 .chezmoiscripts/run_after_86-install-grok-bot.sh.tmpl
+.chezmoiscripts/run_after_87-headless-services.sh.tmpl
 "
 
 warning_script_data() {
   case "$1" in
-    *run_before_00*|*run_after_85*|*run_after_86*)
+    *run_before_00*|*run_after_85*|*run_after_86*|*run_after_87*)
       printf '%s' "$ubuntu_data"
       ;;
     *)

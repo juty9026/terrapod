@@ -29,8 +29,10 @@ tests/**
 # VPS Shell Profile entries are not part of the macOS Terminal Profile.
 .local/lib/terrapod/ubuntu-bootstrap.sh
 .local/lib/terrapod/vendor-deb-install.sh
+.local/lib/terrapod/headless-services
 .chezmoiscripts/85-install-orca-ide.sh
 .chezmoiscripts/86-install-grok-bot.sh
+.chezmoiscripts/87-headless-services.sh
 {{ end }}
 
 {{ if ne .chezmoi.os "darwin" }}

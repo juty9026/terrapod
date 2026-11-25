@@ -1,0 +1,185 @@
+#!/usr/bin/python3
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+
+
+HOME = Path.home()
+CONFIG = HOME / ".config/terrapod/headless-services.json"
+UNIT_DIR = HOME / ".config/systemd/user"
+MARKER = "# Managed by Terrapod headless-services."
+
+
+def read_config():
+    config = json.loads(CONFIG.read_text()) if CONFIG.exists() else {}
+    if not isinstance(config, dict) or config.keys() - {"orca", "grokBot"}:
+        raise ValueError("Expected only orca and grokBot objects in headless-services.json")
+    result = {}
+    for name, defaults in (
+        ("orca", {"enabled": False, "port": 6768}),
+        ("grokBot", {"enabled": False, "display": 142}),
+    ):
+        values = config.get(name, {})
+        if not isinstance(values, dict) or values.keys() - defaults.keys():
+            raise ValueError(f"Unknown settings in {name}")
+        result[name] = defaults | values
+        if type(result[name]["enabled"]) is not bool:
+            raise ValueError(f"{name}.enabled must be true or false")
+    port = result["orca"]["port"]
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise ValueError("orca.port must be an integer from 1 through 65535")
+    display = result["grokBot"]["display"]
+    if type(display) is not int or not 1 <= display <= 65535 or display == 99:
+        raise ValueError("grokBot.display must be an integer from 1 through 65535 except 99")
+    return result
+
+
+def systemctl(*args, user=True):
+    command = ["systemctl", *(["--user"] if user else []), *args]
+    return subprocess.run(command, text=True, capture_output=True)
+
+
+def must_systemctl(*args):
+    result = systemctl(*args)
+    if result.returncode:
+        raise ValueError(result.stderr.strip() or f"systemctl {' '.join(args)} failed")
+
+
+def property_value(unit, name, user=True):
+    result = systemctl("show", unit, f"--property={name}", "--value", user=user)
+    value = result.stdout.strip()
+    if result.returncode and not (name == "LoadState" and value == "not-found"):
+        raise ValueError(result.stderr.strip() or f"Cannot inspect {unit}")
+    return value
+
+
+def check_ownership(unit, legacy):
+    if property_value(unit, "LoadState", user=False) != "not-found":
+        raise ValueError(f"Migrate the existing system {unit} before enabling its user unit")
+    for old_unit in legacy:
+        for user in (True, False):
+            if property_value(old_unit, "LoadState", user=user) != "not-found":
+                manager = "user" if user else "system"
+                raise ValueError(f"Migrate the existing {manager} {old_unit} before enabling {unit}")
+    target = UNIT_DIR / unit
+    if target.is_symlink() or (target.exists() and not target.read_text().startswith(MARKER + "\n")):
+        raise ValueError(f"Refusing to overwrite unmanaged unit {target}")
+    state = property_value(unit, "LoadState")
+    if state != "not-found":
+        fragment = property_value(unit, "FragmentPath")
+        if state != "loaded" or fragment != str(target) or not target.exists():
+            raise ValueError(f"Refusing to replace {unit} from another unit path")
+
+
+def unit_text(app):
+    orca = app == "orca"
+    restart = "on-failure" if orca else "always"
+    extra = "TimeoutStopSec=90\nKillMode=process\n" if orca else ""
+    return f"""{MARKER}
+[Unit]
+Description=Terrapod headless {"Orca" if orca else "Grok Bot"}
+StartLimitIntervalSec=900
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart="%h/.local/lib/terrapod/headless-services" run-{app}
+Environment="PATH=%h/.local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin"
+UMask=0077
+Restart={restart}
+RestartSec=10
+{extra}
+[Install]
+WantedBy=default.target
+"""
+
+
+def install_service(app, unit, legacy, commands):
+    check_ownership(unit, legacy)
+    for command in commands:
+        if not shutil.which(command):
+            raise ValueError(f"Missing {command}. See docs/headless-services.md")
+    UNIT_DIR.mkdir(parents=True, exist_ok=True)
+    target = UNIT_DIR / unit
+    content = unit_text(app)
+    if not target.exists() or target.read_text() != content:
+        with tempfile.NamedTemporaryFile(mode="w", dir=UNIT_DIR, delete=False) as output:
+            staged = Path(output.name)
+            try:
+                output.write(content)
+                output.flush()
+                os.chmod(staged, 0o644)
+                staged.replace(target)
+            finally:
+                staged.unlink(missing_ok=True)
+    must_systemctl("daemon-reload")
+    must_systemctl("enable", unit)
+    state = property_value(unit, "ActiveState")
+    if state in ("inactive", "failed"):
+        must_systemctl("start", unit)
+    elif state not in ("active", "activating", "reloading", "deactivating"):
+        raise ValueError(f"Cannot establish whether {unit} is stopped")
+
+
+def apply(config):
+    services = []
+    if config["orca"]["enabled"]:
+        services.append(("orca", "terrapod-orca.service",
+                         ("orca-remote.service", "orca-serve.service"), ("orca-ide",)))
+    if config["grokBot"]["enabled"]:
+        services.append(("grok-bot", "terrapod-grok-bot.service",
+                         ("grok-bot.service",), ("grok-bot", "xvfb-run", "xauth")))
+    if not services:
+        return
+    linger = subprocess.run(
+        ["loginctl", "show-user", str(os.getuid()), "--property=Linger", "--value"],
+        text=True, capture_output=True,
+    )
+    if linger.returncode or linger.stdout.strip() != "yes":
+        raise ValueError('Enable lingering first: sudo loginctl enable-linger "$(id -un)"')
+    must_systemctl("daemon-reload")
+    errors = []
+    for service in services:
+        try:
+            install_service(*service)
+        except (ValueError, OSError) as error:
+            errors.append(f"{service[1]}: {error}")
+    if errors:
+        raise ValueError("\n".join(errors))
+
+
+def main():
+    config = read_config()
+    if len(sys.argv) != 2:
+        raise ValueError("Usage: headless-services apply|run-orca|run-grok-bot")
+    command = sys.argv[1]
+    if command == "apply":
+        apply(config)
+    elif command == "run-orca":
+        orca = config["orca"]
+        os.execvp("orca-ide", ["orca-ide", "serve", "--supervise", "--no-pairing", "--refuse-public",
+                               "--port", str(orca["port"])])
+    elif command == "run-grok-bot":
+        os.umask(0o077)
+        state_dir = HOME / ".local/state/terrapod/grok-bot"
+        state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        state_dir.chmod(0o700)
+        authority = state_dir / "Xauthority"
+        authority.touch(mode=0o600, exist_ok=True)
+        authority.chmod(0o600)
+        os.execvp("xvfb-run", ["xvfb-run", "-n", str(config["grokBot"]["display"]),
+                                "-f", str(authority), "-s", "-screen 0 1600x1000x24 -nolisten tcp", "grok-bot"])
+    else:
+        raise ValueError(f"Unknown command: {command}")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (ValueError, OSError) as error:
+        print(f"Headless services: {error}", file=sys.stderr)
+        sys.exit(1)
