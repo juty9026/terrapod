@@ -163,7 +163,10 @@ done
 pass "Ubuntu VPS ignores macOS-only entries"
 
 linux_only_entries="
+.chezmoiscripts/run_after_85-install-orca-ide.sh.tmpl
+.chezmoiscripts/run_after_86-install-grok-bot.sh.tmpl
 dot_local/lib/terrapod/ubuntu-bootstrap.sh
+dot_local/lib/terrapod/vendor-deb-install.sh
 "
 
 for entry in $linux_only_entries; do

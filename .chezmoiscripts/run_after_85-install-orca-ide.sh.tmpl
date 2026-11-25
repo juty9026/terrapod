@@ -1,0 +1,97 @@
+{{- if eq .chezmoi.os "linux" -}}
+#!/bin/sh
+set -eu
+
+{{ include "dot_local/lib/terrapod/install-warnings.sh" }}
+
+{{ include "dot_local/lib/terrapod/install-warning-script.sh" }}
+
+{{ include "dot_local/lib/terrapod/vendor-deb-install.sh" }}
+
+declare_install_warning_category orca-ide "Orca install needs attention"
+
+ORCA_IDE_PACKAGE=orca-ide
+ORCA_IDE_RELEASE_URL=https://github.com/stablyai/orca/releases/latest/download
+
+trap 'vendor_deb_cleanup || true' EXIT
+trap 'exit 1' HUP INT TERM
+
+orca_ide_manifest=
+orca_ide_deb_arch=
+
+select_orca_ide_release() {
+  case "$(uname -m)" in
+    aarch64|arm64)
+      orca_ide_manifest=latest-linux-arm64.yml
+      orca_ide_deb_arch=arm64
+      ;;
+    x86_64|amd64)
+      orca_ide_manifest=latest-linux.yml
+      orca_ide_deb_arch=amd64
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+# Prints "<deb file name> <base64 sha512>" for the first .deb the electron-updater
+# manifest lists.
+orca_ide_manifest_deb() {
+  awk '
+    /^[[:space:]]*-[[:space:]]+url:[[:space:]]/ {
+      in_deb = ($3 ~ /\.deb$/)
+      if (in_deb) name = $3
+      next
+    }
+    in_deb && $1 == "sha512:" {
+      print name, $2
+      exit
+    }
+  ' "$1"
+}
+
+install_orca_ide() {
+  # Terrapod installs a missing Orca only. Orca's own updater owns version
+  # freshness, so an installed Orca is never looked up, downloaded or replaced.
+  ! vendor_deb_is_installed "$ORCA_IDE_PACKAGE" || return 0
+
+  vendor_deb_install_step="unsupported architecture"
+  select_orca_ide_release || return 1
+
+  vendor_deb_require_privileges Orca || return 1
+
+  echo "Installing Orca..."
+  vendor_deb_make_work_dir orca-ide || return 1
+
+  vendor_deb_install_step="release manifest download"
+  manifest_path="$vendor_deb_work_dir/$orca_ide_manifest"
+  curl -fsSL --retry 3 "$ORCA_IDE_RELEASE_URL/$orca_ide_manifest" -o "$manifest_path" || return 1
+
+  vendor_deb_install_step="release manifest"
+  deb_entry="$(orca_ide_manifest_deb "$manifest_path")" || return 1
+  deb_name="${deb_entry% *}"
+  deb_sha512="${deb_entry#* }"
+  # The name becomes part of a URL and a path, so only the published naming
+  # scheme for this architecture is accepted.
+  printf '%s\n' "$deb_name" | grep -Eq "^orca-ide_[0-9A-Za-z.+~-]+_${orca_ide_deb_arch}\\.deb\$" || return 1
+  [ -n "$deb_sha512" ] || return 1
+
+  vendor_deb_install_step="download"
+  deb_path="$vendor_deb_work_dir/$deb_name"
+  curl -fsSL --retry 3 "$ORCA_IDE_RELEASE_URL/$deb_name" -o "$deb_path" || return 1
+
+  vendor_deb_install_step="checksum"
+  actual_sha512="$(sha512sum "$deb_path")" || return 1
+  actual_sha512="${actual_sha512%% *}"
+  # The manifest carries base64, so compare in hex without needing openssl. A
+  # base64 error leaves the expected value empty, which never matches.
+  expected_sha512="$(printf '%s' "$deb_sha512" | base64 -d | od -An -vtx1 | tr -d ' \n')"
+  [ -n "$expected_sha512" ] && [ "$actual_sha512" = "$expected_sha512" ] || return 1
+
+  vendor_deb_apt_install "$deb_path" || return 1
+}
+
+install_orca_ide || note_failed_install_warning_item "Orca ($vendor_deb_install_step)"
+vendor_deb_cleanup || note_failed_install_warning_item "Orca download cleanup"
+
+finish_install_warning_category "Failed: %s. Review the installer output, then rerun tpod apply."
+{{- end }}

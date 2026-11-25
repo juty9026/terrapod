@@ -1,0 +1,96 @@
+{{- if eq .chezmoi.os "linux" -}}
+#!/bin/sh
+set -eu
+
+{{ include "dot_local/lib/terrapod/install-warnings.sh" }}
+
+{{ include "dot_local/lib/terrapod/install-warning-script.sh" }}
+
+{{ include "dot_local/lib/terrapod/vendor-deb-install.sh" }}
+
+declare_install_warning_category grok-bot "Grok Bot install needs attention"
+
+GROK_BOT_PACKAGE=grok-bot
+GROK_BOT_REPOSITORY_URL=https://downloads.cursor.com/aptrepo
+
+trap 'vendor_deb_cleanup || true' EXIT
+trap 'exit 1' HUP INT TERM
+
+grok_bot_deb_arch=
+
+select_grok_bot_architecture() {
+  case "$(uname -m)" in
+    aarch64|arm64) grok_bot_deb_arch=arm64 ;;
+    x86_64|amd64) grok_bot_deb_arch=amd64 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Prints "<Filename> <SHA256>" for the first grok-bot stanza of the vendor's APT
+# index that matches the architecture. The vendor publishes one version per
+# architecture, and APT upgrades past it once the package installed its source.
+grok_bot_index_deb() {
+  awk -v arch="$2" '
+    function emit() {
+      if (package == "grok-bot" && architecture == arch && filename != "" && sha256 != "") {
+        print filename, sha256
+        found = 1
+        exit
+      }
+    }
+    /^[[:space:]]*$/ { emit(); package = architecture = filename = sha256 = ""; next }
+    $1 == "Package:" { package = $2 }
+    $1 == "Architecture:" { architecture = $2 }
+    $1 == "Filename:" { filename = $2 }
+    $1 == "SHA256:" { sha256 = $2 }
+    END { if (!found) emit() }
+  ' "$1"
+}
+
+install_grok_bot() {
+  # Terrapod installs a missing Grok Bot only. The package registers the
+  # vendor's APT repository, so apt upgrade owns version freshness and an
+  # installed Grok Bot is never looked up, downloaded or replaced.
+  ! vendor_deb_is_installed "$GROK_BOT_PACKAGE" || return 0
+
+  vendor_deb_install_step="unsupported architecture"
+  select_grok_bot_architecture || return 1
+
+  vendor_deb_require_privileges "Grok Bot" || return 1
+
+  echo "Installing Grok Bot..."
+  vendor_deb_make_work_dir grok-bot || return 1
+
+  vendor_deb_install_step="package index download"
+  index_path="$vendor_deb_work_dir/Packages"
+  curl -fsSL --retry 3 "$GROK_BOT_REPOSITORY_URL/dists/grok-bot/main/binary-$grok_bot_deb_arch/Packages" \
+    -o "$index_path" || return 1
+
+  vendor_deb_install_step="package index"
+  deb_entry="$(grok_bot_index_deb "$index_path" "$grok_bot_deb_arch")" || return 1
+  deb_filename="${deb_entry% *}"
+  deb_sha256="${deb_entry#* }"
+  # The path becomes part of a URL and a file name, so only the published
+  # pool layout for this architecture is accepted.
+  printf '%s\n' "$deb_filename" |
+    grep -Eq "^pool/[A-Za-z0-9._/+~-]+/grok-bot_[0-9A-Za-z.+~-]+_${grok_bot_deb_arch}\\.deb\$" || return 1
+  case "$deb_filename" in *..*) return 1 ;; esac
+  printf '%s\n' "$deb_sha256" | grep -Eq '^[0-9a-f]{64}$' || return 1
+
+  vendor_deb_install_step="download"
+  deb_path="$vendor_deb_work_dir/${deb_filename##*/}"
+  curl -fsSL --retry 3 "$GROK_BOT_REPOSITORY_URL/$deb_filename" -o "$deb_path" || return 1
+
+  vendor_deb_install_step="checksum"
+  actual_sha256="$(sha256sum "$deb_path")" || return 1
+  actual_sha256="${actual_sha256%% *}"
+  [ "$actual_sha256" = "$deb_sha256" ] || return 1
+
+  vendor_deb_apt_install "$deb_path" || return 1
+}
+
+install_grok_bot || note_failed_install_warning_item "Grok Bot ($vendor_deb_install_step)"
+vendor_deb_cleanup || note_failed_install_warning_item "Grok Bot download cleanup"
+
+finish_install_warning_category "Failed: %s. Review the installer output, then rerun tpod apply."
+{{- end }}

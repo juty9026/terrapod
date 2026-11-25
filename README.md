@@ -218,7 +218,7 @@ installs `chezmoi` and `gum`. The installer adds Homebrew and `~/.local/bin` to
 
 On Ubuntu, the initial apply runs setup scripts for the VPS shell profile:
 
-- APT system and Homebrew bootstrap prerequisites only
+- APT system and Homebrew bootstrap prerequisites
 - Python build dependencies required by the mise-managed Python runtime
 - Standard-prefix Homebrew and the shared 20-formula `Brewfile` bundle
 - Oh My Zsh, zinit, and SCM Breeze
@@ -227,9 +227,24 @@ On Ubuntu, the initial apply runs setup scripts for the VPS shell profile:
 - Bun, Node.js 24, Python 3.13, and uv/uvx through mise
 - pnpm through Node.js Corepack
 - Login shell switch to zsh
+- Orca (`orca-ide`) from its official `.deb`, only while it is missing
+- Grok Bot (`grok-bot`) from its official `.deb`, only while it is missing
 
 The VPS Shell Profile is headless: macOS App Groups and other GUI applications
 remain in the optional macOS Desktop App Stack and are never installed on Ubuntu.
+Orca and Grok Bot are the exceptions, because Homebrew cannot install them on
+Linux. Two final steps, one per app, each read the vendor's release manifest or
+package index for the machine's architecture, download the `.deb` it names,
+check its digest, and install it with `apt-get` under `sudo`, pulling in the
+app's desktop libraries. A step runs only while its package (`orca-ide` or
+`grok-bot`) is not installed, so an installed app triggers no download and is
+never upgraded or replaced. Orca announces new releases itself and hands you the
+`apt` command to install them. Grok Bot's package registers the vendor's APT
+repository, so `apt upgrade` updates it. Expect about 700 MB of disk for Orca on
+top of the profile floor. A failed install records an `orca-ide` or `grok-bot`
+warning that the next `tpod apply` retries. The commands are `orca-ide` and
+`grok-bot`. Running either headless, for example under Xvfb as a systemd user
+service, stays outside Terrapod.
 The Optional AI Tool Stack is also macOS-only, because Homebrew publishes
 Antigravity CLI and Codex as casks and Homebrew on Linux does not install
 casks. Claude Code stays macOS-only as a profile decision rather than a

@@ -16,11 +16,13 @@ inlined_warning_scripts="
 .chezmoiscripts/run_after_20-install-mise-tools.sh.tmpl
 .chezmoiscripts/run_after_70-apply-jetendard-settings.sh.tmpl
 .chezmoiscripts/run_after_80-install-ego-lite.sh.tmpl
+.chezmoiscripts/run_after_85-install-orca-ide.sh.tmpl
+.chezmoiscripts/run_after_86-install-grok-bot.sh.tmpl
 "
 
 warning_script_data() {
   case "$1" in
-    *run_before_00*)
+    *run_before_00*|*run_after_85*|*run_after_86*)
       printf '%s' "$ubuntu_data"
       ;;
     *)
@@ -30,7 +32,9 @@ warning_script_data() {
 }
 
 # Content checksums either feed chezmoi's onchange scheduling or the explicit
-# successful-source gate. Other always-run scripts have no checksum consumer.
+# successful-source gate. Other always-run scripts have no checksum consumer. Only
+# the template function counts: an installer may verify a download with the
+# sha256sum command.
 for checksum_script_template in "$repo_root"/.chezmoiscripts/*.tmpl; do
   checksum_script_name="${checksum_script_template##*/}"
 
@@ -54,7 +58,7 @@ for checksum_script_template in "$repo_root"/.chezmoiscripts/*.tmpl; do
         "source-scheduled installer consumes its fingerprint: $checksum_script_name"
       ;;
     *)
-      vestigial_checksums="$(grep -n 'sha256sum' "$checksum_script_template" || true)"
+      vestigial_checksums="$(grep -nE '\{\{[^}]*sha256sum' "$checksum_script_template" || true)"
 
       if [ -n "$vestigial_checksums" ]; then
         printf '%s\n' "$vestigial_checksums" | sed 's/^/  /' >&2
