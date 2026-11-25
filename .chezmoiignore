@@ -30,6 +30,7 @@ tests/**
 .local/lib/terrapod/ubuntu-bootstrap.sh
 .local/lib/terrapod/vendor-deb-install.sh
 .chezmoiscripts/85-install-orca-ide.sh
+.chezmoiscripts/86-install-grok-bot.sh
 {{ end }}
 
 {{ if ne .chezmoi.os "darwin" }}

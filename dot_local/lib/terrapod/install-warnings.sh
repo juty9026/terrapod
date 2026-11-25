@@ -43,7 +43,8 @@ terrapod_install_warning_categories() {
     jetendard-settings \
     gh-extensions \
     ego-lite \
-    orca-ide
+    orca-ide \
+    grok-bot
 }
 
 terrapod_install_warning_is_category() {
