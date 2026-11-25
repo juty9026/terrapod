@@ -218,7 +218,7 @@ installs `chezmoi` and `gum`. The installer adds Homebrew and `~/.local/bin` to
 
 On Ubuntu, the initial apply runs setup scripts for the VPS shell profile:
 
-- APT system and Homebrew bootstrap prerequisites only
+- APT system and Homebrew bootstrap prerequisites
 - Python build dependencies required by the mise-managed Python runtime
 - Standard-prefix Homebrew and the shared 20-formula `Brewfile` bundle
 - Oh My Zsh, zinit, and SCM Breeze
@@ -227,9 +227,18 @@ On Ubuntu, the initial apply runs setup scripts for the VPS shell profile:
 - Bun, Node.js 24, Python 3.13, and uv/uvx through mise
 - pnpm through Node.js Corepack
 - Login shell switch to zsh
+- Orca (`orca-ide`) from its official `.deb`, only while it is missing
 
 The VPS Shell Profile is headless: macOS App Groups and other GUI applications
 remain in the optional macOS Desktop App Stack and are never installed on Ubuntu.
+Orca is the one exception, because Homebrew cannot install it on Linux. A final
+step reads the latest release manifest for the machine's architecture, downloads
+the `.deb` it names, checks its sha512 digest, and installs it with `apt-get`
+under `sudo`, pulling in Orca's desktop libraries. That step runs only while the
+`orca-ide` package is not installed, so an installed Orca triggers no download
+and is never upgraded or replaced; Orca's own updater owns its version. Expect
+about 700 MB of disk on top of the profile floor. A failed install records an
+`orca-ide` warning that the next `tpod apply` retries. The command is `orca-ide`.
 The Optional AI Tool Stack is also macOS-only, because Homebrew publishes
 Antigravity CLI and Codex as casks and Homebrew on Linux does not install
 casks. Claude Code stays macOS-only as a profile decision rather than a

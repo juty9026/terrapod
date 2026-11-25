@@ -158,7 +158,7 @@ _Avoid_: primary docs, source README
 - Cancelling gum-backed **Terrapod Setup** preserves the existing setup cancellation contract: no config write, non-zero exit, and `terrapod: setup cancelled` guidance.
 - The first-run installer explains **Bootstrap UI Dependency** bootstrap failures before **Terrapod Setup**, and `terrapod setup` also explains missing gum when run directly after bootstrap.
 - On both supported profiles, the first-run installer requires standard-prefix Homebrew and installs `chezmoi` and `gum` with Homebrew before **Terrapod Setup**; bootstrap failure stops first-run with guidance.
-- On the **VPS Shell Profile**, APT installs only Ubuntu system and Homebrew bootstrap prerequisites and does not add Charm or mise repositories.
+- On the **VPS Shell Profile**, APT installs only Ubuntu system and Homebrew bootstrap prerequisites and does not add Charm or mise repositories. The one exception is the `orca-ide` package, which Terrapod installs from Orca's official release `.deb` through APT only while it is missing (ADR 0026).
 - On the **VPS Shell Profile**, pre-Setup Homebrew prerequisite installation may use interactive `sudo` prompts, but missing or unusable sudo prevents **Terrapod Setup** and remains a hard first-run failure.
 - A gum bootstrap failure before **Terrapod Setup** is a hard first-run failure, while a later declared-state package-manager failure involving gum is a machine profile readiness warning after the recovery core is available.
 - chezmoi remains the internal apply engine for the **Dotfiles Management Tool**, not the primary workflow users need to remember.
@@ -205,6 +205,8 @@ _Avoid_: primary docs, source README
 - The **VPS Shell Profile** targets exactly one **Supported Ubuntu Release**.
 - The **VPS Shell Profile** includes the **Core Shell Stack**.
 - The **VPS Shell Profile** includes the **Development Runtime Stack**.
+- The **VPS Shell Profile** includes Orca, installed from its official release `.deb` because Homebrew cannot install it on Linux. The install runs only while the `orca-ide` package is missing, on `x86_64` and `aarch64`. It does no release lookup, upgrade or replacement for an installed Orca, whose own updater owns freshness, and it has no setting of its own. See ADR 0026.
+- Orca's `.deb` installation is a narrow exception to APT being the **Bootstrap Package Manager**: it covers the `orca-ide` package alone, with its ordinary APT dependencies, and does not approve release `.deb` files as a package source for other tools.
 - The **Core Shell Stack** includes Oh My Zsh and modern CLI tools such as fd, ripgrep, zoxide, lazygit, GitHub CLI (`gh`), and plain Neovim.
 - The **GitHub CLI Extension Set** belongs to the **Core Shell Stack** on both the **macOS Terminal Profile** and the **VPS Shell Profile**; its first member is `github/gh-stack`.
 - `tpod apply` installs a **GitHub CLI Extension Set** member only when `gh extension list` does not already report it, and never runs `gh extension upgrade` or passes a `--pin` tag; extensions installed by hand outside the set are left alone.
@@ -224,7 +226,7 @@ _Avoid_: primary docs, source README
 - The **VPS Shell Profile** installs Homebrew at `/home/linuxbrew/.linuxbrew` for every **Preset** on supported `x86_64` and `aarch64` systems.
 - The **VPS Shell Profile** supports one non-root management user with initial sudo access; it does not manage multi-user Homebrew prefix ownership.
 - The recommended **VPS Shell Profile** floor is 1 vCPU, 1 GiB RAM, and 3 GiB free disk, with 2 GiB RAM comfortable; the installer warns below 3 GiB but does not make this recommendation a hard gate.
-- APT remains Ubuntu's **Bootstrap Package Manager** and installs only system and Homebrew bootstrap prerequisites; the **Modern CLI Provider** owns user-facing CLI tools, including Git after bootstrap.
+- APT remains Ubuntu's **Bootstrap Package Manager** and installs only system and Homebrew bootstrap prerequisites, plus the `orca-ide` exception; the **Modern CLI Provider** owns user-facing CLI tools, including Git after bootstrap.
 - The **Development Runtime Manager** installs and selects Bun, Node.js, Python, and uv and does not own shared user-facing CLI tools.
 - **Optional AI Tool Stack** installer failures do not block first-run declared-state apply; missing optional AI tools are reported by `tpod status` and `tpod doctor`.
 - Homebrew bundle apply uses `HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade`; Terrapod apply restores missing declared packages without auto-updating or upgrading.
@@ -269,7 +271,7 @@ _Avoid_: primary docs, source README
 - Mandatory stack warning markers such as Homebrew core, Ubuntu bootstrap, shell integrations, mise tools, and the GitHub CLI Extension Set are cleared only by successful reruns because their desired state cannot be disabled by optional settings.
 - Optional stack or app-group warning marker content may be cleared or reduced when the corresponding desired optional setting is disabled.
 - Terrapod install warnings are updated by both first-run installation and routine `tpod apply` because routine apply is the recovery path for previously failed installer categories.
-- Terrapod install warning categories include stable filename slugs for Homebrew core bundle (`homebrew-core`), Homebrew desktop app bundle (`homebrew-desktop-apps`), Ubuntu bootstrap (`ubuntu-bootstrap`), shell integrations (`shell-integrations`), mise runtime tools (`mise-tools`), optional AI CLI tools (`optional-ai-cli-tools`), Jetendard fonts (`jetendard-font`), Jetendard settings (`jetendard-settings`), the **GitHub CLI Extension Set** (`gh-extensions`), and ego lite (`ego-lite`); best-effort UI nudges such as opening Karabiner do not need install warning markers.
+- Terrapod install warning categories include stable filename slugs for Homebrew core bundle (`homebrew-core`), Homebrew desktop app bundle (`homebrew-desktop-apps`), Ubuntu bootstrap (`ubuntu-bootstrap`), shell integrations (`shell-integrations`), mise runtime tools (`mise-tools`), optional AI CLI tools (`optional-ai-cli-tools`), Jetendard fonts (`jetendard-font`), Jetendard settings (`jetendard-settings`), the **GitHub CLI Extension Set** (`gh-extensions`), ego lite (`ego-lite`), and Orca (`orca-ide`); best-effort UI nudges such as opening Karabiner do not need install warning markers.
 - Terrapod install warning markers use shell-friendly key/value content with stable category, summary, guidance, and `updated_at` fields instead of free-form logs or captured stack traces.
 - Terrapod install warning marker values stay single-line so shell parsing remains predictable; longer human-readable explanations belong in `tpod doctor` output.
 - Terrapod install warning marker `updated_at` values use UTC ISO 8601 timestamps such as `2026-06-02T03:12:45Z`.
